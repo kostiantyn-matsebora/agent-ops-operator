@@ -55,14 +55,17 @@ func conv(profile, runtimeRef, sa string) *state.ConversationRecord {
 	return &state.ConversationRecord{Name: "conv-1", ProfileRef: profile, RuntimeRef: runtimeRef, ServiceAccountName: sa}
 }
 
-// seededStore is a kube-backed state.Store over a fake client, holding recs.
-// The fake client is the unit tier's apiserver: the same mapping the manager
-// runs, with no envtest.
-func seededStore(t *testing.T, recs ...*state.ConversationRecord) state.Store {
+// seededStore is a kube-backed Conversations collection over a fake client,
+// holding recs. The fake client is the unit tier's apiserver: the same
+// mapping the manager runs, with no envtest.
+func seededStore(t *testing.T, recs ...*state.ConversationRecord) state.Collection[state.ConversationRecord] {
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(resolveScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).Build()
-	store := kube.NewStore(c, testNS)
+	store, err := kube.Open(c, testNS, kube.ConversationLayout())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
 	for _, r := range recs {
 		if _, err := store.Create(context.Background(), state.Key(r.Name), *r); err != nil {
 			t.Fatalf("seed %s: %v", r.Name, err)

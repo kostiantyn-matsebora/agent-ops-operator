@@ -11,12 +11,12 @@ import (
 )
 
 // Env is what a chat helper reads through: the cluster's custom resources via
-// Reader, conversations and their input payloads via Store, all in one
-// Namespace (a Store is bound to its namespace at construction, but the
-// Reader's calls name one).
+// Reader, queued inputs' out-of-line payloads via Blobs, all in one Namespace
+// (Blobs is bound to its namespace at construction, but the Reader's calls
+// name one).
 type Env struct {
 	Reader    client.Reader
-	Store     state.Store
+	Blobs     state.Blobs
 	Namespace string
 }
 
@@ -91,7 +91,7 @@ type deliveryPass struct {
 // deliver enqueues one input to every bound channel that should show it.
 func (p *deliveryPass) deliver(ctx context.Context, item *state.InputItem) {
 	body, inputRef, labels, severity := item.Payload, "", map[string]string(nil), agentopsv1alpha1.Severity("")
-	if blob, ok := InputPayload(ctx, p.env.Store, item); ok {
+	if blob, ok := InputPayload(ctx, p.env.Blobs, item); ok {
 		body, inputRef, labels, severity = blob.Payload, string(item.PayloadRef), blob.Labels, agentopsv1alpha1.Severity(blob.Severity)
 	}
 	surface := item.OriginSurface(labels)
@@ -167,11 +167,11 @@ func SurfaceEchoes(ctx context.Context, reader client.Reader, ns, channel string
 // the payload is inline or the blob is gone (pruned once processed). Exported
 // because the topic descriptor reads the same blob the same way, and two
 // spellings of one read is how they drift.
-func InputPayload(ctx context.Context, store state.Store, item *state.InputItem) (state.Blob, bool) {
+func InputPayload(ctx context.Context, blobs state.Blobs, item *state.InputItem) (state.Blob, bool) {
 	if item.PayloadRef == "" {
 		return state.Blob{}, false
 	}
-	blob, err := store.GetBlob(ctx, item.PayloadRef)
+	blob, err := blobs.Get(ctx, item.PayloadRef)
 	if err != nil {
 		return state.Blob{}, false
 	}

@@ -10,14 +10,33 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
-// newTestStore is the unit tier's state.Store: the kube backend over the
-// test's fake client, so a test that seeds Conversations into the fake and
-// reads them back through it is exercising the same mapping the manager runs.
-func newTestStore(c client.WithWatch) state.Store { return kube.NewStore(c, testNS) }
+// newTestStore is the unit tier's Conversations collection: the kube backend
+// over the test's fake client, so a test that seeds Conversations into the
+// fake and reads them back through it is exercising the same mapping the
+// manager runs.
+func newTestStore(c client.WithWatch) state.Collection[state.ConversationRecord] {
+	coll, err := kube.Open(c, testNS, kube.ConversationLayout())
+	if err != nil {
+		panic(err)
+	}
+	return coll
+}
+
+// newTestRuns is the unit tier's Runs collection, over the same fake client.
+func newTestRuns(c client.WithWatch) state.Appended[state.ConversationRecord, state.Run] {
+	runs, err := kube.OpenAppended(c, testNS, kube.RunsLayout())
+	if err != nil {
+		panic(err)
+	}
+	return runs
+}
+
+// newTestBlobs is the unit tier's Blobs collection, over the same fake client.
+func newTestBlobs(c client.WithWatch) state.Blobs { return kube.OpenBlobs(c, testNS) }
 
 // recOf reads the record a test seeded under name, failing the test when the
 // store does not hold it.
-func recOf(t *testing.T, s state.Store, name string) *state.ConversationRecord {
+func recOf(t *testing.T, s state.Collection[state.ConversationRecord], name string) *state.ConversationRecord {
 	t.Helper()
 	rec, _, err := s.Get(t.Context(), state.Key(name))
 	if err != nil {

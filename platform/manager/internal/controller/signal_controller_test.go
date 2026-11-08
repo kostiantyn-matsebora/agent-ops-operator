@@ -58,11 +58,16 @@ func newSigEnv(t *testing.T, objs ...client.Object) *sigEnv {
 		WithStatusSubresource(&agentopsv1alpha1.Signal{}, &agentopsv1alpha1.Conversation{}, &agentopsv1alpha1.SignalSource{}).
 		WithObjects(objs...).Build()
 	acts := activity.New(256)
-	store := kube.NewStore(c, sigNS)
-	ops := &chat.OpQueue{Store: store, Registry: chat.NewRegistry(), Activity: acts}
+	backend, err := kube.OpenStores(c, sigNS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := &chat.OpQueue{Conversations: backend.Stores.Conversations, Runs: backend.Stores.Runs, Registry: chat.NewRegistry(), Activity: acts}
 	e := &sigEnv{t: t, c: c, acts: acts, ops: ops, now: time.Now()}
 	e.r = &SignalReconciler{
-		Client: c, Reader: c, Store: store, Signals: kube.NewSignalStore(c, sigNS), Namespace: sigNS, Activity: acts, Ops: ops, Cooldowns: ingest.NewCooldownBook(),
+		Client: c, Reader: c, Namespace: sigNS, Activity: acts, Ops: ops, Cooldowns: ingest.NewCooldownBook(),
+		Conversations: backend.Stores.Conversations, Runs: backend.Stores.Runs, Blobs: backend.Stores.Blobs,
+		Signals: backend.Stores.Signals, CooldownWindows: backend.Stores.Cooldowns, Receipts: backend.Stores.Receipts,
 		MaxQueued: 50, Identity: "replica-a", Now: func() time.Time { return e.now },
 	}
 	return e
@@ -1233,39 +1238,53 @@ func TestHousekeepingBackfillsCompletedAtFromTheObjectNotNow(t *testing.T) {
 
 // ---- the cooldown window behind the store ------------------------------------
 
-// windowStore counts and can fail the two cooldown operations of a SignalStore.
+// windowStore counts and can fail the Collection[CooldownWindow] operations
+// recoverCooldown and recordCooldown drive: Get (the recovery read, and the
+// read half of every Mutate-driven write) and Update/Create (the write
+// half — one or the other, never both, per call to PutCooldownWindow).
 type windowStore struct {
-	state.SignalStore
+	state.Collection[state.CooldownWindow]
 	gets, puts     int
 	getErr, putErr error
 }
 
-func (w *windowStore) GetCooldown(ctx context.Context, source string) ([]state.CooldownEntry, error) {
+func (w *windowStore) Get(ctx context.Context, key state.Key) (state.CooldownWindow, state.Revision, error) {
 	w.gets++
 	if w.getErr != nil {
-		return nil, w.getErr
+		return state.CooldownWindow{}, "", w.getErr
 	}
-	return w.SignalStore.GetCooldown(ctx, source)
+	return w.Collection.Get(ctx, key)
 }
 
-func (w *windowStore) PutCooldown(ctx context.Context, source string, entries []state.CooldownEntry) error {
+func (w *windowStore) Update(ctx context.Context, key state.Key, rev state.Revision, rec state.CooldownWindow) (state.Revision, error) {
 	w.puts++
 	if w.putErr != nil {
-		return w.putErr
+		return "", w.putErr
 	}
-	return w.SignalStore.PutCooldown(ctx, source, entries)
+	return w.Collection.Update(ctx, key, rev, rec)
+}
+
+func (w *windowStore) Create(ctx context.Context, key state.Key, rec state.CooldownWindow) (state.Revision, error) {
+	w.puts++
+	if w.putErr != nil {
+		return "", w.putErr
+	}
+	return w.Collection.Create(ctx, key, rec)
 }
 
 func windowEnv(t *testing.T, objs ...client.Object) (*sigEnv, *windowStore) {
 	t.Helper()
 	e := newSigEnv(t, objs...)
-	w := &windowStore{SignalStore: e.r.Signals}
-	e.r.Signals = w
+	w := &windowStore{Collection: e.r.CooldownWindows}
+	e.r.CooldownWindows = w
 	return e, w
 }
 
-// The window is read once per process per source, and written from the
-// admission that spends an id.
+// The window is read once per process per source (recoverCooldown's cache),
+// and written from the admission that spends an id — one Create for the
+// first admission against a source with nothing recorded, one Update for
+// each after. Every write carries its own CAS read (Mutate's Get), so the
+// collection's Get is called once for the recovery plus once per write.
 func TestConsumerReadsTheWindowOncePerSourceAndWritesOnEachAdmission(t *testing.T) {
 	src := fxSource("alerts")
 	e, w := windowEnv(t, src, fxPipeline("ops", "alerts"),
@@ -1273,11 +1292,11 @@ func TestConsumerReadsTheWindowOncePerSourceAndWritesOnEachAdmission(t *testing.
 	for _, n := range []string{"a", "b", "c"} {
 		e.reconcile(n)
 	}
-	if w.gets != 1 {
-		t.Fatalf("GetCooldown called %d times, want once for the source", w.gets)
+	if w.gets != 4 {
+		t.Fatalf("Get called %d times, want one recovery read plus one per write (4)", w.gets)
 	}
 	if w.puts != 3 {
-		t.Fatalf("PutCooldown called %d times, want once per admission", w.puts)
+		t.Fatalf("Update/Create called %d times, want once per admission", w.puts)
 	}
 }
 
@@ -1327,7 +1346,7 @@ func TestSignalSourceReconcilerReleasesADeletedSource(t *testing.T) {
 	terminal.Status.Phase = agentopsv1alpha1.SignalFailed
 	e := newSigEnv(t, fxSource("kept"), fxSignal("live", gone, "x", time.Now()), terminal,
 		fxSignal("other", fxSource("kept"), "z", time.Now()))
-	rc := &SignalSourceReconciler{Client: e.c, Signals: e.r.Signals}
+	rc := &SignalSourceReconciler{Client: e.c, Signals: e.r.Signals, Cooldowns: e.r.CooldownWindows}
 	if _, err := rc.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: sigNS, Name: "gone"}}); err != nil {
 		t.Fatal(err)
 	}

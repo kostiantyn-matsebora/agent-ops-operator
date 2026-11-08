@@ -3,7 +3,6 @@ package kube
 import (
 	"context"
 	"errors"
-	"sort"
 	"testing"
 	"time"
 
@@ -161,42 +160,6 @@ func TestCooldownLivesOnTheSourceStatusAndAGoneSourceIsNotFound(t *testing.T) {
 	}
 	if _, _, err := store.Cooldowns.Get(ctx, "src"); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Get after Delete = %v, want ErrNotFound", err)
-	}
-}
-
-// TestSignalsAreListedBySourceInAnyPhase: the index the release of a deleted
-// source reads returns terminal signals the non-terminal index withholds.
-func TestSignalsAreListedBySourceInAnyPhase(t *testing.T) {
-	ctx := context.Background()
-	ns := newNamespace(t)
-	store := openSignals(t, wwClient, ns, DefaultSweepInterval)
-	live := state.SignalRecord{Name: "sig-live", SourceRef: "src", Adapter: "cron", InitiationID: "i", Phase: state.SignalPending}
-	done := state.SignalRecord{Name: "sig-done", SourceRef: "src", Adapter: "cron", InitiationID: "i", Phase: state.SignalRouted}
-	other := state.SignalRecord{Name: "sig-other", SourceRef: "other", Adapter: "cron", InitiationID: "i"}
-	for _, r := range []state.SignalRecord{live, done, other} {
-		if _, err := store.Create(ctx, state.Key(r.Name), r); err != nil {
-			t.Fatal(err)
-		}
-	}
-	names := func(recs []state.SignalRecord) []string {
-		var out []string
-		for _, r := range recs {
-			out = append(out, r.Name)
-		}
-		sort.Strings(out)
-		return out
-	}
-	all, err := store.List(ctx, state.SignalBySource, "src")
-	if err != nil || !equalStrings(names(all), []string{"sig-done", "sig-live"}) {
-		t.Fatalf("bySource = %v, %v; want both phases of src", names(all), err)
-	}
-	open, err := store.List(ctx, state.SignalNonTerminalBySource, "src")
-	if err != nil || !equalStrings(names(open), []string{"sig-live"}) {
-		t.Fatalf("nonTerminalBySource = %v, %v; want only the live one", names(open), err)
-	}
-	byInit, err := store.List(ctx, state.SignalNonTerminalByInitiation, state.IndexValue("src", "i"))
-	if err != nil || !equalStrings(names(byInit), []string{"sig-live"}) {
-		t.Fatalf("nonTerminalByInitiation = %v, %v", names(byInit), err)
 	}
 }
 

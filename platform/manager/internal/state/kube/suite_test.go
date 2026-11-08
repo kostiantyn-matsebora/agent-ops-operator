@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -96,4 +97,23 @@ func newTestNamespace(t testing.TB) (string, state.Stores) {
 	t.Helper()
 	ns := newNamespace(t)
 	return ns, openBackend(t, wwClient, ns).Stores
+}
+
+// recvEvent blocks for one event or fails the test after a generous timeout
+// — envtest's own watch latency is normally well under a second, so a real
+// gap means a bug, not a slow CI box. Shared by every layout test that reads
+// a feed directly (the generic feed scenarios live in
+// internal/state/conformance now).
+func recvEvent[T any](t *testing.T, events <-chan state.Event[T]) state.Event[T] {
+	t.Helper()
+	select {
+	case ev, ok := <-events:
+		if !ok {
+			t.Fatal("event channel closed unexpectedly")
+		}
+		return ev
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for a watch event")
+	}
+	return state.Event[T]{}
 }

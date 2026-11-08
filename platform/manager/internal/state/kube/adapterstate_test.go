@@ -199,29 +199,3 @@ func TestAdapterStateEdges(t *testing.T) {
 		}
 	}
 }
-
-func TestAdapterStateFeedAnnouncesPutsAndDeletes(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ns, s := newTestNamespace(t)
-	newChannel(t, ns, "tg")
-	key := state.AdapterStateKey(state.SurfaceChannel, "tg", "k")
-	events, err := s.AdapterState.Watch(ctx, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.AdapterState.Create(ctx, key, "v"); err != nil {
-		t.Fatal(err)
-	}
-	ev := recvEvent(t, events)
-	if ev.Type != state.EventPut || ev.Key != key || ev.Record != "v" {
-		t.Fatalf("first event = %+v, want a put of the value", ev)
-	}
-	if err := s.AdapterState.Delete(ctx, key); err != nil {
-		t.Fatal(err)
-	}
-	ev = recvEvent(t, events)
-	if ev.Type != state.EventDelete || ev.Key != key {
-		t.Fatalf("second event = %+v, want the delete", ev)
-	}
-}

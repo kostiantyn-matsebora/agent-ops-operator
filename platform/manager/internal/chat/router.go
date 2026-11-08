@@ -64,8 +64,12 @@ type InboundMessage struct {
 type Router struct {
 	Client client.Client
 	Reader client.Reader
-	// Store holds the conversations and their queued input payloads.
-	Store     state.Store
+	// Conversations holds the conversations.
+	Conversations state.Collection[state.ConversationRecord]
+	// Runs holds their append-only run history.
+	Runs state.Appended[state.ConversationRecord, state.Run]
+	// Blobs holds their queued input payloads.
+	Blobs     state.Blobs
 	Namespace string
 	Ops       *OpQueue
 	// Activity records the inbound hop. Nil is inert.
@@ -290,7 +294,7 @@ func (r *Router) releaseText(ctx context.Context, conv *state.ConversationRecord
 	// The profile is NOT read here any more: it is no longer an input to what
 	// executes a conversation, and reading one to answer this would be the
 	// habit this change ended.
-	resolved, err := runtimepod.ResolveFor(ctx, r.Reader, r.Store, r.Namespace, conv, r.Runtime)
+	resolved, err := runtimepod.ResolveFor(ctx, r.Reader, r.Conversations, r.Namespace, conv, r.Runtime)
 	if err != nil {
 		// Degrade to the neutral wording rather than failing: the pod is already
 		// gone, and refusing to report a completed release because a Get failed
@@ -376,7 +380,7 @@ func (r *Router) closeConversation(ctx context.Context, conv *state.Conversation
 			r.Ops.EnqueueFarewell(ctx, ch, conv, tid, Notice(farewell))
 		})
 		now := time.Now()
-		if err := state.IgnoreNotFound(state.Patch(ctx, r.Store, conv, func(rec *state.ConversationRecord) {
+		if err := state.IgnoreNotFound(state.Patch(ctx, r.Conversations, conv, func(rec *state.ConversationRecord) {
 			rec.Phase = state.PhaseClosed
 			rec.ClosedAt = &now
 		})); err != nil {
@@ -412,7 +416,7 @@ func (r *Router) ReopenConversation(ctx context.Context, conv *state.Conversatio
 		return err
 	}
 	now := time.Now()
-	return state.Patch(ctx, r.Store, conv, func(rec *state.ConversationRecord) {
+	return state.Patch(ctx, r.Conversations, conv, func(rec *state.ConversationRecord) {
 		rec.Phase = state.PhaseIdle
 		rec.ClosedAt = nil
 		rec.Reopens++
@@ -433,7 +437,7 @@ func (r *Router) refuseReopenBehindOpenSuccessor(ctx context.Context, conv *stat
 	if conv.ConversationID == "" {
 		return nil
 	}
-	list, err := r.Store.List(ctx, state.ByConversationID, state.ListKey{ConversationID: conv.ConversationID})
+	list, err := r.Conversations.List(ctx, state.ByConversationID, conv.ConversationID)
 	if err != nil {
 		return err
 	}
@@ -718,7 +722,7 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		// one Create.
 		conv.Budget = origin.SnapshotBudget()
 	}
-	if _, err := namewords.AllocateName(ctx, r.Store, "task", namewords.Words(nameWords), conv); err != nil {
+	if _, err := namewords.AllocateName(ctx, r.Conversations, "task", namewords.Words(nameWords), conv); err != nil {
 		return conv, err
 	}
 	originName, originKind := ch.Name, activity.NodeChannel
@@ -739,7 +743,7 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 // convByThread resolves a (channel, thread) pair to its conversation. Thread
 // ids are opaque strings scoped per channel — no cross-channel collisions.
 func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string) *state.ConversationRecord {
-	list, err := r.Store.List(ctx, state.ByAll, state.ListKey{})
+	list, err := r.Conversations.List(ctx, state.ByAll, "")
 	if err != nil {
 		return nil
 	}
@@ -780,7 +784,7 @@ func (r *Router) FanOutSend(ctx context.Context, conv *state.ConversationRecord,
 // CR is the only thing that can tell an undelivered reply from a delivered one.
 func (r *Router) FanOutRunReply(ctx context.Context, conv *state.ConversationRecord, runID string, msg Message) {
 	var run *state.Run
-	runs, _ := r.Store.ListRuns(ctx, state.Key(conv.Name))
+	runs, _ := r.Runs.List(ctx, state.Key(conv.Name))
 	for i := range runs {
 		if runs[i].RunID == runID {
 			run = &runs[i]
@@ -789,7 +793,7 @@ func (r *Router) FanOutRunReply(ctx context.Context, conv *state.ConversationRec
 	}
 	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
 		if run != nil && run.DeliveredTo(ch.Name) {
-			SettleDeliveredNote(ctx, r.Store, conv, ch.Name, runID)
+			SettleDeliveredNote(ctx, r.Conversations, conv, ch.Name, runID)
 			return
 		}
 		r.Ops.EnqueueRunReply(ctx, ch, conv, runID, tid, msg)
@@ -804,11 +808,11 @@ func (r *Router) FanOutRunReply(ctx context.Context, conv *state.ConversationRec
 // naming a DIFFERENT run is left alone: that reply is genuinely owed. Best
 // effort: the note is observable bookkeeping, never what decides whether a
 // reply is owed.
-func SettleDeliveredNote(ctx context.Context, store state.Store, conv *state.ConversationRecord, channel, runID string) {
+func SettleDeliveredNote(ctx context.Context, conversations state.Collection[state.ConversationRecord], conv *state.ConversationRecord, channel, runID string) {
 	if b := conv.Thread(channel); b == nil || b.UndeliveredReply != runID {
 		return
 	}
-	_ = clearUndeliveredNote(ctx, store, state.Key(conv.Name), channel, runID)
+	_ = clearUndeliveredNote(ctx, conversations, state.Key(conv.Name), channel, runID)
 }
 
 // eachBoundThread runs fn for every bound channel that already has a thread,
@@ -836,7 +840,7 @@ func (r *Router) eachBoundThread(ctx context.Context, conv *state.ConversationRe
 // conversation re-reads a conversation, for the paths that need the record as
 // it stands AFTER their own write.
 func (r *Router) conversation(ctx context.Context, name string) (*state.ConversationRecord, error) {
-	conv, _, err := r.Store.Get(ctx, state.Key(name))
+	conv, _, err := r.Conversations.Get(ctx, state.Key(name))
 	if err != nil {
 		return nil, err
 	}
@@ -845,13 +849,13 @@ func (r *Router) conversation(ctx context.Context, name string) (*state.Conversa
 
 // env is what the delivery helpers read through.
 func (r *Router) env() Env {
-	return Env{Reader: r.Reader, Store: r.Store, Namespace: r.Namespace}
+	return Env{Reader: r.Reader, Blobs: r.Blobs, Namespace: r.Namespace}
 }
 
 // appendInput queues item on the conversation, re-reading the record on a lost
 // race (state.Mutate).
 func (r *Router) appendInput(ctx context.Context, conv *state.ConversationRecord, item state.InputItem) error {
-	_, err := state.Mutate(ctx, r.Store, state.Key(conv.Name), func(rec *state.ConversationRecord) error {
+	_, err := state.Mutate(ctx, r.Conversations, state.Key(conv.Name), func(rec *state.ConversationRecord) error {
 		rec.Inputs = append(rec.Inputs, item)
 		return nil
 	})

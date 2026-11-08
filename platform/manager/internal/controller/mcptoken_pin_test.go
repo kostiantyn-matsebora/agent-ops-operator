@@ -40,8 +40,11 @@ func TestResolveActingCoordinatorMatchesChatPackage(t *testing.T) {
 	plain.Name, plain.Namespace = "plain-1", "agent-ops"
 
 	c := fakeCoordinatorClient(t, root, member, plain).Build()
-	store := kube.NewStore(c, "agent-ops")
-	router := &chat.Router{Client: c, Reader: c, Store: store, Namespace: "agent-ops"}
+	store, err := kube.Open(c, "agent-ops", kube.ConversationLayout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := &chat.Router{Client: c, Reader: c, Conversations: store, Namespace: "agent-ops"}
 
 	for _, fixture := range []*agentopsv1alpha1.Conversation{root, member, plain} {
 		rec, _, err := store.Get(context.Background(), state.Key(fixture.Name))

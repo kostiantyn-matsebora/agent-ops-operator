@@ -127,7 +127,7 @@ func nonNegative(at string, fields map[string]*int64) error {
 // falls back to the AgentRuntime itself — a hop from a coarser node is honest,
 // one from an image nobody ran is not.
 func (s *Server) runtimeImageNode(ctx context.Context, conv *state.ConversationRecord) *activity.NodeRef {
-	if resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Store, s.Namespace, conv, s.Runtime); err == nil && resolved.Config.Image != "" {
+	if resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Conversations, s.Namespace, conv, s.Runtime); err == nil && resolved.Config.Image != "" {
 		return activity.Node(activity.NodeRuntimeImage, resolved.Config.Image)
 	}
 	return activity.Node(activity.NodeRuntime, s.runtimeName(ctx, conv))

@@ -75,11 +75,14 @@ const errInvalidJSON = "invalid JSON"
 type Server struct {
 	Client client.Client // cached
 	Reader client.Reader // APIReader: strong reads for dispatch state
-	// Store is the only way this surface reaches a Conversation or a queued
-	// input's payload (state-store design D-2).
-	Store state.Store
+	// Conversations, Runs and Blobs are the only way this surface reaches a
+	// Conversation, its run history or a queued input's payload (state-store
+	// design D-2).
+	Conversations state.Collection[state.ConversationRecord]
+	Runs          state.Appended[state.ConversationRecord, state.Run]
+	Blobs         state.Blobs
 	// Signals is the only way publication stores a Signal.
-	Signals   state.SignalStore
+	Signals   state.Expiring[state.SignalRecord]
 	Namespace string
 	Addr      string
 
@@ -302,7 +305,7 @@ func (s *Server) resolvePayload(ctx context.Context) dispatch.PayloadResolver {
 		if item.PayloadRef == "" {
 			return item.Payload, nil
 		}
-		blob, err := s.Store.GetBlob(ctx, item.PayloadRef)
+		blob, err := s.Blobs.Get(ctx, item.PayloadRef)
 		if err != nil {
 			return "", err
 		}
@@ -384,7 +387,7 @@ func (s *Server) resolveToolsets(ctx context.Context, conv *state.ConversationRe
 // setToolingCondition surfaces a binding failure on the conversation so it is
 // visible in `kubectl describe` rather than only in manager logs.
 func (s *Server) setToolingCondition(ctx context.Context, conv *state.ConversationRecord, reason, message string) {
-	_ = state.Patch(ctx, s.Store, conv, func(r *state.ConversationRecord) {
+	_ = state.Patch(ctx, s.Conversations, conv, func(r *state.ConversationRecord) {
 		r.SetCondition(state.Condition{
 			Type: controller.ConditionToolingResolved, Status: state.ConditionFalse,
 			Reason: reason, Message: message,
@@ -393,7 +396,7 @@ func (s *Server) setToolingCondition(ctx context.Context, conv *state.Conversati
 }
 
 func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (dispatch.WorkUnit, bool, error) {
-	conv, rev, err := s.Store.Get(ctx, state.Key(convoName))
+	conv, rev, err := s.Conversations.Get(ctx, state.Key(convoName))
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -430,7 +433,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	// declaration: it answers each message fresh and says so, instead of failing
 	// every follow-up for a configuration the operator deliberately chose.
 	contextID := ""
-	resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Store, s.Namespace, &conv, s.Runtime)
+	resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Conversations, s.Namespace, &conv, s.Runtime)
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -459,7 +462,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	}
 	// Compare-and-swap on the revision read above: a racing update is not
 	// merged over, the caller retries next tick.
-	if _, err := s.Store.Update(ctx, state.Key(conv.Name), rev, conv); err != nil {
+	if _, err := s.Conversations.Update(ctx, state.Key(conv.Name), rev, conv); err != nil {
 		if errors.Is(err, state.ErrConflict) {
 			return dispatch.WorkUnit{}, false, nil
 		}
@@ -620,7 +623,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	key := state.Key(d.Convo)
-	conv, _, err := s.Store.Get(ctx, key)
+	conv, _, err := s.Conversations.Get(ctx, key)
 	if err != nil {
 		code := 500
 		if errors.Is(err, state.ErrNotFound) {
@@ -708,7 +711,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	if d.Continuity == ContinuityContinued {
 		s.breaker().Continued()
 	}
-	updated, err := state.Mutate(ctx, s.Store, key, func(c *state.ConversationRecord) error {
+	updated, err := state.Mutate(ctx, s.Conversations, key, func(c *state.ConversationRecord) error {
 		if inf := c.Inflight; inf != nil && inf.RunID == d.RunID && !hold {
 			c.ProcessedInputIDs = bound(append(c.ProcessedInputIDs, inf.InputIDs...), 50)
 		}
@@ -787,7 +790,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		if err := s.Router.AppendMemberResult(ctx, conv.CausedBy, conv.Name, dedup, result); err != nil {
 			log.FromContext(ctx).Info("routing member result to parent (backstop will retry)",
 				"conversation", conv.Name, "parent", conv.CausedBy.Parent, "error", err.Error())
-		} else if err := s.Store.UpdateRun(ctx, key, d.RunID, state.RunUpdate{MarkRoutedToParent: true}); err != nil &&
+		} else if err := s.Runs.Grow(ctx, key, d.RunID, state.Run{RoutedToParent: true}); err != nil &&
 			!errors.Is(err, state.ErrNotFound) {
 			log.FromContext(ctx).Info("marking run routed to parent (backstop will retry)",
 				"conversation", conv.Name, "runId", d.RunID, "error", err.Error())
@@ -821,7 +824,7 @@ func turnsReachMax(c *state.ConversationRecord) bool {
 // report whose first attempt landed the run but not the inflight clear must not
 // record it twice.
 func (s *Server) recordRun(ctx context.Context, key state.Key, run state.Run) error {
-	runs, err := s.Store.ListRuns(ctx, key)
+	runs, err := s.Runs.List(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -830,7 +833,7 @@ func (s *Server) recordRun(ctx context.Context, key state.Key, run state.Run) er
 			return nil
 		}
 	}
-	return s.Store.AppendRun(ctx, key, run)
+	return s.Runs.Append(ctx, key, run)
 }
 
 // applyReport records what a work report says about the context onto the
@@ -901,7 +904,7 @@ func applyReport(c *state.ConversationRecord, d *workDone, reported string, hold
 // rather than the state this request started with, so the decision is made
 // inside the compare-and-swap loop and a loser re-reads.
 func (s *Server) setPhaseUnlessClosed(ctx context.Context, name string, desired string) error {
-	_, err := state.Mutate(ctx, s.Store, state.Key(name), func(c *state.ConversationRecord) error {
+	_, err := state.Mutate(ctx, s.Conversations, state.Key(name), func(c *state.ConversationRecord) error {
 		if c.Phase != state.PhaseClosed {
 			c.Phase = desired
 		}
@@ -943,7 +946,7 @@ func (s *Server) recordInputs(ctx context.Context, conv *state.ConversationRecor
 		}
 		text, labels := item.Payload, map[string]string(nil)
 		if item.PayloadRef != "" {
-			if blob, err := s.Store.GetBlob(ctx, item.PayloadRef); err == nil {
+			if blob, err := s.Blobs.Get(ctx, item.PayloadRef); err == nil {
 				text, labels = blob.Payload, blob.Labels
 			}
 		}
@@ -1234,7 +1237,7 @@ func (s *Server) reachConversation(w http.ResponseWriter, r *http.Request) (*sta
 		forbidScope(w)
 		return nil, false
 	}
-	conv, _, err := s.Store.Get(ctx, state.Key(name))
+	conv, _, err := s.Conversations.Get(ctx, state.Key(name))
 	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown conversation %q", name)})
 		return nil, false
@@ -1288,7 +1291,7 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := s.Store.Delete(r.Context(), state.Key(conv.Name)); err != nil {
+	if err := s.Conversations.Delete(r.Context(), state.Key(conv.Name)); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1306,7 +1309,7 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 // be deleted — so there is no "not yet closed" case to refuse here, and
 // NotFound is tolerated: some other path may already have deleted it.
 func (s *Server) cascadeDeleteMembers(ctx context.Context, parentName string) error {
-	members, err := s.Store.List(ctx, state.ByCausedBy, state.ListKey{CausedBy: parentName})
+	members, err := s.Conversations.List(ctx, state.ByCausedBy, parentName)
 	if err != nil {
 		return err
 	}
@@ -1318,7 +1321,7 @@ func (s *Server) cascadeDeleteMembers(ctx context.Context, parentName string) er
 		if err := s.cascadeDeleteMembers(ctx, member.Name); err != nil {
 			return err
 		}
-		if err := s.Store.Delete(ctx, state.Key(member.Name)); err != nil {
+		if err := s.Conversations.Delete(ctx, state.Key(member.Name)); err != nil {
 			return err
 		}
 	}

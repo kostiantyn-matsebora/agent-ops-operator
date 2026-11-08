@@ -65,7 +65,7 @@ func (s *Server) callerConversation(ctx context.Context, name, token string) (*s
 	if s.AdapterToken == "" || name == "" || token == "" {
 		return nil, errWrongToken
 	}
-	conv, _, err := s.Store.Get(ctx, state.Key(name))
+	conv, _, err := s.Conversations.Get(ctx, state.Key(name))
 	if err != nil {
 		return nil, errWrongToken
 	}
@@ -98,7 +98,7 @@ func (s *Server) callerActingForCoordinator(ctx context.Context, name, token str
 	if s.AdapterToken == "" || name == "" || token == "" {
 		return nil, errWrongToken
 	}
-	conv, _, err := s.Store.Get(ctx, state.Key(name))
+	conv, _, err := s.Conversations.Get(ctx, state.Key(name))
 	if err != nil {
 		return nil, errWrongToken
 	}
@@ -288,7 +288,7 @@ func (s *Server) stampMove(ctx context.Context, callerName string) {
 }
 
 func (s *Server) tryStampMove(ctx context.Context, callerName string) error {
-	_, err := state.Mutate(ctx, s.Store, state.Key(callerName), func(c *state.ConversationRecord) error {
+	_, err := state.Mutate(ctx, s.Conversations, state.Key(callerName), func(c *state.ConversationRecord) error {
 		if c.Inflight != nil {
 			c.Inflight.Moved = true
 		}
@@ -361,7 +361,7 @@ func (s *Server) handleCoordinateRead(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, projectConversation(caller))
 		return
 	}
-	t, _, err := s.Store.Get(ctx, state.Key(target))
+	t, _, err := s.Conversations.Get(ctx, state.Key(target))
 	if err != nil {
 		writeCoordinateError(w, 404, chat.ErrOutOfSubtree)
 		return
@@ -390,7 +390,7 @@ func (s *Server) descendsFrom(ctx context.Context, target *state.ConversationRec
 		if cur.CausedBy.Parent == ancestorName {
 			return true, nil
 		}
-		parent, _, err := s.Store.Get(ctx, state.Key(cur.CausedBy.Parent))
+		parent, _, err := s.Conversations.Get(ctx, state.Key(cur.CausedBy.Parent))
 		if err != nil {
 			return false, state.IgnoreNotFound(err)
 		}
@@ -487,7 +487,7 @@ func (s *Server) handleCoordinateTree(w http.ResponseWriter, r *http.Request) {
 	}
 	target := caller
 	if in.Target != "" && in.Target != caller.Name {
-		t, _, err := s.Store.Get(ctx, state.Key(in.Target))
+		t, _, err := s.Conversations.Get(ctx, state.Key(in.Target))
 		if err != nil {
 			writeCoordinateError(w, 404, chat.ErrOutOfSubtree)
 			return
@@ -559,7 +559,7 @@ func (s *Server) handleCoordinateOpenRoots(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) readChannelProjection(w http.ResponseWriter, r *http.Request, ch *agentopsv1alpha1.Channel) {
 	ctx := r.Context()
-	all, err := s.Store.List(ctx, state.ByAll, state.ListKey{})
+	all, err := s.Conversations.List(ctx, state.ByAll, "")
 	if err != nil {
 		writeCoordinateError(w, 500, err)
 		return

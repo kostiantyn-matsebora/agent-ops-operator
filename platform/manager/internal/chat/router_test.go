@@ -44,8 +44,8 @@ func closeFixture(t *testing.T, objs ...client.Object) (*Router, *OpQueue, clien
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(objs...).Build()
-	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
-	return &Router{Client: c, Reader: c, Store: newTestStore(c), Namespace: testNS, Ops: q}, q, c
+	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry()}
+	return &Router{Client: c, Reader: c, Conversations: newTestStore(c), Runs: newTestRuns(c), Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}, q, c
 }
 
 func nsChannel(name, adapter string) *agentopsv1alpha1.Channel {

@@ -136,7 +136,7 @@ func contextData(rep contextReport) map[string]string {
 
 // recordCheckpoint stamps the durable half onto the Conversation.
 func (s *Server) recordCheckpoint(ctx context.Context, rep contextReport) error {
-	_, err := state.Mutate(ctx, s.Store, state.Key(rep.Conversation), func(c *state.ConversationRecord) error {
+	_, err := state.Mutate(ctx, s.Conversations, state.Key(rep.Conversation), func(c *state.ConversationRecord) error {
 		c.ContextCheckpoint = &state.ContextCheckpoint{
 			At:       time.Now().UTC(),
 			Quiesced: rep.Quiesced,

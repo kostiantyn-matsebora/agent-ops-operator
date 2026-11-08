@@ -109,7 +109,7 @@ func (s *Server) handleChannelRead(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	now := time.Now()
 
-	all, err := s.Store.List(ctx, state.ByAll, state.ListKey{})
+	all, err := s.Conversations.List(ctx, state.ByAll, "")
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -216,7 +216,7 @@ func (s *Server) markThreadRead(ctx context.Context, name, channel string, targe
 		}
 	}
 	var pending map[*readTarget]bool
-	_, err := state.Mutate(ctx, s.Store, state.Key(name), func(conv *state.ConversationRecord) error {
+	_, err := state.Mutate(ctx, s.Conversations, state.Key(name), func(conv *state.ConversationRecord) error {
 		t := conv.Thread(channel)
 		if t == nil {
 			return fmt.Errorf("conversation %q holds no thread on channel %q", name, channel)

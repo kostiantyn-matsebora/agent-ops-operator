@@ -11,7 +11,6 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // workReportServerAt is workReportServer with a CALLER-CHOSEN dispatch stamp,
@@ -30,7 +29,7 @@ func workReportServerAt(t *testing.T, dispatchedAt metav1.Time) *Server {
 
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 		WithObjects(conv, rt).WithStatusSubresource(conv).Build()
-	return &Server{Reader: c, Store: kube.NewStore(c, "agent-ops"), Client: c, Namespace: "agent-ops", Activity: activity.New(64)}
+	return &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Runs: testRuns(t, c, "agent-ops"), Client: c, Namespace: "agent-ops", Activity: activity.New(64)}
 }
 
 // A recorded run must carry when it actually STARTED, not only when it

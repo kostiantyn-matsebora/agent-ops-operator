@@ -47,7 +47,7 @@ func (q *recordingQueue) names() []string {
 	return out
 }
 
-func feedReconciler(t *testing.T) (*ConversationReconciler, state.Store) {
+func feedReconciler(t *testing.T) (*ConversationReconciler, state.Collection[state.ConversationRecord]) {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := agentopsv1alpha1.AddToScheme(scheme); err != nil {
@@ -55,8 +55,11 @@ func feedReconciler(t *testing.T) (*ConversationReconciler, state.Store) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).Build()
-	store := kube.NewStore(c, "ns-a")
-	return &ConversationReconciler{Client: c, Store: store, Namespace: "ns-a"}, store
+	store, err := kube.Open(c, "ns-a", kube.ConversationLayout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &ConversationReconciler{Client: c, Conversations: store, Namespace: "ns-a"}, store
 }
 
 func waitForNames(t *testing.T, q *recordingQueue, want ...string) {
@@ -174,16 +177,16 @@ func ownedPod(t *testing.T, r *ConversationReconciler, owner *metav1.PartialObje
 
 func bareObject() *corev1.Pod { return &corev1.Pod{} }
 
-// feedStub scripts Store.Watch: each call records the resume point it was
-// given and answers from the next scripted step.
+// feedStub scripts Conversations.Watch: each call records the resume point it
+// was given and answers from the next scripted step.
 type feedStub struct {
-	state.Store
+	state.Collection[state.ConversationRecord]
 	mu      sync.Mutex
 	resumes []state.Revision
-	steps   []func() (<-chan state.Event, error)
+	steps   []func() (<-chan state.Event[state.ConversationRecord], error)
 }
 
-func (f *feedStub) Watch(_ context.Context, resume state.Revision) (<-chan state.Event, error) {
+func (f *feedStub) Watch(_ context.Context, resume state.Revision) (<-chan state.Event[state.ConversationRecord], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resumes = append(f.resumes, resume)
@@ -193,7 +196,7 @@ func (f *feedStub) Watch(_ context.Context, resume state.Revision) (<-chan state
 	return f.steps[len(f.resumes)-1]()
 }
 
-func (f *feedStub) List(context.Context, state.Index, state.ListKey) ([]state.ConversationRecord, error) {
+func (f *feedStub) List(context.Context, state.Index[state.ConversationRecord], string) ([]state.ConversationRecord, error) {
 	return nil, nil
 }
 
@@ -203,9 +206,9 @@ func (f *feedStub) seen() []state.Revision {
 	return append([]state.Revision(nil), f.resumes...)
 }
 
-func eventsThenClose(evs ...state.Event) func() (<-chan state.Event, error) {
-	return func() (<-chan state.Event, error) {
-		ch := make(chan state.Event, len(evs))
+func eventsThenClose(evs ...state.Event[state.ConversationRecord]) func() (<-chan state.Event[state.ConversationRecord], error) {
+	return func() (<-chan state.Event[state.ConversationRecord], error) {
+		ch := make(chan state.Event[state.ConversationRecord], len(evs))
 		for _, e := range evs {
 			ch <- e
 		}
@@ -230,12 +233,14 @@ func waitForResumes(t *testing.T, f *feedStub, n int) []state.Revision {
 // A resume point the store rejects with an error must not be retried forever:
 // the feed drops it and relists.
 func TestPumpFeedClearsAResumePointTheStoreRejects(t *testing.T) {
-	stub := &feedStub{steps: []func() (<-chan state.Event, error){
-		eventsThenClose(state.Event{Type: state.EventPut, Key: "a", Resume: "5"}),
-		func() (<-chan state.Event, error) { return nil, errors.New("too old resource version") },
+	stub := &feedStub{steps: []func() (<-chan state.Event[state.ConversationRecord], error){
+		eventsThenClose(state.Event[state.ConversationRecord]{Type: state.EventPut, Key: "a", Resume: "5"}),
+		func() (<-chan state.Event[state.ConversationRecord], error) {
+			return nil, errors.New("too old resource version")
+		},
 		eventsThenClose(),
 	}}
-	r := &ConversationReconciler{Store: stub, Namespace: "ns-a"}
+	r := &ConversationReconciler{Conversations: stub, Namespace: "ns-a"}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go r.pumpFeed(ctx, &recordingQueue{})
@@ -248,11 +253,11 @@ func TestPumpFeedClearsAResumePointTheStoreRejects(t *testing.T) {
 
 // A bookmark moves the resume point without enqueuing anything.
 func TestPumpFeedFollowsABookmarkWithoutEnqueuing(t *testing.T) {
-	stub := &feedStub{steps: []func() (<-chan state.Event, error){
-		eventsThenClose(state.Event{Type: state.EventBookmark, Resume: "9"}),
+	stub := &feedStub{steps: []func() (<-chan state.Event[state.ConversationRecord], error){
+		eventsThenClose(state.Event[state.ConversationRecord]{Type: state.EventBookmark, Resume: "9"}),
 		eventsThenClose(),
 	}}
-	r := &ConversationReconciler{Store: stub, Namespace: "ns-a"}
+	r := &ConversationReconciler{Conversations: stub, Namespace: "ns-a"}
 	q := &recordingQueue{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

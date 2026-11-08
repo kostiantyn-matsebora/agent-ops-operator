@@ -269,8 +269,8 @@ func TestDeleteCascadesToDescendantsAtAnyDepth(t *testing.T) {
 func TestDeletionTellsEveryBoundThread(t *testing.T) {
 	ops := testOps()
 	r := &controller.ConversationReconciler{
-		Client: k8sClient,
-		Store:  stateStore, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Client:        k8sClient,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
 		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
 	}
 	mkChannel(t, "gone-ch", "tg")
@@ -321,8 +321,8 @@ func TestDeletionTellsEveryBoundThread(t *testing.T) {
 func TestCloseTopicSkipsAThreadWithNoTopicYet(t *testing.T) {
 	ops := testOps()
 	r := &controller.ConversationReconciler{
-		Client: k8sClient,
-		Store:  stateStore, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Client:        k8sClient,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
 		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
 	}
 	mkChannel(t, "no-topic-ch", "tg")
@@ -355,8 +355,8 @@ func TestCloseTopicSkipsAThreadWithNoTopicYet(t *testing.T) {
 func TestCloseTopicResumesOnceATopicArrives(t *testing.T) {
 	ops := testOps()
 	r := &controller.ConversationReconciler{
-		Client: k8sClient,
-		Store:  stateStore, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Client:        k8sClient,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
 		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
 	}
 	mkChannel(t, "late-topic-ch", "tg")

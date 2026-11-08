@@ -14,7 +14,7 @@ import (
 func TestSetPhaseNeverReopensAConversationClosedDuringThePass(t *testing.T) {
 	c := fakeClaimClient(t, claimTestConv("c-1")).Build()
 	store := claimStore(c)
-	r := &ConversationReconciler{Store: store}
+	r := &ConversationReconciler{Conversations: store}
 	ctx := context.Background()
 
 	stale := claimRec(t, store, "c-1") // what the pass read: not closed yet
@@ -37,7 +37,7 @@ func TestSetPhaseNeverReopensAConversationClosedDuringThePass(t *testing.T) {
 func TestSetPhaseMovesAnOpenConversation(t *testing.T) {
 	c := fakeClaimClient(t, claimTestConv("c-2")).Build()
 	store := claimStore(c)
-	r := &ConversationReconciler{Store: store}
+	r := &ConversationReconciler{Conversations: store}
 
 	rec := claimRec(t, store, "c-2")
 	if err := r.setPhase(context.Background(), rec, state.PhaseQueued); err != nil {
@@ -47,4 +47,3 @@ func TestSetPhaseMovesAnOpenConversation(t *testing.T) {
 		t.Fatalf("phase = %q, want %q", got, state.PhaseQueued)
 	}
 }
-

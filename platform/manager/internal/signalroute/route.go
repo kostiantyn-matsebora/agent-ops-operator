@@ -32,14 +32,22 @@ import (
 type Deps struct {
 	// Client is used for the source status writes (the receipt counters).
 	Client client.Client
-	// Signals holds the cooldown window of every source: recovered on first
-	// use in this process and written back on each admission.
-	Signals state.SignalStore
-	// Store holds every conversation and queued input payload: the
-	// reusable-conversation lookup, the backlog count, conversation create and
-	// the input append. Read straight from its source of truth, never a cache:
-	// a pass interrupted after a create must find what it just made.
-	Store state.Store
+	// Conversations holds every conversation: the reusable-conversation
+	// lookup, the backlog count and conversation create. Read straight from
+	// its source of truth, never a cache: a pass interrupted after a create
+	// must find what it just made.
+	Conversations state.Collection[state.ConversationRecord]
+	// Runs holds the conversations' append-only run history, read to tell
+	// whether a signal's message already reached its conversation.
+	Runs state.Appended[state.ConversationRecord, state.Run]
+	// Blobs holds a queued input's out-of-line payload.
+	Blobs state.Blobs
+	// CooldownWindows holds one cooldown window per signal source, read and
+	// replaced by this package's own helpers (window.go) over Mutate.
+	CooldownWindows state.Collection[state.CooldownWindow]
+	// Receipts holds one receipt counter per signal source, counted by this
+	// package's own helper (window.go) over Mutate.
+	Receipts state.Collection[state.Received]
 	// Reader serves the reads a pass needs (claimants, capability and
 	// runtime). The API server directly in production.
 	Reader client.Reader
@@ -199,7 +207,7 @@ func admit(ctx context.Context, deps Deps, sig *state.SignalRecord, source *agen
 	}
 
 	if isChat {
-		full, err := BacklogFull(ctx, deps.Store, deps.MaxQueued)
+		full, err := BacklogFull(ctx, deps.Conversations, deps.MaxQueued)
 		if err != nil {
 			rollbackIf(rollback)
 			return nil, nil, false, err
@@ -319,8 +327,8 @@ func routeClaimants(ctx context.Context, deps Deps, sig *state.SignalRecord) err
 // BacklogFull reports whether the pending backlog has reached its bound.
 // Only PENDING conversations count: an admitted one holds a pod (or is about
 // to) and is already bounded by MAX_ACTIVE_CONVERSATIONS.
-func BacklogFull(ctx context.Context, store state.Store, maxQueued int) (bool, error) {
-	pending, err := store.List(ctx, state.ByPhase, state.ListKey{Phase: state.PhasePending})
+func BacklogFull(ctx context.Context, conversations state.Collection[state.ConversationRecord], maxQueued int) (bool, error) {
+	pending, err := conversations.List(ctx, state.ByPhase, state.PhasePending)
 	if err != nil {
 		return false, err
 	}

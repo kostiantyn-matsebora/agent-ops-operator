@@ -161,7 +161,7 @@ func (r *Router) InvokeMember(ctx context.Context, caller *state.ConversationRec
 // later, its second sweep runs after the close write, which is after this
 // read, which is after the member was created, so the sweep finds it.
 func (r *Router) closeMemberIfCallerClosed(ctx context.Context, callerName string, member *state.ConversationRecord) error {
-	fresh, _, err := r.Store.Get(ctx, state.Key(callerName))
+	fresh, _, err := r.Conversations.Get(ctx, state.Key(callerName))
 	if err != nil {
 		return state.IgnoreNotFound(err)
 	}
@@ -240,7 +240,7 @@ func (r *Router) Descendants(ctx context.Context, rootName string) ([]state.Conv
 	for i := 0; i < 1000 && len(frontier) > 0; i++ {
 		var next []string
 		for _, parent := range frontier {
-			members, err := r.Store.List(ctx, state.ByCausedBy, state.ListKey{CausedBy: parent})
+			members, err := r.Conversations.List(ctx, state.ByCausedBy, parent)
 			if err != nil {
 				return nil, err
 			}
@@ -273,7 +273,7 @@ func (r *Router) causedByAncestry(ctx context.Context, conv *state.ConversationR
 		if cur.CausedBy == nil {
 			return chain, nil
 		}
-		parent, _, err := r.Store.Get(ctx, state.Key(cur.CausedBy.Parent))
+		parent, _, err := r.Conversations.Get(ctx, state.Key(cur.CausedBy.Parent))
 		if err != nil {
 			return nil, err
 		}
@@ -391,7 +391,7 @@ func (r *Router) ListOpenRoots(ctx context.Context, caller *state.ConversationRe
 	if scope.Name == "" {
 		return nil, ErrNoCoordinatorScope
 	}
-	list, err := r.Store.List(ctx, state.ByAll, state.ListKey{})
+	list, err := r.Conversations.List(ctx, state.ByAll, "")
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +435,7 @@ func isOpenSiblingRoot(c *state.ConversationRecord, scope ActingCoordinator) boo
 // reattached to more than once (or re-invoked after its first member closed)
 // is named once. The reaper re-invokes exactly these entries to re-check them.
 func (r *Router) directMemberEntries(ctx context.Context, rootName string) ([]string, error) {
-	list, err := r.Store.List(ctx, state.ByCausedBy, state.ListKey{CausedBy: rootName})
+	list, err := r.Conversations.List(ctx, state.ByCausedBy, rootName)
 	if err != nil {
 		return nil, err
 	}
@@ -506,7 +506,7 @@ func isHumanInitiated(c *state.ConversationRecord) bool {
 // does (state.ByConversationID), never the removed
 // agentops.dev/signature-hash label.
 func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, initiationID string) (*state.ConversationRecord, error) {
-	list, err := r.Store.List(ctx, state.ByConversationID, state.ListKey{ConversationID: initiationID})
+	list, err := r.Conversations.List(ctx, state.ByConversationID, initiationID)
 	if err != nil {
 		return nil, err
 	}
@@ -582,7 +582,7 @@ func (r *Router) createMember(ctx context.Context, caller *state.ConversationRec
 		// beside the spec, so it rides the one Create.
 		member.Budget = claimant.SnapshotBudget()
 	}
-	if _, err := namewords.AllocateName(ctx, r.Store, "member", namewords.Words(entry.Name), member); err != nil {
+	if _, err := namewords.AllocateName(ctx, r.Conversations, "member", namewords.Words(entry.Name), member); err != nil {
 		return nil, err
 	}
 	if err := r.appendInputIdempotent(ctx, member.Name, state.InputItem{
@@ -606,7 +606,7 @@ func (r *Router) createMember(ctx context.Context, caller *state.ConversationRec
 // on an actual new member: reattaching to one already live is not inviting a
 // new agent.
 func (r *Router) bumpAgentsInvoked(ctx context.Context, convName string) error {
-	_, err := state.Mutate(ctx, r.Store, state.Key(convName), func(rec *state.ConversationRecord) error {
+	_, err := state.Mutate(ctx, r.Conversations, state.Key(convName), func(rec *state.ConversationRecord) error {
 		if rec.Budget != nil { // nil: not itself a Coordinator's root, nothing to bump
 			rec.Budget.AgentsInvoked++
 		}
@@ -638,7 +638,7 @@ func (r *Router) AppendMemberResult(ctx context.Context, causedBy *state.Provena
 // Closed (coordination-loop: "a closed parent receives nothing") and skipping
 // a repeat of an id already pending, with optimistic retry on conflict.
 func (r *Router) appendInputIdempotent(ctx context.Context, convName string, item state.InputItem) error {
-	_, err := state.Mutate(ctx, r.Store, state.Key(convName), func(rec *state.ConversationRecord) error {
+	_, err := state.Mutate(ctx, r.Conversations, state.Key(convName), func(rec *state.ConversationRecord) error {
 		if rec.Phase == state.PhaseClosed {
 			return nil
 		}
@@ -678,7 +678,7 @@ func (r *Router) CloseCoordinated(ctx context.Context, caller *state.Conversatio
 		}
 		return r.closeWithCascade(ctx, caller, reason)
 	}
-	target, _, err := r.Store.Get(ctx, state.Key(targetName))
+	target, _, err := r.Conversations.Get(ctx, state.Key(targetName))
 	if err != nil {
 		return state.IgnoreNotFound(err)
 	}
@@ -740,7 +740,7 @@ func (r *Router) closeWithCascade(ctx context.Context, conv *state.ConversationR
 // parent — see closeWithCascade for why. An already-Closed member keeps its
 // own reason and is skipped.
 func (r *Router) cascadeCloseMembers(ctx context.Context, parentName, reason string) error {
-	list, err := r.Store.List(ctx, state.ByCausedBy, state.ListKey{CausedBy: parentName})
+	list, err := r.Conversations.List(ctx, state.ByCausedBy, parentName)
 	if err != nil {
 		return err
 	}
@@ -773,7 +773,7 @@ func (r *Router) closeConversationReason(ctx context.Context, conv *state.Conver
 		r.Ops.EnqueueFarewell(ctx, ch, conv, tid, Notice(farewell))
 	})
 	now := time.Now()
-	return state.IgnoreNotFound(state.Patch(ctx, r.Store, conv, func(rec *state.ConversationRecord) {
+	return state.IgnoreNotFound(state.Patch(ctx, r.Conversations, conv, func(rec *state.ConversationRecord) {
 		rec.Phase = state.PhaseClosed
 		rec.ClosedAt = &now
 		rec.CloseReason = boundedString(reason, agentopsv1alpha1.MaxCloseReason)
@@ -808,7 +808,7 @@ func (r *Router) Escalate(ctx context.Context, conv *state.ConversationRecord, m
 		return nil // already escalated: no replayed digest
 	}
 	now := time.Now()
-	return state.Patch(ctx, r.Store, conv, func(rec *state.ConversationRecord) {
+	return state.Patch(ctx, r.Conversations, conv, func(rec *state.ConversationRecord) {
 		rec.EscalatedAt = &now
 		rec.EscalationMessage = boundedString(message, 2000)
 	})

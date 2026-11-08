@@ -6,6 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
@@ -113,4 +118,23 @@ func (r *SourceReleaser) tryRelease(ctx context.Context, source string, key stat
 		return nil
 	}
 	return err
+}
+
+// liveSignalSource builds a LiveSourceID reading a SignalSource's UID
+// straight from the API server — never a cache, since a release's decision
+// must be against the identity holding the name NOW, the same one publishOne
+// stamps into a fresh Signal's SourceID. A SignalSource is a configuration
+// kind and stays on the Kubernetes API under every backend, so reading it
+// directly here is not a door to the guarded Signal/Conversation state.
+func liveSignalSource(reader client.Reader, namespace string) LiveSourceID {
+	return func(ctx context.Context, name string) (string, bool, error) {
+		var src agentopsv1alpha1.SignalSource
+		if err := reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &src); err != nil {
+			if apierrors.IsNotFound(err) {
+				return "", false, nil
+			}
+			return "", false, err
+		}
+		return string(src.UID), true, nil
+	}
 }

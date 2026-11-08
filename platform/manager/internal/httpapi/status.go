@@ -243,7 +243,7 @@ func (s *Server) runtimeSlots(ctx context.Context) (runtimeSlots, error) {
 		inUse++
 		hasPod[p.Labels[runtimepod.LabelConversation]] = true
 	}
-	convs, err := s.Store.List(ctx, state.ByAll, state.ListKey{})
+	convs, err := s.Conversations.List(ctx, state.ByAll, "")
 	if err != nil {
 		return runtimeSlots{}, err
 	}
@@ -308,7 +308,7 @@ func (s *Server) MetricsSample() metrics.Sample {
 	// conversation independently would list the pipeline set per row, on every
 	// scrape.
 	pipelines := chat.ReadyPipelines(ctx, s.Client, s.Namespace)
-	if convs, err := s.Store.List(ctx, state.ByAll, state.ListKey{}); err == nil {
+	if convs, err := s.Conversations.List(ctx, state.ByAll, ""); err == nil {
 		for i := range convs {
 			c := &convs[i]
 			if c.Inflight == nil {

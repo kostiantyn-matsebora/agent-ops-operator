@@ -79,7 +79,7 @@ func recoverCooldown(ctx context.Context, deps Deps, source *agentopsv1alpha1.Si
 	}
 	readCtx, cancel := context.WithTimeout(ctx, cooldownReadTimeout)
 	defer cancel()
-	window, err := deps.Signals.GetCooldown(readCtx, source.Name)
+	window, err := GetCooldownWindow(readCtx, deps.CooldownWindows, source.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func recordCooldown(ctx context.Context, deps Deps, sourceName string, cd *inges
 	for _, e := range entries {
 		out = append(out, state.CooldownEntry{InitiationID: e.InitiationID, At: e.At})
 	}
-	if err := deps.Signals.PutCooldown(ctx, sourceName, out); err != nil {
+	if err := PutCooldownWindow(ctx, deps.CooldownWindows, sourceName, out); err != nil {
 		log.FromContext(ctx).Info("recording cooldown on the signal source failed; "+
 			"the cooldown window holds in memory but will not survive a restart",
 			"source", sourceName, "error", err.Error())
@@ -114,5 +114,5 @@ func recordCooldown(ctx context.Context, deps Deps, sourceName string, cd *inges
 // store. The store serializes concurrent consumers of the pool and retries a
 // lost race, so no increment is lost.
 func RecordReceived(ctx context.Context, deps Deps, sourceName string) error {
-	return deps.Signals.RecordReceived(ctx, sourceName, time.Now())
+	return CountReceipt(ctx, deps.Receipts, sourceName, time.Now())
 }

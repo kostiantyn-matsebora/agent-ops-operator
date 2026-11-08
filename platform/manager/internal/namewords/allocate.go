@@ -28,7 +28,7 @@ const MaxAllocateAttempts = 20
 // create conflict from a genuine race between two concurrent creators
 // retries the same list-then-create step, bounded to MaxAllocateAttempts;
 // exhausting it returns the last conflict error, naming the base name.
-func AllocateName(ctx context.Context, store state.Store, kind, words string, rec *state.ConversationRecord) (string, error) {
+func AllocateName(ctx context.Context, store state.Collection[state.ConversationRecord], kind, words string, rec *state.ConversationRecord) (string, error) {
 	base := kind + "-" + words
 	var lastErr error
 	for attempt := 0; attempt < MaxAllocateAttempts; attempt++ {
@@ -41,7 +41,7 @@ func AllocateName(ctx context.Context, store state.Store, kind, words string, re
 				return "", err
 			}
 		}
-		list, err := store.List(ctx, state.ByNameBase, state.ListKey{NameBase: base})
+		list, err := store.List(ctx, state.ByNameBase, base)
 		if err != nil {
 			return "", fmt.Errorf("name-base %s: list: %w", base, err)
 		}

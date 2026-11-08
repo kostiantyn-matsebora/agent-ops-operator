@@ -79,12 +79,20 @@ type SignalReconciler struct {
 	Activity *activity.Log
 	// Ops carries the chat notices, fire-and-forget. Nil skips notices.
 	Ops *chat.OpQueue
-	// Store is the only way a signal's route reaches a Conversation.
-	Store state.Store
-	// Signals is the only way this controller reaches a Signal or a source's
-	// cooldown window. It is read straight from its source of truth, never a
-	// cache, so a requeued pass cannot act on a status it already advanced.
-	Signals state.SignalStore
+	// Conversations, Runs and Blobs are the only way a signal's route reaches
+	// a Conversation, its run history or a queued input's payload.
+	Conversations state.Collection[state.ConversationRecord]
+	Runs          state.Appended[state.ConversationRecord, state.Run]
+	Blobs         state.Blobs
+	// Signals is the only way this controller reaches a Signal. It is read
+	// straight from its source of truth, never a cache, so a requeued pass
+	// cannot act on a status it already advanced.
+	Signals state.Expiring[state.SignalRecord]
+	// CooldownWindows and Receipts hold one source's cooldown window and
+	// receipt counters respectively, read and written through
+	// internal/signalroute's own helpers over Mutate.
+	CooldownWindows state.Collection[state.CooldownWindow]
+	Receipts        state.Collection[state.Received]
 	// Namespace names the install's namespace, for the objects read beside the
 	// signals and for the requests the feed enqueues.
 	Namespace string
@@ -181,7 +189,9 @@ func (r *SignalReconciler) ttlFor(phase string) time.Duration {
 
 func (r *SignalReconciler) deps() signalroute.Deps {
 	return signalroute.Deps{
-		Client: r.Client, Signals: r.Signals, Reader: r.reader(), Store: r.Store, Namespace: r.Namespace,
+		Client: r.Client, Reader: r.reader(), Namespace: r.Namespace,
+		Conversations: r.Conversations, Runs: r.Runs, Blobs: r.Blobs,
+		CooldownWindows: r.CooldownWindows, Receipts: r.Receipts,
 		Activity: r.Activity, Ops: r.Ops, Cooldowns: r.Cooldowns,
 		Runtime: r.Runtime, MaxQueued: r.MaxQueued,
 	}
@@ -260,7 +270,7 @@ func (r *SignalReconciler) reconcileLive(ctx context.Context, p *signalPass) (ct
 	var src agentopsv1alpha1.SignalSource
 	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: p.rec.SourceRef}, &src); err != nil {
 		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, r.releaseOrphans(ctx, p.rec.SourceRef, p.rec.SourceID)
+			return ctrl.Result{}, r.releaseOrphans(ctx, p.rec.SourceRef)
 		}
 		return ctrl.Result{}, err
 	}
@@ -296,9 +306,10 @@ func (r *SignalReconciler) reconcileLive(ctx context.Context, p *signalPass) (ct
 // honoured: the store may not be the Kubernetes API, and under envtest no
 // garbage collector runs. The pass knows the identity its Signal recorded, so a
 // successor that took the name meanwhile keeps its own signals and window.
-func (r *SignalReconciler) releaseOrphans(ctx context.Context, source, sourceID string) error {
+func (r *SignalReconciler) releaseOrphans(ctx context.Context, source string) error {
 	log.FromContext(ctx).Info("releasing the signals of a source that no longer exists", "source", source)
-	return r.Signals.ReleaseSource(ctx, source, sourceID)
+	releaser := &SourceReleaser{Signals: r.Signals, Cooldowns: r.CooldownWindows, Live: liveSignalSource(r.reader(), r.Namespace)}
+	return releaser.Release(ctx, source)
 }
 
 // acquire takes the in-process lock of one (source, initiationId) key. The
@@ -332,7 +343,7 @@ func (r *SignalReconciler) isHead(ctx context.Context, sig *state.SignalRecord) 
 	// cache has not seen yet would otherwise be overtaken. The index returns at
 	// most the per-source cap of live Signals, so the list stays small.
 	live, err := r.Signals.List(ctx, state.SignalNonTerminalByInitiation,
-		state.SignalListKey{Source: sig.SourceRef, InitiationID: sig.InitiationID})
+		state.IndexValue(sig.SourceRef, sig.InitiationID))
 	if err != nil {
 		return false, fmt.Errorf("list signals of %s: %w", sig.InitiationID, err)
 	}
@@ -497,7 +508,7 @@ func (r *SignalReconciler) surface(ctx context.Context, sig *state.SignalRecord,
 // kicks the others' passes otherwise. Reports whether sig itself was evicted.
 func (r *SignalReconciler) enforceSourceCap(ctx context.Context, p *signalPass) (bool, error) {
 	sig := &p.rec
-	others, err := r.Signals.List(ctx, state.SignalNonTerminalBySource, state.SignalListKey{Source: sig.SourceRef})
+	others, err := r.Signals.List(ctx, state.SignalNonTerminalBySource, sig.SourceRef)
 	if err != nil {
 		return false, err
 	}

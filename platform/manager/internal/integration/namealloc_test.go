@@ -34,7 +34,7 @@ func bareConversationObject() *agentopsv1alpha1.Conversation {
 }
 
 func TestAllocateNameFirstAllocationHasNoSuffix(t *testing.T) {
-	name, err := namewords.AllocateName(context.Background(), stateStore, "alert", "allocate-first-abc", newBareConversation())
+	name, err := namewords.AllocateName(context.Background(), stores.Conversations, "alert", "allocate-first-abc", newBareConversation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestAllocateNameRecurringBaseGetsTheNextNumber(t *testing.T) {
 	ctx := context.Background()
 	const kind, words = "alert", "allocate-recur-abc"
 
-	first, err := namewords.AllocateName(ctx, stateStore, kind, words, newBareConversation())
+	first, err := namewords.AllocateName(ctx, stores.Conversations, kind, words, newBareConversation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestAllocateNameRecurringBaseGetsTheNextNumber(t *testing.T) {
 		t.Errorf("first = %q", first)
 	}
 
-	second, err := namewords.AllocateName(ctx, stateStore, kind, words, newBareConversation())
+	second, err := namewords.AllocateName(ctx, stores.Conversations, kind, words, newBareConversation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestAllocateNameRecurringBaseGetsTheNextNumber(t *testing.T) {
 		t.Errorf("second = %q", second)
 	}
 
-	third, err := namewords.AllocateName(ctx, stateStore, kind, words, newBareConversation())
+	third, err := namewords.AllocateName(ctx, stores.Conversations, kind, words, newBareConversation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestAllocateNameRetriesAGenuineCreateConflict(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			names[i], errs[i] = namewords.AllocateName(ctx, stateStore, kind, words, newBareConversation())
+			names[i], errs[i] = namewords.AllocateName(ctx, stores.Conversations, kind, words, newBareConversation())
 		}(i)
 	}
 	wg.Wait()
@@ -148,7 +148,7 @@ func TestAllocateNameExhaustsRetriesOnPersistentConflict(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = k8sClient.Delete(ctx, blocker) })
 
-	_, err := namewords.AllocateName(ctx, stateStore, kind, words, newBareConversation())
+	_, err := namewords.AllocateName(ctx, stores.Conversations, kind, words, newBareConversation())
 	if err == nil {
 		t.Fatal("want an error, got nil")
 	}

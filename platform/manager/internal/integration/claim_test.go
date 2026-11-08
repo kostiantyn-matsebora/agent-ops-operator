@@ -30,8 +30,8 @@ import (
 // claim staleness bound, for the claim tests below.
 func reconcilerAs(ops *chat.OpQueue, identity string, staleness time.Duration) *controller.ConversationReconciler {
 	return &controller.ConversationReconciler{
-		Client: k8sClient,
-		Store:  stateStore, Namespace: ns,
+		Client:        k8sClient,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns,
 		Scheme:                 scheme,
 		MaxActiveConversations: 100,
 		Ops:                    ops,

@@ -45,7 +45,7 @@ func TestTryFinishEnsureTopicRecordsAnAdapterError(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry()}
 
 	err := q.finishEnsureTopic(context.Background(),
 		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{Error: "rate limited"})
@@ -72,7 +72,7 @@ func TestTryFinishEnsureTopicRecordsAMissingThreadID(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry()}
 
 	err := q.finishEnsureTopic(context.Background(),
 		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{})
@@ -100,7 +100,7 @@ func TestTryFinishEnsureTopicAppendsABindingWhenNoneExistedAtAll(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry()}
 
 	err := q.finishEnsureTopic(context.Background(),
 		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{ThreadID: "t1"})
@@ -132,7 +132,7 @@ func TestTryFinishEnsureTopicReestablishesAnArchivedThread(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry()}
 
 	err := q.finishEnsureTopic(context.Background(),
 		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{ThreadID: "new-thread"})
@@ -168,7 +168,7 @@ func TestMarkUndeliveredRecordsTheRunOnTheChannelsBinding(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry()}
 
 	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
 	if err := q.markUndelivered(context.Background(), op); err != nil {
@@ -192,7 +192,7 @@ func TestMarkUndeliveredIsANoOpWithNoBindingYet(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry()}
 
 	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
 	if err := q.markUndelivered(context.Background(), op); err != nil {
@@ -214,7 +214,7 @@ func TestMarkUndeliveredIsANoOpWithNoBindingYet(t *testing.T) {
 func TestMarkUndeliveredToleratesAMissingConversation(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).Build()
-	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry()}
 
 	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
 	if err := q.markUndelivered(context.Background(), op); err != nil {
@@ -239,7 +239,7 @@ func TestMarkUndeliveredReturnsANonConflictPatchError(t *testing.T) {
 				return boom
 			},
 		}).Build()
-	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry()}
 
 	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
 	if err := q.markUndelivered(context.Background(), op); err == nil || !errors.Is(err, boom) {
@@ -269,7 +269,7 @@ func TestMarkUndeliveredGivesUpAfterRepeatedConflicts(t *testing.T) {
 				return apierrors.NewConflict(schema.GroupResource{Resource: "conversations"}, "conv-1", errors.New("stale"))
 			},
 		}).Build()
-	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry()}
 
 	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
 	err := q.markUndelivered(context.Background(), op)

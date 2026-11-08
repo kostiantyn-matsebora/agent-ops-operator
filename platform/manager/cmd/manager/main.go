@@ -208,8 +208,8 @@ func main() {
 	acts := activity.New(envInt("ACTIVITY_BUFFER", activity.DefaultSize))
 
 	registry := chat.NewRegistry()
-	ops := &chat.OpQueue{Store: store, Registry: registry, Activity: acts}
-	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Store: store, Namespace: namespace, Ops: ops, Activity: acts}
+	ops := &chat.OpQueue{Conversations: stores.Conversations, Runs: stores.Runs, Registry: registry, Activity: acts}
+	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: namespace, Ops: ops, Activity: acts}
 	controlURL := env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080")
 
 	// ChannelAdapter lifecycle: adapters are plugged in as CRs; the reconciler
@@ -248,8 +248,9 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.SignalSourceReconciler{
-		Client:  mgr.GetClient(),
-		Signals: signalStore,
+		Client:    mgr.GetClient(),
+		Signals:   stores.Signals,
+		Cooldowns: stores.Cooldowns,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "signalsource controller")
 		os.Exit(1)
@@ -296,7 +297,9 @@ func main() {
 	breaker := storagebreaker.New()
 	reconciler := &controller.ConversationReconciler{
 		Client:                 mgr.GetClient(),
-		Store:                  store,
+		Conversations:          stores.Conversations,
+		Runs:                   stores.Runs,
+		Blobs:                  stores.Blobs,
 		Namespace:              namespace,
 		Scheme:                 mgr.GetScheme(),
 		MaxActiveConversations: maxActive,
@@ -402,17 +405,21 @@ func main() {
 	// disagree with it about what a claimant's conversation looks like.
 	cooldowns := ingest.NewCooldownBook()
 	if err := (&controller.SignalReconciler{
-		Client:    mgr.GetClient(),
-		Reader:    mgr.GetAPIReader(),
-		Store:     store,
-		Signals:   signalStore,
-		Namespace: namespace,
-		Activity:  acts,
-		Ops:       ops,
-		Cooldowns: cooldowns,
-		Runtime:   reconciler.Runtime,
-		MaxQueued: envIntNonNegative("MAX_QUEUED_CONVERSATIONS", 50),
-		Identity:  replicaIdentity,
+		Client:          mgr.GetClient(),
+		Reader:          mgr.GetAPIReader(),
+		Conversations:   stores.Conversations,
+		Runs:            stores.Runs,
+		Blobs:           stores.Blobs,
+		Signals:         stores.Signals,
+		CooldownWindows: stores.Cooldowns,
+		Receipts:        stores.Receipts,
+		Namespace:       namespace,
+		Activity:        acts,
+		Ops:             ops,
+		Cooldowns:       cooldowns,
+		Runtime:         reconciler.Runtime,
+		MaxQueued:       envIntNonNegative("MAX_QUEUED_CONVERSATIONS", 50),
+		Identity:        replicaIdentity,
 		// Chart values, never constants. Zero (unset, unparseable or
 		// non-positive) falls back to each Default*; a bad duration also logs
 		// a warning naming the variable (envDurationOr).
@@ -428,17 +435,19 @@ func main() {
 	}
 
 	api := &httpapi.Server{
-		Client:    mgr.GetClient(),
-		Reader:    mgr.GetAPIReader(),
-		Store:     store,
-		Signals:   signalStore,
-		Namespace: namespace,
-		Addr:      env("API_ADDR", ":8080"),
-		Ops:       ops,
-		Router:    router,
-		Cooldowns: cooldowns,
-		Activity:  acts,
-		Version:   env("VERSION", "dev"),
+		Client:        mgr.GetClient(),
+		Reader:        mgr.GetAPIReader(),
+		Conversations: stores.Conversations,
+		Runs:          stores.Runs,
+		Blobs:         stores.Blobs,
+		Signals:       stores.Signals,
+		Namespace:     namespace,
+		Addr:          env("API_ADDR", ":8080"),
+		Ops:           ops,
+		Router:        router,
+		Cooldowns:     cooldowns,
+		Activity:      acts,
+		Version:       env("VERSION", "dev"),
 		// The same bootstrap config the reconciler builds pods from: dispatch
 		// asks it whether this deployment can carry conversation context.
 		Runtime: reconciler.Runtime,

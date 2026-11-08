@@ -56,7 +56,7 @@ func reconcilePipeline(t *testing.T, name string) *agentopsv1alpha1.Pipeline {
 
 func reconcileSignalSource(t *testing.T, name string) *agentopsv1alpha1.SignalSource {
 	t.Helper()
-	rc := &controller.SignalSourceReconciler{Client: k8sClient, Signals: signalStore}
+	rc := &controller.SignalSourceReconciler{Client: k8sClient, Signals: stores.Signals, Cooldowns: stores.Cooldowns}
 	if _, err := rc.Reconcile(context.Background(),
 		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}}); err != nil {
 		t.Fatal(err)
