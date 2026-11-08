@@ -25,6 +25,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/signalroute"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
@@ -67,16 +68,21 @@ func startReplica(t *testing.T, nsName string, mod func(*controller.SignalReconc
 	// The expiry sweep is a manager runnable in production (cmd/manager), and
 	// like every runnable it works only while this replica leads. A short
 	// period stands in for the production one.
-	signals := kube.NewSignalStoreWithSweepInterval(storeClient, nsName, 200*time.Millisecond)
+	backend, err := kube.OpenStores(storeClient, nsName, kube.WithSweepInterval(200*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		signals.Run(ctx)
+		backend.Run(ctx)
 		return nil
 	})); err != nil {
 		t.Fatal(err)
 	}
 	r := &controller.SignalReconciler{
-		Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Store: kube.NewStore(storeClient, nsName),
-		Signals: signals, Namespace: nsName,
+		Client: mgr.GetClient(), Reader: mgr.GetAPIReader(),
+		Conversations: backend.Stores.Conversations, Runs: backend.Stores.Runs, Blobs: backend.Stores.Blobs,
+		Signals: backend.Stores.Signals, CooldownWindows: backend.Stores.Cooldowns, Receipts: backend.Stores.Receipts,
+		Namespace: nsName,
 		Cooldowns: ingest.NewCooldownBook(),
 		Runtime:   runtimepod.Config{ContextPVC: "test-context"},
 		MaxQueued: 50, Identity: "integration-replica",
@@ -488,7 +494,7 @@ func TestDeletingASignalSourceReleasesItsSignalsAndItsWindow(t *testing.T) {
 			t.Fatalf("setup: envtest has no garbage collector, %s should outlive its source", name)
 		}
 	}
-	rc := &controller.SignalSourceReconciler{Client: k8sClient, Signals: signalStore}
+	rc := &controller.SignalSourceReconciler{Client: k8sClient, Signals: stores.Signals, Cooldowns: stores.Cooldowns}
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "rel-gone"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -500,10 +506,10 @@ func TestDeletingASignalSourceReleasesItsSignalsAndItsWindow(t *testing.T) {
 	if signalGone(ns, "rel-other") {
 		t.Error("another source's signal is untouched")
 	}
-	if got, err := signalStore.GetCooldown(ctx, "rel-gone"); err != nil || len(got) != 0 {
+	if got, err := signalroute.GetCooldownWindow(ctx, stores.Cooldowns, "rel-gone"); err != nil || len(got) != 0 {
 		t.Errorf("the deleted source's window must read empty, got %v %v", got, err)
 	}
-	if err := signalStore.ReleaseSource(ctx, "rel-gone", ""); err != nil {
+	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "rel-gone"}}); err != nil {
 		t.Errorf("releasing again is idempotent: %v", err)
 	}
 }
@@ -528,10 +534,10 @@ func seedReleaseFixture(ctx context.Context, t *testing.T) agentopsv1alpha1.Sign
 	terminate(t, ns, "rel-failed", agentopsv1alpha1.SignalFailed, time.Now())
 	mkSignalIn(t, ns, &kept, "rel-other", "rel-other")
 	window := []state.CooldownEntry{{InitiationID: "rel-live", At: time.Now().UTC().Truncate(time.Second)}}
-	if err := signalStore.PutCooldown(ctx, "rel-gone", window); err != nil {
+	if err := signalroute.PutCooldownWindow(ctx, stores.Cooldowns, "rel-gone", window); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := signalStore.GetCooldown(ctx, "rel-gone"); err != nil || len(got) != 1 {
+	if got, err := signalroute.GetCooldownWindow(ctx, stores.Cooldowns, "rel-gone"); err != nil || len(got) != 1 {
 		t.Fatalf("setup: the window was not recorded: %v %v", got, err)
 	}
 	return gone

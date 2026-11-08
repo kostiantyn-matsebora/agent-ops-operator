@@ -484,13 +484,9 @@ func tgAssertRetryBudgetStaysUnderReclaimWindow(t *testing.T, mgr *FakeManager, 
 func TestConsoleConformance(t *testing.T) {
 	mgr := NewFakeManager(t, "adapter-token")
 	api := NewFakeAPIServer(t)
-	convPath := "/apis/agentops.dev/v1alpha1/namespaces/agent-ops/conversations"
-	api.Seed(convPath, map[string]any{
-		"apiVersion": "agentops.dev/v1alpha1", "kind": "Conversation",
-		"metadata": map[string]any{"name": "c1", "namespace": "agent-ops", "uid": "uid-c1"},
-		"spec":     map[string]any{"channelRefs": []any{map[string]any{"name": "console"}}},
-		"status":   map[string]any{"phase": "Idle"},
-	})
+	mgr.SetConversation("c1", "uid-c1",
+		map[string]any{"channelRefs": []any{map[string]any{"name": "console"}}},
+		map[string]any{"phase": "Idle"})
 	mgr.ServeChannels(ChannelInfo{Name: "console",
 		Config:              json.RawMessage(`{"authEnabled":true,"writeEnabled":true,"signalSource":"console"}`),
 		CredentialEnvPrefix: "AGENTOPS_CRED_CONSOLE_"})
@@ -519,13 +515,10 @@ func TestConsoleConformance(t *testing.T) {
 	}
 	assertContractHandshake(t, mgr, "console")
 	// Bind the thread on the conversation, as the manager would.
-	api.Push(convPath, "MODIFIED", map[string]any{
-		"apiVersion": "agentops.dev/v1alpha1", "kind": "Conversation",
-		"metadata": map[string]any{"name": "c1", "namespace": "agent-ops", "uid": "uid-c1"},
-		"spec":     map[string]any{"channelRefs": []any{map[string]any{"name": "console"}}},
-		"status": map[string]any{"phase": "Idle",
-			"threads": []any{map[string]any{"channel": "console", "threadId": topic.ThreadID}}},
-	})
+	mgr.SetConversation("c1", "uid-c1",
+		map[string]any{"channelRefs": []any{map[string]any{"name": "console"}}},
+		map[string]any{"phase": "Idle",
+			"threads": []any{map[string]any{"channel": "console", "threadId": topic.ThreadID}}})
 
 	send := map[string]any{"id": "op-send", "channel": "console", "conversation": "c1", "kind": "send", "threadId": topic.ThreadID,
 		"message": map[string]any{"kind": "answer", "body": "**found it** — the disk is full", "status": "succeeded"}}
@@ -578,7 +571,7 @@ func TestConsoleConformance(t *testing.T) {
 	}
 	consoleAssertThreadlessSendVisibleOrError(t, mgr, p)
 	consoleAssertDeleteConversationActsOrErrors(t, mgr, p, topic.ThreadID)
-	consoleAssertOperationNeverExceedsReclaimWindow(t, mgr, api, convPath)
+	consoleAssertOperationNeverExceedsReclaimWindow(t, mgr)
 	assertRetriesAtOnceAfterNonLeaderRejection(t, mgr, "console", "c1")
 }
 
@@ -659,12 +652,11 @@ func consoleAssertDeleteConversationActsOrErrors(t *testing.T, mgr *FakeManager,
 // shape backpressure takes for a GET — and pins the outcome: the operation
 // completes (as a failure) near-instantly, nowhere close to the window,
 // rather than hanging past it.
-func consoleAssertOperationNeverExceedsReclaimWindow(t *testing.T, mgr *FakeManager, api *FakeAPIServer, convPath string) {
+func consoleAssertOperationNeverExceedsReclaimWindow(t *testing.T, mgr *FakeManager) {
 	t.Helper()
 	const conversation = "c-retry-budget"
-	path := convPath + "/" + conversation
-	api.FailPath(path, http.StatusInternalServerError, -1) // never clears
-	defer api.ClearFailPath(path)
+	mgr.FailConversationRead(conversation, http.StatusInternalServerError) // never clears
+	defer mgr.ClearConversationRead(conversation)
 
 	start := time.Now()
 	mgr.QueueOp(map[string]any{"id": "op-retry-budget", "channel": "console", "conversation": conversation, "kind": "ensure-topic",

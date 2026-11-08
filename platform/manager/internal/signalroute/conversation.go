@@ -44,14 +44,14 @@ func oneShot(kind string) bool { return kind == kindChat || kind == kindTask }
 // derived from the Signal and claimant, so a repeated pass appends nothing
 // twice (design D-5).
 func routeOneClaimant(ctx context.Context, deps Deps, claimant chat.Claimant, sig *state.SignalRecord) (conversation string, waiting bool, err error) {
-	conv, err := findReusableConversation(ctx, deps.Store, claimant, sig.InitiationID)
+	conv, err := findReusableConversation(ctx, deps.Conversations, claimant, sig.InitiationID)
 	if err != nil {
 		return "", false, err
 	}
 
 	inputType := inputTypeForKind(sig.Kind)
 	if conv == nil {
-		full, err := BacklogFull(ctx, deps.Store, deps.MaxQueued)
+		full, err := BacklogFull(ctx, deps.Conversations, deps.MaxQueued)
 		if err != nil {
 			return "", false, err
 		}
@@ -86,8 +86,8 @@ func messageOf(sig *state.SignalRecord) (text string, addressed bool) {
 // by the store's conversationId index. The store reads its source of truth
 // directly (never a cache): a pass repeated after a crash between create and
 // the status write must find the conversation it just made.
-func findReusableConversation(ctx context.Context, store state.Store, claimant chat.Claimant, initiationID string) (*state.ConversationRecord, error) {
-	list, err := store.List(ctx, state.ByConversationID, state.ListKey{ConversationID: initiationID})
+func findReusableConversation(ctx context.Context, conversations state.Collection[state.ConversationRecord], claimant chat.Claimant, initiationID string) (*state.ConversationRecord, error) {
+	list, err := conversations.List(ctx, state.ByConversationID, initiationID)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +243,7 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 	if budget := claimant.SnapshotBudget(); budget != nil {
 		conv.Budget = budget
 	}
-	if _, err := namewords.AllocateName(ctx, deps.Store,
+	if _, err := namewords.AllocateName(ctx, deps.Conversations,
 		nameKindForSignal(sig.Kind), wordsForSignal(sourceName, title), conv); err != nil {
 		return nil, err
 	}
@@ -287,17 +287,17 @@ func InputName(sigName string, ref state.SignalClaimant) string {
 // input: queued in its inputs, or — once dispatch consumed it and pruned the
 // queue — cited by a run's recorded inputs. The blob itself is deleted with
 // its queue entry, so its absence proves nothing.
-func inputDelivered(ctx context.Context, store state.Store, conv *state.ConversationRecord, blobKey string) (bool, error) {
+func inputDelivered(ctx context.Context, runs state.Appended[state.ConversationRecord, state.Run], conv *state.ConversationRecord, blobKey string) (bool, error) {
 	if queuedInput(conv, blobKey) {
 		return true, nil
 	}
-	runs, err := store.ListRuns(ctx, state.Key(conv.Name))
+	recorded, err := runs.List(ctx, state.Key(conv.Name))
 	if err != nil {
 		return false, err
 	}
-	for r := range runs {
-		for i := range runs[r].Inputs {
-			if runs[r].Inputs[i].PayloadRef == state.Key(blobKey) {
+	for r := range recorded {
+		for i := range recorded[r].Inputs {
+			if recorded[r].Inputs[i].PayloadRef == state.Key(blobKey) {
 				return true, nil
 			}
 		}
@@ -324,17 +324,17 @@ func appendInput(ctx context.Context, deps Deps, claimant chat.Claimant, conv *s
 	ciName := InputName(sig.Name, claimantOf(claimant))
 	text, _ := messageOf(sig)
 
-	fresh, _, err := deps.Store.Get(ctx, state.Key(conv.Name))
+	fresh, _, err := deps.Conversations.Get(ctx, state.Key(conv.Name))
 	if err != nil {
 		return err
 	}
-	delivered, err := inputDelivered(ctx, deps.Store, &fresh, ciName)
+	delivered, err := inputDelivered(ctx, deps.Runs, &fresh, ciName)
 	if err != nil || delivered {
 		return err
 	}
 	// Written only now that the queue is known not to carry it, and an
 	// existing blob under the name is the same delivery's earlier half.
-	if err := deps.Store.PutBlob(ctx, state.Key(ciName), state.Blob{
+	if err := deps.Blobs.Put(ctx, state.Key(ciName), state.Blob{
 		ConversationName: conv.Name,
 		Type:             inputType,
 		Payload:          text,
@@ -345,7 +345,7 @@ func appendInput(ctx context.Context, deps Deps, claimant chat.Claimant, conv *s
 	}
 	inputID := "in-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	queued := false
-	if _, err := state.Mutate(ctx, deps.Store, state.Key(conv.Name), func(rec *state.ConversationRecord) error {
+	if _, err := state.Mutate(ctx, deps.Conversations, state.Key(conv.Name), func(rec *state.ConversationRecord) error {
 		queued = false
 		if queuedInput(rec, ciName) {
 			return nil

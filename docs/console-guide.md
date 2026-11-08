@@ -290,6 +290,10 @@ disabled, not gated — absent. Its Role carries no write verb on any agentops
 kind, so it cannot edit a Pipeline, a profile or a toolset even if something
 asked it to.
 
+**It also holds no RBAC on Conversations or Signals at all.** Both are read
+from the manager, not watched over the Kubernetes API — see
+[the state read surface](contracts.md#the-state-read-surface).
+
 The one write anywhere is a message posted to the manager, over the ordinary
 channel contract. Everything else you see is a read.
 

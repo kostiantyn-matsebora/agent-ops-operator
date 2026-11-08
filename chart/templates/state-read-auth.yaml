@@ -1,0 +1,67 @@
+{{- /*
+The /state/* bearer token for a reader that is not an adapter — today
+housekeeping alone (design state-store-generic-contract D-6). A SEPARATE
+credential from both adapterAuth (the master token, and the root every
+derived adapter token is HMAC'd from) and controlPlaneAuth. Never derived
+from either, and an explicit value equal to EITHER one FAILS the render: a
+caller scoped to one surface must not reach another by accident of a shared
+value.
+
+THREE SOURCES, IN ORDER: an explicit stateReadAuth.token, an existing Secret
+of this name, then generation. Explicit is checked FIRST; a setting
+overridden by history is accepted and ignored, which is the worst shape a
+setting can have.
+
+NOTHING RANDOM REACHES A RENDER THAT CANNOT SEE THE CLUSTER. Generation (and
+adoption of a Secret found already there) is gated on
+`agentops.clusterConnected`, not `.Release.IsInstall` alone — a render with no
+cluster (helm template | kubectl apply, CI, a GitOps repo-server) can never
+tell "missing" from "unknown" and must render nothing, matching `adapterAuth`
+and `controlPlaneAuth`. A render WITH real access mints on the first upgrade
+that needs this Secret, same as it would on a fresh install — an adopter
+should never have to pin a value or reinstall the release just to pick up a
+new generated credential.
+*/ -}}
+{{- if not .Values.stateReadAuth.existingSecret }}
+{{- $name := .Values.stateReadAuth.secretName }}
+{{- $explicit := .Values.stateReadAuth.token | default "" }}
+{{- if and $explicit (eq $explicit (.Values.adapterAuth.token | default "")) }}
+{{- fail "stateReadAuth.token must differ from adapterAuth.token: one credential would open both surfaces" }}
+{{- end }}
+{{- if and $explicit (eq $explicit (.Values.controlPlaneAuth.token | default "")) }}
+{{- fail "stateReadAuth.token must differ from controlPlaneAuth.token: one credential would open both surfaces" }}
+{{- end }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+{{- $existingVal := "" }}
+{{- if and $existing $existing.data }}
+{{- $existingVal = index $existing.data "token" | default "" }}
+{{- end }}
+{{- $connected := eq (include "agentops.clusterConnected" .) "true" }}
+{{- if or $explicit $existingVal .Release.IsInstall $connected }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-manager
+  annotations:
+    # a render with no cluster (connected=false, not install, not explicit)
+    # omits this object entirely, same as before `clusterConnected` existed —
+    # `keep` is what stops THAT renderer's absence of it from reading as a
+    # delete once a connected renderer has created it for real
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  {{- if $explicit }}
+  token: {{ $explicit | b64enc }}
+  {{- else if $existingVal }}
+  {{- /* adopt a Secret already there — a previous release retained it, or a
+         connected render created it on an earlier upgrade — rather than mint
+         a credential housekeeping still holds */}}
+  token: {{ $existingVal }}
+  {{- else }}
+  token: {{ randAlphaNum 32 | b64enc }}
+  {{- end }}
+{{- end }}
+{{- end }}

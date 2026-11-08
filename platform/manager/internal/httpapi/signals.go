@@ -25,6 +25,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // NormalizedSignal is one signal in the contract's normalized shape.
@@ -305,12 +306,22 @@ func (s *Server) signalSource(r *http.Request, w http.ResponseWriter, name strin
 	return &src
 }
 
+// handleSignalStateGet and handleSignalStatePut are the signal-surface
+// counterpart of httpapi's handleStateGet/handleStatePut — the source
+// resolves and scopes exactly as it always has, and the value moves through
+// Stores.AdapterState (design D-4) keyed by SurfaceSignalSource rather than a
+// raw annotation patch.
 func (s *Server) handleSignalStateGet(w http.ResponseWriter, r *http.Request) {
 	src := s.signalSource(r, w, r.PathValue("source"))
 	if src == nil {
 		return
 	}
-	writeJSON(w, 200, map[string]string{"value": src.Annotations[StateAnnotationPrefix+r.PathValue("key")]})
+	v, err := getAdapterState(r.Context(), s.AdapterState, state.AdapterStateKey(state.SurfaceSignalSource, src.Name, r.PathValue("key")))
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"value": v})
 }
 
 func (s *Server) handleSignalStatePut(w http.ResponseWriter, r *http.Request) {
@@ -326,12 +337,8 @@ func (s *Server) handleSignalStatePut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
 		return
 	}
-	patch := client.MergeFrom(src.DeepCopy())
-	if src.Annotations == nil {
-		src.Annotations = map[string]string{}
-	}
-	src.Annotations[StateAnnotationPrefix+r.PathValue("key")] = in.Value
-	if err := s.Client.Patch(r.Context(), src, patch); err != nil {
+	key := state.AdapterStateKey(state.SurfaceSignalSource, src.Name, r.PathValue("key"))
+	if err := putAdapterState(r.Context(), s.AdapterState, key, in.Value); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}

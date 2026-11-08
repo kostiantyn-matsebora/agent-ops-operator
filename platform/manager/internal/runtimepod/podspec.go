@@ -172,7 +172,7 @@ type Resolved struct {
 // rather than an omission: its fields were RESOLVED into the conversation at
 // creation, so nothing reads a Pipeline at dispatch time and editing one cannot
 // move a running conversation onto a different identity.
-func ResolveFor(ctx context.Context, r client.Reader, store state.Store, namespace string,
+func ResolveFor(ctx context.Context, r client.Reader, store state.Collection[state.ConversationRecord], namespace string,
 	conv *state.ConversationRecord, fallback Config) (Resolved, error) {
 
 	name, explicit := runtimeNameFor(ctx, r, namespace, conv)

@@ -46,6 +46,9 @@ func neededImages(tier string) map[string]bool {
 	}
 	if tier == "full" {
 		need["runtime-claude"] = true
+		// 11.2: the housekeeping lane only installs under the full tier
+		// (DefaultValues), so its image is only needed there too.
+		need["housekeeping"] = true
 	}
 	return need
 }

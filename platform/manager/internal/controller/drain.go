@@ -130,7 +130,7 @@ func (r *ConversationReconciler) releaseIfNodeDraining(
 				" is draining; the conversation and its context are untouched")
 	}
 	if conv.RuntimePod != "" {
-		if err := state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) { c.RuntimePod = "" }); err != nil {
+		if err := state.Patch(ctx, r.Conversations, conv, func(c *state.ConversationRecord) { c.RuntimePod = "" }); err != nil {
 			return true, err
 		}
 	}

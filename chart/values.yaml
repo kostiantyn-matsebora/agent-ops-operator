@@ -791,6 +791,19 @@ controlPlaneAuth:
   # Pin the token; changing it 503/401s /control-plane/* until the pod restarts.
   token: ""
 
+# Auth for the manager's read-only /state/* surface (design state-store-generic-
+# contract D-6) — a THIRD, dedicated credential, separate from both adapterAuth
+# and controlPlaneAuth above. Housekeeping holds this one and nothing else: it
+# is not an adapter and must not hold the master token. Same three-source
+# shape: explicit value, then an existing Secret, then generation at install.
+stateReadAuth:
+  # Name of the token Secret (key: token). Generated at install, then unmanaged.
+  secretName: agentops-state-read-token
+  # Use an existing Secret (key: token) instead of generating one.
+  existingSecret: ""
+  # Pin the token; changing it 401s /state/* for housekeeping until its next run.
+  token: ""
+
 # Scrape configuration for the manager's `agentops_*` metrics.
 #
 # The metrics are ALWAYS exposed on the manager's existing :9090 — this only

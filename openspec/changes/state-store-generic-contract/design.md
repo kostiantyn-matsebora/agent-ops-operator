@@ -221,6 +221,18 @@ archives only after PR #454 merges and archives. Until then its
 written against the text #454 will publish. The first task re-validates it
 after #454 archives and rebases.
 
+### D-10: Conditional delete
+
+`Collection` gains `DeleteAt(key, revision)` beside `Delete(key)`.
+
+The source release gets a signal, decides against the live source, then deletes. A signal rewritten in between must not be deleted on a decision about its old content.
+
+The project locks optimistically everywhere, so the delete names the revision it decided on.
+
+`DeleteAt` returns the conflict error for a stale revision and leaves the record intact. It returns not-found for an absent key. Its finalizer semantics are those of `Delete`. The `kube` backend maps the revision onto the UID and resourceVersion preconditions the old release code used.
+
+`Delete` remains for a caller that never reads first, such as a teardown that removes whatever is there.
+
 ## Risks / Trade-offs
 
 - [Reshaping interfaces the call sites already moved onto] → the call names

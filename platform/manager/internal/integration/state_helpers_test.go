@@ -13,7 +13,7 @@ import (
 // unchanged.
 func recOf(t *testing.T, name string) *state.ConversationRecord {
 	t.Helper()
-	rec, _, err := stateStore.Get(context.Background(), state.Key(name))
+	rec, _, err := stores.Conversations.Get(context.Background(), state.Key(name))
 	if err != nil {
 		t.Fatalf("read record %q: %v", name, err)
 	}

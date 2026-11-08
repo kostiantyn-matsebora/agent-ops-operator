@@ -44,7 +44,11 @@ func main() {
 		log.Fatalf("kubernetes access: %v (ChannelAdapter needs kubernetesAccess: true and a chart-granted read-only Role)", err)
 	}
 
-	cache := NewCache(kube, append(append([]string{}, Kinds...), InstallKinds...))
+	// Conversations and signals come from the manager's state read surface
+	// (state.go), not the Kubernetes API — compositeSource is what lets one
+	// Cache hold both origins (state-store-generic-contract, design D-8).
+	src := newCompositeSource(kube, newStateSource(cfg))
+	cache := NewCache(src, append(append([]string{}, ConfigurableKinds...), InstallKinds...))
 	transcripts := NewTranscripts()
 	mgr := NewManager(cfg.ManagerURL, cfg.AdapterToken)
 	adapter := NewAdapter(mgr, cache, transcripts, cfg.AdapterName)

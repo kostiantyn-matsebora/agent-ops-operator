@@ -12,7 +12,6 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // workReportServer is a manager holding one inflight conversation on the
@@ -30,7 +29,7 @@ func workReportServer(t *testing.T) (*Server, *activity.Log) {
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 		WithObjects(conv, rt).WithStatusSubresource(conv).Build()
 	log := activity.New(64)
-	return &Server{Reader: c, Store: kube.NewStore(c, "agent-ops"), Client: c, Namespace: "agent-ops", Activity: log}, log
+	return &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Runs: testRuns(t, c, "agent-ops"), Client: c, Namespace: "agent-ops", Activity: log}, log
 }
 
 func postWorkDone(t *testing.T, s *Server, body map[string]any) *httptest.ResponseRecorder {

@@ -40,6 +40,20 @@ var guardedStatusFields = map[string]bool{"Cooldown": true, "ReceivedTotal": tru
 // guardedWireNames are the same fields by their JSON names.
 var guardedWireNames = []string{`"cooldown"`, `"receivedtotal"`, `"lastreceived"`}
 
+// guardedAnnotationPrefix is the adapter state annotation prefix (design
+// D-8): the one place a backend may name where AdapterState's `kube` layout
+// actually lives. A literal reference anywhere else is the same raw-annotation
+// bypass the /channel/state and /signal/state handlers used before task 5.2
+// moved them onto Stores.AdapterState.
+const guardedAnnotationPrefix = "agentops.dev/adapter-state-"
+
+// adapterStateReleaseExemptFile is the ONE call site outside the kube backend
+// allowed to name the prefix: the owning reconciler's release of a deleted
+// Channel's or SignalSource's own keys (internal/controller/adapterstate_release.go),
+// which must read the object's own annotations directly because AdapterState
+// declares no index to list them (task 5.2).
+const adapterStateReleaseExemptFile = "internal/controller/adapterstate_release.go"
+
 // A violation is one reference to a guarded type outside the allowed places.
 type violation struct {
 	pkg, file string
@@ -249,6 +263,7 @@ func violationsIn(path, rel string, kindNames map[string]string) ([]violation, e
 	pkg := filepath.ToSlash(filepath.Dir(rel))
 	out := untypedKindViolations(fset, file, pkg, rel, kindNames)
 	out = append(out, lowercaseCooldownViolations(fset, file, pkg, rel)...)
+	out = append(out, adapterStateAnnotationViolations(fset, file, pkg, rel)...)
 	aliases, dotImported := apiAliases(file)
 	if dotImported {
 		// A dot import names every type unqualified, which the selector walk
@@ -464,6 +479,30 @@ func (s *wireScan) visit(n ast.Node) bool {
 	return true
 }
 
+// adapterStateAnnotationViolations flags a literal reference to the adapter
+// state annotation prefix (design D-8) anywhere outside the kube backend
+// (already excluded by allowedDir) and the one release call site task 5.2
+// adds, adapterStateReleaseExemptFile.
+func adapterStateAnnotationViolations(fset *token.FileSet, file *ast.File, pkg, rel string) []violation {
+	if rel == adapterStateReleaseExemptFile {
+		return nil
+	}
+	var out []violation
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		v, err := strconv.Unquote(lit.Value)
+		if err == nil && strings.Contains(v, guardedAnnotationPrefix) {
+			out = append(out, violation{pkg: pkg, file: rel, line: fset.Position(lit.Pos()).Line,
+				typ: "the adapter state annotation prefix, outside the kube backend and its one release call site"})
+		}
+		return true
+	})
+	return out
+}
+
 func namesWireField(text string) bool {
 	for _, wire := range guardedWireNames {
 		if strings.Contains(text, wire) {
@@ -652,5 +691,43 @@ func TestStaticCheckClosesTheKindVariableAndLowercasePathBypasses(t *testing.T) 
 	want := "internal/chat/bad_const.go,internal/chat/bad_param.go,internal/chat/bad_patch.go,internal/chat/bad_path.go"
 	if strings.Join(files, ",") != want {
 		t.Fatalf("flagged %v, want %s", files, want)
+	}
+}
+
+// The adapter state annotation prefix (design D-8): a bypass outside the
+// kube backend is flagged, the one named release call site is not, and
+// another kind of literal naming no such prefix is left alone.
+func TestStaticCheckGuardsTheAdapterStateAnnotationPrefix(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, src string) {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/chat/bad_prefix.go", "package p\nconst x = \"agentops.dev/adapter-state-\"\n")
+	write("internal/chat/bad_use.go", "package p\nfunc f(ch map[string]string) string { return ch[\"agentops.dev/adapter-state-offset\"] }\n")
+	write("internal/chat/ok_other.go", "package p\nconst y = \"agentops.dev/other-prefix-\"\n")
+	write(adapterStateReleaseExemptFile, "package controller\nconst exempt = \"agentops.dev/adapter-state-\"\n")
+
+	found, err := findViolations(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	var files []string
+	for _, v := range found {
+		if !seen[v.file] {
+			seen[v.file] = true
+			files = append(files, v.file)
+		}
+	}
+	sort.Strings(files)
+	want := []string{"internal/chat/bad_prefix.go", "internal/chat/bad_use.go"}
+	if strings.Join(files, ",") != strings.Join(want, ",") {
+		t.Fatalf("flagged %v, want %v (the release file and the unrelated prefix must not be)", files, want)
 	}
 }

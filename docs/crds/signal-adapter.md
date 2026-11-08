@@ -43,6 +43,7 @@ spec:
     name: <name>
   serviceAccountName: <serviceAccountName>  # the identity this adapter's workload runs as, and its token IS mounted …
   singleton: true                           # singleton runs the workload as replicas 1 + strategy Recreate so no …
+  stateAccess: false                        # stateAccess grants this adapter's derived token the manager's state …
 ```
 <!-- /generated -->
 
@@ -73,6 +74,7 @@ spec:
 | `servedBy.name` | `string` | **yes** | Name of the referenced adapter. |
 | `serviceAccountName` | `string` |  | The identity this adapter's workload runs as, and its token IS mounted — naming an account whose token is never mounted would grant nothing, since the pod would never present that identity. |
 | `singleton` | `boolean` |  | Singleton runs the workload as replicas 1 + strategy Recreate so no rollout ever runs two instances side by side (pollers and schedulers must not double-fire). Defaults to `true`. |
+| `stateAccess` | `boolean` |  | StateAccess grants this adapter's derived token the manager's state read surface. Defaults to `false`. |
 
 <!-- /generated -->
 

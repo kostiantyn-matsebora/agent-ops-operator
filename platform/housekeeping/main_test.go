@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -94,9 +93,6 @@ const reentryEnv = "HOUSEKEEPING_TEST_REENTER_MAIN"
 
 func TestMain(m *testing.M) {
 	if os.Getenv(reentryEnv) == "1" {
-		if dir := os.Getenv("HOUSEKEEPING_TEST_SADIR"); dir != "" {
-			saDir = dir
-		}
 		main()
 		os.Exit(0) // main() returned normally: no failure was recorded
 	}
@@ -105,7 +101,7 @@ func TestMain(m *testing.M) {
 
 // runMainSubprocess re-executes this test binary with reentryEnv set, so the
 // TestMain hook above calls the real main() instead of running the suite.
-func runMainSubprocess(t *testing.T, env map[string]string, extraSADir string) (out string, exitCode int) {
+func runMainSubprocess(t *testing.T, env map[string]string) (out string, exitCode int) {
 	t.Helper()
 
 	// Build a de-duplicated environment (last write wins) rather than merely
@@ -119,9 +115,6 @@ func runMainSubprocess(t *testing.T, env map[string]string, extraSADir string) (
 		}
 	}
 	merged[reentryEnv] = "1"
-	if extraSADir != "" {
-		merged["HOUSEKEEPING_TEST_SADIR"] = extraSADir
-	}
 	for k, v := range env {
 		merged[k] = v
 	}
@@ -144,7 +137,7 @@ func runMainSubprocess(t *testing.T, env map[string]string, extraSADir string) (
 // A missing POD_NAMESPACE must be a hard, immediate failure: the job has no
 // idea what to scan.
 func TestMainExitsWithoutPodNamespace(t *testing.T) {
-	out, code := runMainSubprocess(t, map[string]string{"POD_NAMESPACE": ""}, "")
+	out, code := runMainSubprocess(t, map[string]string{"POD_NAMESPACE": ""})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1: %s", code, out)
 	}
@@ -153,38 +146,52 @@ func TestMainExitsWithoutPodNamespace(t *testing.T) {
 	}
 }
 
-// Outside a cluster (no KUBERNETES_SERVICE_HOST/PORT) construction of the
-// in-cluster client fails, and main must report that and exit non-zero
-// rather than silently doing nothing.
-func TestMainExitsWhenNotInCluster(t *testing.T) {
+// A missing MANAGER_URL must fail fast: the state client has nowhere to
+// read conversations from (state-store-generic-contract D-5).
+func TestMainExitsWithoutManagerURL(t *testing.T) {
 	out, code := runMainSubprocess(t, map[string]string{
-		"POD_NAMESPACE":           "agent-ops",
-		"KUBERNETES_SERVICE_HOST": "",
-		"KUBERNETES_SERVICE_PORT": "",
-	}, "")
+		"POD_NAMESPACE":    "agent-ops",
+		"MANAGER_URL":      "",
+		"STATE_READ_TOKEN": "tok",
+	})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1: %s", code, out)
 	}
-	if !strings.Contains(out, "in-cluster client") {
-		t.Fatalf("output = %q, want the in-cluster-client failure message", out)
+	if !strings.Contains(out, "MANAGER_URL is required") {
+		t.Fatalf("output = %q, want the missing-manager-url message", out)
 	}
 }
 
-// With a real (if not reachable) in-cluster identity and no roots
-// configured, both jobs are skipped and the run must report success — the
-// "nothing to do" happy path a chart with neither PVC bound would take.
-func TestMainSucceedsWithNoRootsConfigured(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ca.crt"), selfSignedCAPEM(t), 0o644); err != nil {
-		t.Fatal(err)
-	}
+// A missing STATE_READ_TOKEN must fail fast rather than open /state/* with
+// no credential (design D-6: housekeeping holds a dedicated read token, not
+// the master token and not a derived adapter token).
+func TestMainExitsWithoutStateReadToken(t *testing.T) {
 	out, code := runMainSubprocess(t, map[string]string{
-		"POD_NAMESPACE":           "agent-ops",
-		"KUBERNETES_SERVICE_HOST": "192.0.2.13",
-		"KUBERNETES_SERVICE_PORT": "6443",
-		"WORKSPACE_ROOT":          "",
-		"SESSIONS_ROOT":           "",
-	}, dir)
+		"POD_NAMESPACE":    "agent-ops",
+		"MANAGER_URL":      "http://127.0.0.1:1",
+		"STATE_READ_TOKEN": "",
+	})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1: %s", code, out)
+	}
+	if !strings.Contains(out, "STATE_READ_TOKEN is required") {
+		t.Fatalf("output = %q, want the missing-state-read-token message", out)
+	}
+}
+
+// With a real namespace/credential pair and no roots configured, both jobs
+// are skipped and the run must report success — the "nothing to do" happy
+// path a chart with neither PVC bound would take. MANAGER_URL is
+// deliberately unreachable (127.0.0.1:1): with no root configured, neither
+// job ever calls the Lister, so the manager is never dialed.
+func TestMainSucceedsWithNoRootsConfigured(t *testing.T) {
+	out, code := runMainSubprocess(t, map[string]string{
+		"POD_NAMESPACE":    "agent-ops",
+		"MANAGER_URL":      "http://127.0.0.1:1",
+		"STATE_READ_TOKEN": "tok",
+		"WORKSPACE_ROOT":   "",
+		"SESSIONS_ROOT":    "",
+	})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0: %s", code, out)
 	}
@@ -198,20 +205,18 @@ func TestMainSucceedsWithNoRootsConfigured(t *testing.T) {
 
 // A root that is configured but simply does not exist yet (a claim that has
 // never been written to) is a no-op, not an error, and each job still runs
-// and reports a scan of zero.
+// and reports a scan of zero — again with no listing ever made, since
+// ReclaimWorkspaces/ReclaimSessions return before consulting the Lister when
+// the root itself is absent.
 func TestMainRunsJobsAgainstUnmountedRoots(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ca.crt"), selfSignedCAPEM(t), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	missing := filepath.Join(t.TempDir(), "not-mounted-yet")
+	missing := t.TempDir() + "/not-mounted-yet"
 	out, code := runMainSubprocess(t, map[string]string{
-		"POD_NAMESPACE":           "agent-ops",
-		"KUBERNETES_SERVICE_HOST": "192.0.2.13",
-		"KUBERNETES_SERVICE_PORT": "6443",
-		"WORKSPACE_ROOT":          missing,
-		"SESSIONS_ROOT":           missing,
-	}, dir)
+		"POD_NAMESPACE":    "agent-ops",
+		"MANAGER_URL":      "http://127.0.0.1:1",
+		"STATE_READ_TOKEN": "tok",
+		"WORKSPACE_ROOT":   missing,
+		"SESSIONS_ROOT":    missing,
+	})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0: %s", code, out)
 	}
@@ -224,22 +229,20 @@ func TestMainRunsJobsAgainstUnmountedRoots(t *testing.T) {
 // os.ReadDir refuses it with something other than IsNotExist), main must
 // log the failure, keep running the other job, and still exit non-zero:
 // one half failing must not stop the other, but must not look like success.
+// Again, the failure happens before any listing, so MANAGER_URL stays
+// unreachable throughout.
 func TestMainExitsNonZeroWhenAJobFails(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ca.crt"), selfSignedCAPEM(t), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	notADir := filepath.Join(t.TempDir(), "regular-file")
+	notADir := t.TempDir() + "/regular-file"
 	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out, code := runMainSubprocess(t, map[string]string{
-		"POD_NAMESPACE":           "agent-ops",
-		"KUBERNETES_SERVICE_HOST": "192.0.2.13",
-		"KUBERNETES_SERVICE_PORT": "6443",
-		"WORKSPACE_ROOT":          notADir,
-		"SESSIONS_ROOT":           "",
-	}, dir)
+		"POD_NAMESPACE":    "agent-ops",
+		"MANAGER_URL":      "http://127.0.0.1:1",
+		"STATE_READ_TOKEN": "tok",
+		"WORKSPACE_ROOT":   notADir,
+		"SESSIONS_ROOT":    "",
+	})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1: %s", code, out)
 	}

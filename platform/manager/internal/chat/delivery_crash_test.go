@@ -24,14 +24,15 @@ func TestDeliveryPassToleratesACrashBetweenTheRunMarkerAndTheNote(t *testing.T) 
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv, nsChannel("c1", "slack")).Build()
 	store := newTestStore(c)
-	q := &OpQueue{Store: store, Registry: NewRegistry()}
-	r := &Router{Client: c, Reader: c, Store: store, Namespace: testNS, Ops: q}
+	testRuns := newTestRuns(c)
+	q := &OpQueue{Conversations: store, Runs: testRuns, Registry: NewRegistry()}
+	r := &Router{Client: c, Reader: c, Conversations: store, Runs: testRuns, Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}
 
-	if err := store.AppendRun(ctx, "conv-1", state.Run{RunID: "run-1", Status: "ok"}); err != nil {
+	if err := testRuns.Append(ctx, "conv-1", state.Run{RunID: "run-1", Status: "ok"}); err != nil {
 		t.Fatal(err)
 	}
 	// The first write lands; the process dies before the second.
-	if err := store.UpdateRun(ctx, "conv-1", "run-1", state.RunUpdate{MarkDelivered: []string{"c1"}}); err != nil {
+	if err := testRuns.Grow(ctx, "conv-1", "run-1", state.Run{Delivered: []string{"c1"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -44,7 +45,7 @@ func TestDeliveryPassToleratesACrashBetweenTheRunMarkerAndTheNote(t *testing.T) 
 	if b := after.Thread("c1"); b == nil || b.UndeliveredReply != "" {
 		t.Fatalf("the delivery pass must settle the note naming a delivered reply, got %+v", b)
 	}
-	runs, err := store.ListRuns(ctx, "conv-1")
+	runs, err := testRuns.List(ctx, "conv-1")
 	if err != nil || len(runs) != 1 || !runs[0].DeliveredTo("c1") {
 		t.Fatalf("the run must stay recorded delivered: %+v, %v", runs, err)
 	}
@@ -62,9 +63,10 @@ func TestDeliveryPassResendsAReplyWhoseRunMarkerNeverLanded(t *testing.T) {
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv, nsChannel("c1", "slack")).Build()
 	store := newTestStore(c)
-	q := &OpQueue{Store: store, Registry: NewRegistry()}
-	r := &Router{Client: c, Reader: c, Store: store, Namespace: testNS, Ops: q}
-	if err := store.AppendRun(ctx, "conv-1", state.Run{RunID: "run-1", Status: "ok"}); err != nil {
+	testRuns := newTestRuns(c)
+	q := &OpQueue{Conversations: store, Runs: testRuns, Registry: NewRegistry()}
+	r := &Router{Client: c, Reader: c, Conversations: store, Runs: testRuns, Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}
+	if err := testRuns.Append(ctx, "conv-1", state.Run{RunID: "run-1", Status: "ok"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,9 +91,10 @@ func TestMarkDeliveredLeavesANoteNamingAnotherRun(t *testing.T) {
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
 	store := newTestStore(c)
-	q := &OpQueue{Store: store, Registry: NewRegistry()}
+	testRuns := newTestRuns(c)
+	q := &OpQueue{Conversations: store, Runs: testRuns, Registry: NewRegistry()}
 	for _, id := range []string{"run-1", "run-2"} {
-		if err := store.AppendRun(ctx, "conv-1", state.Run{RunID: id, Status: "ok"}); err != nil {
+		if err := testRuns.Append(ctx, "conv-1", state.Run{RunID: id, Status: "ok"}); err != nil {
 			t.Fatal(err)
 		}
 	}

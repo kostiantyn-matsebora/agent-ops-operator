@@ -3,133 +3,160 @@ package kube
 import (
 	"context"
 	"fmt"
-	"slices"
+	"reflect"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/watch"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
-// maxRunHistory bounds status.runs[] on the stored object, so a long-lived
-// conversation cannot grow its CR without limit. It is the bound the work
-// report always applied itself; owning it here keeps every writer inside it.
-const maxRunHistory = 10
+// appended is the kube backend of state.Appended[P, T]: the items live on their
+// parent's object (Conversation.status.runs[] for runs), so an append is a
+// read-append-CAS loop against the status subresource, retried on the
+// apiserver's own optimistic-concurrency conflict. Appends and grows commute,
+// so retrying is always correct, and the combined read, the listing with items
+// and the feed's put carrying them are free: the items arrive with the object.
+type appended[P, T any] struct {
+	base
+	l AppendedLayout[P, T]
+}
 
-// AppendRun adds run to key's append-only run history (store.go's
-// Store.AppendRun: "takes no revision ... never fails with a conflict").
-//
-// The kube backend keeps runs embedded in status.runs[] (design D-5), so an
-// append is a read-append-CAS loop against the status subresource, retried
-// on the apiserver's own optimistic-concurrency conflict — appends commute,
-// so retrying is always correct. statusUpdateMaxAttempts bounds it; only a
-// caller that genuinely starved for that many consecutive retries (not
-// expected in practice — see store.go's ErrConflict doc) ever sees
-// ErrConflict out of this call.
-func (s *Store) AppendRun(ctx context.Context, key state.Key, run state.Run) error {
-	rs := toRunStatus(run)
-	for attempt := 0; attempt < statusUpdateMaxAttempts; attempt++ {
-		conv := &agentopsv1alpha1.Conversation{}
-		if err := s.client.Get(ctx, s.namespacedName(key), conv); err != nil {
-			if apierrors.IsNotFound(err) {
-				return state.ErrNotFound
+// OpenAppended returns the state.Appended capability of an item kind on its
+// parent's object, scoped to namespace.
+func OpenAppended[P, T any](c client.WithWatch, namespace string, l AppendedLayout[P, T], opts ...Option) (state.Appended[P, T], error) {
+	if err := l.Parent.validate(); err != nil {
+		return nil, err
+	}
+	if l.Parent.Part != nil || l.ReadItems == nil || l.WriteItems == nil || l.Items.ID == nil || l.Items.Merge == nil {
+		return nil, fmt.Errorf("kube: appended layout %q needs its parent's own object, ReadItems, WriteItems and the item declaration's ID and Merge", l.Items.Name)
+	}
+	return &appended[P, T]{base: newBase(c, namespace, newConfig(opts)), l: l}, nil
+}
+
+// Append adds item to the parent's history (state.Appended: takes no revision,
+// never fails with a conflict). Only a caller that starved for
+// statusUpdateMaxAttempts consecutive retries sees one.
+func (a *appended[P, T]) Append(ctx context.Context, parent state.Key, item T) error {
+	return a.mutate(ctx, parent, "append "+a.l.Items.Name+" to", func(obj client.Object) (bool, error) {
+		items := append(a.l.ReadItems(obj), item)
+		if a.l.MaxItems > 0 && len(items) > a.l.MaxItems {
+			items = items[len(items)-a.l.MaxItems:]
+		}
+		a.l.WriteItems(obj, items)
+		return true, nil
+	})
+}
+
+// Grow applies edit to the item with identity id by the declaration's Merge. An
+// edit the item already satisfies writes nothing.
+func (a *appended[P, T]) Grow(ctx context.Context, parent state.Key, id string, edit T) error {
+	return a.mutate(ctx, parent, "grow "+a.l.Items.Name+" of", func(obj client.Object) (bool, error) {
+		items := a.l.ReadItems(obj)
+		for i := range items {
+			if a.l.Items.ID(&items[i]) != id {
+				continue
 			}
-			return fmt.Errorf("kube: get conversation %q to append run: %w", key, err)
+			before := items[i]
+			a.l.Items.Merge(&items[i], edit)
+			if sameItem(before, items[i]) {
+				return false, nil
+			}
+			a.l.WriteItems(obj, items)
+			return true, nil
 		}
-		conv.Status.Runs = append(conv.Status.Runs, rs)
-		if len(conv.Status.Runs) > maxRunHistory {
-			conv.Status.Runs = conv.Status.Runs[len(conv.Status.Runs)-maxRunHistory:]
+		return false, state.ErrNotFound
+	})
+}
+
+// mutate is the read-edit-CAS loop on the parent's status. edit reports
+// whether it changed the object; an unchanged object is not written.
+func (a *appended[P, T]) mutate(ctx context.Context, parent state.Key, what string, edit func(client.Object) (bool, error)) error {
+	for attempt := 0; attempt < statusUpdateMaxAttempts; attempt++ {
+		obj := a.l.Parent.New()
+		if err := a.getObject(ctx, obj, string(parent), a.l.Parent.Decl.Name); err != nil {
+			return err
 		}
-		if err := s.client.Status().Update(ctx, conv); err != nil {
+		changed, err := edit(obj)
+		if err != nil || !changed {
+			return err
+		}
+		if err := a.client.Status().Update(ctx, obj); err != nil {
 			if apierrors.IsConflict(err) {
 				continue
 			}
-			return fmt.Errorf("kube: append run to conversation %q: %w", key, err)
+			return fmt.Errorf("kube: %s %s %q: %w", what, a.l.Parent.Decl.Name, parent, err)
 		}
 		return nil
 	}
 	return state.ErrConflict
 }
 
-// ListRuns returns key's run history in append order (store.go's
-// Store.ListRuns), a pure read of status.runs[] — no retry loop needed.
-func (s *Store) ListRuns(ctx context.Context, key state.Key) ([]state.Run, error) {
-	var conv agentopsv1alpha1.Conversation
-	if err := s.client.Get(ctx, s.namespacedName(key), &conv); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, state.ErrNotFound
-		}
-		return nil, fmt.Errorf("kube: get conversation %q to list runs: %w", key, err)
+// List returns the parent's items in append order, empty for a parent that has
+// none or does not exist.
+func (a *appended[P, T]) List(ctx context.Context, parent state.Key) ([]T, error) {
+	obj := a.l.Parent.New()
+	if err := a.getObject(ctx, obj, string(parent), a.l.Parent.Decl.Name); err != nil {
+		return nil, err
 	}
-	return toRuns(conv.Status.Runs), nil
+	return a.l.ReadItems(obj), nil
 }
 
-// toRuns maps a status.runs list; an empty one is nil.
-func toRuns(in []agentopsv1alpha1.RunStatus) []state.Run {
-	if len(in) == 0 {
-		return nil
+// GetWithItems serves the record and its items from one apiserver read.
+func (a *appended[P, T]) GetWithItems(ctx context.Context, parent state.Key) (P, state.Revision, []T, error) {
+	var zero P
+	obj := a.l.Parent.New()
+	if err := a.getObject(ctx, obj, string(parent), a.l.Parent.Decl.Name); err != nil {
+		return zero, "", nil, err
 	}
-	out := make([]state.Run, len(in))
-	for i, rs := range in {
-		out[i] = toRun(rs)
+	rec, ok := a.l.Parent.Read(obj)
+	if !ok {
+		return zero, "", nil, state.ErrNotFound
 	}
-	return out
+	return rec, state.Revision(obj.GetResourceVersion()), a.l.ReadItems(obj), nil
 }
 
-// UpdateRun applies upd to the run named runID (store.go's Store.UpdateRun),
-// a read-apply-CAS loop on status.runs[] like AppendRun's. Every RunUpdate
-// field only grows, so a retry after a lost race re-applies it to the
-// fresh object and is always correct; an update the run already satisfies
-// writes nothing.
-func (s *Store) UpdateRun(ctx context.Context, key state.Key, runID string, upd state.RunUpdate) error {
-	for attempt := 0; attempt < statusUpdateMaxAttempts; attempt++ {
-		conv := &agentopsv1alpha1.Conversation{}
-		if err := s.client.Get(ctx, s.namespacedName(key), conv); err != nil {
-			if apierrors.IsNotFound(err) {
-				return state.ErrNotFound
-			}
-			return fmt.Errorf("kube: get conversation %q to update run: %w", key, err)
-		}
-		run := runByID(conv.Status.Runs, runID)
-		if run == nil {
-			return state.ErrNotFound
-		}
-		if !applyRunUpdate(run, upd) {
-			return nil
-		}
-		if err := s.client.Status().Update(ctx, conv); err != nil {
-			if apierrors.IsConflict(err) {
-				continue
-			}
-			return fmt.Errorf("kube: update run %q of conversation %q: %w", runID, key, err)
-		}
-		return nil
+// ListWithItems lists the parents under one declared index, each with the items
+// of the object it was read from: one list, no read per record.
+func (a *appended[P, T]) ListWithItems(ctx context.Context, idx state.Index[P], value string) ([]state.WithItems[P, T], error) {
+	if !a.l.Parent.Decl.Declares(idx) {
+		return nil, state.ErrUnknownIndex
 	}
-	return state.ErrConflict
+	objs, err := a.listObjects(ctx, a.listReader(), a.l.Parent.NewList, a.l.Parent.Decl.Name)
+	if err != nil {
+		return nil, err
+	}
+	prefilter := a.l.Parent.Prefilter[idx.Name()]
+	var out []state.WithItems[P, T]
+	for _, obj := range objs {
+		if prefilter != nil && !prefilter(obj, value) {
+			continue
+		}
+		rec, ok := a.l.Parent.Read(obj)
+		if !ok {
+			continue
+		}
+		if v, listed := idx.Value(&rec); !listed || v != value {
+			continue
+		}
+		out = append(out, state.WithItems[P, T]{Record: rec, Revision: state.Revision(obj.GetResourceVersion()), Items: a.l.ReadItems(obj)})
+	}
+	return out, nil
 }
 
-func runByID(runs []agentopsv1alpha1.RunStatus, runID string) *agentopsv1alpha1.RunStatus {
-	for i := range runs {
-		if runs[i].RunID == runID {
-			return &runs[i]
-		}
-	}
-	return nil
+// WatchWithItems is the parent's feed with each put carrying the items as of
+// that revision.
+func (a *appended[P, T]) WatchWithItems(ctx context.Context, resume state.Revision) (<-chan state.Event[state.WithItems[P, T]], error) {
+	return watchObjects(ctx, &a.base, a.l.Parent.NewList, resume, a.l.Parent.Decl.Name, func(ev watch.Event) []state.Event[state.WithItems[P, T]] {
+		return translateObject(ev, func(obj client.Object) (state.WithItems[P, T], bool) {
+			rec, ok := a.l.Parent.Read(obj)
+			return state.WithItems[P, T]{Record: rec, Revision: state.Revision(obj.GetResourceVersion()), Items: a.l.ReadItems(obj)}, ok
+		})
+	})
 }
 
-// applyRunUpdate grows run by upd and reports whether anything changed.
-func applyRunUpdate(run *agentopsv1alpha1.RunStatus, upd state.RunUpdate) bool {
-	changed := false
-	if upd.MarkDeliveryTracked && !run.DeliveryTracked {
-		run.DeliveryTracked, changed = true, true
-	}
-	if upd.MarkRoutedToParent && !run.RoutedToParent {
-		run.RoutedToParent, changed = true, true
-	}
-	for _, ch := range upd.MarkDelivered {
-		if !slices.Contains(run.Delivered, ch) {
-			run.Delivered, changed = append(run.Delivered, ch), true
-		}
-	}
-	return changed
+// sameItem reports whether a grow left the item as it was.
+func sameItem[T any](a, b T) bool {
+	return reflect.DeepEqual(a, b)
 }

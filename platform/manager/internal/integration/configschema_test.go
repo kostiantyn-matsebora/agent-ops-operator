@@ -162,7 +162,7 @@ func TestChannelConfigValidLifecycle(t *testing.T) {
 // The signal side mirrors it, and a violation must not disturb Served/Wired.
 func TestSignalSourceConfigValidIsAdvisory(t *testing.T) {
 	ctx := context.Background()
-	srcRec := &controller.SignalSourceReconciler{Client: k8sClient, Signals: signalStore}
+	srcRec := &controller.SignalSourceReconciler{Client: k8sClient, Signals: stores.Signals, Cooldowns: stores.Cooldowns}
 	reconcileSrc := func(name string) {
 		t.Helper()
 		if _, err := srcRec.Reconcile(ctx, ctrl.Request{

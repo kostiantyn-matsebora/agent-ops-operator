@@ -24,7 +24,8 @@ func TestNetworkPolicyIsOptIn(t *testing.T) {
 func TestEveryWiredFlowIsAllowed(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "global.agentops.networkPolicy.enabled=true",
-		"--set", "kubernetes.enabled=true")
+		"--set", "kubernetes.enabled=true",
+		"--set", "housekeeping.enabled=true")
 
 	policies := splitPolicies(out)
 
@@ -36,6 +37,9 @@ func TestEveryWiredFlowIsAllowed(t *testing.T) {
 		"agentops-runtime",        // /work, /work/done — the whole dispatch lane
 		"agentops-adapter",        // channel ops and inbound
 		"agentops-signal-adapter", // /signal/inbound — no signal reaches the manager without it
+		// state-store-generic-contract: housekeeping lists /state/conversations
+		// instead of holding RBAC, so a DROP here looks like a manager outage.
+		"agentops-housekeeping",
 	} {
 		if !strings.Contains(manager, caller) {
 			t.Errorf("the manager policy does not admit %q; that lane breaks when policy is enforced", caller)

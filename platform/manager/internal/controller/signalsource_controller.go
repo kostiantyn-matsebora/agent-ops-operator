@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
@@ -30,10 +31,15 @@ const ConditionWired = "Wired"
 // route signals only while a Ready Pipeline claims them.
 type SignalSourceReconciler struct {
 	client.Client
-	// Signals releases a deleted source's signals and cooldown window: the
-	// manager's own act on the deletion, so nothing depends on an owner
-	// reference being honoured (state-store design D-14).
-	Signals state.SignalStore
+	// Signals and Cooldowns release a deleted source's signals and cooldown
+	// window: the manager's own act on the deletion, so nothing depends on an
+	// owner reference being honoured (state-store design D-14).
+	Signals   state.Collection[state.SignalRecord]
+	Cooldowns state.Collection[state.CooldownWindow]
+	// AdapterState releases a deleted SignalSource's own adapter-state keys
+	// (state-store-generic-contract design D-4), through the typed
+	// collection rather than a raw annotation reach.
+	AdapterState state.Collection[string]
 }
 
 // Reconcile sets Served on one SignalSource.
@@ -41,7 +47,8 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	var src agentopsv1alpha1.SignalSource
 	if err := r.Get(ctx, req.NamespacedName, &src); err != nil {
 		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, r.Signals.ReleaseSource(ctx, req.Name, "")
+			releaser := &SourceReleaser{Signals: r.Signals, Cooldowns: r.Cooldowns, Live: liveSignalSource(r.Client, req.Namespace)}
+			return ctrl.Result{}, releaser.Release(ctx, req.Name)
 		}
 		return ctrl.Result{}, err
 	}
@@ -173,10 +180,19 @@ func (r *SignalSourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return reqs
 	}
+	// releaseOnDelete mirrors ChannelReconciler's own (channel_controller.go):
+	// a pure side effect reading the deleted SignalSource's own tombstone to
+	// release its adapter-state keys, enqueueing nothing.
+	releaseOnDelete := func(ctx context.Context, obj client.Object) []ctrl.Request {
+		releaseAdapterStateKeys(ctx, r.AdapterState, state.SurfaceSignalSource, obj)
+		return nil
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentopsv1alpha1.SignalSource{}).
 		Watches(&agentopsv1alpha1.SignalAdapter{}, handler.EnqueueRequestsFromMapFunc(mapAdapter)).
 		Watches(&agentopsv1alpha1.Pipeline{}, handler.EnqueueRequestsFromMapFunc(mapClaimant)).
 		Watches(&agentopsv1alpha1.Coordinator{}, handler.EnqueueRequestsFromMapFunc(mapClaimant)).
+		Watches(&agentopsv1alpha1.SignalSource{}, handler.EnqueueRequestsFromMapFunc(releaseOnDelete),
+			builder.WithPredicates(deleteOnlyPredicate())).
 		Complete(r)
 }

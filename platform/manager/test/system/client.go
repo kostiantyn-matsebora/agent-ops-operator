@@ -10,6 +10,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -93,6 +94,44 @@ func (k *Kube) Can(ctx context.Context, sa, verb, group, resource, namespace str
 		return false, err
 	}
 	return out.Status.Allowed, nil
+}
+
+// RunCronJobOnce creates a one-off Job from a CronJob's own JobTemplate — the
+// standard `kubectl create job --from=cronjob/NAME` behavior — and waits for
+// it to reach a terminal state. Needed because 11.2's lane cannot wait for
+// the real schedule: it proves the job's OWN run, not that cron ticks.
+func (k *Kube) RunCronJobOnce(ctx context.Context, cronJobName string, timeout time.Duration) (*batchv1.Job, error) {
+	var cj batchv1.CronJob
+	if err := k.Get(ctx, types.NamespacedName{Namespace: k.Namespace, Name: cronJobName}, &cj); err != nil {
+		return nil, fmt.Errorf("getting cronjob %s: %w", cronJobName, err)
+	}
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: cronJobName + "-manual-",
+			Namespace:    k.Namespace,
+			Labels:       cj.Spec.JobTemplate.Labels,
+			Annotations:  cj.Spec.JobTemplate.Annotations,
+		},
+		Spec: cj.Spec.JobTemplate.Spec,
+	}
+	if err := k.Create(ctx, job); err != nil {
+		return nil, fmt.Errorf("creating a job from cronjob %s: %w", cronJobName, err)
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var cur batchv1.Job
+		if err := k.Get(ctx, types.NamespacedName{Namespace: k.Namespace, Name: job.Name}, &cur); err != nil {
+			return job, fmt.Errorf("getting job %s: %w", job.Name, err)
+		}
+		if cur.Status.Succeeded >= 1 {
+			return &cur, nil
+		}
+		if cur.Status.Failed >= 1 {
+			return &cur, fmt.Errorf("job %s failed", job.Name)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return job, fmt.Errorf("job %s did not complete within %s", job.Name, timeout)
 }
 
 // Pods lists pods by label selector.

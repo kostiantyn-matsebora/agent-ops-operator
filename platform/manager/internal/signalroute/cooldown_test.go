@@ -10,22 +10,22 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
-// windowStore is a SignalStore whose cooldown read is scripted; anything else
-// is a nil-embedded panic, so a test learns of an unexpected call.
+// windowStore is a Collection[CooldownWindow] whose read is scripted; anything
+// else is a nil-embedded panic, so a test learns of an unexpected call.
 type windowStore struct {
-	state.SignalStore
+	state.Collection[state.CooldownWindow]
 	reads  int
 	err    error
 	blocks bool
 }
 
-func (w *windowStore) GetCooldown(ctx context.Context, _ string) ([]state.CooldownEntry, error) {
+func (w *windowStore) Get(ctx context.Context, _ state.Key) (state.CooldownWindow, state.Revision, error) {
 	w.reads++
 	if w.blocks {
 		<-ctx.Done()
-		return nil, ctx.Err()
+		return state.CooldownWindow{}, "", ctx.Err()
 	}
-	return nil, w.err
+	return state.CooldownWindow{}, "", w.err
 }
 
 func sourceWithHours(hours int32) *agentopsv1alpha1.SignalSource {
@@ -37,7 +37,7 @@ func sourceWithHours(hours int32) *agentopsv1alpha1.SignalSource {
 
 func TestRecoverCooldownSkipsTheReadWhenTheWindowIsOff(t *testing.T) {
 	store := &windowStore{err: errors.New("store down")}
-	deps := Deps{Signals: store}
+	deps := Deps{CooldownWindows: store}
 	// a chat source defaults the window off: a store error must not fail it
 	if cd, err := recoverCooldown(context.Background(), deps, sourceWithHours(0), kindChat); err != nil || cd == nil {
 		t.Fatalf("chat window off: %v, %v, want a built window", cd, err)
@@ -55,7 +55,7 @@ func TestRecoverCooldownReadIsBounded(t *testing.T) {
 	old := cooldownReadTimeout
 	cooldownReadTimeout = 50 * time.Millisecond
 	defer func() { cooldownReadTimeout = old }()
-	deps := Deps{Signals: &windowStore{blocks: true}}
+	deps := Deps{CooldownWindows: &windowStore{blocks: true}}
 	done := make(chan error, 1)
 	go func() {
 		_, err := recoverCooldown(context.Background(), deps, sourceWithHours(1), "alert")

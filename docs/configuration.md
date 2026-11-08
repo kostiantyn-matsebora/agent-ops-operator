@@ -630,7 +630,7 @@ moves.
 | Key | Default | Consequence |
 |---|---|---|
 | `maxActiveConversations` | `5` | how many agents hold a pod at once. Over-cap work waits in `Pending` with no pod and no thread |
-| `maxQueuedConversations` | `50` | the backlog bound; `0` queues nothing. Past it, a chat message is declined and the sender is told. A machine signal stays `Pending` and routes when the backlog drains |
+| `maxQueuedConversations` | `50` | the backlog bound. `0` queues nothing. Past it, a chat message is declined and the sender is told. A machine signal stays `Pending` and routes when the backlog drains |
 | `global.agentops.runtimeDefaults.idleTtlMinutes` | `1` | how long a finished agent keeps its pod. Raise it for expensive startup |
 | `replicas` | `2` | how many manager pods run. Safe above 1: an ensure-topic op is claimed on the Conversation CR by the current leader, never served from an in-memory queue a non-leader never populated |
 | `signalConsumerConcurrency` | `4` | how many consumers route stored signals at once on the leader. Messages of one `(source, initiationId)` still run one at a time, in arrival order |
@@ -676,6 +676,7 @@ hand-written copy is not.
 |---|---|---|
 | `adapterAuth.secretName` | `agentops-adapter-token` | the token every adapter authenticates with. Change it and every adapter 401s until restarted |
 | `controlPlaneAuth.secretName` | `agentops-control-plane-token` | the token guarding `/control-plane/*` (`docs/contracts.md`). Generated the same way as `adapterAuth`, into its own Secret. Unset, the surface refuses every request with 503 |
+| `stateReadAuth.secretName` | `agentops-state-read-token` | the token guarding `/state/*` for a caller that is not an adapter — today, housekeeping and the console. Generated the same way, into its own Secret, and refused at render if it equals `adapterAuth.token` or `controlPlaneAuth.token` |
 | `console.enabled` | `true` | the browser console, on by default |
 
 The console's own values — its token, ingress, TLS and forward-auth — are in

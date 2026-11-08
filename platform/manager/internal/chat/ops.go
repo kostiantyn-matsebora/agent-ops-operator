@@ -142,9 +142,12 @@ var sendEpoch = strconv.FormatInt(time.Now().UnixNano(), 36)
 // reconciliation can re-derive it. Recording an attempt would let one transient
 // transport error suppress that op's recovery permanently.
 type OpQueue struct {
-	// Store holds the conversations the queue marks delivery, archiving and
-	// threads on as ops complete. Nil marks nothing.
-	Store    state.Store
+	// Conversations holds the conversations the queue marks delivery, archiving
+	// and threads on as ops complete. Nil marks nothing.
+	Conversations state.Collection[state.ConversationRecord]
+	// Runs holds the conversations' append-only run history, for the run-reply
+	// delivery marker (markDelivered) and its backstop.
+	Runs     state.Appended[state.ConversationRecord, state.Run]
 	Registry *Registry
 	// Activity records enqueue and completion hops. Nil is inert.
 	Activity *activity.Log
@@ -653,10 +656,10 @@ func isRunReply(id string) bool {
 // has no object to mark and does not need one.
 func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
 	_, channel, ok := ParseCloseTopicOpID(op.ID)
-	if !ok || q.Store == nil {
+	if !ok || q.Conversations == nil {
 		return nil
 	}
-	_, err := state.Mutate(ctx, q.Store, state.Key(op.Conversation), func(rec *state.ConversationRecord) error {
+	_, err := state.Mutate(ctx, q.Conversations, state.Key(op.Conversation), func(rec *state.ConversationRecord) error {
 		if !rec.ThreadArchived(channel) {
 			rec.ThreadsArchived = append(rec.ThreadsArchived, channel)
 		}
@@ -668,9 +671,9 @@ func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
 // markDelivered records that a run's reply reached one channel's thread, so
 // reconciliation stops re-deriving it.
 //
-// TWO WRITES, IN THIS ORDER: the run's delivery marker (state.Store.UpdateRun,
-// which only ever grows the run and so never conflicts with the next run's own
-// append), then the thread's undelivered-reply note (a record write, retried on
+// TWO WRITES, IN THIS ORDER: the run's delivery marker (Runs.Grow, which only
+// ever grows the run and so never conflicts with the next run's own append),
+// then the thread's undelivered-reply note (a record write, retried on
 // conflict). The first is the fact — it is what stops the re-derivation — and
 // the second is the observable note beside it. A crash between them leaves a
 // run recorded delivered with a note still naming it; SettleDeliveredNote,
@@ -681,19 +684,19 @@ func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
 // A plain merge patch on `status.runs` replaced the whole array, so two
 // threads' completions milliseconds apart each wrote the array they had read
 // and the last one won (the system pack's fan-out test found it: console plus
-// Telegram bound to one conversation, `delivered: [tg-ops]` forever). UpdateRun
+// Telegram bound to one conversation, `delivered: [tg-ops]` forever). Grow
 // re-reads and applies its one effect, which is what makes the second write
 // safe where the first was not.
 func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 	_, channel, runID, ok := ParseRunReplyOpID(op.ID)
-	if !ok || q.Store == nil {
+	if !ok || q.Conversations == nil {
 		// Same guard markThreadArchived carries: a queue with no store marks
 		// nothing rather than panicking. The asymmetry was invisible because no
 		// test had ever completed a run reply SUCCESSFULLY without one.
 		return nil
 	}
 	key := state.Key(op.Conversation)
-	runs, err := q.Store.ListRuns(ctx, key)
+	runs, err := q.Runs.List(ctx, key)
 	if err != nil {
 		return state.IgnoreNotFound(err)
 	}
@@ -712,20 +715,20 @@ func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 	if run.DeliveredTo(channel) {
 		return nil
 	}
-	if err := q.Store.UpdateRun(ctx, key, runID, state.RunUpdate{MarkDelivered: []string{channel}}); err != nil {
+	if err := q.Runs.Grow(ctx, key, runID, state.Run{Delivered: []string{channel}}); err != nil {
 		return state.IgnoreNotFound(err)
 	}
 	// Only the note naming THIS run is settled. A note naming an older run
 	// is a reply still owed to the thread, and this one reaching it does not
 	// pay that off.
-	return clearUndeliveredNote(ctx, q.Store, key, channel, runID)
+	return clearUndeliveredNote(ctx, q.Conversations, key, channel, runID)
 }
 
 // clearUndeliveredNote empties the thread's undelivered-reply note when it
 // names runID. Writes nothing when the thread is gone or the note names
 // another run or none.
-func clearUndeliveredNote(ctx context.Context, store state.Store, key state.Key, channel, runID string) error {
-	_, err := state.Mutate(ctx, store, key, func(rec *state.ConversationRecord) error {
+func clearUndeliveredNote(ctx context.Context, conversations state.Collection[state.ConversationRecord], key state.Key, channel, runID string) error {
+	_, err := state.Mutate(ctx, conversations, key, func(rec *state.ConversationRecord) error {
 		if b := rec.Thread(channel); b != nil && b.UndeliveredReply == runID {
 			b.UndeliveredReply = ""
 		}
@@ -744,10 +747,10 @@ func clearUndeliveredNote(ctx context.Context, store state.Store, key state.Key,
 // depends on.
 func (q *OpQueue) markUndelivered(ctx context.Context, op *Op) error {
 	_, channel, runID, ok := ParseRunReplyOpID(op.ID)
-	if !ok || q.Store == nil {
+	if !ok || q.Conversations == nil {
 		return nil
 	}
-	_, err := state.Mutate(ctx, q.Store, state.Key(op.Conversation), func(rec *state.ConversationRecord) error {
+	_, err := state.Mutate(ctx, q.Conversations, state.Key(op.Conversation), func(rec *state.ConversationRecord) error {
 		if binding := rec.Thread(channel); binding != nil {
 			binding.UndeliveredReply = runID
 		}
@@ -778,7 +781,7 @@ func (q *OpQueue) finishEnsureTopic(ctx context.Context, op *Op, res OpResult) e
 		cond.Reason = "AdapterError"
 		cond.Message = channelMsgPrefix + op.Channel + ": adapter completed ensure-topic without a thread id"
 	}
-	_, err := state.Mutate(ctx, q.Store, state.Key(op.Conversation), func(rec *state.ConversationRecord) error {
+	_, err := state.Mutate(ctx, q.Conversations, state.Key(op.Conversation), func(rec *state.ConversationRecord) error {
 		recordThread(rec, op, res, cond)
 		return nil
 	})

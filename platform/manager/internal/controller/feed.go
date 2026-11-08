@@ -118,14 +118,14 @@ func (r *ConversationReconciler) startFeed(ctx context.Context, q workqueue.Type
 }
 
 func (r *ConversationReconciler) pumpFeed(ctx context.Context, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-	feed[state.Event]{
+	feed[state.Event[state.ConversationRecord]]{
 		what: "conversation",
-		open: r.Store.Watch,
-		describe: func(ev state.Event) (state.Key, state.Revision, bool) {
+		open: r.Conversations.Watch,
+		describe: func(ev state.Event[state.ConversationRecord]) (state.Key, state.Revision, bool) {
 			return ev.Key, ev.Resume, ev.Type == state.EventBookmark
 		},
 		list: func(ctx context.Context) ([]state.Key, error) {
-			all, err := r.Store.List(ctx, state.ByAll, state.ListKey{})
+			all, err := r.Conversations.List(ctx, state.ByAll, "")
 			keys := make([]state.Key, 0, len(all))
 			for i := range all {
 				keys = append(keys, state.Key(all[i].Name))
@@ -141,16 +141,16 @@ func (r *ConversationReconciler) request(key state.Key) reconcile.Request {
 }
 
 // startFeed is the Signal reconciler's event source (design D-14), the same
-// loop over the SignalStore's Watch.
+// loop over the Signals collection's Watch.
 func (r *SignalReconciler) startFeed(ctx context.Context, q workqueue.TypedRateLimitingInterface[reconcile.Request]) error {
-	go feed[state.SignalEvent]{
+	go feed[state.Event[state.SignalRecord]]{
 		what: "signal",
 		open: r.Signals.Watch,
-		describe: func(ev state.SignalEvent) (state.Key, state.Revision, bool) {
+		describe: func(ev state.Event[state.SignalRecord]) (state.Key, state.Revision, bool) {
 			return ev.Key, ev.Resume, ev.Type == state.EventBookmark
 		},
 		list: func(ctx context.Context) ([]state.Key, error) {
-			all, err := r.Signals.List(ctx, state.SignalAll, state.SignalListKey{})
+			all, err := r.Signals.List(ctx, state.SignalAll, "")
 			keys := make([]state.Key, 0, len(all))
 			for i := range all {
 				keys = append(keys, state.Key(all[i].Name))

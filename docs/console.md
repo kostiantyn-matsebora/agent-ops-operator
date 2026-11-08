@@ -31,15 +31,25 @@ or ServiceAccount, and the ChannelAdapter reconciler injects
 `SIGNAL_ADAPTER_TOKEN` into the same pod. Two identities, **one** Deployment.
 See [concepts](concepts.md#servedby--two-identities-one-pod).
 
-It fans in five sources the browser never touches directly:
+It fans in six sources the browser never touches directly:
 
 | Source | From | Why the console owns it |
 |---|---|---|
-| CR state, every `agentops.dev` kind | Kubernetes list/watch | RBAC belongs to a ServiceAccount, not a browser token |
+| Conversations and Signals | the manager's [state read surface](contracts.md#the-state-read-surface) (`GET /state/conversations`, `GET /state/signals`, and their two `stream` feeds) | the console holds no Kubernetes RBAC on either kind, and reads them through its own `ChannelAdapter`'s derived token (`spec.stateAccess: true`) instead |
+| CR state, every other `agentops.dev` kind | Kubernetes list/watch | RBAC belongs to a ServiceAccount, not a browser token |
 | Install facts — Deployments, CronJobs, pods, images, digests, restarts, the node a pod runs on | Kubernetes list/watch | needs a read grant the browser cannot hold |
 | Per-hop activity | manager `GET /activity/stream` | one upstream connection multiplexed to N browsers |
 | Runtime state — op queues, slots, cooldowns, leader | manager `GET /status` | in-memory only, and exists nowhere else |
 | Resolved capabilities | manager `GET /pipelines/{name}/resolved` | authoritative — recomputing it invites disagreement |
+
+**The two state feeds join the same cache the Kubernetes watch feeds the UI
+from.** The state feeds carry `put` / `delete` / `bookmark` / `resync` frames.
+
+The console normalizes them into the watch's `ADDED` / `MODIFIED` / `DELETED`.
+Nothing downstream of the cache can tell which backend a kind came from.
+
+A `resync` frame on either state stream relists through the plain `GET`,
+the same recovery a Kubernetes 410 already triggers.
 
 Plus two write paths, both through the manager: `POST /channel/inbound` (reply)
 and `POST /signal/inbound` (originate).
@@ -1211,7 +1221,7 @@ Role is the chart's grant.
 
 | Group | Resources | Verbs |
 |---|---|---|
-| `agentops.dev` | all thirteen kinds, `AgentCapability`, `Coordinator` and `Signal` included | get, list, watch |
+| `agentops.dev` | every kind **except** `Conversation` and `Signal` — `AgentCapability` and `Coordinator` included | get, list, watch |
 | `apps` | deployments | get, list, watch |
 | (core) | pods | get, list, watch |
 | `batch` | cronjobs | get, list, watch |
@@ -1220,6 +1230,13 @@ The pod, deployment and cronjob grant is a deliberate widening past
 `agentops.dev`. Image digests, restart counts, pod failure reasons and the node
 a pod runs on exist in no CR, and an operations console that cannot see a
 CrashLoopBackOff is not one.
+
+**`Conversation` and `Signal` are the two kinds this Role no longer names.**
+The console reads both through the manager's
+[state read surface](contracts.md#the-state-read-surface) instead, over its
+own `ChannelAdapter`'s derived token — no RBAC on either kind, and the
+`ChannelAdapter/console` CR carries `spec.stateAccess: true` for exactly
+this reason.
 
 - **The Components and Infrastructure views are drawn from it.** A component is
   a Deployment, a CronJob, an adapter CR or a runtime image, and a pod's box is

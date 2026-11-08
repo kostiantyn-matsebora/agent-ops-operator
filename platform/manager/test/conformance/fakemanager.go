@@ -32,7 +32,8 @@ import (
 
 const (
 	headerContentType = "Content-Type"
-	errRejected       = "rejected by the conformance fake"
+	mimeEventStream   = "text/event-stream"
+	errRejected       ="rejected by the conformance fake"
 )
 
 // ChannelInfo is one served channel, as GET /channel/channels lists it.
@@ -112,10 +113,16 @@ type FakeManager struct {
 	mu   sync.Mutex
 	cond *sync.Cond
 
-	channels  []ChannelInfo
-	sources   []SourceInfo
-	queue     []json.RawMessage // ops to serve, in order
-	workQueue []json.RawMessage // work units to serve, in order — see QueueWork
+	// The state read surface's Conversations (docs/contracts.md, "The state
+	// read surface"): what the console reads instead of the Kubernetes API.
+	convs      map[string]map[string]any
+	convRev    int
+	stateFail  map[string]int // conversation name -> status its single read answers
+	stateWatch []chan []byte
+	channels   []ChannelInfo
+	sources    []SourceInfo
+	queue      []json.RawMessage // ops to serve, in order
+	workQueue  []json.RawMessage // work units to serve, in order — see QueueWork
 
 	opsRequests   []OpsRequest
 	completions   []Completion
@@ -200,6 +207,21 @@ func NewFakeManager(t *testing.T, token string) *FakeManager {
 			next(w, r)
 		}
 	}
+	mux.HandleFunc("GET /state/conversations", auth(f.stateList))
+	mux.HandleFunc("GET /state/conversations/stream", auth(f.stateStream))
+	mux.HandleFunc("GET /state/conversations/{name}", auth(f.stateOne))
+	// Signals are served empty: no conformance case seeds one.
+	mux.HandleFunc("GET /state/signals", auth(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"revision": "r1", "items": []any{}})
+	}))
+	mux.HandleFunc("GET /state/signals/stream", auth(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(headerContentType, mimeEventStream)
+		w.WriteHeader(200)
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
+		<-r.Context().Done()
+	}))
 	mux.HandleFunc("GET /channel/ops", auth(f.handleOps))
 	mux.HandleFunc("POST /channel/ops/{id}/done", auth(f.handleDone))
 	mux.HandleFunc("POST /channel/inbound", auth(f.handleInbound))
@@ -242,7 +264,7 @@ func NewFakeManager(t *testing.T, token string) *FakeManager {
 		writeJSON(w, 200, map[string]any{"events": []any{}, "next": 0})
 	}))
 	mux.HandleFunc("GET /activity/stream", auth(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(headerContentType, "text/event-stream")
+		w.Header().Set(headerContentType, mimeEventStream)
 		w.WriteHeader(200)
 		<-r.Context().Done()
 	}))
@@ -633,4 +655,95 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set(headerContentType, "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// SetConversation stores (or replaces) a Conversation record, in the wire
+// shape /state/conversations serves ({name,id,revision,createdAt,
+// deletionRequestedAt,spec,status}), and broadcasts it as a `put` frame.
+func (f *FakeManager) SetConversation(name, id string, spec, status map[string]any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.convs == nil {
+		f.convs = map[string]map[string]any{}
+	}
+	f.convRev++
+	rec := map[string]any{"name": name, "id": id, "revision": fmt.Sprint(f.convRev),
+		"createdAt": "2026-01-01T00:00:00Z", "deletionRequestedAt": nil, "spec": spec, "status": status}
+	f.convs[name] = rec
+	body, _ := json.Marshal(rec)
+	frame := []byte(fmt.Sprintf("event: put\nid: %d\ndata: %s\n\n", f.convRev, body))
+	for _, ch := range f.stateWatch {
+		select {
+		case ch <- frame:
+		default:
+		}
+	}
+}
+
+// FailConversationRead makes GET /state/conversations/{name} answer status
+// until ClearConversationRead; the listing and stream are unaffected.
+func (f *FakeManager) FailConversationRead(name string, status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.stateFail == nil {
+		f.stateFail = map[string]int{}
+	}
+	f.stateFail[name] = status
+}
+
+func (f *FakeManager) ClearConversationRead(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.stateFail, name)
+}
+
+func (f *FakeManager) stateList(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	items := make([]any, 0, len(f.convs))
+	for _, rec := range f.convs {
+		items = append(items, rec)
+	}
+	rev := fmt.Sprint(f.convRev)
+	f.mu.Unlock()
+	writeJSON(w, 200, map[string]any{"revision": rev, "items": items})
+}
+
+func (f *FakeManager) stateOne(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	f.mu.Lock()
+	status, failing := f.stateFail[name]
+	rec, ok := f.convs[name]
+	f.mu.Unlock()
+	switch {
+	case failing:
+		writeJSON(w, status, map[string]string{"error": "injected"})
+	case !ok:
+		writeJSON(w, 404, map[string]string{"error": "not found"})
+	default:
+		writeJSON(w, 200, rec)
+	}
+}
+
+func (f *FakeManager) stateStream(w http.ResponseWriter, r *http.Request) {
+	ch := make(chan []byte, 16)
+	f.mu.Lock()
+	f.stateWatch = append(f.stateWatch, ch)
+	f.mu.Unlock()
+	w.Header().Set(headerContentType, mimeEventStream)
+	w.WriteHeader(200)
+	fl, _ := w.(http.Flusher)
+	if fl != nil {
+		fl.Flush()
+	}
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case frame := <-ch:
+			w.Write(frame)
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+	}
 }

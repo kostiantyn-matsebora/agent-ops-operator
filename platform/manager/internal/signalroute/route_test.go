@@ -64,26 +64,33 @@ func TestInputDeliveredReadsTheQueueAndTheRunHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&agentopsv1alpha1.Conversation{}).Build()
-	store := kube.NewStore(c, "ns")
+	store, err := kube.Open(c, "ns", kube.ConversationLayout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs, err := kube.OpenAppended(c, "ns", kube.RunsLayout())
+	if err != nil {
+		t.Fatal(err)
+	}
 	conv := &state.ConversationRecord{Name: "conv"}
 	if _, err := store.Create(ctx, "conv", *conv); err != nil {
 		t.Fatal(err)
 	}
-	if delivered, err := inputDelivered(ctx, store, conv, "in-a"); err != nil || delivered {
+	if delivered, err := inputDelivered(ctx, runs, conv, "in-a"); err != nil || delivered {
 		t.Fatalf("an empty conversation carries nothing: %v, %v", delivered, err)
 	}
 	conv.Inputs = []state.InputItem{{ID: "1", PayloadRef: "in-a"}}
-	if delivered, _ := inputDelivered(ctx, store, conv, "in-a"); !delivered {
+	if delivered, _ := inputDelivered(ctx, runs, conv, "in-a"); !delivered {
 		t.Fatal("queued input")
 	}
-	if delivered, _ := inputDelivered(ctx, store, conv, "in-b"); delivered {
+	if delivered, _ := inputDelivered(ctx, runs, conv, "in-b"); delivered {
 		t.Fatal("queued input")
 	}
 	conv.Inputs = nil
-	if err := store.AppendRun(ctx, "conv", state.Run{RunID: "r1", Inputs: []state.RecordedInput{{PayloadRef: "in-b"}}}); err != nil {
+	if err := runs.Append(ctx, "conv", state.Run{RunID: "r1", Inputs: []state.RecordedInput{{PayloadRef: "in-b"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if delivered, err := inputDelivered(ctx, store, conv, "in-b"); err != nil || !delivered {
+	if delivered, err := inputDelivered(ctx, runs, conv, "in-b"); err != nil || !delivered {
 		t.Fatalf("an input cited by a run is delivered although the queue was pruned: %v, %v", delivered, err)
 	}
 }

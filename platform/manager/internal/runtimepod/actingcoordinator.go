@@ -22,7 +22,7 @@ import (
 // instead. RootName (needed only by the manager's bound checks on
 // list_open_roots / the widened close) is deliberately not resolved here —
 // Build only ever needs the Coordinator's NAME to derive a token.
-func ResolveActingCoordinator(ctx context.Context, store state.Store, conv *state.ConversationRecord) (string, error) {
+func ResolveActingCoordinator(ctx context.Context, store state.Collection[state.ConversationRecord], conv *state.ConversationRecord) (string, error) {
 	if conv.CoordinatorRef != "" {
 		return conv.CoordinatorRef, nil
 	}
@@ -44,7 +44,7 @@ func ResolveActingCoordinator(ctx context.Context, store state.Store, conv *stat
 // ResolveFor's own use: a broken or unreadable ancestry chain answers "" (no
 // token) rather than failing an otherwise-ordinary pod build over a token
 // this conversation may not even present.
-func resolveActingCoordinatorBestEffort(ctx context.Context, store state.Store, conv *state.ConversationRecord) string {
+func resolveActingCoordinatorBestEffort(ctx context.Context, store state.Collection[state.ConversationRecord], conv *state.ConversationRecord) string {
 	name, err := ResolveActingCoordinator(ctx, store, conv)
 	if err != nil {
 		return ""

@@ -1,28 +1,33 @@
-// Package state is the only way the manager reaches a Conversation or a
-// queued input's out-of-line payload (design D-1/D-2 of the state-store
-// change, openspec/changes/state-store/). No Kubernetes type, no selector
-// string and no transaction crosses this boundary — every operation here
-// traces to a manager need recorded in design.md's provenance table.
+// Package state is the only way the manager reaches the state it writes at
+// run time (design D-1 of the state-store-generic-contract change,
+// openspec/changes/state-store-generic-contract/): conversations, their runs,
+// signals, each source's cooldown window and receipt counters, adapter
+// key-value state and queued-input blobs. No Kubernetes type, no selector
+// string and no transaction crosses this boundary.
 //
-// internal/state/kube is the one backend this change ships: today's
-// Conversation/ConversationInput custom resources, behind this contract,
-// byte-for-byte. internal/state/conformance is the suite every backend,
-// kube included, must pass to exist.
+// The contract is a handful of capability interfaces generic over the record
+// type (Collection, Expiring, Appended, Blobs) and one closed inventory,
+// Stores, whose every field is typed by exactly the capabilities that kind of
+// state has. A backend implements each capability once, for every record type;
+// adding a kind of state is one field plus its declaration (Decl), never a new
+// operation. internal/state/kube is the one backend shipped, and
+// internal/state/conformance is the suite every backend must pass to exist.
 package state
 
 import (
 	"context"
 	"errors"
+	"time"
 )
 
-// ErrNotFound is returned by Get, Update and GetBlob for a key that does not
-// exist, or that exists but has passed ExpiresAt.
+// ErrNotFound is returned by Get, Update and Blobs.Get for a key that does not
+// exist, or that exists but has passed its expiry.
 var ErrNotFound = errors.New("state: record not found")
 
-// ErrConflict is returned by Update and AppendRun's internal retry loop when
-// a write loses a compare-and-swap race. Distinguish it from any other
-// failure with errors.Is(err, state.ErrConflict) — never by string-matching
-// a backend's own error text.
+// ErrConflict is returned by Update when a write loses a compare-and-swap
+// race. Distinguish it from any other failure with
+// errors.Is(err, state.ErrConflict) — never by string-matching a backend's
+// own error text.
 var ErrConflict = errors.New("state: conflicting write")
 
 // ErrAlreadyExists is returned by Create for a key that already has a
@@ -35,54 +40,61 @@ var ErrAlreadyExists = errors.New("state: record already exists")
 // on such a record). Nothing of the write is applied.
 var ErrDeleting = errors.New("state: record is being deleted")
 
-// ErrUnknownIndex is returned by List for an Index outside DeclaredIndexes.
+// ErrUnknownIndex is returned by List for an Index outside the collection's
+// declared Indexes.
 var ErrUnknownIndex = errors.New("state: unknown index")
 
-// Index names one of the Store's declared, closed lookups (design D-2: "the
-// declared index set, closed"). A backend's List implements every member of
-// DeclaredIndexes or fails ErrUnknownIndex — there is no open-ended query.
-type Index string
+// Index names one declared lookup over records of type T (design D-1: "a
+// named extractor typed on the record"). It carries the rule that puts a
+// record under a value, so a backend that evaluates in memory needs nothing
+// else and one that serves the lookup natively (a label, a column) keys its
+// own mapping on Name.
+//
+// The type parameter is the point: an Index[ConversationRecord] cannot be
+// handed to a collection of signals, so an index of one kind is refused for
+// another by the compiler. There is no open-ended query — adding an index is a
+// declaration plus a conformance scenario.
+type Index[T any] struct {
+	name  string
+	value func(*T) (string, bool)
+}
 
-const (
-	// ByConversationID looks up the equality match every signal re-delivery,
-	// reopen's at-most-one-open check and member reuse perform on a
-	// conversation's own correlation id. ListKey.ConversationID is read.
-	ByConversationID Index = "conversationId"
-	// ByPipelineAndPhase looks up a Pipeline's own conversations in one
-	// phase — the queue a Pipeline-rooted dispatch sweep reads.
-	// ListKey.PipelineRef and ListKey.Phase are read.
-	ByPipelineAndPhase Index = "pipelineRef+phase"
-	// ByPhase looks up every conversation in one phase, the admission
-	// gate's and housekeeping's own sweep. ListKey.Phase is read.
-	ByPhase Index = "phase"
-	// ByCausedBy looks up a conversation's direct members: every record whose
-	// CausedBy.Parent names the conversation. The close cascade, the tree
-	// walk and member reuse read it. ListKey.CausedBy is read.
-	ByCausedBy Index = "causedBy"
-	// ByNameBase looks up every record sharing one allocated word-chain, so
-	// the next free name for it can be chosen. ListKey.NameBase is read.
-	ByNameBase Index = "nameBase"
-	// ByAll lists every non-expired record in the store's scope — the
-	// admission gate's slot count, the status view and the signal router's
-	// scan read the whole set. No ListKey field is read.
-	ByAll Index = "all"
-)
+// NewIndex declares an index. value returns the lookup value a record is
+// listed under and whether it is listed at all: a record for which it reports
+// false is absent from the index, which is how a "non-terminal" lookup never
+// returns a terminal record. Compose a multi-part value with IndexValue.
+func NewIndex[T any](name string, value func(*T) (string, bool)) Index[T] {
+	return Index[T]{name: name, value: value}
+}
 
-// DeclaredIndexes is the Store's closed index set. internal/state/conformance
-// walks this slice, so adding an Index here without a kube implementation
-// fails the suite on every backend rather than only the one left behind.
-var DeclaredIndexes = []Index{ByConversationID, ByPipelineAndPhase, ByPhase, ByCausedBy, ByNameBase, ByAll}
+// Name is the index's stable identifier, unique within one collection.
+func (i Index[T]) Name() string { return i.name }
 
-// ListKey carries one index's lookup values. A backend's List reads only the
-// fields the named Index declares above; the rest are ignored, so a caller
-// may always populate every field it has without checking which index it is
-// calling.
-type ListKey struct {
-	ConversationID string
-	PipelineRef    string
-	Phase          string
-	CausedBy       string
-	NameBase       string
+// Value returns the value rec is listed under and whether it is listed.
+func (i Index[T]) Value(rec *T) (string, bool) {
+	if i.value == nil {
+		return "", false
+	}
+	return i.value(rec)
+}
+
+// indexValueSeparator joins the parts of a composite index value. A NUL
+// cannot occur in a name, a phase or an initiation id, so two different
+// part lists never produce one value.
+const indexValueSeparator = "\x00"
+
+// IndexValue composes the value of an index over several record fields, the
+// one a caller of List passes for it (for example a source and an initiation
+// id).
+func IndexValue(parts ...string) string {
+	out := ""
+	for i, p := range parts {
+		if i > 0 {
+			out += indexValueSeparator
+		}
+		out += p
+	}
+	return out
 }
 
 // EventType says what happened to a record on a Watch feed.
@@ -93,7 +105,7 @@ const (
 	// them, exactly as an informer's AddFunc/UpdateFunc collapse to one
 	// reconcile request today.
 	EventPut EventType = "put"
-	// EventDelete is a Delete, or a record crossing its ExpiresAt.
+	// EventDelete is a Delete, or a record crossing its expiry.
 	EventDelete EventType = "delete"
 	// EventBookmark carries no change: only a Resume point, advanced past
 	// whatever the backend has seen since its last event, so an idle feed's
@@ -102,15 +114,15 @@ const (
 	EventBookmark EventType = "bookmark"
 )
 
-// Event is one change on a Watch feed: design D-3's "(key, revision,
-// record)", plus the Type a consumer needs to tell a delete from a put and
-// the Resume token for the point the feed has delivered through. Record is
-// the zero value on EventDelete.
-type Event struct {
+// Event is one change on a Watch feed: "(key, revision, record)", plus the
+// Type a consumer needs to tell a delete from a put and the Resume token for
+// the point the feed has delivered through. Record is the zero value on
+// EventDelete and EventBookmark.
+type Event[T any] struct {
 	Type     EventType
 	Key      Key
 	Revision Revision
-	Record   ConversationRecord
+	Record   T
 	// Resume is this event's own Revision, offered back from Watch's resume
 	// parameter to continue strictly after it. Equal to Revision on
 	// EventPut; a backend still mints one on EventDelete so a consumer that
@@ -118,82 +130,164 @@ type Event struct {
 	Resume Revision
 }
 
-// Store is the only way the manager reaches a Conversation's state. A Store
-// is constructed bound to one namespace (design D-2: "one install per
-// namespace") — no method here takes one, and no method takes a selector
-// string.
-type Store interface {
+// WithItems is a record read together with its appended items, as they stood
+// at the same instant: what GetWithItems returns, one element of
+// ListWithItems, and the payload of a put on WatchWithItems.
+type WithItems[P, T any] struct {
+	Record   P
+	Revision Revision
+	Items    []T
+}
+
+// Decl is a kind of state's declaration (design D-1): everything a backend
+// needs to serve it that is not an operation. It sits beside the Stores field
+// it describes, so adding a kind is one field and one Decl and touches no
+// backend primitive.
+type Decl[T any] struct {
+	// Name identifies the kind in the inventory and in a conformance report.
+	Name string
+	// Indexes is the collection's closed lookup set. List with an Index not
+	// in it is ErrUnknownIndex. The conformance suite walks it.
+	Indexes []Index[T]
+	// Expiry reads a record's expiry instant, nil for none. Declared only by
+	// an Expiring collection; a record past it is invisible to Get and List
+	// and delivered as a delete on the feed.
+	Expiry func(*T) *time.Time
+	// ID reads an appended item's identity. Declared only by the item type of
+	// an Appended collection.
+	ID func(*T) string
+	// Merge applies a grow-only edit to an existing appended item. Declared
+	// only by the item type of an Appended collection. It MUST be idempotent
+	// (merging an edit twice equals once) and commutative (two edits give one
+	// result in either order), which the conformance suite proves, because
+	// that property is what lets Grow take no revision and never conflict.
+	Merge func(item *T, edit T)
+}
+
+// Declares reports whether idx is one of d's declared indexes.
+func (d Decl[T]) Declares(idx Index[T]) bool {
+	for _, have := range d.Indexes {
+		if have.Name() == idx.Name() {
+			return true
+		}
+	}
+	return false
+}
+
+// Collection is the base capability: records of type T keyed by Key, written
+// under compare-and-swap, listed by declared index and watched. A Collection
+// is bound to one install's scope at construction, so no method takes a
+// namespace and none takes a selector string.
+type Collection[T any] interface {
 	// Get returns the current record and its revision, or ErrNotFound.
-	Get(ctx context.Context, key Key) (ConversationRecord, Revision, error)
+	Get(ctx context.Context, key Key) (T, Revision, error)
 
 	// Create writes a new record and returns its revision. ErrAlreadyExists
 	// when key already names a record — including one marked for deletion
-	// and still held by a finalizer — a create carries no revision to lose a
-	// race over, it is refused outright. The record's ID, CreatedAt and
-	// DeletionRequestedAt are minted here, whatever rec carries.
-	Create(ctx context.Context, key Key, rec ConversationRecord) (Revision, error)
+	// and still held by a finalizer: a create carries no revision to lose a
+	// race over, it is refused outright. Identity and timestamps the record
+	// type carries as backend-minted (ID, CreatedAt, DeletionRequestedAt) are
+	// minted here, whatever rec holds.
+	Create(ctx context.Context, key Key, rec T) (Revision, error)
 
 	// Update writes rec in place of the record at rev, returning the new
 	// revision. ErrConflict when rev is not the record's current revision —
-	// the caller's own get-modify-put raced another writer (design D-2) and
-	// must Get again before retrying. ErrDeleting when rec adds a finalizer
-	// to a record marked for deletion. Updating a marked record's last
-	// finalizer away removes the record (see Delete): the returned revision
-	// is the one the removal's EventDelete carries as Resume.
-	Update(ctx context.Context, key Key, rev Revision, rec ConversationRecord) (Revision, error)
+	// the caller's own get-modify-put raced another writer and must Get again
+	// (Mutate does). ErrNotFound when the key is absent. ErrDeleting when rec
+	// adds a finalizer to a record marked for deletion. Updating a marked
+	// record's last finalizer away removes the record (see Delete).
+	Update(ctx context.Context, key Key, rev Revision, rec T) (Revision, error)
 
-	// Delete requests a record's removal (design D-11). A record holding no
-	// finalizer is removed at once and the feed carries EventDelete. A record
-	// holding one stays readable by Get, List and Watch with
-	// DeletionRequestedAt set, the feed carries an EventPut for the marking,
-	// and the record is removed — EventDelete — by the Update that leaves its
-	// Finalizers empty. A second Delete of a marked record changes nothing
-	// and keeps the first DeletionRequestedAt. Not an error when the key is
-	// already absent.
+	// Delete requests a record's removal. A record holding no finalizer is
+	// removed at once and the feed carries EventDelete. A record holding one
+	// stays readable with its deletion time set, the feed carries an EventPut
+	// for the marking, and the record is removed by the Update that leaves
+	// its finalizers empty. A second Delete of a marked record changes
+	// nothing. Not an error when the key is already absent.
 	Delete(ctx context.Context, key Key) error
 
-	// List returns every non-expired record matching one declared Index.
-	// ErrUnknownIndex for an Index outside DeclaredIndexes.
-	List(ctx context.Context, index Index, key ListKey) ([]ConversationRecord, error)
+	// DeleteAt is Delete conditional on the revision the caller read. A
+	// caller that Gets a record, decides on what it saw and then removes it
+	// must not remove a record someone rewrote in between, so it names the
+	// revision it decided on. ErrConflict when rev is not the record's
+	// current revision, the record left intact — the caller Gets again and
+	// decides again, as it does after a lost Update. ErrNotFound when the key
+	// is absent. Finalizer semantics are Delete's: a record holding one is
+	// marked, not removed. Delete stays for a caller that never read first.
+	DeleteAt(ctx context.Context, key Key, rev Revision) error
+
+	// List returns every visible record that idx lists under value (compose
+	// a multi-part value with IndexValue; "" for an index over the whole
+	// set). Order is unspecified. ErrUnknownIndex for an index the
+	// collection's Decl does not declare.
+	List(ctx context.Context, idx Index[T], value string) ([]T, error)
 
 	// Watch delivers an at-least-once feed of Event, resuming strictly after
-	// resume (empty Revision starts from now). The channel closes when ctx
-	// is done; a backend reports a terminal failure by closing the channel
-	// early, with no error value crossing this contract (design: no
-	// transactions, no backend-specific type leaks through).
-	Watch(ctx context.Context, resume Revision) (<-chan Event, error)
+	// resume (empty Revision starts from now). The channel closes when ctx is
+	// done; a backend reports a terminal failure by closing the channel
+	// early, with no error value crossing this contract.
+	Watch(ctx context.Context, resume Revision) (<-chan Event[T], error)
+}
 
-	// AppendRun adds run to key's append-only run history. Takes no
-	// revision: appends commute, and a backend meets this with its own
-	// internal CAS retry loop (design D-5) rather than surfacing a conflict
-	// the caller would have no reason to expect.
-	AppendRun(ctx context.Context, key Key, run Run) error
+// Expiring is a Collection whose records carry an expiry. A record past it is
+// invisible to Get and List and delivered as a delete on the feed, so a
+// terminal record removes itself and nothing deletes it by hand. Only a kind
+// whose field is typed Expiring has this; a Conversation never expires.
+type Expiring[T any] interface {
+	Collection[T]
 
-	// UpdateRun applies upd to the run named runID in key's history (design
-	// D-12). Takes no revision: every RunUpdate field only grows, so updates
-	// commute with each other and with AppendRun, and a backend meets this
-	// with its own internal retry. Applying an update already applied
-	// changes nothing and is not an error. ErrNotFound when key names no
-	// record or the record has no run runID — a caller whose run aged out of
-	// the bounded history treats that as nothing owed.
-	UpdateRun(ctx context.Context, key Key, runID string, upd RunUpdate) error
+	// Expiry returns the instant after which rec is invisible, nil for none.
+	// It is the Decl's own extractor, offered so a consumer reads the same
+	// instant the store applies.
+	Expiry(rec T) *time.Time
+}
 
-	// ListRuns returns key's run history in append order.
-	ListRuns(ctx context.Context, key Key) ([]Run, error)
+// Appended is an append-only sub-collection of items of type T hanging off a
+// parent record of type P, keyed by the parent's Key. It does not embed
+// Collection: an item is never created, replaced or deleted on its own, only
+// appended and grown, and it lives and dies with its parent.
+type Appended[P, T any] interface {
+	// Append adds item to parent's history. It takes no revision: appends
+	// commute, and a backend meets this with its own internal retry rather
+	// than surfacing a conflict. ErrNotFound when parent does not exist.
+	Append(ctx context.Context, parent Key, item T) error
 
-	// GetWithRuns is Get and ListRuns in ONE read: the record, its revision
-	// and its run history as they stood at the same instant, or ErrNotFound
-	// by Get's rule. The reconciler reads both on every pass, and a backend
-	// that holds the history on the record spends one round trip instead of two.
-	GetWithRuns(ctx context.Context, key Key) (ConversationRecord, Revision, []Run, error)
+	// List returns parent's items in append order. A parent with none lists
+	// empty. A parent that does not exist is ErrNotFound, as ListRuns always
+	// answered.
+	List(ctx context.Context, parent Key) ([]T, error)
 
-	// PutBlob stores blob under key, replacing any value already there.
-	PutBlob(ctx context.Context, key Key, blob Blob) error
+	// Grow applies edit to the item with identity id by the Decl's Merge. It
+	// takes no revision and never conflicts, because the merge is idempotent
+	// and commutative: applying an edit already applied changes nothing, and
+	// edits commute with each other and with Append. ErrNotFound when the
+	// parent or the item does not exist, so a caller whose item aged out of a
+	// bounded history can tell it from success.
+	Grow(ctx context.Context, parent Key, id string, edit T) error
 
-	// GetBlob returns the blob stored under key, or ErrNotFound.
-	GetBlob(ctx context.Context, key Key) (Blob, error)
+	// GetWithItems is the parent's Get and List in ONE read: the record, its
+	// revision and its items as they stood at the same instant, or
+	// ErrNotFound by Get's rule.
+	GetWithItems(ctx context.Context, parent Key) (P, Revision, []T, error)
 
-	// DeleteBlob removes a blob. Not an error when the key is already
-	// absent — a deleted key reads absent (task 2.5), it does not error.
-	DeleteBlob(ctx context.Context, key Key) error
+	// ListWithItems lists the parent collection by one of its declared
+	// indexes, each record with exactly the items GetWithItems returns for
+	// it. How a backend joins the items to the records is its own.
+	ListWithItems(ctx context.Context, idx Index[P], value string) ([]WithItems[P, T], error)
+
+	// WatchWithItems is the parent's feed with each put carrying the
+	// record's items as of that revision. Semantics as Collection.Watch.
+	WatchWithItems(ctx context.Context, resume Revision) (<-chan Event[WithItems[P, T]], error)
+}
+
+// Blobs stores the out-of-line body of a queued input, keyed by Key.
+type Blobs interface {
+	// Put stores blob under key, replacing any value already there.
+	Put(ctx context.Context, key Key, blob Blob) error
+
+	// Get returns the blob stored under key, or ErrNotFound.
+	Get(ctx context.Context, key Key) (Blob, error)
+
+	// Delete removes a blob. Not an error when the key is already absent.
+	Delete(ctx context.Context, key Key) error
 }

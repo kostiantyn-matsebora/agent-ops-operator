@@ -11,6 +11,10 @@ The console SHALL build its configuration state exclusively from list/watch of `
 - **WHEN** the console's ServiceAccount is checked for `get`, `list` or `watch` on conversations, conversationinputs and signals
 - **THEN** each is denied, and the console still shows every conversation and signal
 
+#### Scenario: Signals arrive by watch like every other kind
+- **WHEN** a Signal's phase moves from Pending to Routed
+- **THEN** the console reflects it from the manager's signal feed, with no polling and no write path to the kind
+
 #### Scenario: Watch expiry recovers
 - **WHEN** the API server returns 410 Gone for a stale watch
 - **THEN** the console relists that kind, replaces its cache, and resumes watching without serving an error to browsers

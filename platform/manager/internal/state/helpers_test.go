@@ -9,31 +9,33 @@ import (
 	"time"
 )
 
-// casStore is the smallest Store the write helpers need: one record, a revision
-// counter, and a hook to lose a race on demand. The conformance suite owns the
-// contract; this only gives Mutate something to compare against.
-type casStore struct {
-	Store // every method the helpers do not touch panics through the nil embed
-	rec   ConversationRecord
-	rev   int
-	found bool
+// casStore is the smallest Collection the write helpers need: one record, a
+// revision counter, and a hook to lose a race on demand. It is generic, the way
+// Mutate is. The conformance suite owns the contract; this only gives Mutate
+// something to compare against.
+type casStore[T any] struct {
+	Collection[T] // every method the helpers do not touch panics through the nil embed
+	rec           T
+	rev           int
+	found         bool
 	// beforeUpdate runs ahead of each Update, to let another writer in.
-	beforeUpdate func(s *casStore)
+	beforeUpdate func(s *casStore[T])
 	updates      int
 }
 
-func newCASStore(rec ConversationRecord) *casStore {
-	return &casStore{rec: rec, rev: 1, found: true}
+func newCASStore[T any](rec T) *casStore[T] {
+	return &casStore[T]{rec: rec, rev: 1, found: true}
 }
 
-func (c *casStore) Get(_ context.Context, _ Key) (ConversationRecord, Revision, error) {
+func (c *casStore[T]) Get(_ context.Context, _ Key) (T, Revision, error) {
 	if !c.found {
-		return ConversationRecord{}, "", ErrNotFound
+		var zero T
+		return zero, "", ErrNotFound
 	}
 	return c.rec, Revision(strconv.Itoa(c.rev)), nil
 }
 
-func (c *casStore) Update(_ context.Context, _ Key, rev Revision, rec ConversationRecord) (Revision, error) {
+func (c *casStore[T]) Update(_ context.Context, _ Key, rev Revision, rec T) (Revision, error) {
 	if c.beforeUpdate != nil {
 		c.beforeUpdate(c)
 	}
@@ -71,7 +73,7 @@ func TestMutateWritesNothingWhenNothingChanged(t *testing.T) {
 func TestMutateRereadsAfterLosingARaceAndKeepsTheWinnersWrite(t *testing.T) {
 	s := newCASStore(ConversationRecord{Name: "c"})
 	raced := false
-	s.beforeUpdate = func(c *casStore) {
+	s.beforeUpdate = func(c *casStore[ConversationRecord]) {
 		if !raced {
 			raced = true
 			c.rec.Brief = "from the other writer"
@@ -94,7 +96,7 @@ func TestMutateRereadsAfterLosingARaceAndKeepsTheWinnersWrite(t *testing.T) {
 
 func TestMutateGivesUpAfterTheBoundAndWrapsTheConflict(t *testing.T) {
 	s := newCASStore(ConversationRecord{Name: "c"})
-	s.beforeUpdate = func(c *casStore) { c.rev++ } // always loses
+	s.beforeUpdate = func(c *casStore[ConversationRecord]) { c.rev++ } // always loses
 	_, err := Mutate(context.Background(), s, "c", func(r *ConversationRecord) error {
 		r.Phase = PhaseQueued
 		return nil
@@ -204,5 +206,32 @@ func TestWatermarksAreOpaqueStringsComparedAtFullPrecision(t *testing.T) {
 	}
 	if (&ThreadBinding{ReadAt: &at}).Unread(&after, "") {
 		t.Fatal("an untracked binding predates the mechanism and reads as read")
+	}
+}
+
+// Mutate is generic over the record: the same loop serves a kind that is not a
+// conversation, and creates nothing when the key is absent.
+func TestMutateIsGenericOverTheRecordType(t *testing.T) {
+	s := newCASStore(CooldownWindow{})
+	raced := false
+	s.beforeUpdate = func(c *casStore[CooldownWindow]) {
+		if !raced {
+			raced = true
+			c.rec.Entries = append(c.rec.Entries, CooldownEntry{InitiationID: "theirs"})
+			c.rev++
+		}
+	}
+	got, err := Mutate(context.Background(), s, "src", func(w *CooldownWindow) error {
+		w.Entries = append(w.Entries, CooldownEntry{InitiationID: "mine"})
+		return nil
+	})
+	if err != nil || len(got.Entries) != 2 || s.updates != 1 {
+		t.Fatalf("got (%+v, %v) after %d updates, want the winner's entry kept and ours added", got, err, s.updates)
+	}
+
+	str := newCASStore("")
+	str.found = false
+	if _, err := Mutate(context.Background(), str, "k", func(*string) error { return nil }); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("got %v, want ErrNotFound for an absent string record", err)
 	}
 }

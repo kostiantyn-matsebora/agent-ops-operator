@@ -1238,6 +1238,74 @@
         "renamed",
         "previously"
       ]
+    },
+    {
+      "id": "state-signalstore",
+      "pattern": "\\bSignalStore\\b",
+      "says": "state.Stores, the closed inventory every kind of state lives on",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "formerly",
+        "no longer",
+        "replaced",
+        "renamed",
+        "previously",
+        "is gone",
+        "gone"
+      ]
+    },
+    {
+      "id": "state-cooldown-helpers",
+      "pattern": "\\b(Get|Put)Cooldown\\b",
+      "says": "GetCooldownWindow and PutCooldownWindow, the helpers in internal/signalroute over state.Collection[CooldownWindow]",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "formerly",
+        "no longer",
+        "replaced",
+        "renamed",
+        "previously",
+        "is gone",
+        "gone"
+      ]
+    },
+    {
+      "id": "state-receipt-helpers",
+      "pattern": "\\b(RecordReceived|GetReceived)\\b",
+      "says": "CountReceipt and GetReceipts, the helpers in internal/signalroute over state.Collection[Received]",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "formerly",
+        "no longer",
+        "replaced",
+        "renamed",
+        "previously",
+        "is gone",
+        "gone"
+      ]
+    },
+    {
+      "id": "state-releasesource",
+      "pattern": "\\bReleaseSource\\b",
+      "says": "the source-release helper in internal/controller, over Signals.List and DeleteAt",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "formerly",
+        "no longer",
+        "replaced",
+        "renamed",
+        "previously",
+        "is gone",
+        "gone"
+      ]
     }
   ]
 }

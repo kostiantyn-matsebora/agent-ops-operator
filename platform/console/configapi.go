@@ -346,8 +346,8 @@ type KindInfo struct {
 }
 
 func (a *API) handleKinds(w http.ResponseWriter, r *http.Request) {
-	out := make([]KindInfo, 0, len(Kinds))
-	for _, k := range Kinds {
+	out := make([]KindInfo, 0, len(ConfigurableKinds))
+	for _, k := range ConfigurableKinds {
 		out = append(out, KindInfo{Kind: k, Title: Singular[k], Count: len(a.cache.List(k)), Synced: a.cache.Synced(k)})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -718,8 +718,13 @@ func pipelineSummary(spec pipelineSpec) string {
 	return strings.Join(parts, ", ")
 }
 
+// knownKind reports whether the generic configuration surface (this file,
+// and the delta projection in api.go) recognizes kind. ConfigurableKinds,
+// not the bare Kinds the Kubernetes watch is scoped to, since conversations
+// and signals are known here too — just sourced from the manager's state
+// read surface instead (state.go).
 func knownKind(kind string) bool {
-	for _, k := range Kinds {
+	for _, k := range ConfigurableKinds {
 		if k == kind {
 			return true
 		}

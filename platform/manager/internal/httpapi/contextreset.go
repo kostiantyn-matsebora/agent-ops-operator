@@ -49,7 +49,7 @@ func (s *Server) handleContextReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := state.Patch(r.Context(), s.Store, conv, func(c *state.ConversationRecord) {
+	err := state.Patch(r.Context(), s.Conversations, conv, func(c *state.ConversationRecord) {
 		c.RuntimeContextID = ""
 		// The retired spelling is cleared too. Leaving it would let the dual-read
 		// that exists for upgrades resurrect the handle this call just removed.

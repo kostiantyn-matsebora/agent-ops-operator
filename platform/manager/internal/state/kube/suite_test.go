@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 var (
@@ -62,23 +63,13 @@ func TestMain(m *testing.M) {
 
 var nsCounter atomic.Int64
 
-// newTestNamespace creates a fresh namespace and returns a Store scoped to
-// it. Every scenario that asserts an EXACT set (List, Watch) gets its own
-// namespace rather than sharing one across the whole test binary — the
-// same "one install per namespace" boundary design D-2 and the spec's own
-// scope-isolation scenario rest on, used here for test isolation instead
-// of install isolation, so one test's fixtures can never leak into
-// another's assertions.
-func newTestNamespace(t testing.TB) (string, *Store) {
-	t.Helper()
-	return newTestNamespaceWithSweepInterval(t, DefaultSweepInterval)
-}
-
-// newTestNamespaceWithSweepInterval is newTestNamespace with the expiry
-// sweep's poll period overridden, for the one scenario (2.6) that needs to
-// observe a sweep inside a test's own timeout rather than wait out
-// DefaultSweepInterval.
-func newTestNamespaceWithSweepInterval(t testing.TB, sweepInterval time.Duration) (string, *Store) {
+// newNamespace creates a fresh namespace. Every scenario that asserts an EXACT
+// set (List, Watch) gets its own namespace rather than sharing one across the
+// whole test binary: the same "one install per namespace" boundary design D-2
+// and the spec's own scope-isolation scenario rest on, used here for test
+// isolation instead of install isolation, so one test's fixtures can never
+// leak into another's assertions.
+func newNamespace(t testing.TB) string {
 	t.Helper()
 	name := fmt.Sprintf("kube-test-%d-%d", os.Getpid(), nsCounter.Add(1))
 	ns := &corev1.Namespace{}
@@ -86,5 +77,43 @@ func newTestNamespaceWithSweepInterval(t testing.TB, sweepInterval time.Duration
 	if err := wwClient.Create(context.Background(), ns); err != nil {
 		t.Fatalf("create test namespace %q: %v", name, err)
 	}
-	return name, NewStoreWithSweepInterval(wwClient, name, sweepInterval)
+	return name
+}
+
+// openBackend opens every store over c in ns, failing the test on a layout the
+// backend refuses.
+func openBackend(t testing.TB, c client.WithWatch, ns string, opts ...Option) *Backend {
+	t.Helper()
+	b, err := OpenStores(c, ns, opts...)
+	if err != nil {
+		t.Fatalf("OpenStores: %v", err)
+	}
+	return b
+}
+
+// newTestNamespace creates a fresh namespace and returns the stores scoped to
+// it.
+func newTestNamespace(t testing.TB) (string, state.Stores) {
+	t.Helper()
+	ns := newNamespace(t)
+	return ns, openBackend(t, wwClient, ns).Stores
+}
+
+// recvEvent blocks for one event or fails the test after a generous timeout
+// — envtest's own watch latency is normally well under a second, so a real
+// gap means a bug, not a slow CI box. Shared by every layout test that reads
+// a feed directly (the generic feed scenarios live in
+// internal/state/conformance now).
+func recvEvent[T any](t *testing.T, events <-chan state.Event[T]) state.Event[T] {
+	t.Helper()
+	select {
+	case ev, ok := <-events:
+		if !ok {
+			t.Fatal("event channel closed unexpectedly")
+		}
+		return ev
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for a watch event")
+	}
+	return state.Event[T]{}
 }

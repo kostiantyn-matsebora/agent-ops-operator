@@ -106,7 +106,7 @@ success.
 - **THEN** the flags are set, the delivered set holds each channel once in
   first-appearance order, and no other run changed
 
-#### Scenario: Concurrent edits and an append all land
+#### Scenario: Concurrent updates and an append all land
 - **WHEN** several edits and an append reach one conversation at the same
   moment, none holding a revision
 - **THEN** every one succeeds and the listing holds every effect
@@ -232,7 +232,7 @@ The cooldown window SHALL be cleared only when no source holds the name. The cal
 - **THEN** the first source's signals and window are gone, and the second's are
   untouched
 
-#### Scenario: A successor's signals survive a release made with only the name
+#### Scenario: A successor's signals outlive the departed release
 - **WHEN** a source is released by name while a signal recorded under the
   identity of a source that now holds that name exists
 - **THEN** the previous incarnation's signals are gone and the successor's stay,
@@ -318,6 +318,34 @@ the typed collections.
 - **WHEN** a reader asks what state the store keeps
 - **THEN** the inventory struct answers completely, one field per kind, with
   its capabilities and indexes beside it
+
+### Requirement: A delete MAY be conditional on a revision
+A collection SHALL offer a delete conditional on a revision, beside its unconditional delete.
+
+A caller that read a record and decided on it SHALL be able to remove exactly that revision.
+
+A revision that is not the record's current one SHALL be refused with the conflict error. The record SHALL stay intact.
+
+An absent key SHALL be refused with the not-found error.
+
+A record whose removal is held SHALL be marked for deletion, not removed, as for the unconditional delete.
+
+The unconditional delete remains for a caller that never read first.
+
+#### Scenario: A stale revision is refused
+- **WHEN** a record is rewritten after a caller read it
+- **AND** the caller deletes it under the revision it read
+- **THEN** the delete fails with the conflict error
+- **AND** the record is unchanged
+
+#### Scenario: The current revision removes the record
+- **WHEN** a caller deletes a record under its current revision
+- **THEN** the record is removed
+
+#### Scenario: The source release deletes under the revision it read
+- **WHEN** a signal is rewritten between the release's decision and its delete
+- **THEN** the signal is not deleted on the stale revision
+- **AND** the release reads it again and decides again
 
 ### Requirement: A listing and a feed event can carry a record's appended items
 A collection that has an appended capability SHALL offer one listing that

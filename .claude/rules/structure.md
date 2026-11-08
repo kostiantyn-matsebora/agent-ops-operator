@@ -45,7 +45,7 @@ Own Go module, the only one with dependencies.
 | `internal/chat/` | Provider/Registry, OpQueue (`ensure-topic`\|`send`\|`close-topic`\|`delete-conversation`), Router |
 | `internal/dispatch/` | input → work-unit, `templates/format.md` is the mandatory output format |
 | `internal/mcpcompile/` | bound MCPConfigs → `mcp.json`. Raw hand-written `mcp.json` is EXCLUSIVE |
-| `internal/state/` | the state store contract (domain records, `Store` for conversations and `SignalStore` for signals, the cooldown window and the receipt counters), `kube/` the one shipped backend, `conformance/` the suite every backend passes to exist (and the bench). The manager reaches conversation and signal state through it, not through the Kubernetes client |
+| `internal/state/` | the GENERIC state contract — `Collection[T]`/`Expiring[T]`/`Appended[P,T]`/`Blobs`, one closed inventory `Stores` (conversations, runs, signals, cooldowns, receipts, adapter state, blobs). `kube/` the one shipped backend, one generic constructor (`kube.Open[T]`/`OpenStores`) over per-kind layouts. `conformance/` the suite every backend passes to exist (and the bench), walked once per field of `Stores`. The manager reaches every kind of state through it, never the Kubernetes client directly |
 | `internal/integration/` | envtest suite, real API server, no kubelet |
 | `config/samples/` | example CRs only |
 
@@ -78,15 +78,19 @@ other three are optional bundles under `chart/charts/<name>/`, off by default.
 
 | Component | Is |
 |---|---|
-| `platform/housekeeping/` | disk GC CronJob, PHASE-BLIND listing (a closed conversation still has a CR) |
+| `platform/housekeeping/` | disk GC CronJob, PHASE-BLIND listing (a closed conversation still has a CR). Lists over the manager's `/state/conversations`, never the Kubernetes API — no RBAC, no mounted ServiceAccount token |
 | `platform/egress-proxy/` | tool-access wall inside the runtime pod — the wall for an agent that doesn't cooperate with `--allowedTools` |
 | `platform/context-sync/` | context sidecar, atomic generations + `current` symlink |
 | `platform/mcp-aops/` | thin MCP client forwarding `AOPS_MCP_TOKEN` — decides nothing, the MANAGER enforces every verb |
 
 ### `platform/console/`
 
-A ChannelAdapter that is ALSO the viewer, read-only watch of the ten
+A ChannelAdapter that is ALSO the viewer, read-only watch of eleven
 agentops kinds plus pods/deployments/cronjobs. **NO write path to the
 Kubernetes API** — the only write anywhere is `POST /channel/inbound`.
-Topology is THREE VIEWS (Model, Components, Infrastructure) of one
-activity feed. `docs/console.md` owns the detail.
+
+Conversations and Signals are the two kinds it does NOT watch over
+Kubernetes: it reads both through the manager's `/state/*` surface
+instead, over its own `ChannelAdapter`'s derived token
+(`spec.stateAccess: true`). Topology is THREE VIEWS (Model, Components,
+Infrastructure) of one activity feed. `docs/console.md` owns the detail.

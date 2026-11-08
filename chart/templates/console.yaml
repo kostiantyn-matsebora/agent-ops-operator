@@ -194,6 +194,11 @@ spec:
   # A REFERENCE to the account this chart renders beside the console's
   # read-only Role. Naming it is what mounts its token.
   serviceAccountName: agentops-adapter-{{ $c.name }}
+  # Design state-store-generic-contract D-6: the console reads conversations
+  # and signals through the manager's /state/* surface, with its own derived
+  # token, rather than the Kubernetes API. Without this the token is refused
+  # by name — an adapter declares its own reach.
+  stateAccess: true
   # A VIEWER, NOT A TRANSPORT. The console renders only what it is sent, so a
   # person typing here does not see their own message unless the manager
   # delivers it — which is why a conversation started from the composer used to
@@ -357,13 +362,11 @@ rules:
       - agentruntimes
       - channels
       - channeladapters
-      - conversations
       - coordinators
       - mcpconfigs
       - mcptoolsets
       - pipelines
       - signaladapters
-      - signals
       - signalsources
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]

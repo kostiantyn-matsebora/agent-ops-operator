@@ -22,20 +22,23 @@ func (c *countingReader) List(ctx context.Context, list client.ObjectList, opts 
 	return c.Reader.List(ctx, list, opts...)
 }
 
-// With a cache the store hands List to it and never lists the apiserver
+// With a cache the collection hands List to it and never lists the apiserver
 // itself, while Get still reads the apiserver: a lookup may be served from
 // memory, a precondition may not. Before this option a close that walked the
 // child lookup twice listed 552 conversations (6 MB) from the apiserver each
 // time and a console batch passed the gateway's 60 seconds.
 func TestCachedListsServeListFromTheReaderAndNothingElse(t *testing.T) {
-	_, s := newTestNamespace(t)
+	ns, s := newTestNamespace(t)
 	ctx := context.Background()
 	createForList(t, ctx, s, "conv-a", "id-1", "pipe-1", "Working")
 
-	cache := &countingReader{Reader: s.client}
-	s.WithCachedLists(cache)
+	cache := &countingReader{Reader: wwClient}
+	cached, err := Open(wwClient, ns, ConversationLayout(), WithCachedLists(cache))
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	got, err := s.List(ctx, state.ByAll, state.ListKey{})
+	got, err := cached.List(ctx, state.ByAll, "")
 	if err != nil || len(got) != 1 {
 		t.Fatalf("List through the reader = %v, %v; want the one record", got, err)
 	}
@@ -44,7 +47,7 @@ func TestCachedListsServeListFromTheReaderAndNothingElse(t *testing.T) {
 	}
 
 	before := cache.lists.Load()
-	if _, _, err := s.Get(ctx, state.Key("conv-a")); err != nil {
+	if _, _, err := cached.Get(ctx, state.Key("conv-a")); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if cache.lists.Load() != before {
@@ -52,10 +55,14 @@ func TestCachedListsServeListFromTheReaderAndNothingElse(t *testing.T) {
 	}
 }
 
-// Without the option the store lists through its own client, as before.
+// Without the option the collection lists through its own client, as before.
 func TestListWithoutACacheUsesTheClient(t *testing.T) {
-	_, s := newTestNamespace(t)
-	if s.listReader() != client.Reader(s.client) {
-		t.Fatal("a store given no cache must list through its client")
+	ns := newNamespace(t)
+	c, err := Open(wwClient, ns, ConversationLayout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := &c.(*collection[state.ConversationRecord]).base; b.listReader() != client.Reader(b.client) {
+		t.Fatal("a collection given no cache must list through its client")
 	}
 }

@@ -96,6 +96,11 @@ type SignalAdapterSpec struct {
 	// +listMapKey=name
 	// +optional
 	Externals []ExternalRef `json:"externals,omitempty"`
+	// StateAccess grants this adapter's derived token the manager's state read
+	// surface. Silence grants nothing.
+	// +kubebuilder:default=false
+	// +optional
+	StateAccess bool `json:"stateAccess,omitempty"`
 }
 
 // SignalAdapterStatus reports workload and serving state.

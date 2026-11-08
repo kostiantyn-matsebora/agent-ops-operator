@@ -114,7 +114,7 @@ func TestSourceOfAnExternallyServedAdapterResolvesServed(t *testing.T) {
 	mkSignalSource(t, "sb-src", "sb-adapter-served", "")
 	reconcileSignalAdapter(t, "sb-adapter-served")
 
-	rc := &controller.SignalSourceReconciler{Client: k8sClient, Signals: signalStore}
+	rc := &controller.SignalSourceReconciler{Client: k8sClient, Signals: stores.Signals, Cooldowns: stores.Cooldowns}
 	if _, err := rc.Reconcile(ctx,
 		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "sb-src"}}); err != nil {
 		t.Fatal(err)

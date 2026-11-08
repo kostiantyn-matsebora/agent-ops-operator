@@ -27,10 +27,10 @@ func getObject(t *testing.T, ns, name string) *agentopsv1alpha1.Conversation {
 func TestIdentityIsTheObjectUIDAndCreationTime(t *testing.T) {
 	ns, s := newTestNamespace(t)
 	rec := fixtureRecord("conv-identity-uid")
-	if _, err := s.Create(context.Background(), state.Key(rec.Name), rec); err != nil {
+	if _, err := s.Conversations.Create(context.Background(), state.Key(rec.Name), rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	got, _, err := s.Get(context.Background(), state.Key(rec.Name))
+	got, _, err := s.Conversations.Get(context.Background(), state.Key(rec.Name))
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -45,11 +45,11 @@ func TestFinalizersRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	rec := fixtureRecord("conv-finalizers")
 	rec.Finalizers = []string{"example.com/hold"}
-	rev, err := s.Create(ctx, state.Key(rec.Name), rec)
+	rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	got, _, err := s.Get(ctx, state.Key(rec.Name))
+	got, _, err := s.Conversations.Get(ctx, state.Key(rec.Name))
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -59,10 +59,10 @@ func TestFinalizersRoundTrip(t *testing.T) {
 	}
 
 	// Marked, then released by Update: the object is gone, status included.
-	if err := s.Delete(ctx, state.Key(rec.Name)); err != nil {
+	if err := s.Conversations.Delete(ctx, state.Key(rec.Name)); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	marked, rev, err := s.Get(ctx, state.Key(rec.Name))
+	marked, rev, err := s.Conversations.Get(ctx, state.Key(rec.Name))
 	if err != nil || marked.DeletionRequestedAt == nil {
 		t.Fatalf("Get marked = %+v, %v", marked, err)
 	}
@@ -71,10 +71,10 @@ func TestFinalizersRoundTrip(t *testing.T) {
 	}
 	marked.Finalizers = nil
 	marked.Phase = "Closed"
-	if _, err := s.Update(ctx, state.Key(rec.Name), rev, marked); err != nil {
+	if _, err := s.Conversations.Update(ctx, state.Key(rec.Name), rev, marked); err != nil {
 		t.Fatalf("Update releasing: %v", err)
 	}
-	if _, _, err := s.Get(ctx, state.Key(rec.Name)); err == nil {
+	if _, _, err := s.Conversations.Get(ctx, state.Key(rec.Name)); err == nil {
 		t.Fatalf("record still readable after its last finalizer was released")
 	}
 }
@@ -83,7 +83,7 @@ func TestUpdateKeepsMetadataTheRecordDoesNotModel(t *testing.T) {
 	ns, s := newTestNamespace(t)
 	ctx := context.Background()
 	rec := fixtureRecord("conv-foreign-meta")
-	rev, err := s.Create(ctx, state.Key(rec.Name), rec)
+	rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -95,13 +95,13 @@ func TestUpdateKeepsMetadataTheRecordDoesNotModel(t *testing.T) {
 	if err := wwClient.Update(ctx, obj); err != nil {
 		t.Fatalf("foreign write: %v", err)
 	}
-	cur, rev, err := s.Get(ctx, state.Key(rec.Name))
+	cur, rev, err := s.Conversations.Get(ctx, state.Key(rec.Name))
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	_ = rev
 	cur.Phase = "Closed"
-	if _, err := s.Update(ctx, state.Key(rec.Name), rev, cur); err != nil {
+	if _, err := s.Conversations.Update(ctx, state.Key(rec.Name), rev, cur); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	after := getObject(t, ns, rec.Name)
@@ -114,7 +114,7 @@ func TestLookupLabelsMirrorTheRecord(t *testing.T) {
 	ns, s := newTestNamespace(t)
 	ctx := context.Background()
 	rec := fixtureRecord("conv-labels")
-	rev, err := s.Create(ctx, state.Key(rec.Name), rec)
+	rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestLookupLabelsMirrorTheRecord(t *testing.T) {
 	}
 
 	rec.CausedBy = nil
-	if _, err := s.Update(ctx, state.Key(rec.Name), rev, rec); err != nil {
+	if _, err := s.Conversations.Update(ctx, state.Key(rec.Name), rev, rec); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	if _, has := getObject(t, ns, rec.Name).Labels[agentopsv1alpha1.LabelCausedBy]; has {
@@ -132,22 +132,22 @@ func TestLookupLabelsMirrorTheRecord(t *testing.T) {
 	}
 }
 
-func TestUpdateRunWritesNothingWhenAlreadySatisfied(t *testing.T) {
+func TestGrowWritesNothingWhenAlreadySatisfied(t *testing.T) {
 	ns, s := newTestNamespace(t)
 	ctx := context.Background()
 	key := state.Key("conv-run-noop")
-	if _, err := s.Create(ctx, key, fixtureRecord("conv-run-noop")); err != nil {
+	if _, err := s.Conversations.Create(ctx, key, fixtureRecord("conv-run-noop")); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if err := s.AppendRun(ctx, key, state.Run{RunID: "r1", DeliveryTracked: true, RoutedToParent: true, Delivered: []string{"chan-a"}}); err != nil {
+	if err := s.Runs.Append(ctx, key, state.Run{RunID: "r1", DeliveryTracked: true, RoutedToParent: true, Delivered: []string{"chan-a"}}); err != nil {
 		t.Fatalf("AppendRun: %v", err)
 	}
 	before := getObject(t, ns, string(key)).ResourceVersion
-	if err := s.UpdateRun(ctx, key, "r1", state.RunUpdate{MarkDeliveryTracked: true, MarkRoutedToParent: true, MarkDelivered: []string{"chan-a"}}); err != nil {
-		t.Fatalf("UpdateRun: %v", err)
+	if err := s.Runs.Grow(ctx, key, "r1", state.Run{DeliveryTracked: true, RoutedToParent: true, Delivered: []string{"chan-a"}}); err != nil {
+		t.Fatalf("Grow: %v", err)
 	}
 	if after := getObject(t, ns, string(key)).ResourceVersion; after != before {
-		t.Fatalf("an already-satisfied UpdateRun wrote: resourceVersion %s -> %s", before, after)
+		t.Fatalf("an already-satisfied Grow wrote: resourceVersion %s -> %s", before, after)
 	}
 }
 
@@ -163,10 +163,10 @@ func TestInstantsReadBackInUTCUnderANonUTCLocalZone(t *testing.T) {
 	ctx := context.Background()
 	rec := fixtureRecord("conv-utc-kube")
 	rec.Finalizers = nil
-	if _, err := s.Create(ctx, state.Key(rec.Name), rec); err != nil {
+	if _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	got, _, err := s.Get(ctx, state.Key(rec.Name))
+	got, _, err := s.Conversations.Get(ctx, state.Key(rec.Name))
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

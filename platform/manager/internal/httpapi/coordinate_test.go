@@ -15,7 +15,6 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // erroringReader always fails to read, for exercising readJSON's error path —
@@ -35,10 +34,10 @@ func coordServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(objs...).Build()
-	store := kube.NewStore(c, "agent-ops")
-	q := &chat.OpQueue{Store: store, Registry: chat.NewRegistry()}
-	router := &chat.Router{Client: c, Reader: c, Store: store, Namespace: "agent-ops", Ops: q}
-	return &Server{Reader: c, Client: c, Store: store, Namespace: "agent-ops", AdapterToken: coordTestMasterKey, Router: router}, c
+	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
+	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry()}
+	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
+	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", AdapterToken: coordTestMasterKey, Router: router}, c
 }
 
 func postCoordinate(s *Server, path, token string, body map[string]any) *httptest.ResponseRecorder {

@@ -12,7 +12,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 func causedConv(name, parent string) *agentopsv1alpha1.Conversation {
@@ -40,7 +39,7 @@ func TestCascadeDeleteMembersDeletesTheSubtreeAndTrustsTheFieldOverTheLabel(t *t
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(
 		causedConv("root", ""), causedConv("mid", "root"), causedConv("leaf", "mid"), decoy,
 	).Build()
-	s := &Server{Client: c, Reader: c, Store: kube.NewStore(c, "agent-ops"), Namespace: "agent-ops"}
+	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops"}
 
 	if err := s.cascadeDeleteMembers(context.Background(), "root"); err != nil {
 		t.Fatal(err)
@@ -62,7 +61,7 @@ func TestCascadeDeleteMembersToleratesNotFoundAndReportsOtherErrors(t *testing.T
 		c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 			WithObjects(causedConv("m", "root")).
 			WithInterceptorFuncs(interceptor.Funcs{Delete: del}).Build()
-		return &Server{Client: c, Reader: c, Store: kube.NewStore(c, "agent-ops"), Namespace: "agent-ops"}
+		return &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops"}
 	}
 
 	gone := build(func(context.Context, client.WithWatch, client.Object, ...client.DeleteOption) error {
@@ -84,7 +83,7 @@ func TestCascadeDeleteMembersReportsAListFailure(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithInterceptorFuncs(interceptor.Funcs{
 		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error { return boom },
 	}).Build()
-	s := &Server{Client: c, Reader: c, Store: kube.NewStore(c, "agent-ops"), Namespace: "agent-ops"}
+	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops"}
 	if err := s.cascadeDeleteMembers(context.Background(), "root"); !errors.Is(err, boom) {
 		t.Fatalf("a list failure must surface, got %v", err)
 	}

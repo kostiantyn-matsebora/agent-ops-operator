@@ -8,11 +8,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // ConditionServed answers "does anything serve this channel's type" — the
@@ -25,6 +27,10 @@ type ChannelReconciler struct {
 	client.Client
 	// Registry resolves in-process (built-in) channel types.
 	Registry *chat.Registry
+	// AdapterState releases a deleted Channel's own adapter-state keys
+	// (state-store-generic-contract design D-4), through the typed
+	// collection rather than a raw annotation reach.
+	AdapterState state.Collection[string]
 }
 
 // Reconcile sets Served on one Channel.
@@ -123,8 +129,19 @@ func (r *ChannelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return reqs
 	}
+	// releaseOnDelete is a MapFunc running as a pure side effect, the same
+	// shape MapRuntimePodToPending already is (conversation_controller.go):
+	// it reads the deleted Channel's own tombstone to release its
+	// adapter-state keys and enqueues nothing, since there is no longer a
+	// Channel to reconcile.
+	releaseOnDelete := func(ctx context.Context, obj client.Object) []ctrl.Request {
+		releaseAdapterStateKeys(ctx, r.AdapterState, state.SurfaceChannel, obj)
+		return nil
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentopsv1alpha1.Channel{}).
 		Watches(&agentopsv1alpha1.ChannelAdapter{}, handler.EnqueueRequestsFromMapFunc(mapAdapter)).
+		Watches(&agentopsv1alpha1.Channel{}, handler.EnqueueRequestsFromMapFunc(releaseOnDelete),
+			builder.WithPredicates(deleteOnlyPredicate())).
 		Complete(r)
 }

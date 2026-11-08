@@ -20,10 +20,19 @@
 //	POST /channel/conversations/{name}/delete         remove an already-Closed one
 //	POST /channel/conversations/{name}/reset-context  clear its context handle
 //	GET  /channel/vocabulary            what may be typed, + its revision
-//	GET  /channel/state/{channel}/{key} adapter cursor state (annotation-backed)
+//	GET  /channel/state/{channel}/{key} adapter cursor state (Stores.AdapterState)
 //	PUT  /channel/state/{channel}/{key}
 //	POST /channel/channels/{name}/status  {"ready","reason"?,"message"?}
 //	POST /channel/read                  {"channel","reads":[{"threadId","readAt"}]}
+//
+// plus the state read surface (state.go; design state-store-generic-contract
+// D-5/D-6), guarded by stateAuth rather than adapterAuth:
+//
+//	GET /state/conversations               {"revision","items":[record]}
+//	GET /state/conversations/{name}        one record
+//	GET /state/conversations/stream?since= SSE: put|delete|bookmark|resync
+//	GET /state/signals
+//	GET /state/signals/stream?since=
 //
 // /channel/read is OPTIONAL: an adapter that never calls it stays fully
 // conformant and its threads simply carry no watermark. The manager owns the
@@ -65,23 +74,26 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/storagebreaker"
 )
 
-// StateAnnotationPrefix namespaces adapter cursor state kept as Channel
-// annotations (e.g. agentops.dev/adapter-state-offset).
-const StateAnnotationPrefix = "agentops.dev/adapter-state-"
-
 const errInvalidJSON = "invalid JSON"
 
 // Server carries dependencies for the HTTP surface.
 type Server struct {
 	Client client.Client // cached
 	Reader client.Reader // APIReader: strong reads for dispatch state
-	// Store is the only way this surface reaches a Conversation or a queued
-	// input's payload (state-store design D-2).
-	Store state.Store
+	// Conversations, Runs and Blobs are the only way this surface reaches a
+	// Conversation, its run history or a queued input's payload (state-store
+	// design D-2).
+	Conversations state.Collection[state.ConversationRecord]
+	Runs          state.Appended[state.ConversationRecord, state.Run]
+	Blobs         state.Blobs
 	// Signals is the only way publication stores a Signal.
-	Signals   state.SignalStore
-	Namespace string
-	Addr      string
+	Signals state.Expiring[state.SignalRecord]
+	// AdapterState is the only way /channel/state and /signal/state read or
+	// write an adapter's cursor (design D-4) — keyed by state.AdapterStateKey,
+	// never a raw annotation patch.
+	AdapterState state.Collection[string]
+	Namespace    string
+	Addr         string
 
 	// Runtime is the bootstrap execution config, the same fallback the
 	// reconciler builds pods from. Dispatch needs it to answer ONE question
@@ -103,6 +115,13 @@ type Server struct {
 	// disables the surface (503), the same unconfigured-is-unauthorized
 	// rule AdapterToken follows.
 	ControlPlaneToken string
+
+	// StateReadToken guards /state/* (design D-6) for a caller that is not an
+	// adapter — today housekeeping alone. Read from STATE_READ_TOKEN by
+	// cmd/manager/main.go only, never from a Secret. Empty disables this ONE
+	// credential; the master token and a stateAccess-granted adapter token
+	// still open the surface.
+	StateReadToken string
 
 	// Activity is the per-hop telemetry log served by /activity*. A nil log is
 	// inert, so every emission site can call it unguarded.
@@ -149,6 +168,11 @@ type Server struct {
 // defaultMaxQueuedConversations is the pending-backlog bound when unset.
 const defaultMaxQueuedConversations = 50
 
+const (
+	errAdapterAuthUnset = "adapter auth not configured"
+	bearerPrefix        = "Bearer "
+)
+
 func (s *Server) maxQueued() int {
 	if s.MaxQueuedConversations > 0 {
 		return s.MaxQueuedConversations
@@ -182,6 +206,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /signal/state/{source}/{key}", s.signalAuth(s.handleSignalStateGet))
 	mux.HandleFunc("PUT /signal/state/{source}/{key}", s.signalAuth(s.handleSignalStatePut))
 	mux.HandleFunc("POST /signal/sources/{name}/status", s.signalAuth(s.handleSignalStatus))
+	mux.HandleFunc("GET /state/conversations", s.stateAuth(s.handleStateConversationsList))
+	mux.HandleFunc("GET /state/conversations/stream", s.stateAuth(s.handleStateConversationsStream))
+	mux.HandleFunc("GET /state/conversations/{name}", s.stateAuth(s.handleStateConversationGet))
+	mux.HandleFunc("GET /state/signals", s.stateAuth(s.handleStateSignalsList))
+	mux.HandleFunc("GET /state/signals/stream", s.stateAuth(s.handleStateSignalsStream))
 	mux.HandleFunc("GET /activity", s.anyAdapterAuth(s.handleActivity))
 	mux.HandleFunc("GET /activity/stream", s.anyAdapterAuth(s.handleActivityStream))
 	mux.HandleFunc("POST /activity", s.anyAdapterAuth(s.handleActivityReport))
@@ -210,6 +239,10 @@ func (s *Server) Handler() http.Handler {
 //
 // /healthz is the one exemption — it answers liveness/readiness for THIS
 // pod, and proxying it would report on a different pod's health entirely.
+// /state/ joins it (design D-7): a store read is backend-consistent, not
+// leader-affine — Get/List/Watch answer the same from any replica, so
+// proxying would only drop the console's and housekeeping's feeds during a
+// leader rollout for no correctness gain.
 //
 // A handler reached despite this (the proxy attempt failed, or none applied)
 // falls through to its OWN local behavior unchanged — for `/channel/ops`
@@ -218,7 +251,7 @@ func (s *Server) Handler() http.Handler {
 // leader at all.
 func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || s.isLeader(r.Context()) {
+		if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/state/") || s.isLeader(r.Context()) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -236,10 +269,10 @@ func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
 func (s *Server) anyAdapterAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.AdapterToken == "" {
-			writeJSON(w, 503, map[string]string{"error": "adapter auth not configured"})
+			writeJSON(w, 503, map[string]string{"error": errAdapterAuthUnset})
 			return
 		}
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), bearerPrefix)
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.AdapterToken)) == 1 {
 			next(w, r)
 			return
@@ -302,7 +335,7 @@ func (s *Server) resolvePayload(ctx context.Context) dispatch.PayloadResolver {
 		if item.PayloadRef == "" {
 			return item.Payload, nil
 		}
-		blob, err := s.Store.GetBlob(ctx, item.PayloadRef)
+		blob, err := s.Blobs.Get(ctx, item.PayloadRef)
 		if err != nil {
 			return "", err
 		}
@@ -384,7 +417,7 @@ func (s *Server) resolveToolsets(ctx context.Context, conv *state.ConversationRe
 // setToolingCondition surfaces a binding failure on the conversation so it is
 // visible in `kubectl describe` rather than only in manager logs.
 func (s *Server) setToolingCondition(ctx context.Context, conv *state.ConversationRecord, reason, message string) {
-	_ = state.Patch(ctx, s.Store, conv, func(r *state.ConversationRecord) {
+	_ = state.Patch(ctx, s.Conversations, conv, func(r *state.ConversationRecord) {
 		r.SetCondition(state.Condition{
 			Type: controller.ConditionToolingResolved, Status: state.ConditionFalse,
 			Reason: reason, Message: message,
@@ -393,7 +426,7 @@ func (s *Server) setToolingCondition(ctx context.Context, conv *state.Conversati
 }
 
 func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (dispatch.WorkUnit, bool, error) {
-	conv, rev, err := s.Store.Get(ctx, state.Key(convoName))
+	conv, rev, err := s.Conversations.Get(ctx, state.Key(convoName))
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -430,7 +463,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	// declaration: it answers each message fresh and says so, instead of failing
 	// every follow-up for a configuration the operator deliberately chose.
 	contextID := ""
-	resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Store, s.Namespace, &conv, s.Runtime)
+	resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Conversations, s.Namespace, &conv, s.Runtime)
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -459,7 +492,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	}
 	// Compare-and-swap on the revision read above: a racing update is not
 	// merged over, the caller retries next tick.
-	if _, err := s.Store.Update(ctx, state.Key(conv.Name), rev, conv); err != nil {
+	if _, err := s.Conversations.Update(ctx, state.Key(conv.Name), rev, conv); err != nil {
 		if errors.Is(err, state.ErrConflict) {
 			return dispatch.WorkUnit{}, false, nil
 		}
@@ -620,7 +653,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	key := state.Key(d.Convo)
-	conv, _, err := s.Store.Get(ctx, key)
+	conv, _, err := s.Conversations.Get(ctx, key)
 	if err != nil {
 		code := 500
 		if errors.Is(err, state.ErrNotFound) {
@@ -708,7 +741,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	if d.Continuity == ContinuityContinued {
 		s.breaker().Continued()
 	}
-	updated, err := state.Mutate(ctx, s.Store, key, func(c *state.ConversationRecord) error {
+	updated, err := state.Mutate(ctx, s.Conversations, key, func(c *state.ConversationRecord) error {
 		if inf := c.Inflight; inf != nil && inf.RunID == d.RunID && !hold {
 			c.ProcessedInputIDs = bound(append(c.ProcessedInputIDs, inf.InputIDs...), 50)
 		}
@@ -787,7 +820,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		if err := s.Router.AppendMemberResult(ctx, conv.CausedBy, conv.Name, dedup, result); err != nil {
 			log.FromContext(ctx).Info("routing member result to parent (backstop will retry)",
 				"conversation", conv.Name, "parent", conv.CausedBy.Parent, "error", err.Error())
-		} else if err := s.Store.UpdateRun(ctx, key, d.RunID, state.RunUpdate{MarkRoutedToParent: true}); err != nil &&
+		} else if err := s.Runs.Grow(ctx, key, d.RunID, state.Run{RoutedToParent: true}); err != nil &&
 			!errors.Is(err, state.ErrNotFound) {
 			log.FromContext(ctx).Info("marking run routed to parent (backstop will retry)",
 				"conversation", conv.Name, "runId", d.RunID, "error", err.Error())
@@ -821,7 +854,7 @@ func turnsReachMax(c *state.ConversationRecord) bool {
 // report whose first attempt landed the run but not the inflight clear must not
 // record it twice.
 func (s *Server) recordRun(ctx context.Context, key state.Key, run state.Run) error {
-	runs, err := s.Store.ListRuns(ctx, key)
+	runs, err := s.Runs.List(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -830,7 +863,7 @@ func (s *Server) recordRun(ctx context.Context, key state.Key, run state.Run) er
 			return nil
 		}
 	}
-	return s.Store.AppendRun(ctx, key, run)
+	return s.Runs.Append(ctx, key, run)
 }
 
 // applyReport records what a work report says about the context onto the
@@ -901,7 +934,7 @@ func applyReport(c *state.ConversationRecord, d *workDone, reported string, hold
 // rather than the state this request started with, so the decision is made
 // inside the compare-and-swap loop and a loser re-reads.
 func (s *Server) setPhaseUnlessClosed(ctx context.Context, name string, desired string) error {
-	_, err := state.Mutate(ctx, s.Store, state.Key(name), func(c *state.ConversationRecord) error {
+	_, err := state.Mutate(ctx, s.Conversations, state.Key(name), func(c *state.ConversationRecord) error {
 		if c.Phase != state.PhaseClosed {
 			c.Phase = desired
 		}
@@ -943,7 +976,7 @@ func (s *Server) recordInputs(ctx context.Context, conv *state.ConversationRecor
 		}
 		text, labels := item.Payload, map[string]string(nil)
 		if item.PayloadRef != "" {
-			if blob, err := s.Store.GetBlob(ctx, item.PayloadRef); err == nil {
+			if blob, err := s.Blobs.Get(ctx, item.PayloadRef); err == nil {
 				text, labels = blob.Payload, blob.Labels
 			}
 		}
@@ -974,10 +1007,10 @@ type adapterScopeKey struct{}
 func (s *Server) adapterAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.AdapterToken == "" {
-			writeJSON(w, 503, map[string]string{"error": "adapter auth not configured"})
+			writeJSON(w, 503, map[string]string{"error": errAdapterAuthUnset})
 			return
 		}
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), bearerPrefix)
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.AdapterToken)) == 1 {
 			next(w, r)
 			return
@@ -995,6 +1028,77 @@ func (s *Server) adapterAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		writeJSON(w, 401, map[string]string{"error": "unauthorized"})
 	}
+}
+
+// ---- state read surface auth ------------------------------------------------
+
+// stateAuth guards /state/* (design D-6, constant-time): the master token
+// (full reach, same as adapterAuth's), STATE_READ_TOKEN (a non-adapter
+// reader — housekeeping, scoped to this surface alone), or a derived
+// ChannelAdapter/SignalAdapter token whose CR sets spec.stateAccess. It is
+// deliberately NOT adapterAuth with an extra check bolted on: adapterAuth's
+// master-token/derived-token halves grant every adapter the SAME reach,
+// while here an adapter's own derived token must additionally be GRANTED by
+// its CR, so the two cannot be folded into one without the grant becoming
+// implicit everywhere adapterAuth is reused.
+//
+// 401 (token does not derive from anything) vs 403 (it derives, but the CR
+// does not declare stateAccess) is the distinction design D-6 draws: a
+// caller presenting an adapter's real identity is told exactly what field to
+// set, where a caller presenting nothing recognisable is told nothing about
+// what exists.
+func (s *Server) stateAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.AdapterToken == "" {
+			writeJSON(w, 503, map[string]string{"error": errAdapterAuthUnset})
+			return
+		}
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), bearerPrefix)
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.AdapterToken)) == 1 {
+			next(w, r)
+			return
+		}
+		if s.StateReadToken != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.StateReadToken)) == 1 {
+			next(w, r)
+			return
+		}
+		name, granted, found := s.stateAdapterFor(r.Context(), got)
+		if !found {
+			writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+			return
+		}
+		if !granted {
+			writeJSON(w, 403, map[string]string{"error": fmt.Sprintf(
+				"adapter %q does not declare spec.stateAccess", name)})
+			return
+		}
+		next(w, r.WithContext(context.WithValue(r.Context(), adapterScopeKey{}, name)))
+	}
+}
+
+// stateAdapterFor finds the ChannelAdapter or SignalAdapter whose derived
+// token is got. found is false when none derives it, granted reports whether
+// that CR declares spec.stateAccess.
+func (s *Server) stateAdapterFor(ctx context.Context, got string) (name string, granted, found bool) {
+	var channels agentopsv1alpha1.ChannelAdapterList
+	if err := s.Client.List(ctx, &channels, client.InNamespace(s.Namespace)); err == nil {
+		for i := range channels.Items {
+			a := &channels.Items[i]
+			if subtle.ConstantTimeCompare([]byte(got), []byte(chat.DeriveAdapterToken(s.AdapterToken, a.Name))) == 1 {
+				return a.Name, a.Spec.StateAccess, true
+			}
+		}
+	}
+	var sources agentopsv1alpha1.SignalAdapterList
+	if err := s.Client.List(ctx, &sources, client.InNamespace(s.Namespace)); err == nil {
+		for i := range sources.Items {
+			a := &sources.Items[i]
+			if subtle.ConstantTimeCompare([]byte(got), []byte(chat.DeriveSignalAdapterToken(s.AdapterToken, a.Name))) == 1 {
+				return a.Name, a.Spec.StateAccess, true
+			}
+		}
+	}
+	return "", false, false
 }
 
 // adapterParam reads the contract's adapter selector. The retired `type`
@@ -1234,7 +1338,7 @@ func (s *Server) reachConversation(w http.ResponseWriter, r *http.Request) (*sta
 		forbidScope(w)
 		return nil, false
 	}
-	conv, _, err := s.Store.Get(ctx, state.Key(name))
+	conv, _, err := s.Conversations.Get(ctx, state.Key(name))
 	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown conversation %q", name)})
 		return nil, false
@@ -1288,7 +1392,7 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := s.Store.Delete(r.Context(), state.Key(conv.Name)); err != nil {
+	if err := s.Conversations.Delete(r.Context(), state.Key(conv.Name)); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1306,7 +1410,7 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 // be deleted — so there is no "not yet closed" case to refuse here, and
 // NotFound is tolerated: some other path may already have deleted it.
 func (s *Server) cascadeDeleteMembers(ctx context.Context, parentName string) error {
-	members, err := s.Store.List(ctx, state.ByCausedBy, state.ListKey{CausedBy: parentName})
+	members, err := s.Conversations.List(ctx, state.ByCausedBy, parentName)
 	if err != nil {
 		return err
 	}
@@ -1318,7 +1422,7 @@ func (s *Server) cascadeDeleteMembers(ctx context.Context, parentName string) er
 		if err := s.cascadeDeleteMembers(ctx, member.Name); err != nil {
 			return err
 		}
-		if err := s.Store.Delete(ctx, state.Key(member.Name)); err != nil {
+		if err := s.Conversations.Delete(ctx, state.Key(member.Name)); err != nil {
 			return err
 		}
 	}
@@ -1420,12 +1524,23 @@ func (s *Server) stateChannel(r *http.Request, w http.ResponseWriter, name strin
 	return &ch
 }
 
+// handleStateGet and handleStatePut are the only callers of AdapterState for
+// the channel surface (design D-4) — the channel resolves and scopes exactly
+// as it always has, and the value moves through Stores.AdapterState instead
+// of a raw annotation patch. Under kube that collection IS the same
+// agentops.dev/adapter-state-<key> annotation on this same Channel (task
+// 3.3), so this is a call-site change, not a wire change.
 func (s *Server) handleStateGet(w http.ResponseWriter, r *http.Request) {
 	ch := s.stateChannel(r, w, r.PathValue("channel"))
 	if ch == nil {
 		return
 	}
-	writeJSON(w, 200, map[string]string{"value": ch.Annotations[StateAnnotationPrefix+r.PathValue("key")]})
+	v, err := getAdapterState(r.Context(), s.AdapterState, state.AdapterStateKey(state.SurfaceChannel, ch.Name, r.PathValue("key")))
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"value": v})
 }
 
 func (s *Server) handleStatePut(w http.ResponseWriter, r *http.Request) {
@@ -1441,16 +1556,43 @@ func (s *Server) handleStatePut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": errInvalidJSON})
 		return
 	}
-	patch := client.MergeFrom(ch.DeepCopy())
-	if ch.Annotations == nil {
-		ch.Annotations = map[string]string{}
-	}
-	ch.Annotations[StateAnnotationPrefix+r.PathValue("key")] = in.Value
-	if err := s.Client.Patch(r.Context(), ch, patch); err != nil {
+	key := state.AdapterStateKey(state.SurfaceChannel, ch.Name, r.PathValue("key"))
+	if err := putAdapterState(r.Context(), s.AdapterState, key, in.Value); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// getAdapterState reads one adapter cursor, reporting "" for a key never
+// written — the same absent-reads-empty rule the old annotation read gave,
+// since a value the handler wrote empty is still present (kube/adapterstate_test.go).
+func getAdapterState(ctx context.Context, coll state.Collection[string], key state.Key) (string, error) {
+	v, _, err := coll.Get(ctx, key)
+	if errors.Is(err, state.ErrNotFound) {
+		return "", nil
+	}
+	return v, err
+}
+
+// putAdapterState writes v under key: Mutate's get-modify-CAS-retry for a key
+// already written, falling back to Create on its first write (Mutate cannot
+// get-modify a record that is not there yet) — the same last-write-wins
+// outcome the old merge patch gave, now expressed through the contract
+// (state-store-generic-contract design D-4, task 3.3's "handlers write
+// through Mutate").
+func putAdapterState(ctx context.Context, coll state.Collection[string], key state.Key, v string) error {
+	_, err := state.Mutate(ctx, coll, key, func(cur *string) error { *cur = v; return nil })
+	if !errors.Is(err, state.ErrNotFound) {
+		return err
+	}
+	_, err = coll.Create(ctx, key, v)
+	if errors.Is(err, state.ErrAlreadyExists) {
+		// Lost a race against another writer's first Create: it exists now,
+		// so Mutate can get-modify-CAS it.
+		_, err = state.Mutate(ctx, coll, key, func(cur *string) error { *cur = v; return nil })
+	}
+	return err
 }
 
 func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {

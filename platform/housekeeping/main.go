@@ -65,10 +65,15 @@ func main() {
 	workspaceRoot := env("WORKSPACE_ROOT", "")
 	sessionsRoot := env("SESSIONS_ROOT", "")
 
-	kube, err := NewInClusterKube(namespace)
-	if err != nil {
-		log.Fatalf("in-cluster client: %v", err)
+	managerURL := env("MANAGER_URL", "")
+	if managerURL == "" {
+		log.Fatal("MANAGER_URL is required")
 	}
+	stateReadToken := env("STATE_READ_TOKEN", "")
+	if stateReadToken == "" {
+		log.Fatal("STATE_READ_TOKEN is required")
+	}
+	lister := NewState(managerURL, stateReadToken)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
@@ -89,7 +94,7 @@ func main() {
 			log.Printf("%s: no root configured, skipping", job.name)
 			continue
 		}
-		rep, err := job.run(ctx, job.root, kube, opts)
+		rep, err := job.run(ctx, job.root, lister, opts)
 		if err != nil {
 			// Report and carry on: one half failing must not stop the other,
 			// and a partial reclaim is fine — an orphan missed now is reclaimed

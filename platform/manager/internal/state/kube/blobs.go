@@ -5,17 +5,29 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
-// PutBlob stores blob under key as a ConversationInput — upserting: an
-// existing object is overwritten in place, a missing one is created
-// (store.go's Store.PutBlob: "replacing any value already there").
-func (s *Store) PutBlob(ctx context.Context, key state.Key, blob state.Blob) error {
+// blobs is the kube backend of state.Blobs: a queued input's out-of-line body as
+// a ConversationInput, the one object a blob can be.
+type blobs struct {
+	base
+}
+
+// OpenBlobs returns the state.Blobs capability, scoped to namespace.
+func OpenBlobs(c client.WithWatch, namespace string, opts ...Option) state.Blobs {
+	return &blobs{base: newBase(c, namespace, newConfig(opts))}
+}
+
+// Put stores blob under key as a ConversationInput, upserting: an existing
+// object is overwritten in place, a missing one is created ("replacing any
+// value already there").
+func (s *blobs) Put(ctx context.Context, key state.Key, blob state.Blob) error {
 	var ci agentopsv1alpha1.ConversationInput
-	err := s.client.Get(ctx, s.namespacedName(key), &ci)
+	err := s.client.Get(ctx, s.namespacedName(string(key)), &ci)
 	switch {
 	case err == nil:
 		applyBlob(&ci, blob)
@@ -36,10 +48,10 @@ func (s *Store) PutBlob(ctx context.Context, key state.Key, blob state.Blob) err
 	}
 }
 
-// GetBlob returns the blob stored under key, or ErrNotFound.
-func (s *Store) GetBlob(ctx context.Context, key state.Key) (state.Blob, error) {
+// Get returns the blob stored under key, or ErrNotFound.
+func (s *blobs) Get(ctx context.Context, key state.Key) (state.Blob, error) {
 	var ci agentopsv1alpha1.ConversationInput
-	if err := s.client.Get(ctx, s.namespacedName(key), &ci); err != nil {
+	if err := s.client.Get(ctx, s.namespacedName(string(key)), &ci); err != nil {
 		if apierrors.IsNotFound(err) {
 			return state.Blob{}, state.ErrNotFound
 		}
@@ -48,9 +60,9 @@ func (s *Store) GetBlob(ctx context.Context, key state.Key) (state.Blob, error) 
 	return toBlob(&ci), nil
 }
 
-// DeleteBlob removes a blob. Not an error when the key is already absent —
-// "a deleted key reads absent" (store.go's Store.DeleteBlob), not an error.
-func (s *Store) DeleteBlob(ctx context.Context, key state.Key) error {
+// Delete removes a blob. Not an error when the key is already absent: "a
+// deleted key reads absent".
+func (s *blobs) Delete(ctx context.Context, key state.Key) error {
 	ci := &agentopsv1alpha1.ConversationInput{}
 	ci.Name, ci.Namespace = string(key), s.namespace
 	if err := s.client.Delete(ctx, ci); err != nil && !apierrors.IsNotFound(err) {

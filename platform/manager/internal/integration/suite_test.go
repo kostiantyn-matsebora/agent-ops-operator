@@ -51,12 +51,10 @@ var (
 	// exercise; every other test keeps reading k8sClient directly.
 	routingClient client.Client
 
-	// stateStore is the kube backend over an UNCACHED client, as production
-	// wires it (state-store design D-4): every Get carries the revision its
-	// Update compares against, so a test never reads a stale one.
-	stateStore state.Store
-	// signalStore is its Signal half, over the same uncached client.
-	signalStore state.SignalStore
+	// stores is the kube backend's typed inventory over an UNCACHED client, as
+	// production wires it (state-store design D-4): every Get carries the
+	// revision its Update compares against, so a test never reads a stale one.
+	stores state.Stores
 )
 
 // chartDir locates the chart from a test's working directory, which is this
@@ -114,8 +112,11 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	stateStore = kube.NewStore(storeClient, ns)
-	signalStore = kube.NewSignalStore(storeClient, ns)
+	backend, err := kube.OpenStores(storeClient, ns)
+	if err != nil {
+		panic(err)
+	}
+	stores = backend.Stores
 
 	code := m.Run()
 	stopRoutingCache()
@@ -126,7 +127,7 @@ func TestMain(m *testing.M) {
 // testOps builds the channel plumbing against the envtest client; the queue's
 // registry is empty, so every channel type behaves as adapter-served.
 func testOps() *chat.OpQueue {
-	return &chat.OpQueue{Store: stateStore, Registry: chat.NewRegistry()}
+	return &chat.OpQueue{Conversations: stores.Conversations, Runs: stores.Runs, Registry: chat.NewRegistry()}
 }
 
 func reconciler() *controller.ConversationReconciler {
@@ -145,8 +146,8 @@ func reconcilerWithOps(ops *chat.OpQueue) *controller.ConversationReconciler {
 
 func reconcilerWithCap(ops *chat.OpQueue, cap int) *controller.ConversationReconciler {
 	return &controller.ConversationReconciler{
-		Client: k8sClient,
-		Store:  stateStore, Namespace: ns,
+		Client:        k8sClient,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns,
 		Scheme:                 scheme,
 		MaxActiveConversations: cap,
 		Ops:                    ops,
@@ -171,11 +172,14 @@ func apiServer() *httpapi.Server {
 func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 	acts := activity.New(512)
 	rt := runtimepod.Config{ContextPVC: "test-context"}
-	ops := &chat.OpQueue{Store: stateStore, Registry: chat.NewRegistry(), Activity: acts}
+	ops := &chat.OpQueue{Conversations: stores.Conversations, Runs: stores.Runs, Registry: chat.NewRegistry(), Activity: acts}
 	srv := &httpapi.Server{
 		// routingClient mirrors production's mgr.GetClient(); Reader stays the
 		// raw k8sClient, as production's mgr.GetAPIReader() does.
-		Client: routingClient, Reader: k8sClient, Store: stateStore, Signals: signalStore, Namespace: ns,
+		Client: routingClient, Reader: k8sClient,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Signals: stores.Signals,
+		AdapterState: stores.AdapterState,
+		Namespace:    ns,
 		// A deployment that CAN carry context: continuity is now promised only
 		// where the conversation resolved somewhere to keep it, so a fixture with
 		// no context volume would (correctly) withhold every handle and make the
@@ -186,7 +190,7 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 		// The router carries the SAME runtime config, exactly as main.go wires
 		// it: /exit reports whether a released conversation keeps its context,
 		// and it must not answer that differently from dispatch.
-		Router:                 &chat.Router{Client: routingClient, Reader: k8sClient, Store: stateStore, Namespace: ns, Ops: ops, Activity: acts, Runtime: rt},
+		Router:                 &chat.Router{Client: routingClient, Reader: k8sClient, Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Ops: ops, Activity: acts, Runtime: rt},
 		AdapterToken:           "test-adapter-token",
 		Activity:               acts,
 		Version:                "test",
