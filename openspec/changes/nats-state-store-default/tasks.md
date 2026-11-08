@@ -65,6 +65,7 @@ This gate applies when implementation starts. This pull request only proposes.
   - `chart/Chart.yaml` gained the `nats` dependency entry (no `condition:`, see 3.1).
   - Verified: the default `helm template` carries `STATE_BACKEND` = `"nats"` and renders the StatefulSet/Services/PDB/Secret/(gated)NetworkPolicy. `--set stateStore.backend=kube` carries `STATE_BACKEND` = `"kube"`, renders none of them, and omits `NATS_URL`/`NATS_USER`/`NATS_PASSWORD`/`NATS_REPLICAS` from the manager Deployment entirely.
   - **Known, flagged breakage outside this lane.** `platform/manager/internal/integration/charttemplate_test.go` carries two pre-existing tests pinned to the OLD default: `TestStateBackendEnvIsRenderedFromTheSelector` ("the default is kube") and `TestStateStoreNullFallsBackToTheKubeDefault`. Both now fail, a direct, unavoidable consequence of this task's own instruction to flip the default. Confirmed by running the full `internal/integration` suite: exactly these two tests fail and nothing else does — not `TestStateStoreGuard`, which exercises the same guard without assuming a default. This file is outside this dispatch's lane, since only the NetworkPolicy test file was authorized. These two assertions need updating to expect `nats` by whoever owns that file next (task 4, unit tests, or the orchestrating session).
+  - **Gap closed by the orchestrating session.** Both tests updated to expect `STATE_BACKEND=nats`. Added task 4.4's chart render tests at the same time: `TestStateStoreGuardRefusesAHandSetContradiction`, `TestNatsBundleRendersByDefault`, `TestNatsReplicaCountIsConfigurable`, `TestNatsCredentialPrecedence`, `TestNatsEnvWiresToItsOwnSecret`. `go test ./internal/integration/...` (`KUBEBUILDER_ASSETS=/root/.envtest/k8s/1.31.0-linux-amd64`, `TZ=Europe/Helsinki`) passes in full, 103s. `publication-guard.py` and `retired-vocabulary-guard.py` clean.
 
 - [ ] 3.6 Record the three gates of D-11 as this change's acceptance: the conformance verdict, the bench numbers against `kube` and the pack verdict. Verify all three pass. A failure is fixed in the backend, never answered by restoring the old default.
   Verdict: PENDING on the backend-developer lane (`internal/state/nats/`, tasks 2.1–2.8) and the system lane (task 5), neither of which had conformance/bench/pack output available at the time this chart lane ran. Left UNTICKED rather than fabricating a number — the orchestrating session completes this once both lanes report.
@@ -74,8 +75,13 @@ This gate applies when implementation starts. This pull request only proposes.
 - [ ] 4.1 `go test ./...` in `platform/manager` under `KUBEBUILDER_ASSETS` and `TZ=Europe/Helsinki`, including `RunStores` against the in-process server and the static import check.
 - [ ] 4.2 `go test -tags conformance -count=1 ./test/conformance/` and `go test -run '^$' -bench . -benchmem ./internal/state/...` for both backends.
 - [ ] 4.3 Add a test for the import against an old-version writer still active on `kube`: a Signal created and a Conversation input appended after the first pass must be present after the final one, and a record the new version wrote must not be overwritten (D-10).
-- [ ] 4.4 The chart's render tests for the bundle, the guard, the credential and the policy, with helm present.
+- [x] 4.4 The chart's render tests for the bundle, the guard, the credential and the policy, with helm present.
+  Verdict:
+  - Added `TestStateStoreGuardRefusesAHandSetContradiction`, `TestNatsBundleRendersByDefault`, `TestNatsReplicaCountIsConfigurable`, `TestNatsCredentialPrecedence`, `TestNatsEnvWiresToItsOwnSecret` to `platform/manager/internal/integration/charttemplate_test.go`, beside the deployment-engineer lane's own `TestEveryWiredFlowIsAllowed` extension and `TestStateServerAdmitsOnlyTheManager` (task 3.3) in `charttemplate_networkpolicy_test.go`.
+  - Fixed the two pre-existing tests the default flip broke (`TestStateBackendEnvIsRenderedFromTheSelector`, `TestStateStoreNullFallsBackToTheKubeDefault`) to expect `nats`.
+  - `go test ./internal/integration/...` (`KUBEBUILDER_ASSETS=/root/.envtest/k8s/1.31.0-linux-amd64`, `TZ=Europe/Helsinki`) passes in full.
 - [ ] 4.5 The retired-vocabulary and publication guards pass.
+  Verdict (partial, re-run at finish): both guards report clean against the tree as it stands after sections 3/4.4. Left unticked until the whole change (sections 2, 5, 6 included) is final, since a later section could still introduce a violation.
 
 ## 5. System tests
 
