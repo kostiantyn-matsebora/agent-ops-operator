@@ -18,3 +18,13 @@ The server's peer port SHALL admit only its own pods.
 #### Scenario: Every wired flow is allowed
 - **WHEN** the manager dials the state server
 - **THEN** the connection succeeds, and the flow table test lists it
+
+#### Scenario: Other components cannot dial the state server
+- **WHEN** restriction is enabled and the console, a channel adapter, a signal
+  adapter or a housekeeping job connects to the state server's client port
+- **THEN** each connection is refused, and each still reads state through the
+  manager's `/state/*` surface
+
+#### Scenario: A peer port admits only its own pods
+- **WHEN** a pod that is not a state server connects to the peer port
+- **THEN** the connection is refused

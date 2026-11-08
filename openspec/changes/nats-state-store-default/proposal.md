@@ -20,7 +20,7 @@ This change writes that backend and makes it the default.
   Store. It passes the same generic conformance suite and bench as `kube`.
 - **New chart bundle `chart/charts/nats/`** running a clustered, three-server
   JetStream `nats-server` with a volume per server, a PodDisruptionBudget, a
-  chart-generated credential and a NetworkPolicy admitting only the manager.
+  credential (explicit, existing Secret or generated) and a NetworkPolicy admitting only the manager.
   No single server is a point of failure.
 - **`stateStore.backend` defaults to `nats`**, and `stateStoreGuard` knows the
   new bundle. `kube` stays selectable and renders no bundle.
@@ -55,8 +55,9 @@ This change writes that backend and makes it the default.
   Kubernetes API.
 - `component-network-isolation`: adds a requirement. The manager may reach the state server on its
   client port. No other component may.
-- `chart-managed-secrets`: adds a requirement. The state server credential is chart-generated and
-  stable across upgrades.
+- `chart-managed-secrets`: adds a requirement. The state server credential resolves from an
+  explicit value, an existing Secret, then generation, and is stable across
+  upgrades.
 
 ## Impact
 

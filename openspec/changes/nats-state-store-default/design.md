@@ -124,8 +124,9 @@ PVC per pod for the store directory. Values: `nats.replicas` (1 or 3),
 - The image comes from the official `nats` image, pinned by digest in
   `values.yaml`, multi-arch.
 
-The credential is a chart-generated user and password, rendered by the same
-rule as `call-auth.yaml` (generate on install only). The manager receives
+The credential is a user and password resolved in order: an explicit value,
+then an existing Secret, then generation on install only. It follows the same
+rule as `call-auth.yaml`. The manager receives
 `NATS_URL` and `NATS_USER`/`NATS_PASSWORD` by `valueFrom`, so it reads no
 Secret.
 
