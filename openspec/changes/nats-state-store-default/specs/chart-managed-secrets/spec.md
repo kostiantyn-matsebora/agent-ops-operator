@@ -21,3 +21,9 @@ sync of an upgrade, SHALL NOT mint a new one.
 #### Scenario: An explicit value wins
 - **WHEN** the adopter supplies the credential
 - **THEN** it is used and nothing is generated
+
+#### Scenario: An upgrade that finds no Secret fails loudly
+- **WHEN** the chart is rendered as an upgrade with cluster access, the state
+  server Secret does not exist and no explicit value is set
+- **THEN** the render fails, naming the Secret and the value that supplies it,
+  and generates nothing
