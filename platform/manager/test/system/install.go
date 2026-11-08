@@ -23,6 +23,10 @@ type InstallValues struct {
 	ChatID            string
 	// Runtime is the AgentRuntime the stub answers to.
 	Runtime string
+	// Housekeeping renders the housekeeping CronJob (11.2: off everywhere
+	// else, same pattern as claude/k8sMCP below — a nightly-only lane, not
+	// the gating tier's).
+	Housekeeping bool
 }
 
 // DefaultValues is the install the pack runs against.
@@ -35,6 +39,7 @@ func DefaultValues(tier string) *InstallValues {
 		BotToken:          "1234567890:e2e-fake-bot-token",
 		ChatID:            "-1001234567890",
 		Runtime:           "stub",
+		Housekeeping:      tier == "full",
 	}
 }
 
@@ -122,7 +127,15 @@ prometheus:
     image: {repository: agentops-signal-alertmanager, tag: e2e}
   pipelines:
     enabled: false
-`, v.AdapterToken, claude, v.Runtime, v.UIToken, v.ChatID, v.BotToken, k8sMCP, v.ControlPlaneToken)
+# 11.2: off outside the full tier — the one lane that exercises it
+# (TestHousekeepingDryRunRetainsEveryConversation) is itself full-tier-only,
+# so the gating smoke tier never builds or installs this image.
+housekeeping:
+  enabled: %[9]t
+  image:
+    repository: agentops-housekeeping
+    tag: e2e
+`, v.AdapterToken, claude, v.Runtime, v.UIToken, v.ChatID, v.BotToken, k8sMCP, v.ControlPlaneToken, v.Housekeeping)
 }
 
 // Install applies the CRDs, deploys the fake Bot API, and installs the chart
