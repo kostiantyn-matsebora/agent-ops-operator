@@ -141,7 +141,8 @@ conversation.
 | `manager` | appended by the manager under a rule of its own |
 
 Today the only manager-origin input is the corrective input a Coordinator
-root receives after a successful turn that made no move. `Name` on such an
+root receives after a successful turn that made no move and in which no input
+of the run came from a person. `Name` on such an
 origin SHALL name the rule that produced it, `move-per-turn`.
 
 ```yaml
