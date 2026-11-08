@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 )
 
 // StateKinds are the two kinds the manager's state read surface serves —
@@ -146,7 +147,13 @@ func statePath(kind string) (string, error) {
 // caller to decode, or an *apiError carrying the status — the same error
 // shape kube.go's own client uses, so a caller need not know which source
 // answered to handle a failure.
-func (s *stateSource) do(ctx context.Context, path, accept string) (*http.Response, error) {
+//
+// timeout bounds this one call, mirroring kube.go's own get(): a List or Get
+// that dials a backend mid-rollout and never answers must fail and retry,
+// not block runKind's goroutine forever with no error to log and no further
+// reconnect attempt. 0 leaves it unbounded — Watch's own contract, since a
+// resumable feed is meant to sit open until the caller's ctx ends.
+func (s *stateSource) do(ctx context.Context, path, accept string, timeout time.Duration) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+path, nil)
 	if err != nil {
 		return nil, err
@@ -155,7 +162,13 @@ func (s *stateSource) do(ctx context.Context, path, accept string) (*http.Respon
 		req.Header.Set("Authorization", "Bearer "+s.token)
 	}
 	req.Header.Set("Accept", accept)
-	resp, err := s.http.Do(req)
+	client := s.http
+	if timeout > 0 {
+		c := *s.http
+		c.Timeout = timeout
+		client = &c
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +190,7 @@ func (s *stateSource) List(ctx context.Context, kind string) ([]*Object, string,
 	if err != nil {
 		return nil, "", err
 	}
-	resp, err := s.do(ctx, path, "application/json")
+	resp, err := s.do(ctx, path, "application/json", 60*time.Second)
 	if err != nil {
 		return nil, "", err
 	}
@@ -208,7 +221,7 @@ func (s *stateSource) Get(ctx context.Context, kind, name string) (*Object, erro
 	if kind != "conversations" {
 		return nil, fmt.Errorf("state source: GET /state/%s/{name} does not exist (design D-5 serves a single-record read for conversations only)", kind)
 	}
-	resp, err := s.do(ctx, "/state/conversations/"+url.PathEscape(name), "application/json")
+	resp, err := s.do(ctx, "/state/conversations/"+url.PathEscape(name), "application/json", 10*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +254,7 @@ func (s *stateSource) Watch(ctx context.Context, kind, revision string, fn func(
 	if revision != "" {
 		streamPath += "?since=" + url.QueryEscape(revision)
 	}
-	resp, err := s.do(ctx, streamPath, "text/event-stream")
+	resp, err := s.do(ctx, streamPath, "text/event-stream", 0)
 	if err != nil {
 		return err
 	}
