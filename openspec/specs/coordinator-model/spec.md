@@ -196,7 +196,7 @@ A conversation carrying `causedBy` and no `coordinatorRef` SHALL keep the
 work unit it has today. A member is a domain agent, and a domain agent may
 have a repository.
 
-#### Scenario: A nested Coordinator's root is dispatched as a member
+#### Scenario: A nested Coordinator's root is not dispatched as a member
 - **WHEN** a conversation carries both `causedBy` and `coordinatorRef`
 - **THEN** it is a root of its own Coordinator and its work unit is framed as coordination
 - **AND** the member framing of its parent's `agents[]` entry does not apply to it
