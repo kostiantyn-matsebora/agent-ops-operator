@@ -14,23 +14,23 @@ letting an old event look current.
 ## Requirements
 
 ### Requirement: Configuration state from read-only Kubernetes watches
-The console SHALL build its configuration state exclusively from list/watch of `agentops.dev/v1alpha1` resources, in its own namespace, using its own ServiceAccount:
-
-- The watched kinds are AgentProfile, AgentRuntime, Channel, ChannelAdapter, Conversation, MCPConfig, MCPToolset, Pipeline, Signal, SignalAdapter and SignalSource.
-- The console SHALL write none of them, and SHALL read no Secret and no non-agentops resource.
-- Watches SHALL resume by resourceVersion and relist on 410 Gone, so the cache converges after disconnects.
+The console SHALL build its configuration state exclusively from list/watch of `agentops.dev/v1alpha1` resources (AgentProfile, AgentRuntime, Channel, ChannelAdapter, MCPConfig, MCPToolset, Pipeline, SignalAdapter, SignalSource) in its own namespace using its own ServiceAccount, with no writes to any of them and no reads of Secrets or any non-agentops resource. It SHALL hold no grant on Conversations, ConversationInputs or Signals: it builds their state from the manager's state read surface, and its Kubernetes ServiceAccount SHALL NOT be able to read them. Watches SHALL resume by resourceVersion and relist on 410 Gone so the cache converges after disconnects.
 
 #### Scenario: State reflects a CR change without polling
 - **WHEN** a Pipeline's `channels[]` is edited with kubectl
 - **THEN** the console's topology updates from the watch event without any console restart or manual refresh
 
-#### Scenario: Watch expiry recovers
-- **WHEN** the API server returns 410 Gone for a stale watch
-- **THEN** the console relists that kind, replaces its cache, and resumes watching without serving an error to browsers
+#### Scenario: The console's grant excludes state
+- **WHEN** the console's ServiceAccount is checked for `get`, `list` or `watch` on conversations, conversationinputs and signals
+- **THEN** each is denied, and the console still shows every conversation and signal
 
 #### Scenario: Signals arrive by watch like every other kind
 - **WHEN** a Signal's phase moves from Pending to Routed
-- **THEN** the console reflects it from the watch event, with no polling and no write path to the kind
+- **THEN** the console reflects it from the manager's signal feed, with no polling and no write path to the kind
+
+#### Scenario: Watch expiry recovers
+- **WHEN** the API server returns 410 Gone for a stale watch
+- **THEN** the console relists that kind, replaces its cache, and resumes watching without serving an error to browsers
 
 ### Requirement: The topology is three views of one activity feed
 

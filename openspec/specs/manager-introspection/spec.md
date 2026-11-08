@@ -12,17 +12,23 @@ resolution that dispatch would perform.
 Three surfaces carry it: `GET /status` for the specific stuck item, Prometheus
 metrics for how deep and how old, and `GET /pipelines/{name}/resolved` so no
 client ever reimplements composition.
+
 ## Requirements
+
 ### Requirement: The manager exposes only state that exists nowhere else
-The manager SHALL expose its own runtime state and its own resolution results, and SHALL NOT expose CR snapshots. Anything readable from a Kubernetes object SHALL be read from the API server by the client under its own RBAC, never proxied through the manager.
+The manager SHALL expose its own runtime state and its own resolution results, and SHALL NOT expose snapshots of configuration. Anything readable from a configuration object (a Pipeline, a Channel, a SignalSource, an adapter CR) SHALL be read from the API server by the client under its own RBAC, never proxied through the manager. State is the exception and has its own surface: a conversation or a signal lives wherever the selected state backend keeps it, and only the manager knows where, so the manager serves it through the state read surface.
 
 #### Scenario: No CR proxying
-- **WHEN** a client needs the spec or status of any `agentops.dev` object
+- **WHEN** a client needs the spec or status of a configuration object (any `agentops.dev` object that is not state)
 - **THEN** no manager endpoint serves it, and the client reads it from the Kubernetes API under its own ServiceAccount
+
+#### Scenario: State is served by the state read surface
+- **WHEN** a client needs a conversation or a signal
+- **THEN** the manager's state read surface serves it, whichever backend holds it
 
 #### Scenario: Manager-only state is reachable
 - **WHEN** a client needs state the manager holds in memory
-- **THEN** an authenticated endpoint serves it, because no Kubernetes object carries it
+- **THEN** an authenticated endpoint serves it, such as `GET /status`, because no Kubernetes object carries it
 
 ### Requirement: Manager runtime state is served by GET /status
 The manager SHALL serve `GET /status`, adapter-token authenticated, reporting at minimum: build version; the identity of the replica holding the leader lease; runtime slots in use against `MAX_ACTIVE_CONVERSATIONS`; per-adapter channel op queue depth with the oldest queued op and the oldest claimed-but-uncompleted op; and active cooldowns.

@@ -6,7 +6,7 @@ The console's read-only view of persisted signals: the inventory of `Signal` obj
 ## Requirements
 
 ### Requirement: A signals view lists persisted signals read-only
-The console SHALL provide a signals view fed by its read-only watch of the `Signal` kind:
+The console SHALL provide a signals view fed by the manager's state read surface (`GET /state/signals` and its feed), never a Kubernetes watch of the `Signal` kind:
 
 - Each row SHALL show the signal's source, `initiationId`, phase and age.
 - The view SHALL be filterable by source and by phase.
@@ -18,7 +18,7 @@ The console SHALL provide a signals view fed by its read-only watch of the `Sign
 
 #### Scenario: No write path exists
 - **WHEN** a user inspects any signal in the view
-- **THEN** no control mutates the signal, and the console's ServiceAccount holds no write verb on the kind
+- **THEN** no control mutates the signal, and the console holds no write path to the state read surface
 
 ### Requirement: A signal's detail shows the per-claimant routing state
 A signal's detail view SHALL render the full routing record:
@@ -40,8 +40,8 @@ A signal's detail view SHALL render the full routing record:
 - **WHEN** a claimant is `Failed`
 - **THEN** the detail shows the failure reason exactly as the manager recorded it, never a console-composed paraphrase
 
-### Requirement: The signals view updates from the watch
-The signals view SHALL reflect lifecycle transitions from watch events alone — no polling, no manual refresh.
+### Requirement: The signals view updates from the state feed
+The signals view SHALL reflect lifecycle transitions from the manager's state read surface feed alone — no polling, no manual refresh, no Kubernetes watch.
 
 #### Scenario: A phase change appears live
 - **WHEN** an open signals view is showing a `Pending` signal and the manager routes it
