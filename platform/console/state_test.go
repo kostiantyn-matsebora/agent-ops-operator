@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stateServer answers the manager's /state/* surface with canned bodies and
@@ -99,6 +100,41 @@ func TestStateSourceWatchResyncExpiresTheWatch(t *testing.T) {
 	err := s.Watch(context.Background(), "signals", "", func(string, *Object) {})
 	if !errors.Is(err, ErrWatchExpired) {
 		t.Fatalf("resync = %v, want ErrWatchExpired", err)
+	}
+}
+
+// TestStateSourceDoTimesOutRatherThanHangingForever: a backend dialled
+// mid-rollout that accepts the connection and never answers must fail this
+// one call, not block runKind's goroutine forever with no error to log and
+// no further reconnect ever attempted — measured live as every console
+// system test failing from the point the manager first churned onward
+// (kube.go's own get() already bounds List/Get this way; do() did not).
+func TestStateSourceDoTimesOutRatherThanHangingForever(t *testing.T) {
+	block := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-block // never responds within the test's lifetime
+	}))
+	// close(block) before srv.Close(): Close() waits for the in-flight
+	// handler above to return, which it cannot do until the channel is
+	// closed — reversing this order deadlocks the test itself.
+	defer func() { close(block); srv.Close() }()
+	s := newStateSource(&Config{ManagerURL: srv.URL, AdapterToken: "tok"})
+
+	_, err := s.do(context.Background(), "/state/conversations", "application/json", 50*time.Millisecond)
+	if err == nil {
+		t.Fatal("do() with a bound timeout must fail rather than hang on a silent backend")
+	}
+}
+
+// TestStateSourceWatchHasNoTimeout: the one caller allowed to sit open
+// indefinitely — a resumable feed's whole point is to wait for the next
+// change, so Watch must never carry do()'s bounded timeout the way
+// List/Get do.
+func TestStateSourceWatchHasNoTimeout(t *testing.T) {
+	stream := "event: resync\nid: 1\ndata: {}\n\n"
+	s := stateServer(t, map[string]string{"/state/conversations/stream": stream}, nil)
+	if s.http.Timeout != 0 {
+		t.Fatalf("stateSource's own client.Timeout = %v, want 0 (per-call timeouts are applied in do(), never on the shared client)", s.http.Timeout)
 	}
 }
 
