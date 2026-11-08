@@ -328,7 +328,7 @@ A revision that is not the record's current one SHALL be refused with the confli
 
 An absent key SHALL be refused with the not-found error.
 
-A record holding a finalizer SHALL be marked, not removed, as for the unconditional delete.
+A record whose removal is held SHALL be marked for deletion, not removed, as for the unconditional delete.
 
 The unconditional delete remains for a caller that never read first.
 

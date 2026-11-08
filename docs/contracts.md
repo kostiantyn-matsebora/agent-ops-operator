@@ -633,7 +633,7 @@ This pattern applies to whatever resident lands here next.
 | `GET/POST /activity*` | per-hop telemetry (bearer token, see activity contract) |
 | `POST /coordinate/*` | the aops MCP server's verbs and read tools (per-conversation or channel-reader bearer token, see aops MCP server contract) |
 | `PUT/GET /control-plane/*` | operational-configuration surface (dedicated bearer token, see control-plane contract) |
-| `GET /state/*` | Conversations and Signals, read-only (adapter or `STATE_READ_TOKEN` bearer, see the state read surface) |
+| `GET /state/*` | Conversations and Signals, read-only (`ADAPTER_TOKEN`, an adapter's derived token or `STATE_READ_TOKEN` as bearer, see the state read surface) |
 | `GET /status`, `GET /pipelines/{name}/resolved` | manager introspection (bearer token) |
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics + the `agentops_*` set above |

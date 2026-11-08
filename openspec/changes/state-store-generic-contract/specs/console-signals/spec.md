@@ -1,5 +1,12 @@
 ## MODIFIED Requirements
 
+### Requirement: The signals view updates from the watch
+The signals view SHALL reflect lifecycle transitions from the manager's state read surface feed alone — no polling, no manual refresh, no Kubernetes watch.
+
+#### Scenario: A phase change appears live
+- **WHEN** an open signals view is showing a `Pending` signal and the manager routes it
+- **THEN** the row's phase updates to `Routed` without a reload
+
 ### Requirement: A signals view lists persisted signals read-only
 The console SHALL provide a signals view fed by the manager's state read surface (`GET /state/signals` and its feed), never a Kubernetes watch of the `Signal` kind:
 
