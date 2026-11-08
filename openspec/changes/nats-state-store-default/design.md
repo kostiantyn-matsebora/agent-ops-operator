@@ -124,9 +124,12 @@ PVC per pod for the store directory. Values: `nats.replicas` (1 or 3),
 - The image comes from the official `nats` image, pinned by digest in
   `values.yaml`, multi-arch.
 
-The credential is a user and password resolved in order: an explicit value,
-then an existing Secret, then generation on install only. It follows the same
-rule as `call-auth.yaml`. The manager receives
+The credential lives in the Secret `agentops-nats-credentials`. It is resolved
+in order: an explicit `nats.auth.user` and `nats.auth.password`, then the
+Secret named by `nats.auth.existingSecret`, then generation on install only.
+It follows the same rule as `call-auth.yaml`. An upgrade that finds no Secret
+and no explicit value fails the render, naming the Secret and the value, and
+generates nothing. The manager receives
 `NATS_URL` and `NATS_USER`/`NATS_PASSWORD` by `valueFrom`, so it reads no
 Secret.
 
@@ -203,6 +206,19 @@ creates Signals on `/signal/inbound` and appends inputs to Conversations on
 change's acceptance criteria, not a condition on the default. A failing gate is
 a defect in the backend to fix before the change is finished, never a reason to
 ship the old default.
+
+### D-12: The NetworkPolicy admits the manager and nothing else
+
+Where restriction is enabled, the state server's pods accept ingress on the
+client port from pods labelled `app.kubernetes.io/name: agentops-manager` and
+on the peer port from the state server's own label. Every other component
+reads state through the manager's `/state/*` surface, which already holds its
+own token, so none needs a route to the server.
+
+A flow-table entry lists manager to server, and the existing
+`TestEveryWiredFlowIsAllowed` walks it. The manager's own NetworkPolicy needs
+no change, since the dial is egress from the manager and the chart does not
+restrict egress.
 
 ## Risks / Trade-offs
 
