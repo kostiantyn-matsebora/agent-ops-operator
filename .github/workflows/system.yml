@@ -19,6 +19,14 @@
 #         CLAUDE_CODE_OAUTH_TOKEN is absent, so a fork or a repository without the
 #         secret runs every tier its access allows and fails for none of the rest.
 #
+#   `stateBackend` pins SYSTEM_STATE_BACKEND for the whole run (nats-state-
+#   store-default task 5.7): empty (every existing caller) leaves the
+#   chart's own default (nats) untouched; `kube` installs the pack on the
+#   fallback backend instead, a REAL cluster install and test run — not
+#   only the `helm template` render task 3.5 already proved renders no
+#   state server — so the fallback path is exercised, not only rendered.
+#   `system-smoke-kube.yml` is the one caller that sets it.
+#
 # WHAT THIS WORKFLOW OWNS is the cluster-based jobs only. Per-module build, vet
 # and test, the envtest suite and chart lint stay in ci.yml — one definition
 # per tier, stated in both openspec capabilities.
@@ -31,6 +39,13 @@ on:
         description: smoke or full
         type: string
         default: smoke
+      stateBackend:
+        description: >-
+          pins SYSTEM_STATE_BACKEND for the whole pack (nats-state-store-default
+          task 5.7's kube-fallback smoke run); empty leaves the chart's own
+          default (nats) untouched
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -53,6 +68,7 @@ jobs:
         working-directory: ${{ env.MANAGER_MODULE }}
     env:
       SYSTEM_TIER: ${{ inputs.tier }}
+      SYSTEM_STATE_BACKEND: ${{ inputs.stateBackend }}
       SYSTEM_ARTIFACT_DIR: ${{ github.workspace }}/system-artifacts
     steps:
       - uses: actions/checkout@v4

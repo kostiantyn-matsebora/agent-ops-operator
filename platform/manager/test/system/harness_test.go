@@ -18,6 +18,9 @@
 //	SYSTEM_ARTIFACT_DIR   where failure diagnostics are written (default $TMPDIR/agentops-e2e)
 //	SYSTEM_TIER           smoke (default) or full — full adds the real-runtime lane
 //	SYSTEM_BUDGET         wall-clock budget of the gating tier (default 20m)
+//	SYSTEM_STATE_BACKEND  pins stateStore.backend for the WHOLE pack (task 5.7's
+//	                      kube-fallback smoke run); empty leaves the chart's own
+//	                      default (nats) untouched
 //	CLAUDE_CODE_OAUTH_TOKEN  the real-runtime lane's credential; absent, the lane is SKIPPED
 package system
 

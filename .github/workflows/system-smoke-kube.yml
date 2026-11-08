@@ -1,0 +1,20 @@
+# The smoke tier, PINNED TO THE kube FALLBACK BACKEND, on demand, on any
+# branch (nats-state-store-default task 5.7) — same shape as
+# system-smoke.yml, but with stateBackend: kube so a real cluster installs
+# and runs the pack on the fallback rather than only `helm template`-ing it.
+#
+#   gh workflow run system-smoke-kube.yml --ref <branch>
+name: system-smoke-kube
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    uses: ./.github/workflows/system.yml
+    with:
+      tier: smoke
+      stateBackend: kube
