@@ -337,10 +337,11 @@ decides whether a signal is emitted at all — see
 
 **The durable record of one published message, and its routing.**
 `/signal/inbound` only PUBLISHES: it validates, applies `attributeFilters`,
-creates the `Signal` and acknowledges. A separate consumer, on the leader,
-routes it afterwards. Publish looks up no claimant, spends no cooldown and
-checks no capacity, so consumption can later be paused without stopping
-ingest.
+creates the `Signal` and acknowledges.
+
+A separate consumer, on the leader, routes it afterwards. Publish looks up
+no claimant, spends no cooldown and checks no capacity, so consumption can
+later be paused without stopping ingest.
 
 **One `Signal` per message, never merged.** A repeat of an `initiationId` is
 its own `Signal`. The `Conversation` already accumulates an `initiationId`:
@@ -348,11 +349,14 @@ its id is that value, and later messages append to it as inputs.
 
 **`spec.signalId` makes publish idempotent.** An adapter may send a
 per-message `signalId`, stable across a re-send of that message and
-distinct from the shared `initiationId`. The `Signal` is named from
-`(source, signalId)`, so a duplicate create is acknowledged and written
-nowhere. This holds in every phase until the TTL deletes the `Signal`. A
-message with no `signalId` gets a generated name and no dedup, and cooldown
-and equality reuse resolve its re-send instead.
+distinct from the shared `initiationId`.
+
+The `Signal` is named from `(source, signalId)`, so a duplicate create is
+acknowledged and written nowhere. This holds in every phase until the TTL
+deletes the `Signal`.
+
+A message with no `signalId` gets a generated name and no dedup, and
+cooldown and equality reuse resolve its re-send instead.
 
 **The consumer decides, in order:**
 
@@ -376,8 +380,10 @@ fact.
 (chart `signalConsumerConcurrency`, default `4`) sets its size. One consumer
 holds a `Signal` at a time. Messages sharing a `(source, initiationId)` are
 processed one after another in arrival order, and different keys in
-parallel. A leader change needs no recovery step: the new leader resumes
-every non-terminal `Signal`, and routing is idempotent, so a redo neither
+parallel.
+
+A leader change needs no recovery step: the new leader resumes every
+non-terminal `Signal`, and routing is idempotent, so a redo neither
 duplicates a conversation nor an input.
 
 **`status.claimants[]` is the per-claimant routing workflow**, snapshotted
@@ -536,6 +542,17 @@ three values and each field's meaning are the
 as a reader knows it, unique within the list.
 
 **`externals` is metadata only, and nothing verifies it.**
+
+#### `spec.stateAccess`: the one field that grants something
+
+Both adapter kinds may also declare `spec.stateAccess` (default `false`).
+Unlike the three above, this one is not metadata — it is a grant.
+
+Setting it `true` lets that adapter's own derived token open the manager's
+[state read surface](contracts.md#the-state-read-surface), `/state/*`.
+Silence grants nothing. The console's own `ChannelAdapter` carries it, which
+is how it reads Conversations and Signals with no Kubernetes RBAC on either
+kind.
 
 - **It grants nothing.** No RBAC, no network policy and no credential follows
   from declaring the Kubernetes API. What an adapter may do is still granted
@@ -1497,10 +1514,12 @@ A runtime's report is never consulted.
 | made no move and answered no person, first time | appends ONE corrective input, origin `manager` |
 | made no move and consumed only that corrective input | escalates the root with a digest |
 
-**A Coordinator never closes a conversation a person started.** `close` on the
-caller's own root is refused when a person opened it, by an addressed
-`/<pipeline> <task>` or a chat message. That person ends it with `/close`.
-A root an alert or a job opened may still close itself.
+**A Coordinator never closes a conversation a person started.** `close` on
+the caller's own root is refused when a person opened it, by an addressed
+`/<pipeline> <task>` or a chat message.
+
+That person ends it with `/close`. A root an alert or a job opened may
+still close itself.
 
 **A person's message is a `channel` input, or any input recording the surface
 it was typed on.** A chat signal is the second case. An alert, a job tick and a
@@ -1902,6 +1921,12 @@ payload is not copied into the conversation object.
     `SignalSource.status.cooldown[]`.
   - Under `kube` the store and the Kubernetes API are the same API.
   - Each source's `receivedTotal` and `lastReceived` counters live there too.
+  - **Adapter cursors live there too** — the one string a channel or signal
+    adapter persists per surface and key, read and written through
+    `GET`/`PUT /channel/state/{key}` and `/signal/state/{key}`. Under `kube`
+    it is still the same `agentops.dev/adapter-state-<key>` annotation on
+    the `Channel` or `SignalSource` an adapter upgraded across this change
+    already wrote.
   - Conversation state is the session id, threads, inputs, runs, phase and
     the message record. The record holds what people sent and what the agent
     answered.
@@ -1939,14 +1964,16 @@ a second source of truth beside the CRs.
 | Manager — admission | active/pending counts | live pod list + `Conversation` phase | `kube`: the Kubernetes API's own guarantee | nothing |
 | Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | none: not state-store state | recent history. Clients are told to resync rather than handed silence |
 | Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | none: not state-store state | with `persistence.context.enabled` off, conversational context. With it on, nothing |
-| Channel / signal adapters | transport cursors | annotations on `Channel` / `SignalSource` | none: not state-store state | nothing |
-| Console | transcript buffer, config cache, activity index | rebuilt by list→watch and cursor replay. The transcript is a CACHE of `status.runs[]` | none: not state-store state | nothing authoritative. Acks and notices only |
-| Housekeeping job | none (scans disk, reads conversations) | the claims it mounts | none: not state-store state | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
+| Channel / signal adapters | transport cursors | the state store, through `/channel/state`/`/signal/state` | `kube`: the same `agentops.dev/adapter-state-<key>` annotation on `Channel` / `SignalSource`, the Kubernetes API's own guarantee | nothing |
+| Console | transcript buffer, config cache, activity index | Conversations and Signals read through the manager's [state read surface](contracts.md#the-state-read-surface), everything else rebuilt by Kubernetes list→watch and cursor replay. The transcript is a CACHE of `status.runs[]` | none: the console holds no state of its own, and reads no Kubernetes RBAC on either kind it now reaches through the manager | nothing authoritative. Acks and notices only |
+| Housekeeping job | none (scans disk, lists conversations through the manager's state read surface) | the claims it mounts | none: not state-store state, and no Kubernetes grant on `Conversation` at all | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
 
 **The backend column names what a row's guarantee rests on.** Conversation
-state, `Signal`s and the cooldown window go through the store. A source's
-`receivedTotal` and `lastReceived` counters go through it too, and under `kube`
-stay the same two status fields on the source.
+state, `Signal`s and the cooldown window go through the store.
+
+A source's `receivedTotal` and `lastReceived` counters go through it too,
+and under `kube` stay the same two status fields on the source. So does an
+adapter's own cursor, the same annotation it always was.
 
 - **Under `kube`**, a restart costs what the Kubernetes API's own guarantee
   allows. A write is acknowledged once the API server has it.

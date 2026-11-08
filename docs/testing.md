@@ -132,42 +132,49 @@ boundary, not a limitation to work around.
 
 ## The state store conformance suite
 
-The manager reaches conversation state, `Signal`s and each source's cooldown
-window through one contract (`internal/state`): `Store` for conversations,
-`SignalStore` beside it for the rest.
+The manager reaches conversation state, `Signal`s, each source's cooldown
+window and receipt counters, and adapter cursors through one GENERIC
+contract (`internal/state`): `Collection[T]`, `Expiring[T]`, `Appended[P,
+T]` and `Blobs`, composed into one closed inventory, `Stores`, naming every
+kind the manager keeps.
 
-A **conformance suite** (`internal/state/conformance`) is what a backend passes
-to exist. Each scenario of the contract's spec is one subtest. `Run` covers
-`Store`, and `RunSignals` covers `SignalStore` with 39 scenarios.
+A **conformance suite** (`internal/state/conformance`) is what a backend
+passes to exist, driven by the inventory rather than written per kind.
+
+One engine per capability — `Run`, `RunExpiring`, `RunAppended`, `RunBlobs`
+— and one entry point, `RunStores`, that walks every field of `Stores` and
+fails, naming the field, if one is left unwired.
 
 | Decides | Cannot decide |
 |---|---|
-| conversations: compare-and-swap writes and refusal of a stale revision, lookup by declared index, a resumable at-least-once change feed, expiry, append-only runs, blob payloads, scope isolation between installs | latency or throughput under load |
-| signals: create as the one duplicate arbiter in every phase, status-only compare-and-swap that never rewrites the publication fields, the two non-terminal indexes, the resumable feed, expiry written in the same write that makes a phase terminal | a real kubelet |
-| sources: the per-source cooldown window, and release of a source's signals and window | anything the feed does beyond what the contract states |
+| every collection: compare-and-swap writes and refusal of a stale revision, conditional delete (`DeleteAt`) against a stale, current or absent revision, lookup by declared index, a resumable at-least-once change feed, scope isolation between installs | latency or throughput under load |
+| `Expiring` kinds (`Signal`): a record past its expiry is invisible to reads and arrives as a delete on the feed | a real kubelet |
+| `Appended` kinds (conversation runs): append order, `Grow`'s merge idempotence (an edit applied twice equals once) and commutativity (two edits converge in either order) — the properties that let `Grow` take no revision | anything the feed does beyond what the contract states |
+| the whole inventory: a kind removed from `Stores` without a matching fixture fails `RunStores`, naming it | — |
 
-- **Every backend runs the same suite.** The `kube` backend runs it in its own
-  package against envtest, so it is part of the ordinary `go test ./...`.
-- **A new backend adds one test calling `conformance.Run`** and one calling
-  `conformance.RunSignals`, never a copy of a
-  scenario. A scenario a backend cannot meet is a contract change, not an
-  exception.
+- **Every backend runs the same suite.** The `kube` backend runs it in its
+  own package against envtest (`TestStores`), so it is part of the ordinary
+  `go test ./...`.
+- **A new backend adds one test calling `conformance.RunStores`** against
+  its own `Stores`, never a copy of a scenario. A scenario a backend cannot
+  meet is a contract change, not an exception.
+- **A kind without a capability skips exactly that scenario.** `Cooldowns`,
+  `Receipts` and `AdapterState` declare no index, so the index scenarios
+  report skipped for them rather than faking a lookup they cannot serve.
 
 **The bench measures, and gates nothing.** It prints the numbers a backend
-decision is made from:
+decision is made from, one sub-benchmark per field of `Stores`:
 
 ```sh
-cd platform/manager && go test -bench . -benchmem ./internal/state/...
+cd platform/manager && go test -run '^$' -bench . -benchmem ./internal/state/...
 ```
 
 | Metric | Read it as |
 |---|---|
-| `ns/op`, `B/op`, `allocs/op` | the cost of the timed append loop |
-| `bytes/run(json-proxy)` | the JSON size of one run. A lower bound true of every backend, not the wire size |
+| `ns/op`, `B/op`, `allocs/op` | the cost of the timed write loop |
+| `bytes/record(json-proxy)` / `bytes/run(json-proxy)` | the JSON size of one record. A lower bound true of every backend, not the wire size |
 | `allocs/write` | allocations of one isolated compare-and-swap update |
-| `resident_records(live)` | live signals a listing returns at the signal bench's scale, 200 of 300 |
-| `ns/list(live=200,terminal=100)` | the time of one listing at that scale, where the terminal signals must not slow the live count |
-| `resident_records(phase=Working)` | records a listing returns at the bench's scale, about 66 of its 200 conversations (a third are Working) |
+| `resident_records` | live records a listing returns at the bench's scale. Zero for a kind with no index (`Cooldowns`, `Receipts`, `AdapterState`) — "resident after a listing" has no meaning for a kind that cannot be listed |
 
 Compare two backends by running the same bench against each. Do not compare
 `ns/op` across machines.

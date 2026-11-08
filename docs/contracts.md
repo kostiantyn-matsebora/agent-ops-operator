@@ -443,13 +443,69 @@ delivery, and the edge reads "sent, unconfirmed" rather than claiming success.
 Every field but `kind` is optional. The reporting adapter is taken from the
 TOKEN, so an adapter naming another in `adapter` is refused with 403.
 
+## The state read surface
+
+**One door onto Conversations and Signals, for every reader that is not a
+reconciler.** `/state/*`, read-only, serving the same records the `kube`
+backend keeps on those two kinds — never a Kubernetes watch, and never the
+reader's own RBAC.
+
+The console and the housekeeping job both used to watch Conversations (and,
+for the console, Signals) directly against the Kubernetes API. Both now read
+this surface instead, and carry no RBAC on either kind.
+
+| Route | Serves |
+|---|---|
+| `GET /state/conversations` | the whole set, phase-blind, each record with `status.runs[]` and `runs[].inputs[]` |
+| `GET /state/conversations/{name}` | one record, 404 if absent |
+| `GET /state/conversations/stream?since=` | SSE: `put` / `delete` / `bookmark` / `resync`, each frame's `id:` the revision to resume from |
+| `GET /state/signals` | the whole set, each record with `expiresAt` |
+| `GET /state/signals/stream?since=` | the signal half of the stream above |
+
+No single-signal route, and no stream resume carrying items: nothing reads
+one signal on its own, or a signal's history.
+
+**The wire record** carries a kind's published field names only — `name`,
+`id`, `revision`, `createdAt`, `deletionRequestedAt`, `spec`, `status` — never
+Kubernetes metadata, labels or annotations. Under `kube`, `spec` and `status`
+are the object's own bytes.
+
+**`since` is a resume token handed back by a listing or an earlier frame,
+never something a caller constructs.** An unrecognized or stale one is not an
+error.
+
+The stream opens with a `resync` frame first. That tells the caller to
+re-read the listing before trusting anything delivered after it.
+
+A caller naming any other query parameter is refused by name.
+
+**Authentication** is one of three:
+
+| Caller | Presents |
+|---|---|
+| The master | `ADAPTER_TOKEN` |
+| An adapter | its own derived token, only when its `ChannelAdapter` or `SignalAdapter` declares `spec.stateAccess: true` — see [the channel adapter](contracts/channel-adapter.md) and [signal adapter](contracts/signal-adapter.md) specifications |
+| Housekeeping | `STATE_READ_TOKEN`, the chart's `stateReadAuth` credential, read from the environment and never a Secret the manager itself reads |
+
+An adapter token that derives correctly but whose CR does not declare
+`spec.stateAccess` is refused with 403, naming the adapter and the field. A
+token that does not derive at all is 401.
+
+`/state/` is served by **every replica**, leader or not — a store read needs
+no leader, so it joins `/healthz` in bypassing the leader-proxy a stateful
+surface like `/channel/ops` still requires.
+
 ## Manager introspection
 
 **The manager exposes only what only the manager knows.**
 
-Anything that lives in a CR is read from the API server, with the API server's
-own RBAC, and is never proxied. A manager that mirrors CRs becomes a second
-Kubernetes API with a second auth scope and its own staleness.
+Configuration — Pipelines, Channels, SignalSources, the adapter CRs — is read
+from the API server, with the API server's own RBAC, and is never proxied. A
+manager that mirrored it would become a second Kubernetes API with a second
+auth scope and its own staleness.
+
+Conversations and Signals are state, not configuration, and are served
+through `/state/*` above instead.
 
 Both endpoints below are read-only and use the same bearer scheme as
 `/activity`.
@@ -577,6 +633,7 @@ This pattern applies to whatever resident lands here next.
 | `GET/POST /activity*` | per-hop telemetry (bearer token, see activity contract) |
 | `POST /coordinate/*` | the aops MCP server's verbs and read tools (per-conversation or channel-reader bearer token, see aops MCP server contract) |
 | `PUT/GET /control-plane/*` | operational-configuration surface (dedicated bearer token, see control-plane contract) |
+| `GET /state/*` | Conversations and Signals, read-only (adapter or `STATE_READ_TOKEN` bearer, see the state read surface) |
 | `GET /status`, `GET /pipelines/{name}/resolved` | manager introspection (bearer token) |
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics + the `agentops_*` set above |

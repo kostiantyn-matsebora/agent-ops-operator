@@ -125,7 +125,7 @@ Keys and worked examples in
 **A separate identity from the acting account above** —
 `agentops-signal-k8s-events`, granted `list`/`watch` on events, pods and
 replicasets, and (cluster-wide installs only) nodes, for drain awareness. No
-agent runs as it and it never calls a tool; it only decides which cluster
+agent runs as it, and it never calls a tool. It only decides which cluster
 Events become conversations.
 
 - **The grant is a resource, not a field list.** `nodes: list, watch` permits
@@ -190,6 +190,7 @@ Properties of the product you cannot read off the values.
 | **The Telegram bot credential has one holder** | `agentops-gateway-telegram` alone holds the bot token. The channel adapter holds only a chart-generated call token and relays every Bot API call through the router, whose NetworkPolicy ingress admits the channel adapter on `router.callPort` |
 | **Adapter credentials are not stored** | a per-adapter token is an HMAC of a master key and the adapter's name, validated by re-deriving it. Nothing is minted, stored, or read back |
 | **The control-plane surface holds its own credential** | `/control-plane/*`'s token is distinct from `ADAPTER_TOKEN` and the coordinator token — a caller holding one cannot reach another's surface. Unconfigured, it refuses every request rather than falling open |
+| **Housekeeping holds no Kubernetes grant** | it lists conversations through the manager's `/state/*` surface, authenticated by its own `stateReadAuth` credential. No Role, no RoleBinding, and its ServiceAccount's token is not even mounted (`automountServiceAccountToken: false`) |
 | **Runtime pods are non-root** | at a fixed uid, and each conversation's workspace is its own subpath of the claim, so concurrent pods cannot see each other's tree |
 | **Under egress control the container is hardened further** | all capabilities dropped, privilege escalation refused |
 
@@ -250,10 +251,12 @@ that writes a fix runs a model under a read-only token and holds no other
 secret.
 
 That step accepts a run started by one bot, `github-actions`, and no other,
-because a carried `conveyor:fix` round is dispatched by this repository's own
-workflow. The gate before it has already re-read the standing instruction the
-bot relayed, and refused the run without one. The archive station is a session
-started the same way, and a person still merges what it opens.
+because a carried `conveyor:fix` round is dispatched by this repository's
+own workflow. The gate before it has already re-read the standing
+instruction the bot relayed, and refused the run without one.
+
+The archive station is a session started the same way, and a person still
+merges what it opens.
 
 The model-free step after it pushes the commit through a WRITE DEPLOY KEY
 (`AUTOFIX_DEPLOY_KEY`), repository-scoped and `contents` only, because a push

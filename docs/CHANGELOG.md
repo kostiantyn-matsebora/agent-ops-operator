@@ -36,6 +36,17 @@ for the source and the reference material beside this file.
   attributes it to the manager.
 - `status.inflight.moved` on a Conversation, written by the manager's own
   verb handlers and read when a run completes.
+- A new `/state/*` HTTP surface: `GET /state/conversations`,
+  `GET /state/conversations/{name}`, `GET /state/conversations/stream`,
+  `GET /state/signals` and `GET /state/signals/stream`. The one door onto
+  Conversations and Signals for a reader that is not a reconciler.
+- A new CRD field, `spec.stateAccess` (default `false`), on `ChannelAdapter`
+  and `SignalAdapter`. Grants that adapter's own derived token the state
+  read surface above. Silence grants nothing.
+- A new values key, `stateReadAuth.{secretName, existingSecret, token}`, the
+  credential guarding `/state/*` for a caller that is not an adapter —
+  today, housekeeping. Generated the same way as `adapterAuth` and
+  `controlPlaneAuth`, and refused at render if it equals either.
 
 ### Changed
 
@@ -51,6 +62,20 @@ for the source and the reference material beside this file.
 - A source's `receivedTotal` and `lastReceived` counters are now written
   through the state store too, so no manager state is left outside it. Under
   `kube` the fields and their values are unchanged.
+- An adapter's own cursor (`/channel/state`, `/signal/state`) is now written
+  through the state store too. Under `kube` it is the same
+  `agentops.dev/adapter-state-<key>` annotation, byte-identical, so an
+  adapter upgraded across this change reads back what it wrote before.
+- **The housekeeping job now lists conversations through the manager's
+  `/state/*` surface, never the Kubernetes API, and holds no RBAC at all.**
+  It needs `MANAGER_URL` and `STATE_READ_TOKEN` reachable, both now
+  projected by the chart automatically. A release with
+  `global.agentops.networkPolicy.enabled: true` must admit it on the
+  manager's NetworkPolicy, which this chart version does unconditionally —
+  no values change needed.
+- The console now reads Conversations and Signals through the same surface
+  instead of a Kubernetes watch, over its own `ChannelAdapter`'s derived
+  token. Its Role no longer grants either kind.
 - A re-sent `signalId` whose earlier signal has expired but is not yet swept
   (up to the sweep period, 30 seconds) is now stored, not acknowledged as a
   duplicate and dropped.
