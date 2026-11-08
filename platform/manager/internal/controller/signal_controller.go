@@ -574,7 +574,7 @@ func (r *SignalReconciler) evict(ctx context.Context, p *signalPass, live, limit
 }
 
 // SetupWithManager wires the consumer pool: SIGNAL_CONSUMER_CONCURRENCY workers
-// over one work queue keyed by Signal, fed by the SignalStore's feed (design
+// over one work queue keyed by Signal, fed by the Signals collection's feed (design
 // D-14) rather than an informer on the CRD, plus the channel housekeeping uses
 // to enqueue another Signal's pass. The controller runs on the leader only.
 func (r *SignalReconciler) SetupWithManager(mgr ctrl.Manager) error {

@@ -484,7 +484,7 @@ A caller naming any other query parameter is refused by name.
 | Caller | Presents |
 |---|---|
 | The master | `ADAPTER_TOKEN` |
-| An adapter | its own derived token, only when its `ChannelAdapter` or `SignalAdapter` declares `spec.stateAccess: true` — see [the channel adapter](contracts/channel-adapter.md) and [signal adapter](contracts/signal-adapter.md) specifications |
+| An adapter, such as the console | its own derived token, only when its `ChannelAdapter` or `SignalAdapter` declares `spec.stateAccess: true`. The console's `ChannelAdapter` declares it |
 | Housekeeping | `STATE_READ_TOKEN`, the chart's `stateReadAuth` credential, read from the environment and never a Secret the manager itself reads |
 
 An adapter token that derives correctly but whose CR does not declare

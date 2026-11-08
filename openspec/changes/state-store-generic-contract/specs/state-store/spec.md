@@ -106,7 +106,7 @@ success.
 - **THEN** the flags are set, the delivered set holds each channel once in
   first-appearance order, and no other run changed
 
-#### Scenario: Concurrent edits and an append all land
+#### Scenario: Concurrent updates and an append all land
 - **WHEN** several edits and an append reach one conversation at the same
   moment, none holding a revision
 - **THEN** every one succeeds and the listing holds every effect

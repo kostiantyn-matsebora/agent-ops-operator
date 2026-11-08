@@ -15,8 +15,8 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
-// The Signal reconciler's event source is the SignalStore's feed, the way the
-// Conversation reconciler's is the Store's: a signal that exists when the
+// The Signal reconciler's event source is the Signals collection's feed, the way the
+// Conversation reconciler's is the Conversations collection's: a signal that exists when the
 // controller starts is reconciled, and each later create, update and delete
 // reaches the queue in the order the store made them.
 func TestSignalFeedDeliversTheLifecycleInOrder(t *testing.T) {

@@ -43,8 +43,10 @@ It fans in six sources the browser never touches directly:
 | Resolved capabilities | manager `GET /pipelines/{name}/resolved` | authoritative — recomputing it invites disagreement |
 
 **The two state feeds join the same cache the Kubernetes watch feeds the UI
-from.** Both sides speak one delta vocabulary (`ADDED` / `MODIFIED` / `DELETED`),
-so nothing downstream of the cache can tell which backend a kind came from.
+from.** The state feeds carry `put` / `delete` / `bookmark` / `resync` frames.
+
+The console normalizes them into the watch's `ADDED` / `MODIFIED` / `DELETED`.
+Nothing downstream of the cache can tell which backend a kind came from.
 
 A `resync` frame on either state stream relists through the plain `GET`,
 the same recovery a Kubernetes 410 already triggers.

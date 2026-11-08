@@ -66,16 +66,18 @@ for the source and the reference material beside this file.
   through the state store too. Under `kube` it is the same
   `agentops.dev/adapter-state-<key>` annotation, byte-identical, so an
   adapter upgraded across this change reads back what it wrote before.
-- **The housekeeping job now lists conversations through the manager's
-  `/state/*` surface, never the Kubernetes API, and holds no RBAC at all.**
+- The housekeeping job now lists conversations through the manager's
+  `/state/*` surface, never the Kubernetes API, and **holds no RBAC at all**.
   It needs `MANAGER_URL` and `STATE_READ_TOKEN` reachable, both now
   projected by the chart automatically. A release with
   `global.agentops.networkPolicy.enabled: true` must admit it on the
   manager's NetworkPolicy, which this chart version does unconditionally —
   no values change needed.
 - The console now reads Conversations and Signals through the same surface
-  instead of a Kubernetes watch, over its own `ChannelAdapter`'s derived
-  token. Its Role no longer grants either kind.
+  instead of a Kubernetes watch. Its `ChannelAdapter` now declares
+  `spec.stateAccess: true`, so its derived adapter token opens `/state/*`
+  (not the `stateReadAuth` credential housekeeping uses). Its Role no longer
+  grants either kind.
 - A re-sent `signalId` whose earlier signal has expired but is not yet swept
   (up to the sweep period, 30 seconds) is now stored, not acknowledged as a
   duplicate and dropped.
