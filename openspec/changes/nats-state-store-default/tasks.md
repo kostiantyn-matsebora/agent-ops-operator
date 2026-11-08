@@ -2,9 +2,16 @@
 
 This gate applies when implementation starts. This pull request only proposes.
 
-- [ ] 1.1 Confirm `state-store-generic-contract` is archived and rebase the branch on master. Nothing below starts before this is ticked.
-- [ ] 1.2 Re-read the published "Every piece of live state has one declared home" in `state-durability`. This change's delta replaces one sentence of it. Copy the published block whole, including every scenario the other change added, and change only that sentence.
-- [ ] 1.3 Re-run `openspec validate nats-state-store-default`.
+- [x] 1.1 Confirm `state-store-generic-contract` is archived and rebase the branch on master. Nothing below starts before this is ticked.
+  Verdict:
+  - `state-store-generic-contract` is archived at `openspec/changes/archive/2026-11-08-state-store-generic-contract/` (issue #457, PR #470).
+  - `change/nats-state-store-default` was branched from `origin/master` at `51d7304`, which already contains the archive commit.
+- [x] 1.2 Re-read the published "Every piece of live state has one declared home" in `state-durability`. This change's delta replaces one sentence of it. Copy the published block whole, including every scenario the other change added, and change only that sentence.
+  Verdict:
+  - `openspec/changes/nats-state-store-default/specs/state-durability/spec.md`'s `MODIFIED Requirements` block already equals the now-published `state-durability` requirement apart from the one paragraph naming the backend (`nats` on its own volumes vs. `kube`'s), diffed by hand against `openspec/specs/state-durability/spec.md`.
+  - No scenario of the published requirement is missing from the delta.
+- [x] 1.3 Re-run `openspec validate nats-state-store-default`.
+  Verdict: `openspec validate nats-state-store-default` reports the change valid.
 
 ## 2. The `nats` backend — backend-developer
 
