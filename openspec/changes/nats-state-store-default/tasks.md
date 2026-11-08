@@ -147,8 +147,8 @@ This gate applies when implementation starts. This pull request only proposes.
   - Added `TestStateStoreGuardRefusesAHandSetContradiction`, `TestNatsBundleRendersByDefault`, `TestNatsReplicaCountIsConfigurable`, `TestNatsCredentialPrecedence`, `TestNatsEnvWiresToItsOwnSecret` to `platform/manager/internal/integration/charttemplate_test.go`, beside the deployment-engineer lane's own `TestEveryWiredFlowIsAllowed` extension and `TestStateServerAdmitsOnlyTheManager` (task 3.3) in `charttemplate_networkpolicy_test.go`.
   - Fixed the two pre-existing tests the default flip broke (`TestStateBackendEnvIsRenderedFromTheSelector`, `TestStateStoreNullFallsBackToTheKubeDefault`) to expect `nats`.
   - `go test ./internal/integration/...` (`KUBEBUILDER_ASSETS=/root/.envtest/k8s/1.31.0-linux-amd64`, `TZ=Europe/Helsinki`) passes in full.
-- [ ] 4.5 The retired-vocabulary and publication guards pass.
-  Verdict (partial, re-run at finish): both guards report clean against the tree as it stands after sections 3/4.4. Left unticked until the whole change (sections 2, 5, 6 included) is final, since a later section could still introduce a violation.
+- [x] 4.5 The retired-vocabulary and publication guards pass.
+  Verdict: re-run after sections 2, 3, 5 and 6 all landed. `python3 .github/scripts/publication-guard.py` and `python3 .github/scripts/retired-vocabulary-guard.py` both report clean against the whole tree.
 
 ## 5. System tests
 
