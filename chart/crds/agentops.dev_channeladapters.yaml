@@ -246,6 +246,11 @@ spec:
                   rollout ever runs two instances side by side (required for pull-based
                   transports like Telegram getUpdates).
                 type: boolean
+              stateAccess:
+                description: |-
+                  StateAccess grants this adapter's derived token the manager's state read
+                  surface. Silence grants nothing.
+                type: boolean
             required:
             - image
             type: object

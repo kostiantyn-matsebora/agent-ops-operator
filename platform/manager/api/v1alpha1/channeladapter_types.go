@@ -80,6 +80,10 @@ type ChannelAdapterSpec struct {
 	// +listMapKey=name
 	// +optional
 	Externals []ExternalRef `json:"externals,omitempty"`
+	// StateAccess grants this adapter's derived token the manager's state read
+	// surface. Silence grants nothing.
+	// +optional
+	StateAccess bool `json:"stateAccess,omitempty"`
 }
 
 // Echoes reports whether a surface served by this adapter displays a person's
