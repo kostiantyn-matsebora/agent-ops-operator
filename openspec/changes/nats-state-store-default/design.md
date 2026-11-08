@@ -47,7 +47,8 @@ A KV revision is the stream sequence of the entry's last write. It is a
 wrong-last-sequence error to `state.ErrConflict` or `ErrAlreadyExists`.
 
 `Watch` resumes with an ordered consumer starting at sequence `rev + 1`.
-That is exact, so no dedup layer is needed. A bookmark is a periodic
+The feed stays at-least-once, as the contract says. A reconnect may redeliver
+the last event, and consumers already tolerate it. A bookmark is a periodic
 heartbeat event carrying the consumer's last delivered sequence.
 
 ### D-3: Envelope in the value, JSON

@@ -12,7 +12,7 @@ This gate applies when implementation starts. This pull request only proposes.
 - [ ] 2.4 Implement `Expiring[T]`, the sweep and invisible-past-expiry reads (D-6). Verify a read between expiry and sweep reports not found.
 - [ ] 2.5 Implement `Appended[P, T]`: `Append`, `Grow` by CAS retry, `GetWithItems`, `ListWithItems`, `WatchWithItems` (D-5). Verify two concurrent grows both apply.
 - [ ] 2.6 Implement `Blobs` over an Object Store (D-7). Verify a blob above the server's message limit reads back byte-identical.
-- [ ] 2.7 Implement the one-time import from `kube` with the marker written last (D-10). Verify the three import scenarios of the spec, including a kill mid-import, and that the source objects are untouched.
+- [ ] 2.7 Implement the one-time import from `kube` with the marker written last (D-10). Verify every import scenario of the spec: the upgrade, the interrupted import, the non-leader, the late old-replica write, the new-version write that is never overwritten, the fresh install and the untouched source.
 - [ ] 2.8 Select `nats` in `cmd/manager/store.go` from `STATE_BACKEND`, read `NATS_URL`, credentials and replicas from env, and report not ready while the server is unreachable. Verify the unknown-backend and not-ready tests.
 
 ## 3. The `nats` bundle and the default — deployment-engineer
