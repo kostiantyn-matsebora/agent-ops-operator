@@ -96,8 +96,9 @@ value is stored whole.
 
 ### Requirement: A `kube` install's records are imported before the manager serves
 When the `nats` backend starts over an empty bucket set and the Kubernetes API
-holds conversation, input, signal, cooldown or receipt records, the manager
-SHALL copy them into the store before it reports ready.
+holds conversation, run, input, signal, cooldown, receipt or adapter-state
+records, the manager SHALL copy them into the store before it reports ready.
+Adapter state is the key-value annotations on `Channel` and `SignalSource`.
 
 - The import SHALL start only on the replica holding the leader Lease.
 - Each copied record SHALL carry the source's `resourceVersion` as
