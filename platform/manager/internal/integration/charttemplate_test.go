@@ -426,6 +426,7 @@ var generatedCredentials = []struct{ name, key string }{
 	{"agentops-adapter-token", "token"},
 	{"agentops-console-console", "uiToken"},
 	{"agentops-control-plane-token", "token"},
+	{"agentops-state-read-token", "token"},
 }
 
 // secretDoc returns the rendered Secret of that name, or "" if none was emitted.
@@ -484,7 +485,8 @@ func TestExplicitTokensRenderOnUpgrade(t *testing.T) {
 	out := helmTemplate(t, "--is-upgrade",
 		"--set", "console.auth.uiToken=rotated-ui",
 		"--set", "adapterAuth.token=rotated-master",
-		"--set", "controlPlaneAuth.token=rotated-control-plane")
+		"--set", "controlPlaneAuth.token=rotated-control-plane",
+		"--set", "stateReadAuth.token=rotated-state-read")
 	for _, c := range generatedCredentials {
 		if secretDoc(out, c.name) == "" {
 			t.Fatalf("%s must render on upgrade when configured explicitly", c.name)
@@ -520,7 +522,8 @@ func TestExistingSecretIsReferencedAndNotCreated(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "console.auth.existingSecret=my-console-secret",
 		"--set", "adapterAuth.existingSecret=my-adapter-secret",
-		"--set", "controlPlaneAuth.existingSecret=my-control-plane-secret")
+		"--set", "controlPlaneAuth.existingSecret=my-control-plane-secret",
+		"--set", "stateReadAuth.existingSecret=my-state-read-secret")
 	for _, c := range generatedCredentials {
 		if doc := secretDoc(out, c.name); doc != "" {
 			t.Fatalf("no Secret may be created when one is supplied, got:\n%s", doc)
@@ -574,6 +577,55 @@ func TestControlPlaneTokenEnvWiresToItsOwnSecret(t *testing.T) {
 	// the Secret level.
 	if !strings.Contains(deploy, "name: ADAPTER_TOKEN\n              valueFrom:\n                secretKeyRef:\n                  name: agentops-adapter-token") {
 		t.Fatalf("ADAPTER_TOKEN must still reference its own Secret:\n%s", deploy)
+	}
+}
+
+// state-store-generic-contract D-6: a caller holding stateReadAuth's token must
+// reach /state/* alone, so it is never derived from or equal to either other
+// credential. Mirrors TestControlPlaneTokenEnvWiresToItsOwnSecret for the third
+// credential, and the equal-token refusal state-read-auth.yaml adds beside
+// control-plane-auth.yaml's own (which checks only against adapterAuth).
+func TestStateReadTokenMustDifferFromTheOtherTwoCredentials(t *testing.T) {
+	if out := helmTemplateErr(t,
+		"--set", "stateReadAuth.token=same",
+		"--set", "adapterAuth.token=same"); !strings.Contains(out, "stateReadAuth.token must differ from adapterAuth.token") {
+		t.Fatalf("the render must refuse a stateReadAuth token equal to adapterAuth's, naming both:\n%s", out)
+	}
+	if out := helmTemplateErr(t,
+		"--set", "stateReadAuth.token=same",
+		"--set", "controlPlaneAuth.token=same"); !strings.Contains(out, "stateReadAuth.token must differ from controlPlaneAuth.token") {
+		t.Fatalf("the render must refuse a stateReadAuth token equal to controlPlaneAuth's, naming both:\n%s", out)
+	}
+	// Three distinct values render cleanly.
+	out := helmTemplate(t,
+		"--set", "stateReadAuth.token=state-value",
+		"--set", "adapterAuth.token=adapter-value",
+		"--set", "controlPlaneAuth.token=control-plane-value")
+	if doc := secretDoc(out, "agentops-state-read-token"); doc == "" {
+		t.Fatal("agentops-state-read-token was not rendered")
+	}
+}
+
+func TestStateReadTokenEnvWiresToItsOwnSecret(t *testing.T) {
+	want := func(secret string) string {
+		return "name: STATE_READ_TOKEN\n              valueFrom:\n                secretKeyRef:\n                  name: " + secret + "\n                  key: token"
+	}
+	deploy := findDocByKindAndMetaName(helmTemplate(t), "Deployment", "agentops-manager")
+	if deploy == "" {
+		t.Fatal("manager Deployment not rendered")
+	}
+	if !strings.Contains(deploy, want("agentops-state-read-token")) {
+		t.Fatalf("manager Deployment must wire STATE_READ_TOKEN to the default Secret:\n%s", deploy)
+	}
+
+	renamed := findDocByKindAndMetaName(helmTemplate(t, "--set", "stateReadAuth.secretName=test"), "Deployment", "agentops-manager")
+	if !strings.Contains(renamed, want("test")) {
+		t.Fatalf("STATE_READ_TOKEN must follow stateReadAuth.secretName:\n%s", renamed)
+	}
+
+	existing := findDocByKindAndMetaName(helmTemplate(t, "--set", "stateReadAuth.existingSecret=my-state-read-secret"), "Deployment", "agentops-manager")
+	if !strings.Contains(existing, want("my-state-read-secret")) {
+		t.Fatalf("STATE_READ_TOKEN must follow stateReadAuth.existingSecret:\n%s", existing)
 	}
 }
 

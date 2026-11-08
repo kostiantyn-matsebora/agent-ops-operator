@@ -17,36 +17,14 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-housekeeping
----
-# READ-ONLY, and only conversations. This job performs no API writes at all:
-# both etcd-side stages of the lifecycle are the manager's.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: {{ $h.serviceAccountName }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: agentops-housekeeping
-rules:
-  - apiGroups: ["agentops.dev"]
-    resources: ["conversations"]
-    verbs: ["get", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: {{ $h.serviceAccountName }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: agentops-housekeeping
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: {{ $h.serviceAccountName }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ $h.serviceAccountName }}
-    namespace: {{ .Release.Namespace }}
+{{/*
+Design state-store-generic-contract D-6/D-8: housekeeping lists conversations
+through the manager's /state/* surface now, not the Kubernetes API, so it
+holds no Kubernetes grant at all — no Role, no RoleBinding. The ServiceAccount
+stays (the pod still needs an identity to name on its spec), but
+automountServiceAccountToken on the CronJob's pod spec, below, keeps even that
+identity's token off the pod: there is no API call left for it to authenticate.
+*/}}
 ---
 # Named agentops-housekeeping so signal-k8s-events' name-prefix self-exclusion
 # applies: a CronJob fails on a schedule, and an unexcluded failure would open a
@@ -73,6 +51,11 @@ spec:
         spec:
           restartPolicy: Never
           serviceAccountName: {{ $h.serviceAccountName }}
+          # Design state-store-generic-contract D-6/D-8: this job holds no
+          # Kubernetes grant at all now, so there is no API call left for its
+          # ServiceAccount's token to authenticate — it reads conversations
+          # through MANAGER_URL/STATE_READ_TOKEN below instead.
+          automountServiceAccountToken: false
           {{- with $h.nodeSelector }}
           nodeSelector:
 {{ toYaml . | indent 12 }}
@@ -91,6 +74,21 @@ spec:
                   value: {{ $h.maxDeletions | quote }}
                 - name: SESSION_GRACE
                   value: {{ $h.sessionGrace | quote }}
+                # Design state-store-generic-contract D-5/D-6: the job lists
+                # conversations through the manager's /state/* surface, never
+                # the Kubernetes API — same in-cluster Service DNS name as the
+                # aops MCP server's own MANAGER_URL (templates/coordination.yaml).
+                - name: MANAGER_URL
+                  value: {{ printf "http://agentops-manager.%s.svc:%v" .Release.Namespace .Values.service.apiPort | quote }}
+                # A reader that is not an adapter, so it holds a DEDICATED
+                # credential — never ADAPTER_TOKEN (master reach) or
+                # CONTROL_PLANE_TOKEN (a different surface). Same Secret the
+                # manager itself reads STATE_READ_TOKEN from.
+                - name: STATE_READ_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.stateReadAuth.existingSecret | default .Values.stateReadAuth.secretName }}
+                      key: token
                 {{- if $mountWs }}
                 - name: WORKSPACE_ROOT
                   value: /reclaim/workspace

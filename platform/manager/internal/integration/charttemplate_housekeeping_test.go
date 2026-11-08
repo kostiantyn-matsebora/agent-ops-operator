@@ -104,26 +104,29 @@ func TestHousekeepingMountsOnlyTheClaimsThatExist(t *testing.T) {
 	}
 }
 
-// The job reads conversations and writes NOTHING: both etcd-side stages of the
-// lifecycle belong to the manager.
-func TestHousekeepingRoleIsReadOnly(t *testing.T) {
+// state-store-generic-contract D-6/D-8: the job lists conversations through
+// the manager's /state/* surface now, not the Kubernetes API, so it holds no
+// Kubernetes grant at all — no Role, no RoleBinding, and no mounted token for
+// the ServiceAccount it still names on its pod spec.
+func TestHousekeepingHoldsNoKubernetesGrant(t *testing.T) {
 	out := helmTemplate(t, "--set", "housekeeping.enabled=true")
-	var role string
 	for _, doc := range splitDocs(out) {
-		if strings.Contains(doc, "\nkind: Role\n") && strings.Contains(doc, "name: agentops-housekeeping") {
-			role = stripComments(doc)
+		if (strings.Contains(doc, "\nkind: Role\n") || strings.Contains(doc, "\nkind: RoleBinding\n")) &&
+			strings.Contains(doc, "name: agentops-housekeeping") {
+			t.Fatalf("housekeeping must hold no Role or RoleBinding, got:\n%s", stripComments(doc))
 		}
 	}
-	if role == "" {
-		t.Fatal("housekeeping Role not rendered")
+	cron := cronJobDoc(t, out)
+	if !strings.Contains(cron, "automountServiceAccountToken: false") {
+		t.Errorf("the CronJob's pod must not mount its ServiceAccount's token, or a now-unused identity still authenticates to the API server:\n%s", cron)
 	}
-	if !strings.Contains(role, `verbs: ["get", "list"]`) {
-		t.Errorf("the job's Role must be get/list only:\n%s", role)
-	}
-	for _, forbidden := range []string{"delete", "create", "update", "patch", "watch"} {
-		if strings.Contains(role, forbidden) {
-			t.Errorf("the job must not be granted %q:\n%s", forbidden, role)
+	for _, name := range []string{"MANAGER_URL", "STATE_READ_TOKEN"} {
+		if !strings.Contains(cron, "name: "+name) {
+			t.Errorf("the CronJob must carry %s, the only way it reaches conversations now:\n%s", name, cron)
 		}
+	}
+	if !strings.Contains(cron, "name: STATE_READ_TOKEN\n                  valueFrom:\n                    secretKeyRef:\n                      name: agentops-state-read-token\n                      key: token") {
+		t.Errorf("STATE_READ_TOKEN must come from the stateReadAuth Secret, never a literal value:\n%s", cron)
 	}
 }
 

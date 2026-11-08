@@ -52,6 +52,13 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: agentops-mcp-aops
+        # Design state-store-generic-contract D-7: housekeeping reads
+        # conversations through /state/*, outside the leader proxy but still
+        # served by the manager's own port — a DROP here looks like a manager
+        # outage, exactly the mcp-aops lane's failure mode above.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentops-housekeeping
         # A REPLICA OF ITSELF (chat-ops-broker-telegram-gateway). A non-leader
         # reverse-proxies /channel/ops and /activity* to the leader, so with
         # this rule missing every such proxy attempt is DROPPED — invisible

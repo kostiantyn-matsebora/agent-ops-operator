@@ -167,6 +167,14 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.controlPlaneAuth.existingSecret | default .Values.controlPlaneAuth.secretName }}
                   key: token
+            # /state/*'s credential for a reader that is not an adapter —
+            # today housekeeping alone (design state-store-generic-contract
+            # D-6). A THIRD Secret, never ADAPTER_TOKEN or CONTROL_PLANE_TOKEN.
+            - name: STATE_READ_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.stateReadAuth.existingSecret | default .Values.stateReadAuth.secretName }}
+                  key: token
             {{- /* THE FLOOR ACCOUNT, by name. An adapter naming none runs as it —
             bound to nothing, refused as a binding target, token mounted.
 
