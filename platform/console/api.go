@@ -248,7 +248,7 @@ func (a *API) handleTopology(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) syncState() map[string]bool {
 	out := map[string]bool{}
-	for _, k := range append(append([]string{}, Kinds...), InstallKinds...) {
+	for _, k := range append(append([]string{}, ConfigurableKinds...), InstallKinds...) {
 		out[k] = a.cache.Synced(k)
 	}
 	return out

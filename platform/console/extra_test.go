@@ -184,7 +184,7 @@ func TestHandleKindsEndpoint(t *testing.T) {
 
 	var out []KindInfo
 	getJSON(t, h, "/api/config", &out)
-	if len(out) != len(Kinds) {
+	if len(out) != len(ConfigurableKinds) {
 		t.Fatalf("want one row per agentops.dev kind, got %d", len(out))
 	}
 	byKind := map[string]KindInfo{}
@@ -357,7 +357,13 @@ func TestSummaryLinePerKind(t *testing.T) {
 		{"agentcapabilities", `{}`, "", ""},
 		{"coordinators", `{"agents":[{"name":"a"},{"name":"b"}]}`, "", "2 agents"},
 		{"signals", `{}`, `{"phase":"PartiallyRouted"}`, "partiallyrouted"},
-		{"signals", `{}`, `{"phase":"Dropped","reason":"cooldown"}`, "dropped (cooldown)"},
+		// "unclaimed", not the real system's other drop reason "cooldown":
+		// the console never names that one at all (state-store-generic-
+		// contract design D-8 — the store, not this module, owns it), and
+		// this fixture's job is only to prove summaryLine lowercases the
+		// phase and appends any reason in parentheses, which any drop
+		// reason exercises equally.
+		{"signals", `{}`, `{"phase":"Dropped","reason":"unclaimed"}`, "dropped (unclaimed)"},
 		{"signals", `{}`, `{}`, ""},
 		{"unknown", `{}`, "", ""},
 	}

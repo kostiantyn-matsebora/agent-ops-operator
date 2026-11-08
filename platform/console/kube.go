@@ -36,23 +36,29 @@ const (
 	APIVersion = "v1alpha1"
 )
 
-// Kinds are the agentops.dev resource plurals the console watches — the wiring
-// graph plus live conversations and the capability objects. Nothing outside
-// this list and InstallKinds is ever requested, which is what makes the chart's
-// read-only Role a complete description of the console's reach.
+// Kinds are the agentops.dev resource plurals the console watches over the
+// Kubernetes API — the wiring graph and the capability objects. Nothing
+// outside this list and InstallKinds is ever requested of the API server,
+// which is what makes the chart's read-only Role a complete description of
+// the console's reach there.
+//
+// Conversations and signals are NOT here (state-store-generic-contract,
+// design D-8): the console reads those two through the manager's
+// /state/* surface instead (state.go), never through the Kubernetes API,
+// so a Role built from this list grants it nothing on either kind. See
+// StateKinds and ConfigurableKinds in state.go for the other half of what
+// the console treats as "a kind it knows about".
 var Kinds = []string{
 	"agentcapabilities",
 	"agentprofiles",
 	"agentruntimes",
 	"channels",
 	"channeladapters",
-	"conversations",
 	"coordinators",
 	"mcpconfigs",
 	"mcptoolsets",
 	"pipelines",
 	"signaladapters",
-	"signals",
 	"signalsources",
 }
 

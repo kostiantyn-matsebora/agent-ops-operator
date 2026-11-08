@@ -153,7 +153,7 @@ func (a *API) handleOverview(w http.ResponseWriter, r *http.Request) {
 		out.ManagerError = err.Error()
 	}
 
-	for _, k := range append(append([]string{}, Kinds...), InstallKinds...) {
+	for _, k := range append(append([]string{}, ConfigurableKinds...), InstallKinds...) {
 		out.Counts[k] = len(a.cache.List(k))
 		out.Synced[k] = a.cache.Synced(k)
 	}
@@ -282,7 +282,7 @@ func (a *API) adapters() []AdapterInfo {
 // never conceal a broken component from the rollup.
 func (a *API) problems() []Problem {
 	var out []Problem
-	for _, kind := range Kinds {
+	for _, kind := range ConfigurableKinds {
 		for _, obj := range a.cache.List(kind) {
 			for _, c := range obj.Conditions() {
 				if c.Status == "True" {

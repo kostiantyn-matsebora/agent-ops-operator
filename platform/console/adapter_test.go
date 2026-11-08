@@ -210,8 +210,10 @@ func (f *fakeManager) inbounds() []map[string]any {
 func consoleUnderTest(t *testing.T, f *fakeManager, objs ...*Object) (*Adapter, *Transcripts, *Cache) {
 	t.Helper()
 	cache := staticCache(objs...)
-	// the static cache never lists, so mark it synced for Run()
-	for _, k := range Kinds {
+	// the static cache never lists, so mark it synced for Run() — every kind
+	// staticCache's own Cache was built over (ConfigurableKinds, matching
+	// state.go), or WaitForSync would never see every kind accounted for.
+	for _, k := range ConfigurableKinds {
 		cache.replace(k, cache.List(k))
 	}
 	tr := NewTranscripts()

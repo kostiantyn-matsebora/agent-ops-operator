@@ -9,7 +9,7 @@ import (
 
 // staticCache builds a cache pre-populated without any API traffic.
 func staticCache(objs ...*Object) *Cache {
-	c := NewCache(&fakeSource{lists: []listResult{{rv: "1"}}, watches: []watchScript{{block: true}}}, Kinds)
+	c := NewCache(&fakeSource{lists: []listResult{{rv: "1"}}, watches: []watchScript{{block: true}}}, ConfigurableKinds)
 	for _, o := range objs {
 		c.apply("ADDED", o)
 	}

@@ -149,6 +149,26 @@ func TestConsoleRoleIsReadOnly(t *testing.T) {
 	assertRuleGrantsNone(t, rules, "console Role", "create", "update", "patch", "delete", "secrets")
 	assertExactlyAPIGroups(t, rules, "console Role",
 		`apiGroups: ["agentops.dev"]`, `apiGroups: ["apps"]`, `apiGroups: [""]`, `apiGroups: ["batch"]`)
+	// state-store-generic-contract design D-8: the console reads conversations
+	// and signals through the manager's /state/* surface now, never the
+	// Kubernetes API, so this Role must name neither. This list is
+	// platform/console's Kinds var, copied by hand — a Go module may not
+	// import another's internal/ (structure.md), so there is no way to share
+	// it, and the two must be kept in step on review instead.
+	for _, forbidden := range []string{"conversations", "signals"} {
+		if strings.Contains(rules, "- "+forbidden+"\n") {
+			t.Errorf("console Role must not grant %q, read through /state/* instead:\n%s", forbidden, rules)
+		}
+	}
+	for _, want := range []string{
+		"agentcapabilities", "agentprofiles", "agentruntimes", "channels",
+		"channeladapters", "coordinators", "mcpconfigs", "mcptoolsets",
+		"pipelines", "signaladapters", "signalsources",
+	} {
+		if !strings.Contains(rules, "- "+want+"\n") {
+			t.Errorf("console Role is missing %q, platform/console's Kinds names it:\n%s", want, rules)
+		}
+	}
 }
 
 // assertOnlyReadVerbs fails unless every verbs: line in rules is exactly
