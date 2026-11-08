@@ -79,9 +79,12 @@ func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
 
 	e.PostSignal(t, sourceName, map[string]any{"initiationId": convID, "kind": "task", "payload": "echo " + convID, "title": convID})
 	conv := e.ConversationFor(t, convID, time.Minute)
-	t.Cleanup(func() {
-		_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
-	})
+	// NOT deleted on cleanup, unlike every other lane's own fixture: the
+	// full tier's system.yml caller runs this Go pack FIRST and then
+	// `platform/console/ui/e2e-live` against the SAME, reused cluster
+	// (SYSTEM_REUSE=1) — task 5.10's spec finds this exact conversation by
+	// its stable `e2e-nats-import-conv-` title prefix and renders it, which
+	// is the whole point of leaving it behind rather than tidying it away.
 	conv = e.WaitRun(t, conv.Name, 1, 4*time.Minute)
 
 	// A repeat within the window stamps SignalSource.Status.Cooldown
