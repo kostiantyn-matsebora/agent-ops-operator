@@ -238,26 +238,39 @@ the chosen entry as YAML, or nothing when no runtime is declared. */ -}}
 {{- end -}}
 
 {{- /* THE STATE-STORE BACKENDS: the names of the backends that ship a bundle. A
-backend's bundle is the values key of the SAME name (`<backend>.enabled`), so
-there is nothing to map. `kube` is the baseline and has NO bundle. A later
-backend bundle adds its name HERE, and its render tests with it. */ -}}
+backend's bundle is the values key of the SAME name, rendered from the
+PARENT's own template (never natively from the bundle's own
+`chart/charts/<name>/templates/`, which cannot see `stateStore.backend` —
+chart.md: "A SUBCHART READS NO PARENT SCOPE BUT `global.`"). `kube` is the
+baseline and has NO bundle. A later backend bundle adds its name HERE, and
+its render tests with it. */ -}}
 {{- define "agentops.stateStoreBackends" -}}
-{{- toYaml (list) -}}
+{{- toYaml (list "nats") -}}
 {{- end -}}
 
-{{- /* THE SELECTED STATE-STORE BACKEND: the one template that names the `kube`
-default. */ -}}
+{{- /* THE SELECTED STATE-STORE BACKEND. `nats` is the default as of
+nats-state-store-default (D-9); `kube` is the one name that is never in
+`agentops.stateStoreBackends` and renders no bundle. */ -}}
 {{- define "agentops.stateBackend" -}}
-{{- (.Values.stateStore | default dict).backend | default "kube" -}}
+{{- (.Values.stateStore | default dict).backend | default "nats" -}}
 {{- end -}}
 
 {{- /* THE STATE-STORE GUARD.
 
-`stateStore.backend` selects ONE backend and exactly that backend's bundle must
-be enabled. Fails the render, naming the value, on (a) a backend that is neither
-`kube` nor in the list, (b) a selected backend whose bundle is disabled, and
-(c) a backend bundle enabled that is not the selected one — two bundles on, or
-one on beside `kube`.
+`stateStore.backend` selects ONE backend, and that backend's bundle follows
+the selector ON ITS OWN — a bundle's `enabled` carries no literal default, so
+"left alone" and "explicitly agrees with the selector" render identically.
+Fails the render, naming the value and the contradiction, on:
+
+  (a) a backend that is neither `kube` nor a known bundle
+  (b) a known bundle's `enabled` HAND-SET to the opposite of what the
+      selector needs for it — true while another backend is selected, or
+      false while this one is (nats-state-store-default D-9)
+
+`hasKey` is what tells "hand-set" apart from "left alone": a bundle whose
+values.yaml ships no `enabled` default (nats's does not) answers `hasKey`
+false until an adopter (or this chart's own values.yaml) writes one, so the
+selector alone decides and this guard checks nothing.
 
 IT READS NO CLUSTER, so it protects a GitOps render exactly as it protects an
 interactive one. */ -}}
@@ -267,19 +280,14 @@ interactive one. */ -}}
 {{- if and (ne $backend "kube") (not (has $backend $known)) -}}
 {{- fail (printf "stateStore.backend=%q is not a known state backend (known: %s)" $backend (join ", " (concat (list "kube") $known))) -}}
 {{- end -}}
-{{- $on := list -}}
 {{- range $b := $known -}}
-{{- if (index $.Values $b | default dict).enabled -}}{{- $on = append $on (printf "%s.enabled" $b) -}}{{- end -}}
+{{- $bv := index $.Values $b | default dict -}}
+{{- if hasKey $bv "enabled" -}}
+{{- $want := eq $backend $b -}}
+{{- if ne $bv.enabled $want -}}
+{{- fail (printf "stateStore.backend=%q conflicts with %s.enabled=%v: the selector picks exactly one backend, and %s.enabled is hand-set to the opposite of what that needs. Remove %s.enabled — it follows the selector on its own — or set stateStore.backend to %q." $backend $b $bv.enabled $b $b $b) -}}
 {{- end -}}
-{{- if gt (len $on) 1 -}}
-{{- fail (printf "more than one state backend bundle is enabled (%s); stateStore.backend=%q selects exactly one, so enable only its bundle" (join ", " (sortAlpha $on)) $backend) -}}
 {{- end -}}
-{{- if ne $backend "kube" -}}
-{{- if not (index $.Values $backend | default dict).enabled -}}
-{{- fail (printf "stateStore.backend=%q needs its bundle, but %s.enabled is false" $backend $backend) -}}
-{{- end -}}
-{{- else if $on -}}
-{{- fail (printf "%s is enabled but stateStore.backend=\"kube\" selects no bundle; select that backend or disable the bundle" (first $on)) -}}
 {{- end -}}
 {{- end -}}
 

@@ -1,0 +1,28 @@
+{{- /*
+The `nats` state-store backend's server bundle (design
+nats-state-store-default D-8/D-9). Rendered from HERE, the parent, rather
+than natively from `chart/charts/nats/templates/` — `agentops.stateBackend`
+reads `.Values.stateStore.backend`, a PARENT-scope value, and a subchart
+cannot see it (chart.md: "A SUBCHART READS NO PARENT SCOPE BUT `global.`"),
+proven by rendering a probe value through `$` from inside a subchart
+template and finding it empty. So `chart/charts/nats/` carries no
+Chart.yaml dependency `condition:` (same reason the `kubernetes` bundle
+carries none) and defines everything as named templates only, included
+from here with `.Values.nats` passed in explicitly — the one direction
+Helm allows a value to cross this boundary.
+
+This is also the ONE gate: every object the bundle owns renders together,
+so there is no second place "is nats selected" can answer differently.
+*/ -}}
+{{- include "agentops.stateStoreGuard" . }}
+{{- if eq (include "agentops.stateBackend" .) "nats" }}
+{{ include "nats.statefulset" (dict "root" $ "nats" .Values.nats) }}
+---
+{{ include "nats.services" (dict "root" $ "nats" .Values.nats) }}
+---
+{{ include "nats.pdb" (dict "root" $ "nats" .Values.nats) }}
+---
+{{ include "nats.credential" (dict "root" $ "nats" .Values.nats) }}
+---
+{{ include "nats.networkpolicy" (dict "root" $ "nats" .Values.nats) }}
+{{- end }}

@@ -7,6 +7,20 @@ Ask an agent:  a task is an ordinary signal — post it to a SignalSource a Read
   curl -s -X POST http://agentops-manager.{{ .Release.Namespace }}.svc:{{ .Values.service.apiPort }}/signal/inbound -H "Authorization: Bearer $TOKEN" \
     -d '{"source":"<signalsource>","signals":[{"initiationId":"ask-1","kind":"task","payload":"..."}]}'
 
+{{- if eq (include "agentops.stateBackend" .) "nats" }}
+{{- if eq (int (.Values.nats.replicas | default 3)) 1 }}
+
+NATS IS RUNNING WITH ONE REPLICA — the state store has a SINGLE POINT OF
+FAILURE. Losing this pod holds every conversation until it restarts, and a
+lost PersistentVolumeClaim loses state that was never replicated.
+
+This is a conscious choice on a cluster that cannot place three replicas
+usefully (a single node shares one failure domain either way). Raise it
+where it matters:
+  --set nats.replicas=3
+{{- end }}
+{{- end }}
+
 Remember: wiring lives ONLY on Pipelines — a SignalSource without a Ready
 Pipeline claim drops its signals (Wired=False). Capabilities are wiring too:
 AgentProfiles carry no tools and no MCP, so an agent's abilities come from the
