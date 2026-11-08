@@ -35,7 +35,7 @@ This change writes that backend and makes it the default.
 - **`nats` is the default and `kube` is the alternative.** The change is done
   when the `nats` backend passes the conformance suite, the bench shows it at
   or below `kube` on bytes written per run and allocations per write, and the
-  system pack passes unchanged against it.
+  system pack and the console `e2e-live` specs pass unchanged against it.
 
 ## Capabilities
 

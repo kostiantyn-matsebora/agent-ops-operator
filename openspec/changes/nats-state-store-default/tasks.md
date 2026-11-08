@@ -2,7 +2,9 @@
 
 This gate applies when implementation starts. This pull request only proposes.
 
-- [ ] 1.1 Confirm `state-store-generic-contract` is archived and the branch is rebased on master. Re-read the published text of "Every piece of live state has one declared home" in `state-durability`. The delta in this change replaces one sentence of it, so copy the published block whole, including every scenario the other change added, and change only that sentence. Re-run `openspec validate nats-state-store-default`. Nothing below starts before this is ticked.
+- [ ] 1.1 Confirm `state-store-generic-contract` is archived and rebase the branch on master. Nothing below starts before this is ticked.
+- [ ] 1.2 Re-read the published "Every piece of live state has one declared home" in `state-durability`. This change's delta replaces one sentence of it. Copy the published block whole, including every scenario the other change added, and change only that sentence.
+- [ ] 1.3 Re-run `openspec validate nats-state-store-default`.
 
 ## 2. The `nats` backend — backend-developer
 

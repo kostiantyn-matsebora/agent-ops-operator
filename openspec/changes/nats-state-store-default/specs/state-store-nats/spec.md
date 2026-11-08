@@ -183,7 +183,7 @@ render SHALL name the loss of the guarantee in the chart notes.
 - **WHEN** the bundle is installed on a one-node cluster
 - **THEN** all three servers schedule and the render does not fail
 
-#### Scenario: Changing the replica count after install is refused, not ignored
+#### Scenario: Changing the replica count after install is warned and left unapplied
 - **WHEN** `nats.replicas` is changed after the buckets exist
 - **THEN** the manager keeps the existing buckets unchanged, logs a warning
   naming both counts, and records a drop in the activity log, and the docs
