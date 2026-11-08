@@ -731,3 +731,106 @@ func TestStaticCheckGuardsTheAdapterStateAnnotationPrefix(t *testing.T) {
 		t.Fatalf("flagged %v, want %v (the release file and the unrelated prefix must not be)", files, want)
 	}
 }
+
+// natsGoImportPrefix is the client library the nats backend introduces
+// (design D-1 of nats-state-store-default): the package itself and every
+// subpackage (notably jetstream). internal/state/nats is the only package
+// allowed to import it, mirroring this file's own guard on
+// internal/state/kube's Conversation/Signal types above — a backend's own
+// dependency must stay exactly as contained as the types it maps.
+const natsGoImportPrefix = "github.com/nats-io/nats.go"
+
+// natsBackendDir is the one package the guard excludes, test files included:
+// a leaked import in a _test.go file is the same bypass as one in ordinary
+// code, since go test still builds and links it.
+const natsBackendDir = "internal/state/nats"
+
+// TestOnlyTheNatsBackendImportsTheNatsClientLibrary is the static check task
+// 2.1 of nats-state-store-default asks for: nothing outside
+// internal/state/nats may import nats.go or one of its subpackages.
+func TestOnlyTheNatsBackendImportsTheNatsClientLibrary(t *testing.T) {
+	root := filepath.Join("..", "..")
+	found, err := findNatsGoImports(root, natsBackendDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) > 0 {
+		t.Fatalf("only %s may import %s (design D-1 of nats-state-store-default):\n  %s",
+			natsBackendDir, natsGoImportPrefix, strings.Join(found, "\n  "))
+	}
+}
+
+// findNatsGoImports walks every .go file under root (test files included,
+// vendor-equivalent dirs skipped by a module-only repo having none) and
+// reports each file outside exemptDir that imports natsGoImportPrefix or one
+// of its subpackages.
+func findNatsGoImports(root, exemptDir string) ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, _ := filepath.Rel(root, path)
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			if rel == exemptDir || strings.HasPrefix(rel, exemptDir+"/") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			return fmt.Errorf("parsing %s: %w", rel, err)
+		}
+		for _, imp := range file.Imports {
+			p, unquoteErr := strconv.Unquote(imp.Path.Value)
+			if unquoteErr != nil {
+				continue
+			}
+			if p == natsGoImportPrefix || strings.HasPrefix(p, natsGoImportPrefix+"/") {
+				out = append(out, fmt.Sprintf("%s imports %s", rel, p))
+			}
+		}
+		return nil
+	})
+	sort.Strings(out)
+	return out, err
+}
+
+// The check must actually fire outside the backend and leave the backend
+// itself alone.
+func TestStaticCheckGuardsTheNatsClientLibraryImport(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, src string) {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/chat/bad.go", "package p\nimport \""+natsGoImportPrefix+"\"\nvar _ = nats.ErrInvalidArg\n")
+	write("internal/chat/bad_sub.go", "package p\nimport \""+natsGoImportPrefix+"/jetstream\"\nvar _ = jetstream.ErrKeyNotFound\n")
+	write("internal/chat/bad_test.go", "package p\nimport \""+natsGoImportPrefix+"\"\nvar _ = nats.ErrInvalidArg\n")
+	write("internal/state/nats/ok.go", "package nats\nimport \""+natsGoImportPrefix+"\"\nvar _ = nats.ErrInvalidArg\n")
+	write("internal/state/nats/ok_test.go", "package nats\nimport \""+natsGoImportPrefix+"\"\nvar _ = nats.ErrInvalidArg\n")
+	write("internal/chat/ok_other.go", "package p\nimport \"github.com/nats-io/nuid\"\nvar _ = nuid.Next\n")
+
+	found, err := findNatsGoImports(root, natsBackendDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	for _, v := range found {
+		files = append(files, strings.SplitN(v, " ", 2)[0])
+	}
+	sort.Strings(files)
+	want := []string{"internal/chat/bad.go", "internal/chat/bad_sub.go", "internal/chat/bad_test.go"}
+	if strings.Join(files, ",") != strings.Join(want, ",") {
+		t.Fatalf("flagged %v, want %v (the backend's own files and the unrelated nuid import must not be)", files, want)
+	}
+}

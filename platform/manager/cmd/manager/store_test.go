@@ -32,6 +32,24 @@ func TestStateBackendRefusesAnUnknownNameAndNamesIt(t *testing.T) {
 	}
 }
 
+func TestStateBackendAcceptsNats(t *testing.T) {
+	t.Setenv(stateBackendEnv, "nats")
+	got, err := stateBackendFromEnv()
+	if err != nil || got != backendNats {
+		t.Fatalf("got (%q, %v), want the nats backend", got, err)
+	}
+}
+
+// newNatsStores must fail fast, before connecting to anything, when the
+// nats backend is selected with no NATS_URL — the same "stops before it
+// connects" posture stateBackendFromEnv itself has.
+func TestNewNatsStoresRequiresNatsURL(t *testing.T) {
+	t.Setenv("NATS_URL", "")
+	if _, err := newNatsStores(nil, "agent-ops"); err == nil {
+		t.Fatal("want an error with NATS_URL unset")
+	}
+}
+
 // runMainEnv switches TestMainExitsOnAnUnknownStateBackend's re-executed copy
 // of the test binary into running main itself.
 const runMainEnv = "AGENTOPS_TEST_RUN_MAIN"
