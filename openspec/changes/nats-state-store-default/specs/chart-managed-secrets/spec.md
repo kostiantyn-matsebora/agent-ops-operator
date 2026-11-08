@@ -10,6 +10,10 @@ yields nothing. On an upgrade the third step is then skipped as well, and the
 Secret body is not rendered. A render without a cluster, such as a GitOps
 sync of an upgrade, SHALL NOT mint a new one.
 
+#### Scenario: An install generates the credential
+- **WHEN** the chart is rendered as an install, with or without cluster access
+- **THEN** a credential is generated, as for any chart-managed credential
+
 #### Scenario: An upgrade keeps the credential
 - **WHEN** the chart is rendered as an upgrade without a cluster
 - **THEN** the credential Secret body is not rendered with a new value

@@ -149,8 +149,9 @@ already-exists as done, then writes the marker last. The manager serves
 nothing until it returns.
 
 - Needs `get/list` on the kinds `kube` already holds. No new verb.
-- Idempotent by existence, never patches, in line with the storage
-  invariant.
+- Creates by existence. The one later write is the re-copy rule below, and it
+  touches only a record the new version has not written. It never patches a
+  Kubernetes object, in line with the storage invariant.
 - Leaves the CRs. Deleting them is the adopter's act after verifying, and
   the docs say how.
 - Revisions are not preserved. A resume token from before the import is

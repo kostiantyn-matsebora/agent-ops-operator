@@ -94,14 +94,23 @@ value is stored whole.
 - **WHEN** a blob larger than the server's maximum message size is put
 - **THEN** it reads back byte-identical
 
-### Requirement: A `kube` install's records are imported once
+### Requirement: A `kube` install's records are imported before the manager serves
 When the `nats` backend starts over an empty bucket set and the Kubernetes API
 holds conversation, input, signal, cooldown or receipt records, the manager
-SHALL copy them into the store once, before it serves any request. The import
-SHALL create each record and SHALL treat already-exists as done, so a crash
-mid-import is repaired by running it again. It SHALL write a marker last, and
-SHALL NOT run again once the marker exists. It SHALL NOT modify or delete the
-Kubernetes objects it read.
+SHALL copy them into the store before it reports ready.
+
+- The import SHALL start only on the replica holding the leader Lease.
+- Each copied record SHALL carry the source's `resourceVersion` as
+  `importedFrom`.
+- The import SHALL repeat a pass at an interval. A pass SHALL create each
+  missing record and treat already-exists as done.
+- A pass SHALL re-copy a record whose source `resourceVersion` differs from
+  `importedFrom`, only if the store record has had no write of its own. It
+  SHALL never overwrite a record the new version has written.
+- The passes SHALL continue until no manager pod of another version exists.
+  One final pass SHALL then run, and the marker SHALL be written last.
+- The import SHALL NOT run again once the marker exists.
+- The import SHALL NOT modify or delete the Kubernetes objects it read.
 
 #### Scenario: An upgrade keeps its conversations
 - **WHEN** an install with live `kube` conversations upgrades to the default
@@ -112,6 +121,19 @@ Kubernetes objects it read.
 #### Scenario: An interrupted import is repaired
 - **WHEN** the manager is killed after importing half the records
 - **THEN** the next start completes the import and no record is duplicated
+
+#### Scenario: A non-leader never imports
+- **WHEN** a replica that does not hold the Lease starts over empty buckets
+- **THEN** it copies nothing and reports not ready until the marker exists
+
+#### Scenario: A late write by an old replica is caught
+- **WHEN** an old-version replica creates a Signal and appends an input to a
+  Conversation after the first pass
+- **THEN** both are present in the store after the final pass
+
+#### Scenario: A new-version write is never overwritten
+- **WHEN** the new version has written a record that an old replica also changed
+- **THEN** the final pass leaves the new version's value
 
 #### Scenario: A fresh install imports nothing
 - **WHEN** the backend starts over empty buckets and an empty API
@@ -160,6 +182,12 @@ render SHALL name the loss of the guarantee in the chart notes.
 #### Scenario: A single-node cluster still schedules
 - **WHEN** the bundle is installed on a one-node cluster
 - **THEN** all three servers schedule and the render does not fail
+
+#### Scenario: Changing the replica count after install is refused, not ignored
+- **WHEN** `nats.replicas` is changed after the buckets exist
+- **THEN** the manager keeps the existing buckets unchanged, logs a warning
+  naming both counts, and records a drop in the activity log, and the docs
+  give the rebuild path
 
 #### Scenario: One replica is explicit
 - **WHEN** the adopter sets `nats.replicas` to 1
