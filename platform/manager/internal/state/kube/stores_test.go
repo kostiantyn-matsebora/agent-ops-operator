@@ -11,6 +11,7 @@ package kube
 
 import (
 	"context"
+	"flag"
 	"testing"
 	"time"
 
@@ -62,4 +63,22 @@ func TestStores(t *testing.T) {
 
 func BenchmarkStores(b *testing.B) {
 	conformance.BenchStores(b, openStores(b))
+}
+
+// TestBenchStoresRuns executes the benchmark harness once per store so a
+// broken bench helper fails `go test`, not only a manual `-bench` run. One
+// iteration each (-test.benchtime=1x): the numbers are not asserted, only
+// that every helper runs to completion against the backend.
+func TestBenchStoresRuns(t *testing.T) {
+	prev := flag.Lookup("test.benchtime").Value.String()
+	if err := flag.Set("test.benchtime", "1x"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = flag.Set("test.benchtime", prev) })
+	res := testing.Benchmark(func(b *testing.B) {
+		conformance.BenchStores(b, openStores(t))
+	})
+	if res.N == 0 {
+		t.Fatal("the benchmark harness did not complete a single iteration")
+	}
 }

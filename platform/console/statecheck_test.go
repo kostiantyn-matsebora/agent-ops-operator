@@ -186,7 +186,10 @@ func kindCallViolation(fset *token.FileSet, n ast.Node, rel string) (kindViolati
 		return kindViolation{}, false
 	}
 	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || len(call.Args) != kindCallArgs[sel.Sel.Name] {
+	if !ok {
+		return kindViolation{}, false
+	}
+	if want, known := kindCallArgs[sel.Sel.Name]; !known || len(call.Args) != want {
 		return kindViolation{}, false
 	}
 	kind, ok := unquotedKind(call.Args[1])
