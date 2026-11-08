@@ -104,36 +104,18 @@ func findKindViolations(root string) ([]kindViolation, error) {
 			return err
 		}
 		if d.IsDir() {
-			// the UI's own tree is a different toolchain entirely, and ui/
-			// never reaches this module's apiSource — nothing to check there.
-			if d.Name() == "ui" || (path != root && strings.HasPrefix(d.Name(), ".")) {
-				return filepath.SkipDir
-			}
-			return nil
+			return skipKindDir(root, path, d)
 		}
-		if !strings.HasSuffix(path, ".go") {
+		// fixtures: never walked, matching the manager's own
+		// internal/state/static_test.go, which excludes every _test.go
+		// file from the whole check, not only the kind-literal half
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, path)
-		rel = filepath.ToSlash(rel)
-		isTest := strings.HasSuffix(path, "_test.go")
-
-		if isTest {
-			return nil // fixtures: never walked, matching the manager's own
-			// internal/state/static_test.go, which excludes every _test.go
-			// file from the whole check, not only the kind-literal half
-		}
-
-		fset := token.NewFileSet()
-		file, perr := parser.ParseFile(fset, path, nil, 0)
-		if perr != nil {
-			return fmt.Errorf("parsing %s: %w", rel, perr)
-		}
-		out = append(out, wireNameViolations(fset, file, rel)...)
-		if rel != stateClientFile {
-			out = append(out, kindLiteralViolations(fset, file, rel)...)
-		}
-		return nil
+		vs, perr := fileKindViolations(path, filepath.ToSlash(rel))
+		out = append(out, vs...)
+		return perr
 	})
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].file != out[j].file {
@@ -142,6 +124,29 @@ func findKindViolations(root string) ([]kindViolation, error) {
 		return out[i].line < out[j].line
 	})
 	return out, err
+}
+
+// skipKindDir skips the UI's own tree (a different toolchain, never reaching
+// this module's apiSource) and dot-directories.
+func skipKindDir(root, path string, d fs.DirEntry) error {
+	if d.Name() == "ui" || (path != root && strings.HasPrefix(d.Name(), ".")) {
+		return filepath.SkipDir
+	}
+	return nil
+}
+
+// fileKindViolations parses one file and reports its violations.
+func fileKindViolations(path, rel string) ([]kindViolation, error) {
+	fset := token.NewFileSet()
+	file, perr := parser.ParseFile(fset, path, nil, 0)
+	if perr != nil {
+		return nil, fmt.Errorf("parsing %s: %w", rel, perr)
+	}
+	out := wireNameViolations(fset, file, rel)
+	if rel != stateClientFile {
+		out = append(out, kindLiteralViolations(fset, file, rel)...)
+	}
+	return out, nil
 }
 
 // kindLiteralViolations finds the two doors a guarded kind string opens
@@ -162,37 +167,36 @@ func kindLiteralViolations(fset *token.FileSet, file *ast.File, rel string) []ki
 		}
 	}
 	ast.Inspect(file, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		argIdx, wantArgs := 1, 0
-		switch sel.Sel.Name {
-		case "List":
-			wantArgs = 2
-		case "Get":
-			wantArgs = 3
-		case "Watch":
-			wantArgs = 4
-		default:
-			return true
-		}
-		if len(call.Args) != wantArgs {
-			return true
-		}
-		if kind, ok := unquotedKind(call.Args[argIdx]); ok {
-			out = append(out, kindViolation{
-				file: rel, line: fset.Position(call.Pos()).Line,
-				why: fmt.Sprintf("%q named as the kind argument of %s.%s(ctx, ...) (an apiSource-shaped call)", kind, exprString(sel.X), sel.Sel.Name),
-			})
+		if v, ok := kindCallViolation(fset, n, rel); ok {
+			out = append(out, v)
 		}
 		return true
 	})
 	return out
+}
+
+// kindCallArgs maps an apiSource-shaped method to its argument count.
+var kindCallArgs = map[string]int{"List": 2, "Get": 3, "Watch": 4}
+
+// kindCallViolation reports n when it is an apiSource-shaped call naming a
+// guarded kind as its second argument.
+func kindCallViolation(fset *token.FileSet, n ast.Node, rel string) (kindViolation, bool) {
+	call, ok := n.(*ast.CallExpr)
+	if !ok {
+		return kindViolation{}, false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || len(call.Args) != kindCallArgs[sel.Sel.Name] {
+		return kindViolation{}, false
+	}
+	kind, ok := unquotedKind(call.Args[1])
+	if !ok {
+		return kindViolation{}, false
+	}
+	return kindViolation{
+		file: rel, line: fset.Position(call.Pos()).Line,
+		why: fmt.Sprintf("%q named as the kind argument of %s.%s(ctx, ...) (an apiSource-shaped call)", kind, exprString(sel.X), sel.Sel.Name),
+	}, true
 }
 
 // topLevelStringSliceLiteral returns decl's composite literal when decl is a
@@ -206,22 +210,28 @@ func topLevelStringSliceLiteral(decl ast.Decl) *ast.CompositeLit {
 		return nil
 	}
 	for _, spec := range gen.Specs {
-		vs, ok := spec.(*ast.ValueSpec)
+		if vs, ok := spec.(*ast.ValueSpec); ok {
+			if lit := stringSliceValue(vs); lit != nil {
+				return lit
+			}
+		}
+	}
+	return nil
+}
+
+// stringSliceValue returns the first []string{...} literal among vs's values.
+func stringSliceValue(vs *ast.ValueSpec) *ast.CompositeLit {
+	for _, v := range vs.Values {
+		lit, ok := v.(*ast.CompositeLit)
 		if !ok {
 			continue
 		}
-		for _, v := range vs.Values {
-			lit, ok := v.(*ast.CompositeLit)
-			if !ok {
-				continue
-			}
-			arr, ok := lit.Type.(*ast.ArrayType)
-			if !ok || arr.Len != nil {
-				continue // fixed-size array, not a slice literal
-			}
-			if ident, ok := arr.Elt.(*ast.Ident); ok && ident.Name == "string" {
-				return lit
-			}
+		arr, ok := lit.Type.(*ast.ArrayType)
+		if !ok || arr.Len != nil {
+			continue // fixed-size array, not a slice literal
+		}
+		if ident, ok := arr.Elt.(*ast.Ident); ok && ident.Name == "string" {
+			return lit
 		}
 	}
 	return nil

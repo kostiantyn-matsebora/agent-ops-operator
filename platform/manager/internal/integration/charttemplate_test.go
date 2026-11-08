@@ -621,7 +621,7 @@ func TestStateReadTokenMustDifferFromTheOtherTwoCredentials(t *testing.T) {
 		"--set", "stateReadAuth.token=state-value",
 		"--set", "adapterAuth.token=adapter-value",
 		"--set", "controlPlaneAuth.token=control-plane-value")
-	if doc := secretDoc(out, "agentops-state-read-token"); doc == "" {
+	if secretDoc(out, "agentops-state-read-token") == "" {
 		t.Fatal("agentops-state-read-token was not rendered")
 	}
 }

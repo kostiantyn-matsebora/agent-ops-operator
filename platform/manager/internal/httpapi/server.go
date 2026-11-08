@@ -168,6 +168,11 @@ type Server struct {
 // defaultMaxQueuedConversations is the pending-backlog bound when unset.
 const defaultMaxQueuedConversations = 50
 
+const (
+	errAdapterAuthUnset = "adapter auth not configured"
+	bearerPrefix        = "Bearer "
+)
+
 func (s *Server) maxQueued() int {
 	if s.MaxQueuedConversations > 0 {
 		return s.MaxQueuedConversations
@@ -264,10 +269,10 @@ func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
 func (s *Server) anyAdapterAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.AdapterToken == "" {
-			writeJSON(w, 503, map[string]string{"error": "adapter auth not configured"})
+			writeJSON(w, 503, map[string]string{"error": errAdapterAuthUnset})
 			return
 		}
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), bearerPrefix)
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.AdapterToken)) == 1 {
 			next(w, r)
 			return
@@ -1002,10 +1007,10 @@ type adapterScopeKey struct{}
 func (s *Server) adapterAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.AdapterToken == "" {
-			writeJSON(w, 503, map[string]string{"error": "adapter auth not configured"})
+			writeJSON(w, 503, map[string]string{"error": errAdapterAuthUnset})
 			return
 		}
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), bearerPrefix)
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.AdapterToken)) == 1 {
 			next(w, r)
 			return
@@ -1045,10 +1050,10 @@ func (s *Server) adapterAuth(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) stateAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.AdapterToken == "" {
-			writeJSON(w, 503, map[string]string{"error": "adapter auth not configured"})
+			writeJSON(w, 503, map[string]string{"error": errAdapterAuthUnset})
 			return
 		}
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), bearerPrefix)
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.AdapterToken)) == 1 {
 			next(w, r)
 			return

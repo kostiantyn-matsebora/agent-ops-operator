@@ -474,8 +474,8 @@ are the object's own bytes.
 never something a caller constructs.** An unrecognized or stale one is not an
 error.
 
-The stream opens with a `resync` frame first. That tells the caller to
-re-read the listing before trusting anything delivered after it.
+A `resync` frame opens the stream only when the resume point is unknown or
+too old. It tells the caller to re-read the listing before trusting anything delivered after it.
 
 A caller naming any other query parameter is refused by name.
 
