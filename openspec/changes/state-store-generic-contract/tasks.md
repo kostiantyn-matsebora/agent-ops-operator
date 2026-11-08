@@ -2,7 +2,7 @@
 
 - [x] 1.1 Confirm PR #454 (`state-store`) is merged and archived, rebase this branch on master, and re-run `openspec validate state-store-generic-contract`. Verify the `state-store` and `state-durability` deltas validate against the published specs and that every MODIFIED block still equals the published text it replaces apart from this change's edits. Nothing below starts before this is ticked.
   Verdict:
-  - `state-store` and `signal-persistence` are archived, and the branch is rebased on master.
+  - `state-store` is archived, and the branch is rebased on master.
   - This change's `state-store` and `state-durability` deltas validate against the published specs.
   - Validation found three omitted published scenarios: console-topology signals-by-watch, the run concurrency scenario and the successor-outlives-release scenario. It now passes.
   - The heavily rewritten requirements differ from their published text by design.

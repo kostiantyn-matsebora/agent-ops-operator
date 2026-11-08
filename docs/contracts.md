@@ -456,10 +456,10 @@ this surface instead, and carry no RBAC on either kind.
 
 | Route | Serves |
 |---|---|
-| `GET /state/conversations` | the whole set, phase-blind, each record with `status.runs[]` and `runs[].inputs[]` |
+| `GET /state/conversations` | the whole set, phase-blind, each record with `status.runs[]` and `runs[].inputs[]`, and the revision to resume the feed from |
 | `GET /state/conversations/{name}` | one record, 404 if absent |
 | `GET /state/conversations/stream?since=` | SSE: `put` / `delete` / `bookmark` / `resync`, each frame's `id:` the revision to resume from |
-| `GET /state/signals` | the whole set, each record with `expiresAt` |
+| `GET /state/signals` | the whole set, each record with `expiresAt`, and the revision to resume the feed from |
 | `GET /state/signals/stream?since=` | the signal half of the stream above |
 
 No single-signal route, and no stream resume carrying items: nothing reads

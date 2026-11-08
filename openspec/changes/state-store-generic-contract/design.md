@@ -225,7 +225,9 @@ after #454 archives and rebases.
 
 `Collection` gains `DeleteAt(key, revision)` beside `Delete(key)`.
 
-The source release gets a signal, decides against the live source, then deletes. A signal rewritten in between must not be deleted on the strength of a decision about its old content. The project locks optimistically everywhere, so the delete names the revision it decided on.
+The source release gets a signal, decides against the live source, then deletes. A signal rewritten in between must not be deleted on a decision about its old content.
+
+The project locks optimistically everywhere, so the delete names the revision it decided on.
 
 `DeleteAt` returns the conflict error for a stale revision and leaves the record intact. It returns not-found for an absent key. Its finalizer semantics are those of `Delete`. The `kube` backend maps the revision onto the UID and resourceVersion preconditions the old release code used.
 

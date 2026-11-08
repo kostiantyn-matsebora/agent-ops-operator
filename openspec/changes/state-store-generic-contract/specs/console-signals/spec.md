@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: The signals view updates from the watch
+### Requirement: The signals view updates from the state feed
 The signals view SHALL reflect lifecycle transitions from the manager's state read surface feed alone — no polling, no manual refresh, no Kubernetes watch.
 
 #### Scenario: A phase change appears live
