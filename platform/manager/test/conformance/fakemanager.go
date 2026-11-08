@@ -32,7 +32,8 @@ import (
 
 const (
 	headerContentType = "Content-Type"
-	errRejected       = "rejected by the conformance fake"
+	mimeEventStream   = "text/event-stream"
+	errRejected       ="rejected by the conformance fake"
 )
 
 // ChannelInfo is one served channel, as GET /channel/channels lists it.
@@ -214,7 +215,7 @@ func NewFakeManager(t *testing.T, token string) *FakeManager {
 		writeJSON(w, 200, map[string]any{"revision": "r1", "items": []any{}})
 	}))
 	mux.HandleFunc("GET /state/signals/stream", auth(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set(headerContentType, mimeEventStream)
 		w.WriteHeader(200)
 		if fl, ok := w.(http.Flusher); ok {
 			fl.Flush()
@@ -263,7 +264,7 @@ func NewFakeManager(t *testing.T, token string) *FakeManager {
 		writeJSON(w, 200, map[string]any{"events": []any{}, "next": 0})
 	}))
 	mux.HandleFunc("GET /activity/stream", auth(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(headerContentType, "text/event-stream")
+		w.Header().Set(headerContentType, mimeEventStream)
 		w.WriteHeader(200)
 		<-r.Context().Done()
 	}))
@@ -728,7 +729,7 @@ func (f *FakeManager) stateStream(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.stateWatch = append(f.stateWatch, ch)
 	f.mu.Unlock()
-	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set(headerContentType, mimeEventStream)
 	w.WriteHeader(200)
 	fl, _ := w.(http.Flusher)
 	if fl != nil {

@@ -462,8 +462,9 @@ this surface instead, and carry no RBAC on either kind.
 | `GET /state/signals` | the whole set, each record with `expiresAt`, and the revision to resume the feed from |
 | `GET /state/signals/stream?since=` | the signal half of the stream above |
 
-No single-signal route, and no stream resume carrying items: nothing reads
-one signal on its own, or a signal's history.
+Signals have no single-record route and carry no items: nothing reads one
+signal on its own, or a signal's history. Conversation listings and feed
+events do carry a record's `runs[].inputs[]`.
 
 **The wire record** carries a kind's published field names only — `name`,
 `id`, `revision`, `createdAt`, `deletionRequestedAt`, `spec`, `status` — never

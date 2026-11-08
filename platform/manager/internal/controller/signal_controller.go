@@ -393,7 +393,7 @@ func (r *SignalReconciler) consume(ctx context.Context, p *signalPass, src *agen
 		return ctrl.Result{}, procErr
 	}
 	if res.FirstRouted {
-		if err := signalroute.RecordReceived(ctx, deps, src.Name); err != nil {
+		if err := signalroute.CountReceipt(ctx, deps.Receipts, src.Name, time.Now()); err != nil {
 			log.FromContext(ctx).Info("recording receipt on the signal source failed",
 				"source", src.Name, "error", err.Error())
 		}

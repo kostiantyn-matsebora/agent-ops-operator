@@ -81,7 +81,7 @@ type SignalRecord struct {
 	// backend that links a record to its owner can (the kube backend turns it
 	// into the owner reference), and read back. A backend with no such link
 	// stores it and does nothing else with it: the manager releases a
-	// deleted source's signals itself, with ReleaseSource.
+	// deleted source's signals itself, in the controller's source-release helper.
 	SourceID string
 
 	// Publication fields.

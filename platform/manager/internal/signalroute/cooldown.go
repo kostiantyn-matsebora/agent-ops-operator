@@ -109,10 +109,3 @@ func recordCooldown(ctx context.Context, deps Deps, sourceName string, cd *inges
 			"source", sourceName, "error", err.Error())
 	}
 }
-
-// RecordReceived counts one routed signal on the source through the state
-// store. The store serializes concurrent consumers of the pool and retries a
-// lost race, so no increment is lost.
-func RecordReceived(ctx context.Context, deps Deps, sourceName string) error {
-	return CountReceipt(ctx, deps.Receipts, sourceName, time.Now())
-}
