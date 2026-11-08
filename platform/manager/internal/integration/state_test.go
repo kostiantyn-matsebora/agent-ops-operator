@@ -425,3 +425,87 @@ func TestStateConversationSpecAndStatusBytesEqualTheObjects(t *testing.T) {
 		t.Fatalf("status bytes differ:\n got  %s\n want %s", wire.Status, wantStatus)
 	}
 }
+
+// TestStateSignalsListIncludesTheRecord: the signal half of
+// TestStateConversationsListIncludesRunsPhaseBlind — design D-5 serves
+// GET /state/signals the same way, minus runs (signals have none).
+func TestStateSignalsListIncludesTheRecord(t *testing.T) {
+	ctx := context.Background()
+	srv := apiServer()
+
+	name := "state-list-sig"
+	if _, err := stores.Signals.Create(ctx, state.Key(name), state.SignalRecord{
+		Name: name, SourceRef: "state-list-src", Adapter: "cron", InitiationID: name,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stores.Signals.Delete(context.Background(), state.Key(name)) })
+
+	rec := adapterReq(srv, "GET", "/state/signals", nil, testMasterToken)
+	if rec.Code != 200 {
+		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Revision string          `json:"revision"`
+		Items    json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	// design D-5/D-6 note in signalsListResponse: Collection.List hands back
+	// no per-item revision, so this listing's own Revision is always "".
+	if out.Revision != "" {
+		t.Errorf("revision = %q, want empty — state.Collection.List carries none", out.Revision)
+	}
+	if !strings.Contains(string(out.Items), `"name":"`+name+`"`) {
+		t.Fatalf("listing missing the signal: %s", out.Items)
+	}
+	if !strings.Contains(string(out.Items), `"sourceRef":{"name":"state-list-src"}`) {
+		t.Fatalf("listing missing the signal's sourceRef: %s", out.Items)
+	}
+}
+
+// TestStateSignalsStreamResyncsOnUnknownSinceThenCarriesPutAndDelete: the
+// signal half of the conversations stream test above. Exercises
+// handleStateSignalsStream and translateSignalFeed, neither reached by any
+// other test.
+func TestStateSignalsStreamResyncsOnUnknownSinceThenCarriesPutAndDelete(t *testing.T) {
+	ctx := context.Background()
+	srv := apiServer()
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	dialCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(dialCtx, "GET", ts.URL+"/state/signals/stream?since=not-a-real-revision", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testMasterToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != 200 {
+		t.Fatalf("stream status = %d", resp.StatusCode)
+	}
+	r := bufio.NewReader(resp.Body)
+	if first := readSSEEvent(t, r); first.event != "resync" {
+		t.Fatalf("first frame = %q, want resync for an unknown since", first.event)
+	}
+
+	name := "state-stream-sig"
+	if _, err := stores.Signals.Create(ctx, state.Key(name), state.SignalRecord{
+		Name: name, SourceRef: "state-stream-src", Adapter: "cron", InitiationID: name,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stores.Signals.Delete(context.Background(), state.Key(name)) })
+	readSSEEventNamed(t, r, "put", name)
+
+	if err := stores.Signals.Delete(ctx, state.Key(name)); err != nil {
+		t.Fatal(err)
+	}
+	readSSEEventNamed(t, r, "delete", name)
+}

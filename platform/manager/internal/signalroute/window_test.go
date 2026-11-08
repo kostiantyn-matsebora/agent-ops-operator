@@ -130,6 +130,55 @@ func (r *racyReceipts) Update(ctx context.Context, k state.Key, rev state.Revisi
 	return r.memCollection.Update(ctx, k, rev, rec)
 }
 
+// racyCreate simulates a second writer's Create winning a race for a key
+// that held NOTHING yet: the first Get/Mutate attempt reads ErrNotFound, but
+// by the time this writer's own Create runs, the key already exists —
+// state.ErrAlreadyExists, not a conflict, since Create carries no revision.
+// CountReceipt/PutCooldownWindow must retry through Mutate rather than fail.
+type racyCreate[T any] struct {
+	*memCollection[T]
+	raced bool
+}
+
+func (r *racyCreate[T]) Create(ctx context.Context, k state.Key, rec T) (state.Revision, error) {
+	if !r.raced {
+		r.raced = true
+		// The other writer's create lands first, with whatever it had.
+		_, _ = r.memCollection.Create(ctx, k, rec)
+		return "", state.ErrAlreadyExists
+	}
+	return r.memCollection.Create(ctx, k, rec)
+}
+
+func TestCountReceiptRetriesWhenAnotherWriterCreatesTheCounterFirst(t *testing.T) {
+	ctx := context.Background()
+	racing := &racyCreate[state.Received]{memCollection: newMem[state.Received]()}
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := CountReceipt(ctx, racing, "s", at); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	// Both this writer's increment and the racing writer's own Create landed:
+	// the racing Create wrote Total=1 (the record this call passed in), and
+	// the retried Mutate bumped it once more.
+	got, err := GetReceipts(ctx, racing, "s")
+	if err != nil || got.Total != 2 {
+		t.Fatalf("got %+v, %v, want 2 (the racing create's write, plus this writer's retried bump)", got, err)
+	}
+}
+
+func TestPutCooldownWindowRetriesWhenAnotherWriterCreatesTheWindowFirst(t *testing.T) {
+	ctx := context.Background()
+	racing := &racyCreate[state.CooldownWindow]{memCollection: newMem[state.CooldownWindow]()}
+	entries := []state.CooldownEntry{{InitiationID: "a", At: time.Now()}}
+	if err := PutCooldownWindow(ctx, racing, "s", entries); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	got, err := GetCooldownWindow(ctx, racing, "s")
+	if err != nil || len(got) != 1 || got[0] != entries[0] {
+		t.Fatalf("got %v, %v, want the replacing entry to have won the retry", got, err)
+	}
+}
+
 func TestReceiptsOfAGoneSourceReadZeroAndCountIsNotFound(t *testing.T) {
 	c := newMem[state.Received]()
 	c.gone = true
