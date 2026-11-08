@@ -227,8 +227,9 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.ChannelReconciler{
-		Client:   mgr.GetClient(),
-		Registry: registry,
+		Client:       mgr.GetClient(),
+		Registry:     registry,
+		AdapterState: stores.AdapterState,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "channel controller")
 		os.Exit(1)
@@ -248,9 +249,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.SignalSourceReconciler{
-		Client:    mgr.GetClient(),
-		Signals:   stores.Signals,
-		Cooldowns: stores.Cooldowns,
+		Client:       mgr.GetClient(),
+		Signals:      stores.Signals,
+		Cooldowns:    stores.Cooldowns,
+		AdapterState: stores.AdapterState,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "signalsource controller")
 		os.Exit(1)
@@ -441,6 +443,7 @@ func main() {
 		Runs:          stores.Runs,
 		Blobs:         stores.Blobs,
 		Signals:       stores.Signals,
+		AdapterState:  stores.AdapterState,
 		Namespace:     namespace,
 		Addr:          env("API_ADDR", ":8080"),
 		Ops:           ops,
@@ -460,6 +463,10 @@ func main() {
 		// /control-plane/*'s own dedicated secret — deliberately a distinct
 		// env var from ADAPTER_TOKEN, never derived from it (design.md).
 		ControlPlaneToken: os.Getenv("CONTROL_PLANE_TOKEN"),
+		// /state/*'s non-adapter credential (design D-6) — housekeeping's
+		// own, read from the kubelet-projected env only, never a Secret the
+		// manager itself reads.
+		StateReadToken: os.Getenv("STATE_READ_TOKEN"),
 		// durable-chat-ops-broker: the SAME identity the reconciler's claims
 		// carry, so a replica that is not the current Lease holder rejects a
 		// channel-ops poll (503) instead of answering from an OpQueue the

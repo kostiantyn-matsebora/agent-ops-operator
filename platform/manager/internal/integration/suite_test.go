@@ -177,7 +177,9 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 		// routingClient mirrors production's mgr.GetClient(); Reader stays the
 		// raw k8sClient, as production's mgr.GetAPIReader() does.
 		Client: routingClient, Reader: k8sClient,
-		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Signals: stores.Signals, Namespace: ns,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Signals: stores.Signals,
+		AdapterState: stores.AdapterState,
+		Namespace:    ns,
 		// A deployment that CAN carry context: continuity is now promised only
 		// where the conversation resolved somewhere to keep it, so a fixture with
 		// no context volume would (correctly) withhold every handle and make the

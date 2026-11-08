@@ -59,6 +59,15 @@ func testSignals(t *testing.T, c client.WithWatch, ns string) state.Expiring[sta
 	return signals
 }
 
+func testAdapterState(t *testing.T, c client.WithWatch, ns string) state.Collection[string] {
+	t.Helper()
+	coll, err := kube.OpenAdapterState(c, ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return coll
+}
+
 // Malformed JSON bodies are refused the same way here as everywhere else --
 // but both handlers resolve the channel FIRST, so covering them needs a
 // real (fake) Reader, not the zero-value Server the other two call sites
