@@ -540,6 +540,17 @@ func (s *Server) streamSSE(w http.ResponseWriter, r *http.Request, open func(con
 			return
 		case f, ok := <-frames:
 			if !ok {
+				// The backend ended the feed: an apiserver watch that timed out,
+				// or errored on a resume point it no longer holds (the contract
+				// reports a terminal failure by closing the channel early, with
+				// no error value). A bare close tells the reader nothing, and a
+				// reader that reconnects from the same stale point is refused
+				// the same way for ever, its view frozen. `resync` makes it
+				// relist, which closes any gap the ended feed left.
+				if ctx.Err() == nil {
+					writeSSEFrame(w, sseFrame{event: "resync", data: []byte("{}")})
+					flusher.Flush()
+				}
 				return
 			}
 			writeSSEFrame(w, f)
