@@ -50,6 +50,9 @@ This change writes that backend and makes it the default.
 - `state-store`: the `kube` backend is no longer the default and renders a
   bundle for no other backend. "Exactly one backend is selected" now names
   `nats` as the default and the bundle it enables.
+- `state-durability`: one sentence of the state store home changes. The
+  default backend keeps state on its own clustered volumes, not in the
+  Kubernetes API.
 - `component-network-isolation`: adds a requirement. The manager may reach the state server on its
   client port. No other component may.
 - `chart-managed-secrets`: adds a requirement. The state server credential is chart-generated and
@@ -85,7 +88,7 @@ This change writes that backend and makes it the default.
 
 **Dependencies**
 
-- Sequenced after `state-store-generic-contract` is archived. Both it and the
-  published `state-durability` say a default install keeps the same two homes.
-  That sentence becomes untrue here, so a `state-durability` delta is added at
-  the sequencing gate, once the other change's text is published.
+- Implementation is sequenced after `state-store-generic-contract` is
+  archived. Both changes modify the same `state-durability` requirement, so
+  the delta here is written against the other change's text and is re-checked
+  at the gate (task 1.1).

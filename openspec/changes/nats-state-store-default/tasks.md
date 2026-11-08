@@ -1,6 +1,8 @@
 ## 1. Sequencing gate
 
-- [ ] 1.1 Confirm `state-store-generic-contract` is archived and the branch is rebased on master. Read the published text of "Every piece of live state has one declared home". Where it still says a default install keeps the same two homes, add a MODIFIED `state-durability` delta replacing that sentence with the `nats` home this change introduces, copying the published scenarios whole. Re-run `openspec validate nats-state-store-default`. Nothing below starts before this is ticked.
+This gate applies when implementation starts. This pull request only proposes.
+
+- [ ] 1.1 Confirm `state-store-generic-contract` is archived and the branch is rebased on master. Re-read the published text of "Every piece of live state has one declared home" in `state-durability`. The delta in this change replaces one sentence of it, so copy the published block whole, including every scenario the other change added, and change only that sentence. Re-run `openspec validate nats-state-store-default`. Nothing below starts before this is ticked.
 
 ## 2. The `nats` backend — backend-developer
 
