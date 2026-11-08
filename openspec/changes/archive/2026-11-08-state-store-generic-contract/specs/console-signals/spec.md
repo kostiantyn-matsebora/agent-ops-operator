@@ -1,3 +1,8 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: The signals view updates from the watch`
+- TO: `### Requirement: The signals view updates from the state feed`
+
 ## MODIFIED Requirements
 
 ### Requirement: The signals view updates from the state feed
