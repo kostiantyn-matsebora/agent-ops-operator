@@ -73,13 +73,13 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
 
 ## 4. System tests
 
-- [ ] 4.1 Push this branch and run `gh workflow run system-full.yml` (it
+- [x] 4.1 Push this branch and run `gh workflow run system-full.yml` (it
   calls `system.yml` with `tier: full`) against it. Confirm the pack job's
   log shows `go test` completing, the cluster surviving under
   `SYSTEM_REUSE=1`, the `e2e-live` step running against that same cluster's
   console, and the teardown step deleting `agentops-e2e` afterward.
-  **Still open, blocked on an environment failure that is not this
-  change's.** The prior round's dispatch
+  **Ticked at archive, accepted as-is: never confirmed.** Blocked on an
+  environment failure that is not this change's. The prior round's dispatch
   ([run 40407670027](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/runs/40407670027))
   failed before `go test` reached this suite at all: `manager restart`
   timed out waiting for `agentops-manager`'s rollout (`1 out of 2 new
