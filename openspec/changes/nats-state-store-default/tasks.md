@@ -28,7 +28,7 @@ This gate applies when implementation starts. This pull request only proposes.
 
 - [ ] 4.1 `go test ./...` in `platform/manager` under `KUBEBUILDER_ASSETS` and `TZ=Europe/Helsinki`, including `RunStores` against the in-process server and the static import check.
 - [ ] 4.2 `go test -tags conformance -count=1 ./test/conformance/` and `go test -run '^$' -bench . -benchmem ./internal/state/...` for both backends.
-- [ ] 4.3 Add a test for the import against a writer still active on `kube`, and decide the guard D-10 and the risk table name. Record the decision.
+- [ ] 4.3 Add a test for the import against an old-version writer still active on `kube`: a Signal created and a Conversation input appended after the first pass must be present after the final one, and a record the new version wrote must not be overwritten (D-10).
 - [ ] 4.4 The chart's render tests for the bundle, the guard, the credential and the policy, with helm present.
 - [ ] 4.5 The retired-vocabulary and publication guards pass.
 

@@ -156,6 +156,23 @@ nothing until it returns.
 - Revisions are not preserved. A resume token from before the import is
   invalid, and consumers start from now, which the contract already allows.
 
+**The import races an old replica, and this is how it is closed.** During a
+rolling upgrade an old-version replica can still write custom resources. It
+creates Signals on `/signal/inbound` and appends inputs to Conversations on
+`/channel/inbound`, on any replica, leader or not.
+
+1. The import starts only after this replica holds the leader Lease, so the
+   old leader's reconcilers have stopped.
+2. Each copied record carries the source's `resourceVersion` in its envelope
+   as `importedFrom`.
+3. The import repeats a pass every 30 seconds. A pass creates what is missing.
+   It also re-copies a record whose source `resourceVersion` differs from
+   `importedFrom`, but only if the `nats` record has had no write of its own.
+   A record the new version has already written is never overwritten.
+4. The passes continue until the manager's pod list shows no manager pod of
+   another version. One final pass then runs and the marker is written last.
+5. The manager reports not ready until the marker exists.
+
 | Alternative | Rejected because |
 |---|---|
 | No import, document the loss | A default flip that silently drops live conversations |
@@ -192,9 +209,9 @@ ship the old default.
   bench reports it, and the housekeeping GC still applies.
 - **Server restart stalls the manager** → the storage breaker holds work and
   reports an outage before a loss (`terminology.md`, context continuity).
-- **Import copies a stale view if the old manager still runs** → the upgrade
-  rolls the manager first and the import refuses while a `kube` write landed
-  in the last interval. Judged in task 4.3.
+- **Import copies a stale view while an old replica still writes** → the
+  repeated passes and the `importedFrom` re-copy rule of D-10 close it. A
+  record both versions wrote during the roll keeps the new version's value.
 - **One chart value flips two things (backend and bundle)** → the guard fails
   every contradiction and names the value.
 

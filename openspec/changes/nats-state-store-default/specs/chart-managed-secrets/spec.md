@@ -3,7 +3,11 @@
 ### Requirement: The state server credential is generated once
 The state server's credential SHALL be resolved in this order: an explicitly
 configured value, then an existing Secret, then generation. Generation SHALL
-happen on install only. A render without a cluster, such as a GitOps
+happen on install only.
+
+A render without cluster access finds no existing Secret, so the second step
+yields nothing. On an upgrade the third step is then skipped as well, and the
+Secret body is not rendered. A render without a cluster, such as a GitOps
 sync of an upgrade, SHALL NOT mint a new one.
 
 #### Scenario: An upgrade keeps the credential
