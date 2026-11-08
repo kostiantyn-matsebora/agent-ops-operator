@@ -144,11 +144,20 @@ changes backend. The guard still fails a hand-set contradiction.
 ### D-10: Import from `kube` runs once, in the manager, before serving
 
 On start the `nats` backend checks the `_meta/imported` key in `adapterstate`.
-If absent, it lists the Conversation, ConversationInput, Signal and
-SignalSource kinds through the `kube` backend (opened read-only for this),
-copies each through the `nats` collections with `Create`, treats
-already-exists as done, then writes the marker last. The manager serves
-nothing until it returns.
+If absent, it reads these kinds through the `kube` backend, opened read-only
+for this, and copies each through the `nats` collections with `Create`:
+
+| Source | Target |
+|---|---|
+| `Conversation` and its runs | `conversations`, `runs` |
+| `ConversationInput` payloads | the blob Object Store |
+| `Signal` | `signals` |
+| `SignalSource` status cooldown window | `cooldowns` |
+| `SignalSource` status receipt counters | `receipts` |
+| `Channel` and `SignalSource` adapter-state annotations | `adapterstate` |
+
+It treats already-exists as done and writes the marker last. The manager
+serves nothing until it returns.
 
 - Needs `get/list` on the kinds `kube` already holds. No new verb.
 - Creates by existence. The one later write is the re-copy rule below, and it

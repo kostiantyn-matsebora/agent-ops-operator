@@ -9,9 +9,9 @@ This gate applies when implementation starts. This pull request only proposes.
 ## 2. The `nats` backend — backend-developer
 
 - [ ] 2.1 Add `internal/state/nats` with the connection, the bucket bootstrap (replica count from `NATS_REPLICAS`) and the envelope codec (D-1, D-3). Verify `go vet ./internal/state/...` passes and only this package imports `nats.go`.
-- [ ] 2.2 Implement `Collection[T]` over KV: `Get`, `Create`, `Update`, `Delete`, `DeleteAt` with the revision as CAS, and the contract's errors (D-2). Verify a stale write returns the conflict error and a create over a held key returns already-exists.
+- [ ] 2.2 Implement `Collection[T]` over KV: `Get`, `Create`, `Update`, `Delete`, `DeleteAt` with the revision as CAS, and the contract's errors (D-2). Verify a stale write returns the conflict error, a create over a held key returns already-exists, and a delete of a record holding a finalizer leaves it readable with its deletion time set until the `Update` that empties the finalizers removes it.
 - [ ] 2.3 Implement the watch-fed mirror, `List` by declared index, and `Watch` resuming strictly after a revision with a bookmark (D-2, D-4). Verify `List` blocks until the first catch-up and a list after a returned create includes it.
-- [ ] 2.4 Implement `Expiring[T]`, the sweep and invisible-past-expiry reads (D-6). Verify a read between expiry and sweep reports not found.
+- [ ] 2.4 Implement `Expiring[T]`, the sweep and invisible-past-expiry reads (D-6). Verify a read between expiry and sweep reports not found, a list omits the expired record, and the feed carries its delete.
 - [ ] 2.5 Implement `Appended[P, T]`: `Append`, `Grow` by CAS retry, `GetWithItems`, `ListWithItems`, `WatchWithItems` (D-5). Verify two concurrent grows both apply.
 - [ ] 2.6 Implement `Blobs` over an Object Store (D-7). Verify a blob above the server's message limit reads back byte-identical.
 - [ ] 2.7 Implement the one-time import from `kube` with the marker written last (D-10). Verify every import scenario of the spec: the upgrade, the interrupted import, the non-leader, the late old-replica write, the new-version write that is never overwritten, the fresh install and the untouched source.
