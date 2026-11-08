@@ -32,6 +32,7 @@ you gave it. **Treat the agent container as untrusted code with a shell.**
 | **4** agent → Secrets | reads any Secret by creating or entering a pod | [pod execution disabled](#secret-exposure) — **on** |
 | **5** agent → context volume | reads another conversation's context | [no mount of the volume](#context-isolation) — **on** |
 | **6** agent → pod logs | conversation content readable with `pods/log` | **none** — [residual risk](#residual-risk) |
+| **7** any pod → state server | reads or writes conversation state directly, bypassing the manager's own authorization | [state store isolation](#state-store-isolation) — **on** (credential), **off** (network policy) |
 
 **Nothing in the cluster is granted by default.** A route naming no identity runs
 as an account bound to nothing. Acting power is something a route opts into, by
@@ -178,6 +179,25 @@ names a weaker one, exactly as any other wiring resolves.
 own and forwards the caller's token verbatim — every bound above is the
 manager's, re-checked on every call, never the server's.
 
+### State store isolation
+
+Under the default `nats` backend, conversation state lives on a clustered
+server beside the manager rather than in the Kubernetes API.
+
+| | |
+|---|---|
+| **Threat** | crossing 7 — any pod that reaches the state server reads or writes a conversation's own record directly, including another conversation's messages |
+| **Control** | the client port always requires the chart-managed credential (`nats.auth`). Where network policy is enabled, it also admits the manager's pods alone — the server's peer port admits only its own pods |
+| **Cost** | none beyond the install's existing network-policy decision |
+| **Residual risk** | the credential is one shared secret, not a token per caller, so anything holding it is indistinguishable from the manager. A policy applies where nothing enforces it, silently, same as crossing 1 |
+
+Every other component reaches state through the manager's `/state/*`
+surface instead, which already holds its own token, so none of them needs a
+route to the server at all.
+
+**Under `kube`** this crossing does not exist. State is the Kubernetes API,
+and crossing 3's authorization is what bounds it instead.
+
 ---
 
 ## The platform's own posture
@@ -191,6 +211,7 @@ Properties of the product you cannot read off the values.
 | **Adapter credentials are not stored** | a per-adapter token is an HMAC of a master key and the adapter's name, validated by re-deriving it. Nothing is minted, stored, or read back |
 | **The control-plane surface holds its own credential** | `/control-plane/*`'s token is distinct from `ADAPTER_TOKEN` and the coordinator token — a caller holding one cannot reach another's surface. Unconfigured, it refuses every request rather than falling open |
 | **Housekeeping holds no Kubernetes grant** | it lists conversations through the manager's `/state/*` surface, authenticated by its own `stateReadAuth` credential. No Role, no RoleBinding, and its ServiceAccount's token is not even mounted (`automountServiceAccountToken: false`) |
+| **The state server's credential is chart-managed, not the manager's to mint** | resolved explicit value, then an existing Secret, then generation on install only — the same order as `adapterAuth`/`controlPlaneAuth`. The manager receives it by `valueFrom` and reads no Secret of its own, under this backend either |
 | **The state read surface is a grant, off by default** | `spec.stateAccess: true` on a `ChannelAdapter` or `SignalAdapter` opens `/state/*` to that adapter's derived token. Silence grants nothing. The console reads through its own adapter's grant. Housekeeping is not an adapter and reads through `stateReadAuth` instead |
 | **Runtime pods are non-root** | at a fixed uid, and each conversation's workspace is its own subpath of the claim, so concurrent pods cannot see each other's tree |
 | **Under egress control the container is hardened further** | all capabilities dropped, privilege escalation refused |

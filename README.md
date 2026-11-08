@@ -60,7 +60,7 @@ any MCP server &nbsp;·&nbsp; your own
    talk to it. Or one `Coordinator`, composing several agents into one.
 4. **Then it runs.** One conversation per incident, in its own isolated pod,
    strictly serial and capped. A restart loses nothing.
-5. **Every part of it is a Kubernetes object.** `kubectl get conversations`.
+5. **Every route is a Kubernetes object.** The console shows it running, live.
 
 ## What you write
 

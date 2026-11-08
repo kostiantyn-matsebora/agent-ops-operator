@@ -12,11 +12,28 @@ for the source and the reference material beside this file.
 
 ### Added
 
-- A new values key, `stateStore.backend`, default `kube`. It selects where the
-  manager keeps conversation state, and exactly one backend may be selected.
-  `kube` is the Kubernetes API, as before, and it is the only backend this
-  release ships. The render refuses an unknown value. The key covers
-  `Signal`s and each source's cooldown window as well as conversations.
+- A new values key, `stateStore.backend`, selecting where the manager keeps
+  conversation state. Exactly one backend may be selected, and the render
+  refuses an unknown value. The key covers `Signal`s and each source's
+  cooldown window and receipt counters as well as conversations.
+- A new `nats` state backend, a clustered JetStream KV and Object Store the
+  chart runs as its own three-server bundle. It passes the same conformance
+  suite and bench as `kube`.
+- **BREAKING: the default backend is now `nats`, not `kube`.** State lives on
+  the bundle's own clustered volumes, not the Kubernetes API —
+  `kubectl get conv` and `kubectl get sig` no longer show anything live on a
+  fresh install. Pin the old behaviour with `stateStore.backend: kube`.
+- **BREAKING: a default install now runs three more pods and three more
+  volumes**, for the `nats` bundle.
+- An upgrade from `kube` imports every conversation, signal, cooldown window
+  and receipt counter into `nats` on the manager's first start, before it
+  reports ready, and leaves the custom resources in place.
+- A new NetworkPolicy admits the state server's client port from the manager
+  alone, and its peer port from its own pods alone, where network
+  restriction is enabled.
+- A new chart-managed credential, the Secret `agentops-nats-credentials`,
+  resolved explicit value, then existing Secret, then generation on install
+  only — the same order as `adapterAuth`/`controlPlaneAuth`.
 - A new `Signal` CRD and a publish/consume split on `POST /signal/inbound`.
   The endpoint validates, stores one `Signal` per admitted message and
   acknowledges. A separate consumer pool on the leader then claims it, spends
@@ -122,13 +139,45 @@ for the source and the reference material beside this file.
 
 ### Upgrade
 
-Not breaking. Helm never upgrades an existing CRD, so apply the new and changed ones with the chart before `helm upgrade`:
+**Breaking: the default state backend changes to `nats`.** Helm never
+upgrades an existing CRD, so apply the new and changed ones with the chart
+before `helm upgrade`:
 
 ```sh
 kubectl apply -f chart/crds/
 ```
 
-This adds the `Signal` CRD, one Conversation field and one enum value. Adapter and manager upgrade in either order: an older manager ignores `signalId`. An adapter that reads `conversations` from the response, if you wrote one, must stop.
+```powershell
+kubectl apply -f chart/crds/
+```
+
+This adds the `Signal` CRD, one Conversation field and one enum value.
+Adapter and manager upgrade in either order: an older manager ignores
+`signalId`. An adapter that reads `conversations` from the response, if you
+wrote one, must stop.
+
+The new manager starts, finds the empty `nats` buckets and the `kube`
+records, imports them, and reports ready once the import finishes. Verify
+through the console or `/state/conversations` before trusting it, then
+delete the old custom resources yourself once you have — the import never
+does:
+
+```sh
+kubectl -n agent-ops delete conversations,conversationinputs,signals --all
+```
+
+```powershell
+kubectl -n agent-ops delete conversations,conversationinputs,signals --all
+```
+
+**Pin the old behaviour instead** with `stateStore.backend: kube` if you rely
+on reading conversations through the Kubernetes API.
+
+**Rollback loses what `nats` received after the upgrade.** Setting
+`stateStore.backend` back to `kube` and upgrading again does not copy
+anything written to `nats` since the first upgrade — every conversation
+opened or continued after it is lost. Snapshot (`nats stream snapshot`)
+first if that matters.
 
 ## [18.0.1] — 2026-10-25
 

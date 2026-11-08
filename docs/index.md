@@ -66,7 +66,8 @@ already in it.
 - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes native
 
   Fourteen custom resources, validated by the API server like anything else
-  you deploy. `kubectl get conversations` tells you what is running.
+  you deploy. The console shows every conversation live, on any state
+  backend.
 
 - ![]({{ '/assets/img/claim-gitops.svg' | relative_url }}) GitOps ready
 

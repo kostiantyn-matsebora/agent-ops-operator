@@ -22,6 +22,7 @@
 | Telegram's `reply_to_message` never nests | name the addressed form in the menu text |
 | Two `getUpdates` consumers, one bot token | 409s — stop the old poller, confirm, then start new |
 | Two Telegram components held the same bot token, splitting custody the gateway's own name argued against | consolidate into the gateway — `POST /telegram/call/{method}` relay, one chart-generated shared call token |
+| `jetstream.KeyValue.WatchAll`'s `ResumeFromRevision` implies `DeliverLastPerSubject` | it silently collapses every intermediate write to one key's LATEST value — a resumed `Watch` must subscribe to the raw stream directly, and `History` must exceed 1 or the purge leaves nothing to replay |
 
 ### Wiring, review and CI mechanics
 

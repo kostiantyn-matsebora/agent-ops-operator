@@ -238,8 +238,32 @@ in-process instead of spawning the `claude` CLI, and the Pulse signal
 adapter's default `correlationStrategy` changes what counts as a repeat
 alert. See the changelog entry before you upgrade a production install.
 
-`helm uninstall` removes the workloads but leaves the CRDs, every Conversation
-and the context claim, so reinstalling finds your data where it was.
+**The next release is BREAKING too: the default state backend changes to
+`nats`.** A fresh install now also runs three more pods and three more
+volumes — a clustered state server replacing the `Conversation`, `Signal`
+and cooldown custom resources as the live record.
+
+`kubectl get conversations` stops showing anything on a default install. Pin
+the old behaviour with `stateStore.backend: kube` — see
+[configuration](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#state-store).
+
+An existing install upgrading from `kube` imports its conversations, signals
+and cooldown windows into `nats` automatically, on the manager's first
+start, before it reports ready. Verify through the console or
+`/state/conversations`, then delete the old custom resources yourself once
+you have — the import never does:
+
+```sh
+kubectl -n agent-ops delete conversations,conversationinputs,signals --all
+```
+
+```powershell
+kubectl -n agent-ops delete conversations,conversationinputs,signals --all
+```
+
+`helm uninstall` removes the workloads but leaves the CRDs, every Conversation,
+the context claim and — under the default `nats` backend — the state
+server's three volumes, so reinstalling finds your data where it was.
 
 Helm never deletes CRDs that came from a chart's `crds/` directory, so this is
 not something the chart decides. Removing them means deleting them yourself,

@@ -132,7 +132,11 @@ states plainly.
 
 **One incident or task.** A chat topic, an agent session, and an append-only
 queue of inputs (task / alert / reply / recurrence), executed strictly serially.
-`kubectl get conversations` shows phase, thread and runtime live.
+
+**Where you read phase, thread and runtime live depends on the state-store
+backend.** Under `kube`, `kubectl get conversations` shows them. Under the
+default, `nats`, they live on the state server's own volumes instead — the
+console reads them either way (see [Restart resilience](#restart-resilience)).
 
 | Phase | Means |
 |---|---|
@@ -1916,17 +1920,22 @@ payload is not copied into the conversation object.
   every accepted `Signal` and each source's cooldown window through.
   - The chart selects a backend with `stateStore.backend` (see
     [configuration](configuration.md#state-store)).
-  - The only backend shipped is `kube`. It keeps the `Conversation`,
-    `ConversationInput` and `Signal` custom resources, and the window in
-    `SignalSource.status.cooldown[]`.
-  - Under `kube` the store and the Kubernetes API are the same API.
+  - **Two backends ship.** `nats` is the default: a clustered JetStream KV
+    and Object Store the chart runs as its own bundle, three servers by
+    default. `kube` keeps the `Conversation`, `ConversationInput` and
+    `Signal` custom resources, and the window in
+    `SignalSource.status.cooldown[]` — select it with `stateStore.backend:
+    kube`.
+  - Under `kube` the store and the Kubernetes API are the same API. Under
+    `nats` the store is the bundle's own servers, reached only by the
+    manager.
   - Each source's `receivedTotal` and `lastReceived` counters live there too.
   - **Adapter cursors live there too** — the one string a channel or signal
     adapter persists per surface and key, read and written through
     `GET`/`PUT /channel/state/{channel}/{key}` and `/signal/state/{source}/{key}`. Under `kube`
     it is still the same `agentops.dev/adapter-state-<key>` annotation on
     the `Channel` or `SignalSource` an adapter upgraded across this change
-    already wrote.
+    already wrote. Under `nats` it is a key in the `adapterstate` bucket.
   - Conversation state is the session id, threads, inputs, runs, phase and
     the message record. The record holds what people sent and what the agent
     answered.
@@ -1949,22 +1958,24 @@ payload is not copied into the conversation object.
 - **Deliberately lossy** — bounded telemetry whose loss costs history, never
   correctness. It is documented as lossy and it reports its gaps.
 
-**The manager mounts no volume.** Its state either derives from CR state or is
-telemetry, and a claim would pin it to one node, defeat rescheduling, and create
-a second source of truth beside the CRs.
+**The manager mounts no volume.** Its state either derives from a Kubernetes
+object, is a cache of a state-store record, or is telemetry.
+
+A claim would pin it to one node and defeat rescheduling. It would also
+create a second source of truth beside the backend it already has.
 
 | Component | State it holds | Home | State store backend | A restart costs |
 |---|---|---|---|---|
 | Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | `kube`: the Kubernetes API's own guarantee | nothing |
-| Manager — op queue | outbound channel ops | derived from CR state | `kube`: the Kubernetes API's own guarantee | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
-| Manager — thread claim and undelivered reply | `status.threads[].claim` (holder, claimedAt) and `status.threads[].undeliveredReply` | the state store, on the `Conversation` | `kube`: the Kubernetes API's own guarantee | nothing: a claim held by a replica other than the leader is cleared on the next reconcile, and an undelivered reply is re-derived until delivery succeeds |
-| Manager — ingest cooldown | `initiationId` suppression | the state store | `kube`: `SignalSource.status.cooldown[]`, the Kubernetes API's own guarantee | nothing inside the window |
-| Manager — source receipt counters | `receivedTotal` and `lastReceived` per source | the state store | `kube`: `SignalSource.status`, the Kubernetes API's own guarantee | nothing: each count is serialized by the backend, so no increment is lost |
-| Manager — signal publish and consume | every accepted signal, and its per-claimant routing state | the state store, surviving every restart and leader change | `kube`: `Signal` CRs, the Kubernetes API's own guarantee | no acknowledged signal: the new leader resumes every non-terminal `Signal`, and routing is idempotent |
-| Manager — admission | active/pending counts | live pod list + `Conversation` phase | `kube`: the Kubernetes API's own guarantee | nothing |
+| Manager — op queue | outbound channel ops | derived from conversation state | `kube`: the Kubernetes API's own guarantee. `nats`: the clustered KV's own guarantee, quorum-committed to two of three servers | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
+| Manager — thread claim and undelivered reply | `status.threads[].claim` (holder, claimedAt) and `status.threads[].undeliveredReply` | the state store, on the `Conversation` record | `kube`: the Kubernetes API's own guarantee. `nats`: the same quorum-committed guarantee, on the `conversations` bucket's entry | nothing: a claim held by a replica other than the leader is cleared on the next reconcile, and an undelivered reply is re-derived until delivery succeeds |
+| Manager — ingest cooldown | `initiationId` suppression | the state store | `kube`: `SignalSource.status.cooldown[]`, the Kubernetes API's own guarantee. `nats`: the `cooldowns` bucket, quorum-committed | nothing inside the window |
+| Manager — source receipt counters | `receivedTotal` and `lastReceived` per source | the state store | `kube`: `SignalSource.status`, the Kubernetes API's own guarantee. `nats`: the `receipts` bucket, quorum-committed | nothing: each count is serialized by the backend, so no increment is lost |
+| Manager — signal publish and consume | every accepted signal, and its per-claimant routing state | the state store, surviving every restart and leader change | `kube`: `Signal` CRs, the Kubernetes API's own guarantee. `nats`: the `signals` bucket, quorum-committed | no acknowledged signal: the new leader resumes every non-terminal `Signal`, and routing is idempotent |
+| Manager — admission | active/pending counts | live pod list + conversation phase | `kube`: the Kubernetes API's own guarantee. `nats`: the `conversations` bucket's own guarantee | nothing |
 | Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | none: not state-store state | recent history. Clients are told to resync rather than handed silence |
 | Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | none: not state-store state | with `persistence.context.enabled` off, conversational context. With it on, nothing |
-| Channel / signal adapters | transport cursors | the state store, through `/channel/state`/`/signal/state` | `kube`: the same `agentops.dev/adapter-state-<key>` annotation on `Channel` / `SignalSource`, the Kubernetes API's own guarantee | nothing |
+| Channel / signal adapters | transport cursors | the state store, through `/channel/state`/`/signal/state` | `kube`: the same `agentops.dev/adapter-state-<key>` annotation on `Channel` / `SignalSource`, the Kubernetes API's own guarantee. `nats`: a key in the `adapterstate` bucket, quorum-committed | nothing |
 | Console | transcript buffer, config cache, activity index | Conversations and Signals read through the manager's [state read surface](contracts.md#the-state-read-surface), everything else rebuilt by Kubernetes list→watch and cursor replay. The transcript is a CACHE of `status.runs[]` | none: the console holds no state of its own, and holds no Kubernetes RBAC on either kind it now reaches through the manager | nothing authoritative. Acks and notices only |
 | Housekeeping job | none (scans disk, lists conversations through the manager's state read surface) | the claims it mounts | none: not state-store state, and no Kubernetes grant on `Conversation` at all | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
 
@@ -1977,10 +1988,13 @@ adapter's own cursor, the same annotation it always was.
 
 - **Under `kube`**, a restart costs what the Kubernetes API's own guarantee
   allows. A write is acknowledged once the API server has it.
-- **Reads of one record go to the API server**, not the manager's informer
-  cache, so a compare-and-swap never races a stale copy. Lookups that return
-  several records are served from the cache, since a full list of a large
-  install is slow.
+- **Under `nats`**, a restart costs what the clustered KV's own guarantee
+  allows. A write is acknowledged once two of the three servers have it, so
+  losing one server loses nothing.
+- **Reads of one record go to the server**, never a cache, so a
+  compare-and-swap precondition is never a guess. Listings are served from an
+  in-memory mirror kept current by a watch, since a full list of a large
+  install is slow either backend.
 - **A later backend adds its own row**, stating its own guarantee.
 - **Release is explicit.** The manager deletes a closed or evicted
   conversation's pod and ConfigMap itself under every backend, so no row
