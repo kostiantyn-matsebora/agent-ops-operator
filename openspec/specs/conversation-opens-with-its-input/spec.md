@@ -6,14 +6,34 @@ A thread reads as the event followed by the work: every input records where it
 came from, and every input is delivered to every bound channel EXCEPT the
 surface that displayed it — in parallel with dispatch, once per input and
 channel, so the human sees what happened even if the agent never answers.
+
 ## Requirements
+
 ### Requirement: Inputs record where they came from and the pipeline is inferred
 
-Every input SHALL record its own origin as `{kind: signal|channel|member, name}` —
-materialized state, snapshotted like `profileRef` and `channelRefs` and never set
-by hand. It SHALL replace the job-only `jobName` field, so the originating source
-is recorded for every input kind rather than for jobs alone. It SHALL be optional
-so inputs created before this change remain valid.
+Every input SHALL record its own origin as
+`{kind: signal|channel|member|manager, name}`.
+
+- Materialized state, snapshotted like `profileRef` and `channelRefs`, never
+  set by hand.
+- It replaces the job-only `jobName` field, so the originating source is
+  recorded for every input kind rather than for jobs alone.
+- It is optional, so inputs created before this change remain valid.
+
+Each input recorded on `status.runs[].inputs[]` also carries `surface`, the
+channel it was typed on.
+
+- It is empty when no surface displayed the input, as for an alert, a job tick
+  or a posted task.
+- A message that reached the manager as a chat signal records origin `signal`
+  AND a non-empty `surface`.
+
+The fourth kind, `manager`, is an input the manager appended under a rule of
+its own. Its `name` is the rule that wrote it, `move-per-turn` today (`conversation-provenance`).
+
+It entered on no surface. The per-destination delivery rule below therefore
+delivers it to every bound channel, attributed to the manager, with no
+clause of its own.
 
 **The originating Pipeline IS recorded**, on `Conversation.spec.pipelineRef` —
 this requirement once said no such field should exist, and `pipeline-model` now
@@ -42,6 +62,17 @@ is a guess.
 - **WHEN** a conversation predating `pipelineRef` has bindings matching more than
   one Ready pipeline
 - **THEN** the message renders without a pipeline name and is otherwise complete
+
+#### Scenario: A chat signal records the surface it was typed on
+- **WHEN** a person's message reaches the manager as a chat signal from a chat origination adapter
+- **THEN** its recorded input carries origin `signal` and a non-empty `surface`, while an alert records an empty one
+
+#### Scenario: A manager-origin input is delivered everywhere
+
+- **WHEN** the manager appends an input `{kind: manager, name: move-per-turn}`
+  to a conversation bound to two channels
+- **THEN** both channels receive it, attributed to the manager, because it
+  entered on no surface
 
 ### Requirement: Bound channels receive every input the destination has not already seen
 
