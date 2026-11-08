@@ -73,7 +73,7 @@ func testCASTwoActorsRace[T any](t *testing.T, s state.Collection[T], fx Fixture
 	key := fx.Key("cas-race")
 	rev, err := s.Create(ctx, key, fx.New())
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	var wg sync.WaitGroup
@@ -106,7 +106,7 @@ func testCASTwoActorsRace[T any](t *testing.T, s state.Collection[T], fx Fixture
 
 	final, _, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if m := fx.Marker(final); m != 1 && m != 2 {
 		t.Fatalf("final marker = %d, want exactly one actor's write, never a merge", m)
@@ -118,7 +118,7 @@ func testCASStaleClaimNeverMerged[T any](t *testing.T, s state.Collection[T], fx
 	key := fx.Key("cas-stale")
 	staleRev, err := s.Create(ctx, key, fx.New())
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	if _, err := s.Update(ctx, key, staleRev, fx.Edit(fx.New(), 1)); err != nil {
@@ -131,7 +131,7 @@ func testCASStaleClaimNeverMerged[T any](t *testing.T, s state.Collection[T], fx
 
 	got, _, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if fx.Marker(got) != 1 {
 		t.Fatalf("marker = %d after a refused stale write, want 1 unchanged", fx.Marker(got))
@@ -153,7 +153,7 @@ func testCreateRefusedOnExistingKey[T any](t *testing.T, s state.Collection[T], 
 
 	got, _, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if fx.Marker(got) != 1 {
 		t.Fatalf("marker = %d after a refused create, want 1 unchanged", fx.Marker(got))
@@ -173,29 +173,35 @@ func testEveryDeclaredIndex[T any](t *testing.T, s state.Collection[T], decl sta
 		}
 	}
 	for _, idx := range decl.Indexes {
-		groups := map[string][]state.Key{}
-		for _, kv := range fx.Indexed {
-			rec := kv.Record
-			v, listed := idx.Value(&rec)
-			if listed {
-				groups[v] = append(groups[v], kv.Key)
-			}
+		checkIndex(t, ctx, s, idx, fx)
+	}
+}
+
+// checkIndex lists every value the fixture's pool puts under idx and requires
+// exactly the keys that carry it.
+func checkIndex[T any](t *testing.T, ctx context.Context, s state.Collection[T], idx state.Index[T], fx Fixture[T]) {
+	groups := map[string][]state.Key{}
+	for _, kv := range fx.Indexed {
+		rec := kv.Record
+		v, listed := idx.Value(&rec)
+		if listed {
+			groups[v] = append(groups[v], kv.Key)
 		}
-		if len(groups) == 0 {
-			t.Fatalf("index %q: the fixture's pool lists nothing under it — add a record that does", idx.Name())
+	}
+	if len(groups) == 0 {
+		t.Fatalf("index %q: the fixture's pool lists nothing under it — add a record that does", idx.Name())
+	}
+	for v, want := range groups {
+		got, err := s.List(ctx, idx, v)
+		if err != nil {
+			t.Fatalf("List(%s, %q): %v", idx.Name(), v, err)
 		}
-		for v, want := range groups {
-			got, err := s.List(ctx, idx, v)
-			if err != nil {
-				t.Fatalf("List(%s, %q): %v", idx.Name(), v, err)
-			}
-			gotKeys := make([]state.Key, len(got))
-			for i, r := range got {
-				gotKeys[i] = fx.KeyOf(r)
-			}
-			if !sameKeySet(gotKeys, want) {
-				t.Fatalf("List(%s, %q) = %v, want exactly %v", idx.Name(), v, gotKeys, want)
-			}
+		gotKeys := make([]state.Key, len(got))
+		for i, r := range got {
+			gotKeys[i] = fx.KeyOf(r)
+		}
+		if !sameKeySet(gotKeys, want) {
+			t.Fatalf("List(%s, %q) = %v, want exactly %v", idx.Name(), v, gotKeys, want)
 		}
 	}
 }
@@ -216,13 +222,13 @@ func testFeedEventShape[T any](t *testing.T, s state.Collection[T], fx Fixture[T
 
 	events, err := s.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 
 	key := fx.Key("feed-shape")
 	rev, err := s.Create(ctx, key, fx.Edit(fx.New(), 1))
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	evt := mustRecvEventMatching(t, events, 5*time.Second, func(e state.Event[T]) bool {
@@ -239,11 +245,11 @@ func testFeedResumeContinuity[T any](t *testing.T, s state.Collection[T], fx Fix
 
 	formerLeaderEvents, err := s.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 	key := fx.Key("resume-leader")
 	if _, err := s.Create(ctx, key, fx.New()); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 	createEvt := mustRecvEvent(t, formerLeaderEvents, 5*time.Second)
 	resumePoint := createEvt.Resume
@@ -252,10 +258,10 @@ func testFeedResumeContinuity[T any](t *testing.T, s state.Collection[T], fx Fix
 	// formerLeaderEvents, while a change still lands.
 	cur, rev, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if _, err := s.Update(ctx, key, rev, fx.Edit(cur, 1)); err != nil {
-		t.Fatalf("Update: %v", err)
+		t.Fatalf(fmtUpdate, err)
 	}
 
 	resumed, err := s.Watch(ctx, resumePoint)
@@ -273,11 +279,11 @@ func testFeedNoGapAcrossDisconnect[T any](t *testing.T, s state.Collection[T], f
 
 	events, err := s.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 	key := fx.Key("no-gap")
 	if _, err := s.Create(ctx, key, fx.Edit(fx.New(), 0)); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 	firstEvt := mustRecvEvent(t, events, 5*time.Second)
 	lastSeen := firstEvt.Resume
@@ -285,7 +291,7 @@ func testFeedNoGapAcrossDisconnect[T any](t *testing.T, s state.Collection[T], f
 	const duringDisconnect = 20
 	cur, currentRev, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	for i := 1; i <= duringDisconnect; i++ {
 		newRev, err := s.Update(ctx, key, currentRev, fx.Edit(cur, i))
@@ -329,11 +335,11 @@ func testFeedStaleSnapshotCaughtByCAS[T any](t *testing.T, s state.Collection[T]
 
 	events, err := s.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 	key := fx.Key("stale-snapshot")
 	if _, err := s.Create(ctx, key, fx.Edit(fx.New(), 1)); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 	snapshot := mustRecvEvent(t, events, 5*time.Second)
 
@@ -361,15 +367,15 @@ func testDeleteWithoutFinalizer[T any](t *testing.T, s state.Collection[T], fx F
 	defer cancel()
 	events, err := s.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 	key := fx.Key("delete-plain")
 	if _, err := s.Create(ctx, key, fx.New()); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	if err := s.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
 	if _, _, err := s.Get(ctx, key); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Get after Delete error = %v, want ErrNotFound", err)
@@ -387,15 +393,15 @@ func testDeleteHeldRecordMarked[T any](t *testing.T, s state.Collection[T], fx F
 	defer cancel()
 	events, err := s.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 	key := fx.Key("delete-held")
 	if _, err := s.Create(ctx, key, fx.Hold.Hold(fx.New())); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	if err := s.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
 	got, _, err := s.Get(ctx, key)
 	if err != nil {
@@ -414,7 +420,7 @@ func testDeleteHeldRecordMarked[T any](t *testing.T, s state.Collection[T], fx F
 	}
 	again, _, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if !fx.Hold.Marked(again) {
 		t.Fatalf("second Delete unmarked a held record")
@@ -426,20 +432,20 @@ func testReleaseLastFinalizerRemoves[T any](t *testing.T, s state.Collection[T],
 	defer cancel()
 	events, err := s.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 	key := fx.Key("release")
 	held := fx.Hold.AddSecond(fx.Hold.Hold(fx.New()))
 	if _, err := s.Create(ctx, key, held); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 	if err := s.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
 
 	rec, rev, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	// fx.Hold.Hold sets the finalizer set to exactly one, modelling "one of
 	// two released".
@@ -467,21 +473,21 @@ func testFinalizerAddRefusedWhenDeleting[T any](t *testing.T, s state.Collection
 	ctx := context.Background()
 	key := fx.Key("no-new-hold")
 	if _, err := s.Create(ctx, key, fx.Hold.Hold(fx.New())); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 	if err := s.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
 	rec, rev, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if _, err := s.Update(ctx, key, rev, fx.Hold.AddSecond(rec)); !errors.Is(err, state.ErrDeleting) {
 		t.Fatalf("Update adding a finalizer error = %v, want ErrDeleting", err)
 	}
 	got, _, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if fx.Hold.NumFinalizers(got) != 1 {
 		t.Fatalf("refused Update changed the finalizer set: %+v", got)
@@ -492,10 +498,10 @@ func testCreateRefusedWhileDeleting[T any](t *testing.T, s state.Collection[T], 
 	ctx := context.Background()
 	key := fx.Key("still-held")
 	if _, err := s.Create(ctx, key, fx.Hold.Hold(fx.New())); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 	if err := s.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
 	if _, err := s.Create(ctx, key, fx.New()); !errors.Is(err, state.ErrAlreadyExists) {
 		t.Fatalf("Create over a marked record error = %v, want ErrAlreadyExists", err)
@@ -573,12 +579,12 @@ func testIdentityStableAndRenewed[T any](t *testing.T, s state.Collection[T], fx
 	key := fx.Key("identity")
 	before := time.Now().UTC().Add(-time.Minute)
 	if _, err := s.Create(ctx, key, fx.New()); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	first, rev, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	id := fx.Identity
 	if id.ID(first) == "" {
@@ -589,25 +595,25 @@ func testIdentityStableAndRenewed[T any](t *testing.T, s state.Collection[T], fx
 	}
 
 	if _, err := s.Update(ctx, key, rev, fx.Edit(first, 1)); err != nil {
-		t.Fatalf("Update: %v", err)
+		t.Fatalf(fmtUpdate, err)
 	}
 	second, _, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if id.ID(second) != id.ID(first) || !id.CreatedAt(second).Equal(id.CreatedAt(first)) {
 		t.Fatalf("identity moved across an Update: %q %v -> %q %v", id.ID(first), id.CreatedAt(first), id.ID(second), id.CreatedAt(second))
 	}
 
 	if err := s.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
 	if _, err := s.Create(ctx, key, fx.New()); err != nil {
 		t.Fatalf("Create (recreate): %v", err)
 	}
 	third, _, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if id.ID(third) == "" || id.ID(third) == id.ID(first) {
 		t.Fatalf("recreated record ID = %q, want a new identity distinct from %q", id.ID(third), id.ID(first))
@@ -619,23 +625,23 @@ func testIdentityCallerSuppliedIgnored[T any](t *testing.T, s state.Collection[T
 	key := fx.Key("identity-ignored")
 	id := fx.Identity
 	if _, err := s.Create(ctx, key, id.Forge(fx.New())); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	got, rev, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if id.ID(got) == "" {
 		t.Fatalf("Create dropped identity entirely: %+v", got)
 	}
 
 	if _, err := s.Update(ctx, key, rev, id.Forge(fx.Edit(got, 1))); err != nil {
-		t.Fatalf("Update: %v", err)
+		t.Fatalf(fmtUpdate, err)
 	}
 	again, _, err := s.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if id.ID(again) != id.ID(got) || !id.CreatedAt(again).Equal(id.CreatedAt(got)) {
 		t.Fatalf("Update kept caller-supplied identity: %+v", again)

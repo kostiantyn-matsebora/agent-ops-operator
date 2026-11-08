@@ -37,7 +37,7 @@ func intMarker(s string) int {
 // conversationFixture drives Run over Stores.Conversations.
 var conversationFixture = Fixture[state.ConversationRecord]{
 	New: func() state.ConversationRecord {
-		return state.ConversationRecord{ProfileRef: "profile-default", Phase: "Working"}
+		return state.ConversationRecord{ProfileRef: profileDefault, Phase: "Working"}
 	},
 	Edit: func(rec state.ConversationRecord, marker int) state.ConversationRecord {
 		rec.Title = strconv.Itoa(marker)
@@ -84,7 +84,7 @@ func conversationIndexPool() []Keyed[state.ConversationRecord] {
 	key := func(label string) state.Key { return state.Key("conv-idx-" + label) }
 	rec := func(convID, pipeline, phase, nameBase string, causedBy *state.Provenance) state.ConversationRecord {
 		return state.ConversationRecord{
-			ProfileRef: "profile-default", ConversationID: convID, PipelineRef: pipeline,
+			ProfileRef: profileDefault, ConversationID: convID, PipelineRef: pipeline,
 			Phase: phase, NameBase: nameBase, CausedBy: causedBy,
 		}
 	}
@@ -142,10 +142,10 @@ func signalIndexPool() []Keyed[state.SignalRecord] {
 		return state.SignalRecord{Name: name, SourceRef: source, Adapter: "cron", InitiationID: init, Phase: phase}
 	}
 	return []Keyed[state.SignalRecord]{
-		{Key: "sig-idx-a", Record: rec("sig-idx-a", "idx-source-a", "idx-init-x", "")},
-		{Key: "sig-idx-b", Record: rec("sig-idx-b", "idx-source-a", "idx-init-x", state.SignalRouted)},
-		{Key: "sig-idx-c", Record: rec("sig-idx-c", "idx-source-a", "idx-init-y", "")},
-		{Key: "sig-idx-d", Record: rec("sig-idx-d", "idx-source-b", "idx-init-x", "")},
+		{Key: "sig-idx-a", Record: rec("sig-idx-a", idxSourceA, idxInitX, "")},
+		{Key: "sig-idx-b", Record: rec("sig-idx-b", idxSourceA, idxInitX, state.SignalRouted)},
+		{Key: "sig-idx-c", Record: rec("sig-idx-c", idxSourceA, "idx-init-y", "")},
+		{Key: "sig-idx-d", Record: rec("sig-idx-d", "idx-source-b", idxInitX, "")},
 	}
 }
 
@@ -157,7 +157,7 @@ func signalIndexPool() []Keyed[state.SignalRecord] {
 // only grows, first-appearance order (compared here as a set, per
 // StoreDeclarations' own comment).
 var runFixture = AppendedFixture[state.ConversationRecord, state.Run]{
-	NewParent: func() state.ConversationRecord { return state.ConversationRecord{ProfileRef: "profile-default"} },
+	NewParent: func() state.ConversationRecord { return state.ConversationRecord{ProfileRef: profileDefault} },
 	NewItem:   func(id string) state.Run { return state.Run{RunID: id, Status: "succeeded"} },
 	Edit: func(marker string) state.Run {
 		switch marker {

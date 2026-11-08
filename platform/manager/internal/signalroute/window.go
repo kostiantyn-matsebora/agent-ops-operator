@@ -9,8 +9,8 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
-// The helpers below are the cooldown and receipt operations the SignalStore
-// used to carry, moved above the contract: each is a read or a Mutate over the
+// The helpers below are the cooldown and receipt operations the old signal
+// store used to carry, moved above the contract: each is a read or a Mutate over the
 // typed collection, keyed by the source's name.
 
 // GetCooldownWindow reads a source's recorded cooldown window. A source that

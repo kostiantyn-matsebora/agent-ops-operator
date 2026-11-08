@@ -117,21 +117,21 @@ func testNoMultiRecordAtomicity(t *testing.T, open func() state.Stores) {
 	if err != nil {
 		t.Fatalf("Get after the conversation write alone: %v", err)
 	}
-	if got.ProfileRef != "profile-default" {
+	if got.ProfileRef != profileDefault {
 		t.Fatalf("ProfileRef = %q — the conversation write must stand on its own", got.ProfileRef)
 	}
 
 	// The next reconciliation completes the owed input.
 	blobKey := state.Key("crash-between-writes-input-1")
-	if err := s.Blobs.Put(ctx, blobKey, state.Blob{ConversationName: string(key), Type: "task", Payload: "owed-input"}); err != nil {
+	if err := s.Blobs.Put(ctx, blobKey, state.Blob{ConversationName: string(key), Type: "task", Payload: owedInput}); err != nil {
 		t.Fatalf("Put (completing the owed write): %v", err)
 	}
 	blob, err := s.Blobs.Get(ctx, blobKey)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if blob.Payload != "owed-input" {
-		t.Fatalf("Payload = %q, want %q", blob.Payload, "owed-input")
+	if blob.Payload != owedInput {
+		t.Fatalf("Payload = %q, want %q", blob.Payload, owedInput)
 	}
 }
 

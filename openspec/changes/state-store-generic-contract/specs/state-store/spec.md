@@ -120,11 +120,6 @@ success.
   give different items
 - **THEN** the conformance suite fails for that declaration on every backend
 
-#### Scenario: Concurrent updates and an append all land
-- **WHEN** several updates and an append reach one conversation at the same
-  moment, none holding a revision
-- **THEN** every one succeeds and the listing holds every effect
-
 ### Requirement: Signal lookup is by key or by a declared index
 The contract SHALL offer lookup of a signal by key and listing by a declared,
 closed set of signal indexes:

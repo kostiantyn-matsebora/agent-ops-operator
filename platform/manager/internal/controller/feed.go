@@ -141,7 +141,7 @@ func (r *ConversationReconciler) request(key state.Key) reconcile.Request {
 }
 
 // startFeed is the Signal reconciler's event source (design D-14), the same
-// loop over the SignalStore's Watch.
+// loop over the Signals collection's Watch.
 func (r *SignalReconciler) startFeed(ctx context.Context, q workqueue.TypedRateLimitingInterface[reconcile.Request]) error {
 	go feed[state.Event[state.SignalRecord]]{
 		what: "signal",

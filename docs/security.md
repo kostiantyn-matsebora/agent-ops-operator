@@ -191,6 +191,7 @@ Properties of the product you cannot read off the values.
 | **Adapter credentials are not stored** | a per-adapter token is an HMAC of a master key and the adapter's name, validated by re-deriving it. Nothing is minted, stored, or read back |
 | **The control-plane surface holds its own credential** | `/control-plane/*`'s token is distinct from `ADAPTER_TOKEN` and the coordinator token — a caller holding one cannot reach another's surface. Unconfigured, it refuses every request rather than falling open |
 | **Housekeeping holds no Kubernetes grant** | it lists conversations through the manager's `/state/*` surface, authenticated by its own `stateReadAuth` credential. No Role, no RoleBinding, and its ServiceAccount's token is not even mounted (`automountServiceAccountToken: false`) |
+| **The state read surface is a grant, off by default** | `spec.stateAccess: true` on a `ChannelAdapter` or `SignalAdapter` opens `/state/*` to that adapter's derived token. Silence grants nothing, and the console and housekeeping are the shipped readers |
 | **Runtime pods are non-root** | at a fixed uid, and each conversation's workspace is its own subpath of the claim, so concurrent pods cannot see each other's tree |
 | **Under egress control the container is hardened further** | all capabilities dropped, privilege escalation refused |
 

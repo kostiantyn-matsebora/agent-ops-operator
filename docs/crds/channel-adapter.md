@@ -69,7 +69,7 @@ spec:
 | `resources.requests` | `map[string]object` |  | Requests describes the minimum amount of compute resources required. |
 | `serviceAccountName` | `string` |  | The identity this adapter's workload runs as, with its token mounted. |
 | `singleton` | `boolean` |  | Singleton runs the workload as replicas 1 + strategy Recreate so no rollout ever runs two instances side by side (required for pull-based transports like Telegram getUpdates). Defaults to `true`. |
-| `stateAccess` | `boolean` |  | StateAccess grants this adapter's derived token the manager's state read surface. |
+| `stateAccess` | `boolean` |  | StateAccess grants this adapter's derived token the manager's state read surface. Defaults to `false`. |
 
 <!-- /generated -->
 

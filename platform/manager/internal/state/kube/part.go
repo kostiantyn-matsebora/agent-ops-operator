@@ -190,7 +190,6 @@ func (p *partCollection[T]) translate(ev watch.Event, carried map[string]map[sta
 		return nil
 	}
 	rev := state.Revision(obj.GetResourceVersion())
-	name := obj.GetName()
 	switch ev.Type {
 	case watch.Bookmark:
 		if rev == "" {
@@ -198,36 +197,49 @@ func (p *partCollection[T]) translate(ev watch.Event, carried map[string]map[sta
 		}
 		return []state.Event[T]{{Type: state.EventBookmark, Resume: rev}}
 	case watch.Added, watch.Modified:
-		entries := p.l.Part.Enumerate(obj)
-		now := make(map[state.Key]struct{}, len(entries))
-		out := make([]state.Event[T], 0, len(entries))
-		for _, e := range entries {
-			now[e.Key] = struct{}{}
-			out = append(out, state.Event[T]{Type: state.EventPut, Key: e.Key, Revision: rev, Record: e.Record, Resume: rev})
-		}
-		for k := range carried[name] {
-			if _, still := now[k]; !still {
-				out = append(out, state.Event[T]{Type: state.EventDelete, Key: k, Resume: rev})
-			}
-		}
-		carried[name] = now
-		return out
+		return p.translateUpsert(obj, rev, carried)
 	case watch.Deleted:
-		keys := carried[name]
-		if keys == nil {
-			keys = map[state.Key]struct{}{}
-		}
-		for _, e := range p.l.Part.Enumerate(obj) {
-			keys[e.Key] = struct{}{}
-		}
-		delete(carried, name)
-		out := make([]state.Event[T], 0, len(keys))
-		for k := range keys {
-			out = append(out, state.Event[T]{Type: state.EventDelete, Key: k, Resume: rev})
-		}
-		return out
+		return p.translateDeleted(obj, rev, carried)
 	}
 	return nil
+}
+
+// translateUpsert announces every record the object now carries and a delete
+// for each one it carried before and no longer does.
+func (p *partCollection[T]) translateUpsert(obj client.Object, rev state.Revision, carried map[string]map[state.Key]struct{}) []state.Event[T] {
+	name := obj.GetName()
+	entries := p.l.Part.Enumerate(obj)
+	now := make(map[state.Key]struct{}, len(entries))
+	out := make([]state.Event[T], 0, len(entries))
+	for _, e := range entries {
+		now[e.Key] = struct{}{}
+		out = append(out, state.Event[T]{Type: state.EventPut, Key: e.Key, Revision: rev, Record: e.Record, Resume: rev})
+	}
+	for k := range carried[name] {
+		if _, still := now[k]; !still {
+			out = append(out, state.Event[T]{Type: state.EventDelete, Key: k, Resume: rev})
+		}
+	}
+	carried[name] = now
+	return out
+}
+
+// translateDeleted announces a delete for every record the object carried.
+func (p *partCollection[T]) translateDeleted(obj client.Object, rev state.Revision, carried map[string]map[state.Key]struct{}) []state.Event[T] {
+	name := obj.GetName()
+	keys := carried[name]
+	if keys == nil {
+		keys = map[state.Key]struct{}{}
+	}
+	for _, e := range p.l.Part.Enumerate(obj) {
+		keys[e.Key] = struct{}{}
+	}
+	delete(carried, name)
+	out := make([]state.Event[T], 0, len(keys))
+	for k := range keys {
+		out = append(out, state.Event[T]{Type: state.EventDelete, Key: k, Resume: rev})
+	}
+	return out
 }
 
 var _ state.Collection[struct{}] = (*partCollection[struct{}])(nil)

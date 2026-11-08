@@ -234,7 +234,7 @@ func (c *collection[T]) Update(ctx context.Context, key state.Key, rev state.Rev
 	}
 	c.l.WriteMain(obj, rec)
 	if err := c.client.Update(ctx, obj); err != nil {
-		return "", writeError("update "+c.l.Decl.Name, string(key), err)
+		return "", writeError(writeUpdate+c.l.Decl.Name, string(key), err)
 	}
 	if c.l.WriteStatus == nil {
 		return state.Revision(obj.GetResourceVersion()), nil
@@ -244,6 +244,9 @@ func (c *collection[T]) Update(ctx context.Context, key state.Key, rev state.Rev
 	// ever touches), since the main endpoint leaves .status exactly as it was.
 	return c.updateStatusRetrying(ctx, key, obj, rec)
 }
+
+// writeUpdate prefixes the operation named in a write error.
+const writeUpdate = "update "
 
 // updateStatusRetrying writes the record's status over obj, re-reading and
 // re-applying on a conflict while nothing but what StatusDrift tolerates has
@@ -281,7 +284,7 @@ func (c *collection[T]) updateStatusRetrying(ctx context.Context, key state.Key,
 func (c *collection[T]) updateStatusFirst(ctx context.Context, key state.Key, obj client.Object, rec T) (state.Revision, error) {
 	c.l.WriteStatus(obj, rec)
 	if err := c.client.Status().Update(ctx, obj); err != nil {
-		return "", writeError("update "+c.l.Decl.Name+" status", string(key), err)
+		return "", writeError(writeUpdate+c.l.Decl.Name+" status", string(key), err)
 	}
 	return c.settleMain(ctx, key, obj, rec)
 }
@@ -302,7 +305,7 @@ func (c *collection[T]) settleMain(ctx context.Context, key state.Key, obj clien
 			return state.Revision(obj.GetResourceVersion()), nil
 		}
 		if !apierrors.IsConflict(err) {
-			return "", writeError("update "+c.l.Decl.Name+" metadata", string(key), err)
+			return "", writeError(writeUpdate+c.l.Decl.Name+" metadata", string(key), err)
 		}
 		if err := c.client.Get(ctx, c.namespacedName(string(key)), obj); err != nil {
 			return "", writeError("re-read "+c.l.Decl.Name+" before metadata retry", string(key), err)
@@ -321,7 +324,7 @@ func (c *collection[T]) updateReleasingLastFinalizer(ctx context.Context, key st
 	if c.l.WriteStatus != nil {
 		c.l.WriteStatus(obj, rec)
 		if err := c.client.Status().Update(ctx, obj); err != nil {
-			return "", writeError("update "+c.l.Decl.Name+" status", string(key), err)
+			return "", writeError(writeUpdate+c.l.Decl.Name+" status", string(key), err)
 		}
 	}
 	for attempt := 0; attempt < statusUpdateMaxAttempts; attempt++ {

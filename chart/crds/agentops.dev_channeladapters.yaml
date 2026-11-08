@@ -247,6 +247,7 @@ spec:
                   transports like Telegram getUpdates).
                 type: boolean
               stateAccess:
+                default: false
                 description: |-
                   StateAccess grants this adapter's derived token the manager's state read
                   surface. Silence grants nothing.

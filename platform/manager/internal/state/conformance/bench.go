@@ -35,7 +35,7 @@ func Bench[T any](b *testing.B, open func() state.Collection[T], decl state.Decl
 	}
 	recJSON, err := json.Marshal(fx.New())
 	if err != nil {
-		b.Fatalf("marshal: %v", err)
+		b.Fatalf(fmtMarshal, err)
 	}
 
 	allocs := testing.AllocsPerRun(1, func() {
@@ -69,7 +69,7 @@ func Bench[T any](b *testing.B, open func() state.Collection[T], decl state.Decl
 	}
 
 	b.ReportMetric(float64(len(recJSON)), "bytes/record(json-proxy)")
-	b.ReportMetric(allocs, "allocs/write")
+	b.ReportMetric(allocs, metricAllocsPerWrite)
 	b.ReportMetric(float64(resident), "resident_records")
 }
 
@@ -86,7 +86,7 @@ func BenchAppended[P, T any](b *testing.B, open func() AppendedOpen[P, T], fx Ap
 	item := fx.NewItem("bench-item")
 	itemJSON, err := json.Marshal(item)
 	if err != nil {
-		b.Fatalf("marshal: %v", err)
+		b.Fatalf(fmtMarshal, err)
 	}
 
 	allocs := testing.AllocsPerRun(1, func() {
@@ -116,7 +116,7 @@ func BenchAppended[P, T any](b *testing.B, open func() AppendedOpen[P, T], fx Ap
 	}
 
 	b.ReportMetric(float64(len(itemJSON)), "bytes/run(json-proxy)")
-	b.ReportMetric(allocs, "allocs/write")
+	b.ReportMetric(allocs, metricAllocsPerWrite)
 	b.ReportMetric(float64(resident), "resident_records")
 }
 
@@ -129,15 +129,15 @@ func BenchBlobs(b *testing.B, open func() state.Blobs) {
 	blob := fixtureBlob()
 	blobJSON, err := json.Marshal(blob)
 	if err != nil {
-		b.Fatalf("marshal: %v", err)
+		b.Fatalf(fmtMarshal, err)
 	}
 	if err := s.Put(ctx, key, blob); err != nil {
-		b.Fatalf("Put: %v", err)
+		b.Fatalf(fmtPut, err)
 	}
 
 	allocs := testing.AllocsPerRun(1, func() {
 		if err := s.Put(ctx, key, blob); err != nil {
-			b.Fatalf("Put: %v", err)
+			b.Fatalf(fmtPut, err)
 		}
 	})
 
@@ -145,12 +145,12 @@ func BenchBlobs(b *testing.B, open func() state.Blobs) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if err := s.Put(ctx, key, blob); err != nil {
-			b.Fatalf("Put: %v", err)
+			b.Fatalf(fmtPut, err)
 		}
 	}
 
 	b.ReportMetric(float64(len(blobJSON)), "bytes/record(json-proxy)")
-	b.ReportMetric(allocs, "allocs/write")
+	b.ReportMetric(allocs, metricAllocsPerWrite)
 }
 
 // BenchStores runs Bench/BenchAppended/BenchBlobs for every field of

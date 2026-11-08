@@ -134,7 +134,7 @@ func testListOrder[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixt
 }
 
 func testAppendOnMissingParent[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
-	if err := o.Items.Append(context.Background(), "no-such-parent", fx.NewItem("item-1")); !errors.Is(err, state.ErrNotFound) {
+	if err := o.Items.Append(context.Background(), noSuchParent, fx.NewItem(itemOne)); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Append on missing parent: got %v, want ErrNotFound", err)
 	}
 }
@@ -144,7 +144,7 @@ func testGetWithItems[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedF
 	key := createParent(t, o, fx, "with-items")
 	for _, id := range []string{"item-a", "item-b"} {
 		if err := o.Items.Append(ctx, key, fx.NewItem(id)); err != nil {
-			t.Fatalf("Append: %v", err)
+			t.Fatalf(fmtAppend, err)
 		}
 	}
 	_, rev, items, err := o.Items.GetWithItems(ctx, key)
@@ -167,14 +167,14 @@ func testGetWithItems[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedF
 // first iteration already proves that half).
 func testListOnMissingParentIsNotFound[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
 	_ = fx
-	if _, err := o.Items.List(context.Background(), "no-such-parent"); !errors.Is(err, state.ErrNotFound) {
+	if _, err := o.Items.List(context.Background(), noSuchParent); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("List of a missing parent: got %v, want ErrNotFound", err)
 	}
 }
 
 func testGetWithItemsOnMissingParent[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
 	_ = fx
-	if _, _, _, err := o.Items.GetWithItems(context.Background(), "no-such-parent"); !errors.Is(err, state.ErrNotFound) {
+	if _, _, _, err := o.Items.GetWithItems(context.Background(), noSuchParent); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("GetWithItems of a missing parent: got %v, want ErrNotFound", err)
 	}
 }
@@ -182,13 +182,13 @@ func testGetWithItemsOnMissingParent[P, T any](t *testing.T, o AppendedOpen[P, T
 func testGrowUnknown[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
 	ctx := context.Background()
 	key := createParent(t, o, fx, "grow-unknown")
-	if err := o.Items.Append(ctx, key, fx.NewItem("item-1")); err != nil {
-		t.Fatalf("Append: %v", err)
+	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
+		t.Fatalf(fmtAppend, err)
 	}
 	if err := o.Items.Grow(ctx, key, "no-such-item", fx.Edit("x")); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Grow of an unknown item: got %v, want ErrNotFound", err)
 	}
-	if err := o.Items.Grow(ctx, "no-such-parent", "item-1", fx.Edit("x")); !errors.Is(err, state.ErrNotFound) {
+	if err := o.Items.Grow(ctx, noSuchParent, itemOne, fx.Edit("x")); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Grow of an unknown parent: got %v, want ErrNotFound", err)
 	}
 }
@@ -196,11 +196,11 @@ func testGrowUnknown[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFi
 func testMergeIdempotent[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
 	ctx := context.Background()
 	key := createParent(t, o, fx, "merge-idempotent")
-	if err := o.Items.Append(ctx, key, fx.NewItem("item-1")); err != nil {
-		t.Fatalf("Append: %v", err)
+	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
+		t.Fatalf(fmtAppend, err)
 	}
 	for i := 0; i < 2; i++ { // the second application must change nothing further
-		if err := o.Items.Grow(ctx, key, "item-1", fx.Edit("x")); err != nil {
+		if err := o.Items.Grow(ctx, key, itemOne, fx.Edit("x")); err != nil {
 			t.Fatalf("Grow #%d: %v", i+1, err)
 		}
 	}
@@ -223,7 +223,7 @@ func testMergeCommutes[P, T any](t *testing.T, o AppendedOpen[P, T], fx Appended
 	key := createParent(t, o, fx, "merge-commutes")
 	for _, id := range []string{"forward", "backward"} {
 		if err := o.Items.Append(ctx, key, fx.NewItem(id)); err != nil {
-			t.Fatalf("Append: %v", err)
+			t.Fatalf(fmtAppend, err)
 		}
 	}
 	if err := o.Items.Grow(ctx, key, "forward", fx.Edit("a")); err != nil {
@@ -254,8 +254,8 @@ func testMergeCommutes[P, T any](t *testing.T, o AppendedOpen[P, T], fx Appended
 func testGrowCommutesWithAppend[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
 	ctx := context.Background()
 	key := createParent(t, o, fx, "grow-concurrent")
-	if err := o.Items.Append(ctx, key, fx.NewItem("item-1")); err != nil {
-		t.Fatalf("Append: %v", err)
+	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
+		t.Fatalf(fmtAppend, err)
 	}
 	markers := []string{"m1", "m2", "m3", "m4"}
 	var wg sync.WaitGroup
@@ -264,7 +264,7 @@ func testGrowCommutesWithAppend[P, T any](t *testing.T, o AppendedOpen[P, T], fx
 		wg.Add(1)
 		go func(m string) {
 			defer wg.Done()
-			errs <- o.Items.Grow(ctx, key, "item-1", fx.Edit(m))
+			errs <- o.Items.Grow(ctx, key, itemOne, fx.Edit(m))
 		}(m)
 	}
 	wg.Add(1)
@@ -341,7 +341,7 @@ func testWatchWithItems[P, T any](t *testing.T, o AppendedOpen[P, T], fx Appende
 	if err != nil {
 		t.Fatalf("WatchWithItems: %v", err)
 	}
-	if err := o.Items.Append(ctx, key, fx.NewItem("item-1")); err != nil {
+	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
 		t.Fatal(err)
 	}
 

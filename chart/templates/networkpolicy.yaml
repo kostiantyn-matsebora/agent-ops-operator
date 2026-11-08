@@ -59,6 +59,11 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: agentops-housekeeping
+        # The console reads conversations and signals through /state/* too
+        # (spec.stateAccess), so it needs the same admission.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentops-console
         # A REPLICA OF ITSELF (chat-ops-broker-telegram-gateway). A non-leader
         # reverse-proxies /channel/ops and /activity* to the leader, so with
         # this rule missing every such proxy attempt is DROPPED — invisible

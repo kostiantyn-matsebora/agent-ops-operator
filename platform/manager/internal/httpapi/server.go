@@ -1062,38 +1062,43 @@ func (s *Server) stateAuth(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		var channels agentopsv1alpha1.ChannelAdapterList
-		if err := s.Client.List(r.Context(), &channels, client.InNamespace(s.Namespace)); err == nil {
-			for i := range channels.Items {
-				a := &channels.Items[i]
-				if subtle.ConstantTimeCompare([]byte(got), []byte(chat.DeriveAdapterToken(s.AdapterToken, a.Name))) == 1 {
-					if !a.Spec.StateAccess {
-						writeJSON(w, 403, map[string]string{"error": fmt.Sprintf(
-							"adapter %q does not declare spec.stateAccess", a.Name)})
-						return
-					}
-					next(w, r.WithContext(context.WithValue(r.Context(), adapterScopeKey{}, a.Name)))
-					return
-				}
-			}
+		name, granted, found := s.stateAdapterFor(r.Context(), got)
+		if !found {
+			writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+			return
 		}
-		var sources agentopsv1alpha1.SignalAdapterList
-		if err := s.Client.List(r.Context(), &sources, client.InNamespace(s.Namespace)); err == nil {
-			for i := range sources.Items {
-				a := &sources.Items[i]
-				if subtle.ConstantTimeCompare([]byte(got), []byte(chat.DeriveSignalAdapterToken(s.AdapterToken, a.Name))) == 1 {
-					if !a.Spec.StateAccess {
-						writeJSON(w, 403, map[string]string{"error": fmt.Sprintf(
-							"adapter %q does not declare spec.stateAccess", a.Name)})
-						return
-					}
-					next(w, r.WithContext(context.WithValue(r.Context(), adapterScopeKey{}, a.Name)))
-					return
-				}
-			}
+		if !granted {
+			writeJSON(w, 403, map[string]string{"error": fmt.Sprintf(
+				"adapter %q does not declare spec.stateAccess", name)})
+			return
 		}
-		writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+		next(w, r.WithContext(context.WithValue(r.Context(), adapterScopeKey{}, name)))
 	}
+}
+
+// stateAdapterFor finds the ChannelAdapter or SignalAdapter whose derived
+// token is got. found is false when none derives it, granted reports whether
+// that CR declares spec.stateAccess.
+func (s *Server) stateAdapterFor(ctx context.Context, got string) (name string, granted, found bool) {
+	var channels agentopsv1alpha1.ChannelAdapterList
+	if err := s.Client.List(ctx, &channels, client.InNamespace(s.Namespace)); err == nil {
+		for i := range channels.Items {
+			a := &channels.Items[i]
+			if subtle.ConstantTimeCompare([]byte(got), []byte(chat.DeriveAdapterToken(s.AdapterToken, a.Name))) == 1 {
+				return a.Name, a.Spec.StateAccess, true
+			}
+		}
+	}
+	var sources agentopsv1alpha1.SignalAdapterList
+	if err := s.Client.List(ctx, &sources, client.InNamespace(s.Namespace)); err == nil {
+		for i := range sources.Items {
+			a := &sources.Items[i]
+			if subtle.ConstantTimeCompare([]byte(got), []byte(chat.DeriveSignalAdapterToken(s.AdapterToken, a.Name))) == 1 {
+				return a.Name, a.Spec.StateAccess, true
+			}
+		}
+	}
+	return "", false, false
 }
 
 // adapterParam reads the contract's adapter selector. The retired `type`

@@ -1923,7 +1923,7 @@ payload is not copied into the conversation object.
   - Each source's `receivedTotal` and `lastReceived` counters live there too.
   - **Adapter cursors live there too** — the one string a channel or signal
     adapter persists per surface and key, read and written through
-    `GET`/`PUT /channel/state/{key}` and `/signal/state/{key}`. Under `kube`
+    `GET`/`PUT /channel/state/{channel}/{key}` and `/signal/state/{source}/{key}`. Under `kube`
     it is still the same `agentops.dev/adapter-state-<key>` annotation on
     the `Channel` or `SignalSource` an adapter upgraded across this change
     already wrote.

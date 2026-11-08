@@ -25,10 +25,10 @@ func newSignalSource(t *testing.T, ns, name string) *agentopsv1alpha1.SignalSour
 	return src
 }
 
-// TestSignalStoreWritesTheObjectPublicationAlwaysWrote pins "byte-identical":
+// TestSignalsCollectionWritesTheObjectPublicationAlwaysWrote pins "byte-identical":
 // a Signal created through the store carries the same spec and owner reference
 // as one created by the Client call publication made before the store existed.
-func TestSignalStoreWritesTheObjectPublicationAlwaysWrote(t *testing.T) {
+func TestSignalsCollectionWritesTheObjectPublicationAlwaysWrote(t *testing.T) {
 	ctx := context.Background()
 	ns := newNamespace(t)
 	src := newSignalSource(t, ns, "src")
