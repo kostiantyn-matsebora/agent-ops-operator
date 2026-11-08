@@ -93,20 +93,18 @@ func TestRBACAsEnforced(t *testing.T) {
 		deny("agentops-runtime", "list", "", res)
 	}
 	deny("agentops-runtime", "list", "agentops.dev", "conversations")
-	// The console reads the agentops kinds and nothing else; it never writes.
-	allow("agentops-adapter-console", "list", "agentops.dev", "conversations")
+	// The console reads the configuration kinds over the Kubernetes API and
+	// nothing else; it never writes.
 	allow("agentops-adapter-console", "watch", "agentops.dev", "pipelines")
-	deny("agentops-adapter-console", "create", "agentops.dev", "conversations")
 	deny("agentops-adapter-console", "get", "", "secrets")
 	deny("agentops-adapter-console", "delete", "", "pods")
-	// 6.2 (signal-persistence) — the console's Role gains get/list/watch on
-	// the new Signal kind and nothing more (design D-7): a read-only
-	// inventory view, never a write path, exactly like every other
-	// agentops kind the console reads.
-	for _, verb := range []string{"get", "list", "watch"} {
-		allow("agentops-adapter-console", verb, "agentops.dev", "signals")
-	}
-	for _, verb := range []string{"create", "update", "patch", "delete"} {
+	// state-store-generic-contract design D-7/D-8: Conversations and Signals
+	// moved off the Kubernetes API onto the manager's /state/* surface
+	// (spec.stateAccess), so the console's Role grants NEITHER kind any
+	// verb at all — list/watch denied is the same "never a write path"
+	// posture signal-persistence once proved with an allow.
+	for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete"} {
+		deny("agentops-adapter-console", verb, "agentops.dev", "conversations")
 		deny("agentops-adapter-console", verb, "agentops.dev", "signals")
 	}
 }
