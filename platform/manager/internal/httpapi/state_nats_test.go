@@ -122,3 +122,23 @@ func TestTheConversationStreamOverNatsCarriesCloseReadAndArchive(t *testing.T) {
 	}
 	wait("the archive", "thread-9")
 }
+
+// A quiet stream must still say something, or a reader cannot tell it from a
+// connection that died without closing.
+func TestAQuietStreamWritesKeepAlives(t *testing.T) {
+	old := streamKeepAlive
+	streamKeepAlive = 30 * time.Millisecond
+	t.Cleanup(func() { streamKeepAlive = old })
+
+	s := &Server{}
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	open := func(ctx context.Context, since state.Revision) (<-chan sseFrame, error) {
+		return make(chan sseFrame), nil // never produces a frame
+	}
+	rec := httptest.NewRecorder()
+	s.streamSSE(rec, httptest.NewRequest("GET", "/state/conversations/stream", nil).WithContext(ctx), open)
+	if n := strings.Count(rec.Body.String(), ": keep-alive"); n < 3 {
+		t.Fatalf("a silent stream wrote %d keep-alives in 400ms, want several: %q", n, rec.Body.String())
+	}
+}
