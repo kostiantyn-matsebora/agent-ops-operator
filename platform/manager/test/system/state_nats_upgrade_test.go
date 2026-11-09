@@ -136,16 +136,7 @@ func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
 	// recurring into the SAME conversation rather than opening a second one.
 	e.PostSignal(t, sourceName, map[string]any{"initiationId": convID, "kind": "task", "payload": "repeat", "title": convID})
 	waitFor(t, "a cooldown entry for "+convID, time.Minute, func() (bool, error) {
-		var s agentopsv1alpha1.SignalSource
-		if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: sourceName}, &s); err != nil {
-			return false, err
-		}
-		for _, c := range s.Status.Cooldown {
-			if c.InitiationID == convID {
-				return true, nil
-			}
-		}
-		return false, nil
+		return cooldownHolds(ctx, e, sourceName, convID)
 	})
 	assertExactlyOneConversationPerClaimant(t, ctx, e, convID, pipelineName)
 
@@ -186,17 +177,8 @@ func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
 	// must still recur into the SAME conversation rather than open a second.
 	e.PostSignal(t, sourceName, map[string]any{"initiationId": convID, "kind": "task", "payload": "repeat again", "title": convID})
 	waitFor(t, "the post-import repeat to still fold into the one conversation", time.Minute, func() (bool, error) {
-		items, err := e.K.Conversations(ctx)
-		if err != nil {
-			return false, err
-		}
-		n := 0
-		for i := range items {
-			if items[i].Spec.ConversationID == convID {
-				n++
-			}
-		}
-		return n == 1, nil
+		n, err := countConversationsFor(ctx, e, convID)
+		return n == 1, err
 	})
 
 	// Idempotent re-import on a restart (design D-10 step 4): nothing short
@@ -208,15 +190,9 @@ func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
 	if code != 200 || !strings.Contains(out, convID) {
 		t.Fatalf("the conversation must still read after a second manager restart: %d %s", code, out)
 	}
-	items, err := e.K.Conversations(ctx)
+	n, err := countConversationsFor(ctx, e, convID)
 	if err != nil {
 		t.Fatal(err)
-	}
-	n := 0
-	for i := range items {
-		if items[i].Spec.ConversationID == convID {
-			n++
-		}
 	}
 	if n != 1 {
 		t.Fatalf("a repeated import pass must never duplicate the conversation, got %d", n)
@@ -226,8 +202,46 @@ func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
 	// patches a Kubernetes object"). Compared by VALUE — the importer's own
 	// read cannot move anything on the source regardless, but a reconciler
 	// loop reacting to a cache resync could, and that is what this guards.
+	assertKubeRecordsUntouched(t, ctx, e, conv.Name, convBefore, sigBefore, sourceName, sourceBefore.Status.Cooldown)
+}
+
+// countConversationsFor counts the kube Conversations opened for one initiation id.
+func countConversationsFor(ctx context.Context, e *Env, convID string) (int, error) {
+	items, err := e.K.Conversations(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for i := range items {
+		if items[i].Spec.ConversationID == convID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// cooldownHolds reports whether the source's kube status carries a cooldown entry for convID.
+func cooldownHolds(ctx context.Context, e *Env, sourceName, convID string) (bool, error) {
+	var s agentopsv1alpha1.SignalSource
+	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: sourceName}, &s); err != nil {
+		return false, err
+	}
+	for _, c := range s.Status.Cooldown {
+		if c.InitiationID == convID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// assertKubeRecordsUntouched compares the kube custom resources, by VALUE,
+// against what they were before the upgrade.
+func assertKubeRecordsUntouched(t *testing.T, ctx context.Context, e *Env, convName string,
+	convBefore *agentopsv1alpha1.Conversation, sigBefore *agentopsv1alpha1.Signal,
+	sourceName string, cooldownBefore []agentopsv1alpha1.CooldownEntry) {
+	t.Helper()
 	var convAfter agentopsv1alpha1.Conversation
-	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: conv.Name}, &convAfter); err != nil {
+	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: convName}, &convAfter); err != nil {
 		t.Fatalf("the kube Conversation must still exist, untouched, after the upgrade: %v", err)
 	}
 	if !reflect.DeepEqual(convBefore.Spec, convAfter.Spec) || !reflect.DeepEqual(convBefore.Status, convAfter.Status) {
@@ -244,9 +258,9 @@ func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
 	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: sourceName}, &sourceAfter); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(sourceBefore.Status.Cooldown, sourceAfter.Status.Cooldown) {
+	if !reflect.DeepEqual(cooldownBefore, sourceAfter.Status.Cooldown) {
 		t.Fatalf("the kube SignalSource's own cooldown record must be byte-identical across the upgrade:\nbefore=%+v\nafter=%+v",
-			sourceBefore.Status.Cooldown, sourceAfter.Status.Cooldown)
+			cooldownBefore, sourceAfter.Status.Cooldown)
 	}
 }
 

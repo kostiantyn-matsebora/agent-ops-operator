@@ -3825,7 +3825,7 @@ func TestNatsCredentialPrecedence(t *testing.T) {
 	if doc := secretDoc(helmTemplate(t, "--is-upgrade"), "agentops-nats-credentials"); doc != "" {
 		t.Fatalf("a cluster-less upgrade with no explicit value must mint no credential, got:\n%s", doc)
 	}
-	if doc := secretDoc(helmTemplate(t, "--is-upgrade", "--set", "nats.auth.password=rotated"), "agentops-nats-credentials"); doc == "" {
+	if secretDoc(helmTemplate(t, "--is-upgrade", "--set", "nats.auth.password=rotated"), "agentops-nats-credentials") == "" {
 		t.Fatal("an explicit value must still render on upgrade")
 	}
 }

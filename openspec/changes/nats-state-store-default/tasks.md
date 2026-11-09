@@ -15,7 +15,7 @@ This gate applies when implementation starts. This pull request only proposes.
 
 ## 2. The `nats` backend — backend-developer
 
-- [x] 2.1 Add `internal/state/nats` with the connection, the bucket bootstrap (replica count from `NATS_REPLICAS`) and the envelope codec (D-1, D-3). Verify `go vet ./internal/state/...` passes and only this package imports `nats.go`.
+- [ ] 2.1 Add `internal/state/nats` with the connection, the bucket bootstrap (replica count from `NATS_REPLICAS`) and the envelope codec (D-1, D-3). Verify `go vet ./internal/state/...` passes and only this package imports `nats.go`.
   Verdict:
   - `internal/state/nats/nats.go`: `Config`/`ConfigFromEnv` (`NATS_URL` required, `NATS_USER`/`NATS_PASSWORD`/`NATS_REPLICAS` optional), `Connect`/`Conn.Reachable`/`Conn.Close`.
   - `internal/state/nats/envelope.go`: the JSON envelope (`id`, `createdAt`, `finalizers`, `deletionRequestedAt`, `appendSeq`, then `record`), `encode`/`decodeEnvelope`.

@@ -80,11 +80,10 @@ where one kind merely references another.</figcaption>
   when it decides to. A member may itself be a Coordinator.
 
 - **[Conversation]({{ '/crds/conversation/' | relative_url }})** — **the
-  running thing** — one incident, one task, one question. It holds the thread
-  and the pod. The operator creates it. Look here to see what happened.
-  **Its own record lives wherever `stateStore.backend` puts it** — the
-  default keeps it off the Kubernetes API, so the pod is the one object
-  `kubectl` always shows.
+  running thing** — one incident, one task, one question. It owns the pod
+  and names the thread. The operator creates it. Look here to see what
+  happened. Its record lives in the state store, which by default keeps it
+  off the Kubernetes API.
 
 - **[ConversationInput]({{ '/crds/conversation-input/' | relative_url }})** —
   one large payload — a full alert, say — carried out of line, so the

@@ -48,8 +48,8 @@ auth:
   existingSecret: ""
   secretName: agentops-nats-credentials
 
-# Probed on the monitoring port (8222), which nats-server opens once
-# `monitor` below is set — an exec probe would need a shell tool the
+# Probed on the monitoring port (8222), which nats-server opens through the fixed
+# `monitor` port in templates/_helpers.tpl (not configurable here) — an exec probe would need a shell tool the
 # alpine image's nats-server binary alone does not carry, and a tcpSocket
 # probe on the client port risks the same crash-loop the kubernetes/
 # prometheus MCP servers' own comments warn about (a probe that cannot

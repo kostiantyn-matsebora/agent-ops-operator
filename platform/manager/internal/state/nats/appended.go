@@ -112,35 +112,44 @@ func (a *appended[P, T]) Grow(ctx context.Context, parent state.Key, id string, 
 		return err
 	}
 	for attempt := 0; attempt < casRetryMaxAttempts; attempt++ {
-		entry, err := a.itemsKV.Get(ctx, key)
-		if err != nil {
-			if isNotFound(err) {
-				return state.ErrNotFound
-			}
-			return fmt.Errorf("nats: get %s %q of %q: %w", a.decl.Name, id, parent, err)
-		}
-		e, err := decodeEnvelope[T](entry.Value())
-		if err != nil {
+		retry, err := a.growOnce(ctx, parent, id, key, edit)
+		if !retry {
 			return err
 		}
-		before := e.Record
-		a.decl.Merge(&e.Record, edit)
-		if reflect.DeepEqual(before, e.Record) {
-			return nil
-		}
-		data, err := e.encode()
-		if err != nil {
-			return err
-		}
-		if _, err := a.itemsKV.Update(ctx, key, data, entry.Revision()); err != nil {
-			if isWrongLastSequence(err) {
-				continue
-			}
-			return fmt.Errorf("nats: grow %s %q of %q: %w", a.decl.Name, id, parent, err)
-		}
-		return nil
 	}
 	return state.ErrConflict
+}
+
+// growOnce is one read-merge-CAS pass of Grow. retry is true when a
+// concurrent write moved the item between the read and the write.
+func (a *appended[P, T]) growOnce(ctx context.Context, parent state.Key, id, key string, edit T) (retry bool, err error) {
+	entry, err := a.itemsKV.Get(ctx, key)
+	if err != nil {
+		if isNotFound(err) {
+			return false, state.ErrNotFound
+		}
+		return false, fmt.Errorf("nats: get %s %q of %q: %w", a.decl.Name, id, parent, err)
+	}
+	e, err := decodeEnvelope[T](entry.Value())
+	if err != nil {
+		return false, err
+	}
+	before := e.Record
+	a.decl.Merge(&e.Record, edit)
+	if reflect.DeepEqual(before, e.Record) {
+		return false, nil
+	}
+	data, err := e.encode()
+	if err != nil {
+		return false, err
+	}
+	if _, err := a.itemsKV.Update(ctx, key, data, entry.Revision()); err != nil {
+		if isWrongLastSequence(err) {
+			return true, nil
+		}
+		return false, fmt.Errorf("nats: grow %s %q of %q: %w", a.decl.Name, id, parent, err)
+	}
+	return false, nil
 }
 
 // findItemKey scans parent's items for the first whose declared id matches,

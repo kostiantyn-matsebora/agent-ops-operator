@@ -2,6 +2,7 @@ package nats
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -128,19 +129,9 @@ func (c *collection[T]) Create(ctx context.Context, key state.Key, rec T) (state
 // saw — moved the key since rev.
 func (c *collection[T]) Update(ctx context.Context, key state.Key, rev state.Revision, rec T) (state.Revision, error) {
 	wk := wireKey(string(key))
-	entry, err := c.kv.Get(ctx, wk)
-	if err != nil {
-		if isNotFound(err) {
-			return "", state.ErrNotFound
-		}
-		return "", fmt.Errorf("nats: get %s %q before update: %w", c.layout.Decl.Name, key, err)
-	}
-	cur, err := decodeEnvelope[T](entry.Value())
+	_, cur, err := c.getVisible(ctx, wk, key, "update")
 	if err != nil {
 		return "", err
-	}
-	if !c.visible(&cur, time.Now()) {
-		return "", state.ErrNotFound
 	}
 	revUint, err := parseRevision(rev)
 	if err != nil {
@@ -154,10 +145,7 @@ func (c *collection[T]) Update(ctx context.Context, key state.Key, rev state.Rev
 	}
 	if deleting && len(next) == 0 {
 		if err := c.kv.Delete(ctx, wk, jetstream.LastRevision(revUint)); err != nil {
-			if isWrongLastSequence(err) {
-				return "", state.ErrConflict
-			}
-			return "", fmt.Errorf("nats: release %s %q: %w", c.layout.Decl.Name, key, err)
+			return "", c.conflictOr(err, "release", key)
 		}
 		return "", nil
 	}
@@ -170,12 +158,47 @@ func (c *collection[T]) Update(ctx context.Context, key state.Key, rev state.Rev
 	}
 	seq, err := c.kv.Update(ctx, wk, data, revUint)
 	if err != nil {
-		if isWrongLastSequence(err) {
-			return "", state.ErrConflict
-		}
-		return "", fmt.Errorf("nats: update %s %q: %w", c.layout.Decl.Name, key, err)
+		return "", c.conflictOr(err, "update", key)
 	}
 	return formatRevision(seq), nil
+}
+
+// getVisible reads key's current envelope straight from the server, answering
+// ErrNotFound for an absent or expired record.
+func (c *collection[T]) getVisible(ctx context.Context, wk string, key state.Key, op string) (jetstream.KeyValueEntry, envelope[T], error) {
+	entry, err := c.kv.Get(ctx, wk)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, envelope[T]{}, state.ErrNotFound
+		}
+		return nil, envelope[T]{}, fmt.Errorf("nats: get %s %q before %s: %w", c.layout.Decl.Name, key, op, err)
+	}
+	cur, err := decodeEnvelope[T](entry.Value())
+	if err != nil {
+		return nil, envelope[T]{}, err
+	}
+	if !c.visible(&cur, time.Now()) {
+		return nil, envelope[T]{}, state.ErrNotFound
+	}
+	return entry, cur, nil
+}
+
+// markDeleting stamps cur's deletion time under entry's revision. retry is
+// true when another writer raced the mark.
+func (c *collection[T]) markDeleting(ctx context.Context, wk string, key state.Key, entry jetstream.KeyValueEntry, cur envelope[T]) (retry bool, err error) {
+	now := time.Now().UTC()
+	cur.DeletionRequestedAt = &now
+	data, err := cur.encode()
+	if err != nil {
+		return false, err
+	}
+	if _, err := c.kv.Update(ctx, wk, data, entry.Revision()); err != nil {
+		if isWrongLastSequence(err) {
+			return true, nil
+		}
+		return false, fmt.Errorf("nats: mark %s %q for deletion: %w", c.layout.Decl.Name, key, err)
+	}
+	return false, nil
 }
 
 // Delete requests removal, carrying no revision (store.go: Delete takes
@@ -186,19 +209,12 @@ func (c *collection[T]) Update(ctx context.Context, key state.Key, rev state.Rev
 func (c *collection[T]) Delete(ctx context.Context, key state.Key) error {
 	wk := wireKey(string(key))
 	for attempt := 0; attempt < casRetryMaxAttempts; attempt++ {
-		entry, err := c.kv.Get(ctx, wk)
-		if err != nil {
-			if isNotFound(err) {
-				return nil
-			}
-			return fmt.Errorf("nats: get %s %q before delete: %w", c.layout.Decl.Name, key, err)
+		entry, cur, err := c.getVisible(ctx, wk, key, "delete")
+		if errors.Is(err, state.ErrNotFound) {
+			return nil
 		}
-		cur, err := decodeEnvelope[T](entry.Value())
 		if err != nil {
 			return err
-		}
-		if !c.visible(&cur, time.Now()) {
-			return nil
 		}
 		if len(cur.Finalizers) == 0 {
 			if err := c.kv.Delete(ctx, wk); err != nil {
@@ -209,19 +225,11 @@ func (c *collection[T]) Delete(ctx context.Context, key state.Key) error {
 		if cur.DeletionRequestedAt != nil {
 			return nil
 		}
-		now := time.Now().UTC()
-		cur.DeletionRequestedAt = &now
-		data, err := cur.encode()
-		if err != nil {
-			return err
+		retry, err := c.markDeleting(ctx, wk, key, entry, cur)
+		if retry {
+			continue // another writer raced the mark; look again
 		}
-		if _, err := c.kv.Update(ctx, wk, data, entry.Revision()); err != nil {
-			if isWrongLastSequence(err) {
-				continue // another writer raced the mark; look again
-			}
-			return fmt.Errorf("nats: mark %s %q for deletion: %w", c.layout.Decl.Name, key, err)
-		}
-		return nil
+		return err
 	}
 	return fmt.Errorf("nats: delete %s %q: exhausted %d attempts on conflict", c.layout.Decl.Name, key, casRetryMaxAttempts)
 }
@@ -230,48 +238,35 @@ func (c *collection[T]) Delete(ctx context.Context, key state.Key) error {
 // reported as ErrConflict, as documented, not silently resolved.
 func (c *collection[T]) DeleteAt(ctx context.Context, key state.Key, rev state.Revision) error {
 	wk := wireKey(string(key))
-	entry, err := c.kv.Get(ctx, wk)
-	if err != nil {
-		if isNotFound(err) {
-			return state.ErrNotFound
-		}
-		return fmt.Errorf("nats: get %s %q before deleteAt: %w", c.layout.Decl.Name, key, err)
-	}
-	cur, err := decodeEnvelope[T](entry.Value())
+	entry, cur, err := c.getVisible(ctx, wk, key, "deleteAt")
 	if err != nil {
 		return err
-	}
-	if !c.visible(&cur, time.Now()) {
-		return state.ErrNotFound
 	}
 	if formatRevision(entry.Revision()) != rev {
 		return state.ErrConflict
 	}
 	if len(cur.Finalizers) == 0 {
 		if err := c.kv.Delete(ctx, wk, jetstream.LastRevision(entry.Revision())); err != nil {
-			if isWrongLastSequence(err) {
-				return state.ErrConflict
-			}
-			return fmt.Errorf("nats: deleteAt %s %q: %w", c.layout.Decl.Name, key, err)
+			return c.conflictOr(err, "deleteAt", key)
 		}
 		return nil
 	}
 	if cur.DeletionRequestedAt != nil {
 		return nil
 	}
-	now := time.Now().UTC()
-	cur.DeletionRequestedAt = &now
-	data, err := cur.encode()
-	if err != nil {
-		return err
+	retry, err := c.markDeleting(ctx, wk, key, entry, cur)
+	if retry {
+		return state.ErrConflict
 	}
-	if _, err := c.kv.Update(ctx, wk, data, entry.Revision()); err != nil {
-		if isWrongLastSequence(err) {
-			return state.ErrConflict
-		}
-		return fmt.Errorf("nats: mark %s %q for deletion (deleteAt): %w", c.layout.Decl.Name, key, err)
+	return err
+}
+
+// conflictOr maps a lost compare-and-set to ErrConflict and wraps anything else.
+func (c *collection[T]) conflictOr(err error, op string, key state.Key) error {
+	if isWrongLastSequence(err) {
+		return state.ErrConflict
 	}
-	return nil
+	return fmt.Errorf("nats: %s %s %q: %w", op, c.layout.Decl.Name, key, err)
 }
 
 // List serves a declared index from the watch-fed mirror (design D-4):

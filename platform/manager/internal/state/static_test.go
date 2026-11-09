@@ -785,19 +785,28 @@ func findNatsGoImports(root, exemptDir string) ([]string, error) {
 		if err != nil {
 			return fmt.Errorf("parsing %s: %w", rel, err)
 		}
-		for _, imp := range file.Imports {
-			p, unquoteErr := strconv.Unquote(imp.Path.Value)
-			if unquoteErr != nil {
-				continue
-			}
-			if p == natsGoImportPrefix || strings.HasPrefix(p, natsGoImportPrefix+"/") {
-				out = append(out, fmt.Sprintf("%s imports %s", rel, p))
-			}
+		for _, p := range natsGoImportsOf(file) {
+			out = append(out, fmt.Sprintf("%s imports %s", rel, p))
 		}
 		return nil
 	})
 	sort.Strings(out)
 	return out, err
+}
+
+// natsGoImportsOf returns the nats client-library import paths a parsed file carries.
+func natsGoImportsOf(file *ast.File) []string {
+	var out []string
+	for _, imp := range file.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			continue
+		}
+		if p == natsGoImportPrefix || strings.HasPrefix(p, natsGoImportPrefix+"/") {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // The check must actually fire outside the backend and leave the backend

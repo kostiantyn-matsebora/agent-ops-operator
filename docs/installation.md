@@ -247,19 +247,9 @@ and cooldown custom resources as the live record.
 the old behaviour with `stateStore.backend: kube` — see
 [configuration](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#state-store).
 
-An existing install upgrading from `kube` imports its conversations, signals
-and cooldown windows into `nats` automatically, on the manager's first
-start, before it reports ready. Verify through the console or
-`/state/conversations`, then delete the old custom resources yourself once
-you have — the import never does:
-
-```sh
-kubectl -n agent-ops delete conversations,conversationinputs,signals --all
-```
-
-```powershell
-kubectl -n agent-ops delete conversations,conversationinputs,signals --all
-```
+An existing install upgrading from `kube` imports its records into `nats` on
+the manager's first start. The steps are in the
+[changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
 
 `helm uninstall` removes the workloads but leaves the CRDs, every Conversation,
 the context claim and — under the default `nats` backend — the state
