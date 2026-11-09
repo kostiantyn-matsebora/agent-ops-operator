@@ -176,7 +176,13 @@ func restartManagerSchedulable(ctx context.Context, cluster *Cluster) error {
 			_, _ = kc("delete", p, "--grace-period=0", "--force", "--wait=false")
 		}
 	}
-	if out, err := kc("rollout", "status", "deployment/agentops-manager", "--timeout=5m"); err != nil {
+	// 8m, not 5m — forceManagerRollout (replicas_test.go) hit the same
+	// deadline on a fresh cluster and measured both new pods landing
+	// Running/Ready a little past 5m: cold image import plus container
+	// start on a brand-new node, not the scheduling deadlock above. This
+	// call runs on exactly that cluster, right after the full tier's own
+	// fresh install, and #450 is the port never carrying that margin over.
+	if out, err := kc("rollout", "status", "deployment/agentops-manager", "--timeout=8m"); err != nil {
 		return fmt.Errorf("manager restart: %w %s", err, out)
 	}
 	return nil
