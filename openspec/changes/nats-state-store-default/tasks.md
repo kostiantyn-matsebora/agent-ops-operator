@@ -230,6 +230,13 @@ Playwright. Each item also names what is still owed to a real run.
 - [x] 5.12 Verify `system-full.yml` runs the new specs in its existing browser pass, with no new job.
   Verdict: confirmed by reading `.github/workflows/system.yml` (the shared definition both `system-smoke.yml` and `system-full.yml` call): the Go pack runs as `go test -tags system ... ./test/system/` — the WHOLE package, no file list, so `state_nats_test.go`/`state_nats_upgrade_test.go` are picked up for free. The `e2e-live` step runs `npx playwright test --config e2e-live/playwright.config.ts` — the WHOLE directory, no spec list — so `32-nats-pod-death-mid-conversation.spec.ts` and `33-nats-kube-to-nats-migration-render.spec.ts` are picked up the same way. Both steps already existed before this change. Neither was touched, and no new job was added for either. The ONLY workflow-level addition this change makes (`stateBackend` input, `system-smoke-kube.yml`, task 5.7) is a SEPARATE, opt-in entry point, not a change to `system-full.yml`'s own existing browser pass.
 
+- [x] 5.13 Retention parity: deleting a conversation releases its runs (`nats`) and the blobs its queued inputs name (both backends), deleting a source clears its receipt counters, a sweep catches orphans. Unit tests in `internal/state/nats/cascade_test.go` and `internal/controller/signal_release_test.go`, and an envtest in `internal/integration/conversation_blob_release_test.go`, shown failing first.
+- [x] 5.14 Conformance scenarios run against both backends: bounded run history, a listing by an index over the parent after a parent-only write, an expiry made while disconnected delivered on the resumed feed.
+- [x] 5.15 Cover `internal/state/nats` (96%), the `cmd/manager` wiring, a replica that is not the leader, and the conversation stream over `nats` carrying a close, a read mark and an archive.
+- [x] 5.16 Console stream resilience: the state streams write a keep-alive, the console drops a silent stream and the cache relists, resumes from the last revision after a clean close. Unit tests on both sides.
+- [ ] 5.17 System tier, not performed from this session (a workstation cluster decides it): restart the manager mid-watch and see a closed conversation listed without a reload, and retention end to end leaving no runs or blobs. Dispatch `system-smoke.yml`.
+- [ ] 5.18 e2e through the browser for the same path, not performed from this session.
+
 ## 6. Documentation
 
 ### 6.1 Reference docs

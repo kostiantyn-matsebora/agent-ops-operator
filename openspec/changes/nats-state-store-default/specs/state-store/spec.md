@@ -71,3 +71,37 @@ SHALL refuse to start on a name it does not implement.
 #### Scenario: A bundle left on under another backend fails
 - **WHEN** the selector names `kube` and `nats.enabled` is true
 - **THEN** the render fails and names `nats.enabled`
+
+### Requirement: A deleted source's signals are released by the manager
+The manager SHALL release a source through a helper over the contract. The helper:
+
+- lists the source's signals by the any-phase source index
+- deletes each one under the revision it listed
+- clears the source's cooldown window
+- clears the source's receipt counters
+
+Release is idempotent and raises no error for a source with none.
+
+The manager SHALL call it when a `SignalSource` is observed gone. It SHALL also release the orphan a pass finds, so no cleanup depends on an owner reference being honoured. The `kube` backend MAY still set the owner reference.
+
+#### Scenario: A released source leaves no state behind
+- **WHEN** a source is released and no other source holds its name
+- **THEN** its signals, its cooldown window and its receipt counters are gone
+
+#### Scenario: Another source of the same name keeps the counters
+- **WHEN** a source is released while another source holds the same name
+- **THEN** the window and the counters are left alone
+
+### Requirement: Deleting a conversation releases what it owns
+Deleting a conversation, by any path, SHALL release the out-of-line body of every input still queued on it, before the record is let go. Under the `nats` backend it SHALL also remove the conversation's runs, and a periodic sweep SHALL remove the runs and the blobs a crash between the two steps left without an owner, after a grace long enough that a blob written ahead of the input naming it is not taken for an orphan.
+
+#### Scenario: A queued input's blob goes with the conversation
+- **WHEN** a conversation with a queued input held out of line is deleted
+- **THEN** that blob is gone and a blob no queue names is untouched
+
+### Requirement: Run history is bounded the same on every backend
+A conversation SHALL keep its newest ten runs on every backend, the oldest falling off. Growing a run that has aged out SHALL report not-found.
+
+### Requirement: A reader's stream survives silence
+The conversation and signal streams SHALL write a keep-alive while they have nothing to send. A reader SHALL treat a stream silent past several keep-alives as dead and relist before it resumes.
+

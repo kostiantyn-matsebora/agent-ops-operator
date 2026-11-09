@@ -25,6 +25,16 @@ for the source and the reference material beside this file.
   fresh install. Pin the old behaviour with `stateStore.backend: kube`.
 - **BREAKING: a default install now runs three more pods and three more
   volumes**, for the `nats` bundle.
+- Retention behaves the same on both backends. Deleting a conversation now
+  also releases the bodies of its queued inputs, deleting a source clears its
+  receipt counters as well as its cooldown window, and under `nats` a
+  conversation's runs are removed with it and a periodic sweep catches what a
+  crash left behind. A conversation keeps its newest ten runs either way.
+- The state streams write a keep-alive, and the console drops a stream that
+  stays silent and relists, so a manager that dies without closing its socket
+  no longer freezes the console's view.
+- The manager waits for the state server to accept its buckets instead of
+  exiting while the cluster forms its quorum.
 - An upgrade from `kube` imports every conversation, signal, cooldown window
   and receipt counter into `nats` on the manager's first start, before it
   reports ready, and leaves the custom resources in place.
