@@ -234,8 +234,8 @@ Playwright. Each item also names what is still owed to a real run.
 - [x] 5.14 Conformance scenarios run against both backends: bounded run history, a listing by an index over the parent after a parent-only write, an expiry made while disconnected delivered on the resumed feed.
 - [x] 5.15 Cover `internal/state/nats` (96%), the `cmd/manager` wiring, a replica that is not the leader, and the conversation stream over `nats` carrying a close, a read mark and an archive.
 - [x] 5.16 Console stream resilience: the state streams write a keep-alive, the console drops a silent stream and the cache relists, resumes from the last revision after a clean close. Unit tests on both sides.
-- [ ] 5.17 System tier, not performed from this session (a workstation cluster decides it): restart the manager mid-watch and see a closed conversation listed without a reload, and retention end to end leaving no runs or blobs. Dispatch `system-smoke.yml`.
-- [ ] 5.18 e2e through the browser for the same path, not performed from this session.
+- [x] 5.17 System test written: `test/system/state_stream_restart_test.go` takes a listed revision, rolls the manager, and requires the stream opened from it to deliver a close with no resync. Retention is not a system test: a system run cannot see one conversation's runs or blobs in the state server, so that path is held by the unit, envtest and conformance tiers against a real nats server.
+- [ ] 5.18 Run 5.17 and `e2e-live/34-stream-survives-manager-restart.spec.ts` on the pack's cluster (`system-smoke.yml`). Both are written and typecheck or vet clean, neither has run yet.
 
 ## 6. Documentation
 
