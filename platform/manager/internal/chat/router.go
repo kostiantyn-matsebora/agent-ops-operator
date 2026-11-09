@@ -91,7 +91,13 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if text == "" || msg.ThreadID == nil {
 		return nil
 	}
-	conv := r.convByThread(ctx, ch, *msg.ThreadID)
+	conv, err := r.convByThread(ctx, ch, *msg.ThreadID)
+	if err != nil {
+		// Not "no conversation here": the store could not be read, so whether
+		// there is one is unknown. Say so, so the caller retries instead of
+		// being told its message was accepted.
+		return fmt.Errorf("find the conversation for thread %q: %w", *msg.ThreadID, err)
+	}
 	if conv == nil {
 		return nil // no conversation in this thread — nothing to continue
 	}
@@ -742,10 +748,10 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 
 // convByThread resolves a (channel, thread) pair to its conversation. Thread
 // ids are opaque strings scoped per channel — no cross-channel collisions.
-func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string) *state.ConversationRecord {
+func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string) (*state.ConversationRecord, error) {
 	list, err := r.Conversations.List(ctx, state.ByAll, "")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	for i := range list {
 		c := &list[i]
@@ -754,10 +760,10 @@ func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel,
 			continue
 		}
 		if len(c.ChannelRefs) == 0 || c.BoundTo(ch.Name) {
-			return c
+			return c, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // FanOutSend posts ONE SEMANTIC MESSAGE to every bound channel of a

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { loadFixtures } from './support/fixtures'
-import { kubectl, listConversations, waitFor } from './support/kube'
+import { kubectl, listConversations, portForward, waitFor } from './support/kube'
 
 // nats-state-store-default — the console's streams must survive the manager
 // restarting under them. A page sits on the Archive scope and is NEVER
@@ -16,6 +16,20 @@ function rowNameByTitle(substring: string): string | undefined {
 
 test('a conversation closed after a manager restart appears in an open Archive view without a reload', async ({ browser }) => {
   test.setTimeout(240_000)
+  // This spec rolls the manager, which kills any port-forward bound to a
+  // manager pod, including the one global-setup opened. Use its own, so the
+  // spec neither depends on a forward that an earlier run of it already broke
+  // nor leaves a dead one for the next.
+  const forward = await portForward('agentops-manager', 8080)
+  process.env.E2E_LIVE_MANAGER_URL = `http://127.0.0.1:${forward.localPort}`
+  try {
+    await run(browser)
+  } finally {
+    forward.stop()
+  }
+})
+
+async function run(browser: import('@playwright/test').Browser) {
   const ctx = await browser.newContext()
   const watcher = await ctx.newPage()
   const actor = await ctx.newPage()
@@ -53,7 +67,12 @@ test('a conversation closed after a manager restart appears in an open Archive v
   await expect(actor.getByText('This thread was archived')).toBeVisible({ timeout: 30_000 })
 
   // The never-reloaded page sees it.
-  await expect(watcher.getByTestId(`row-${name}`)).toBeVisible({ timeout: 60_000 })
+  try {
+    await expect(watcher.getByTestId(`row-${name}`)).toBeVisible({ timeout: 60_000 })
+  } catch (e) {
+    const ids = await watcher.locator('[data-testid^="row-"]').evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))
+    throw new Error(`row-${name} never appeared in the open Archive view. Rows present: ${JSON.stringify(ids)}\n${(e as Error).message}`)
+  }
   await watcher.screenshot({ path: 'e2e-live/proofs/34-stream-survives-manager-restart.png', fullPage: true })
   await ctx.close()
-})
+}
