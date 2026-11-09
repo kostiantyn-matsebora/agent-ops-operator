@@ -251,6 +251,19 @@ no second secret key to exist.
 {{- end }}
 {{- include "agentops.generatedSecretGuard" (dict "root" $root "name" $name "explicit" $explicitPassword "existing" $existing "existingVal" $existingPassword "key" "password" "setting" "nats.auth.password") -}}
 {{- $connected := eq (include "agentops.clusterConnected" $root) "true" -}}
+{{- /*
+Generation SHALL happen on install only (spec chart-managed-secrets,
+"The state server credential is generated once"): unlike
+adapter-auth.yaml/control-plane-auth.yaml/state-read-auth.yaml, which mint on
+the first CONNECTED upgrade too, an upgrade that finds no existing Secret and
+no explicit value for THIS credential fails loudly instead, naming the Secret
+and the value — design D-8's own text and the spec's own scenario "An upgrade
+that finds no Secret fails loudly". A render with no cluster access still
+can't tell "missing" from "unknown" and renders nothing either way.
+*/ -}}
+{{- if and $connected (not $root.Release.IsInstall) (not $explicitPassword) (not $existingPassword) }}
+{{- fail (printf "Secret %q does not exist and neither nats.auth.password nor nats.auth.existingSecret is set. Set one of them before upgrading to the nats state-store backend." $name) }}
+{{- end }}
 {{- if or $explicitPassword $existingPassword $root.Release.IsInstall $connected }}
 apiVersion: v1
 kind: Secret
