@@ -99,16 +99,29 @@ type Backend struct {
 // inventory, scoped by scope, and opens every field of state.Stores over
 // them. The sweep is not started: Run does that, once the caller has
 // somewhere to run it (mirroring kube.OpenStores).
-func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (*Backend, error) {
+func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (_ *Backend, err error) {
 	cfg := newOpenConfig(opts)
 	replicas := conn.cfg.replicas()
 	b := &Backend{conn: conn, scope: scope}
+
+	// Each bucket's mirror starts its watch the moment its collection is built.
+	// A later bucket failing must not leave the earlier ones running: a caller
+	// that retries would pile up one set per attempt.
+	var stops []func()
+	defer func() {
+		if err != nil {
+			for _, stop := range stops {
+				stop()
+			}
+		}
+	}()
 
 	convKV, convBucket, err := b.bootstrapKV(ctx, bucketConversations, replicas)
 	if err != nil {
 		return nil, err
 	}
 	conversations := newCollection[state.ConversationRecord](conn.js, convKV, convBucket, kvStreamName(convBucket), ConversationsLayout())
+	stops = append(stops, conversations.mirror.stop)
 
 	runsKV, runsBucket, err := b.bootstrapKV(ctx, bucketRuns, replicas)
 	if err != nil {
@@ -129,6 +142,7 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 		return nil, err
 	}
 	signalsColl := newCollection[state.SignalRecord](conn.js, signalsKV, signalsBucket, kvStreamName(signalsBucket), SignalsLayout())
+	stops = append(stops, signalsColl.mirror.stop)
 	signalsExpiring, err := newExpiring(signalsColl, cfg.sweepInterval)
 	if err != nil {
 		return nil, err
@@ -139,18 +153,21 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 		return nil, err
 	}
 	cooldowns := newCollection[state.CooldownWindow](conn.js, cooldownsKV, cooldownsBucket, kvStreamName(cooldownsBucket), CooldownsLayout())
+	stops = append(stops, cooldowns.mirror.stop)
 
 	receiptsKV, receiptsBucket, err := b.bootstrapKV(ctx, bucketReceipts, replicas)
 	if err != nil {
 		return nil, err
 	}
 	receipts := newCollection[state.Received](conn.js, receiptsKV, receiptsBucket, kvStreamName(receiptsBucket), ReceiptsLayout())
+	stops = append(stops, receipts.mirror.stop)
 
 	adapterStateKV, adapterStateBucket, err := b.bootstrapKV(ctx, bucketAdapterState, replicas)
 	if err != nil {
 		return nil, err
 	}
 	adapterState := newCollection[string](conn.js, adapterStateKV, adapterStateBucket, kvStreamName(adapterStateBucket), AdapterStateLayout())
+	stops = append(stops, adapterState.mirror.stop)
 
 	blobsBucket := bucketName(scope, objectStoreBlobs)
 	blobsStore, err := conn.js.CreateOrUpdateObjectStore(ctx, jetstream.ObjectStoreConfig{Bucket: blobsBucket, Replicas: replicas})
@@ -244,3 +261,28 @@ type sweepEvery struct {
 }
 
 func (s sweepEvery) Run(ctx context.Context) { s.c.Run(ctx, s.interval) }
+
+// OpenStoresWhenReady is OpenStores that waits for the server instead of
+// failing on the first refusal: a JetStream cluster that has not yet formed a
+// quorum cannot place a replicated bucket, and the manager that gives up and
+// exits turns a few seconds of startup into a crash loop. It retries every
+// interval until ctx ends, then returns the last refusal.
+func OpenStoresWhenReady(ctx context.Context, conn *Conn, scope string, interval time.Duration, opts ...Option) (*Backend, error) {
+	if interval <= 0 {
+		interval = DefaultOpenRetryInterval
+	}
+	for {
+		b, err := OpenStores(ctx, conn, scope, opts...)
+		if err == nil {
+			return b, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%w (last attempt: %v)", ctx.Err(), err)
+		case <-time.After(interval):
+		}
+	}
+}
+
+// DefaultOpenRetryInterval is how long OpenStoresWhenReady waits between attempts.
+const DefaultOpenRetryInterval = 3 * time.Second

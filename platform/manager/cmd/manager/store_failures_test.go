@@ -145,6 +145,9 @@ func TestTheNatsStoreFailsWhenTheBucketsCannotBeCreated(t *testing.T) {
 	srv := startTestNats(t)
 	t.Setenv("NATS_URL", srv.ClientURL())
 	t.Setenv("NATS_REPLICAS", "3") // one server cannot hold three replicas
+	old := natsOpenTimeout
+	natsOpenTimeout = 2 * time.Second
+	t.Cleanup(func() { natsOpenTimeout = old })
 	done := make(chan error, 1)
 	go func() {
 		_, err := newNatsStores(testManager(t), "agent-ops")

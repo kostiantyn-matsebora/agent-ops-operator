@@ -723,3 +723,5 @@ func mustKeys(t *testing.T, b *Backend, parent string) []string {
 	}
 	return keys
 }
+
+func signalFixtureForRetry() state.SignalRecord { return state.SignalRecord{SourceRef: "s"} }

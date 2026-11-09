@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -93,6 +94,10 @@ func newKubeStores(mgr ctrl.Manager, namespace string) (state.Stores, error) {
 // completed, and gates the import itself on this replica holding the leader
 // Lease, repeating while an old-version replica's pod may still be writing
 // (design D-10).
+// natsOpenTimeout bounds how long startup waits for the state server to accept
+// its buckets. A variable so a test need not wait it out.
+var natsOpenTimeout = 2 * time.Minute
+
 func newNatsStores(mgr ctrl.Manager, namespace string) (state.Stores, error) {
 	cfg, err := natsstate.ConfigFromEnv()
 	if err != nil {
@@ -103,8 +108,11 @@ func newNatsStores(mgr ctrl.Manager, namespace string) (state.Stores, error) {
 		return state.Stores{}, fmt.Errorf("nats state store: %w", err)
 	}
 
-	ctx := context.Background()
-	backend, err := natsstate.OpenStores(ctx, conn, namespace)
+	// A cluster still forming its quorum cannot place a replicated bucket yet.
+	// Wait for it, bounded, instead of exiting into a crash loop.
+	openCtx, cancelOpen := context.WithTimeout(context.Background(), natsOpenTimeout)
+	defer cancelOpen()
+	backend, err := natsstate.OpenStoresWhenReady(openCtx, conn, namespace, natsstate.DefaultOpenRetryInterval)
 	if err != nil {
 		return state.Stores{}, fmt.Errorf("opening the nats state store: %w", err)
 	}
