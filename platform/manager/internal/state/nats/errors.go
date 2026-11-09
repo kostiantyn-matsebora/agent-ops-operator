@@ -14,6 +14,11 @@ import (
 // (ErrKeyNotFound) or "a delete marker is there" (ErrKeyDeleted) — both read
 // as state.ErrNotFound, since a tombstone is exactly as absent to a caller
 // as a key that never existed.
+// errCorrupt marks a stored value this backend cannot decode. It is a fact
+// about that one entry, permanent, so a feed skips it where it would end on a
+// failure that may pass.
+var errCorrupt = errors.New("nats: stored value is corrupt")
+
 func isNotFound(err error) bool {
 	return errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted)
 }

@@ -48,7 +48,7 @@ func (e *envelope[T]) encode() ([]byte, error) {
 func decodeEnvelope[T any](data []byte) (envelope[T], error) {
 	var e envelope[T]
 	if err := json.Unmarshal(data, &e); err != nil {
-		return envelope[T]{}, fmt.Errorf("nats: decode envelope: %w", err)
+		return envelope[T]{}, fmt.Errorf("%w: decode envelope: %w", errCorrupt, err)
 	}
 	return e, nil
 }

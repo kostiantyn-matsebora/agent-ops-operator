@@ -349,7 +349,13 @@ func (a *appended[P, T]) drainMergedWatch(ctx context.Context, cancel context.Ca
 			}
 			parent = state.Key(k)
 		}
-		ev := a.mergedEvent(ctx, parent, parentDeleted, state.Revision(fmt.Sprintf("%d.%d", pSeq, iSeq)))
+		ev, act := a.mergedEvent(ctx, parent, parentDeleted, state.Revision(fmt.Sprintf("%d.%d", pSeq, iSeq)))
+		switch act {
+		case actSkip:
+			continue
+		case actStop:
+			return // the consumer resumes from the last event it was given
+		}
 		select {
 		case out <- ev:
 		case <-ctx.Done():
@@ -358,20 +364,38 @@ func (a *appended[P, T]) drainMergedWatch(ctx context.Context, cancel context.Ca
 	}
 }
 
-func (a *appended[P, T]) mergedEvent(ctx context.Context, parent state.Key, parentDeleted bool, resume state.Revision) state.Event[state.WithItems[P, T]] {
+// feedAction is what the merged feed does with the entry it just read.
+type feedAction int
+
+const (
+	actDeliver feedAction = iota
+	actSkip               // a corrupt entry: nothing to say, and nothing that will change
+	actStop               // a failure that may pass: end the feed rather than lose an event
+)
+
+// mergedEvent builds the event for one change to parent. A parent that no
+// longer exists is a delete, so a consumer evicts what it held. A corrupt
+// entry is skipped, as plain Watch skips one. Any other failure ends the feed:
+// delivering a delete for a record that still exists would evict it, and
+// dropping the event would break at-least-once, while a closed feed makes the
+// consumer resume from the last revision it saw.
+func (a *appended[P, T]) mergedEvent(ctx context.Context, parent state.Key, parentDeleted bool, resume state.Revision) (state.Event[state.WithItems[P, T]], feedAction) {
 	if parentDeleted {
-		return state.Event[state.WithItems[P, T]]{Type: state.EventDelete, Key: parent, Resume: resume}
+		return state.Event[state.WithItems[P, T]]{Type: state.EventDelete, Key: parent, Resume: resume}, actDeliver
 	}
 	rec, parentRev, items, err := a.GetWithItems(ctx, parent)
-	if err != nil {
-		// The parent is gone (or raced a delete): deliver a delete so a
-		// consumer evicts whatever it held for this key.
-		return state.Event[state.WithItems[P, T]]{Type: state.EventDelete, Key: parent, Resume: resume}
+	switch {
+	case errors.Is(err, state.ErrNotFound):
+		return state.Event[state.WithItems[P, T]]{Type: state.EventDelete, Key: parent, Resume: resume}, actDeliver
+	case errors.Is(err, errCorrupt):
+		return state.Event[state.WithItems[P, T]]{}, actSkip
+	case err != nil:
+		return state.Event[state.WithItems[P, T]]{}, actStop
 	}
 	return state.Event[state.WithItems[P, T]]{
 		Type: state.EventPut, Key: parent, Revision: parentRev,
 		Record: state.WithItems[P, T]{Record: rec, Revision: parentRev, Items: items}, Resume: resume,
-	}
+	}, actDeliver
 }
 
 var _ state.Appended[struct{}, struct{}] = (*appended[struct{}, struct{}])(nil)

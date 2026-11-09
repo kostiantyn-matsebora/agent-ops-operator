@@ -335,7 +335,8 @@ func (c *collection[T]) Watch(ctx context.Context, resume state.Revision) (<-cha
 
 // bookmarkInterval is how often an idle Watch feed emits a bookmark (design
 // D-2).
-const bookmarkInterval = 10 * time.Second
+// A variable only so a test need not wait ten seconds for one.
+var bookmarkInterval = 10 * time.Second
 
 func (c *collection[T]) drainWatch(ctx context.Context, raw <-chan kvEntry, out chan<- state.Event[T]) {
 	defer close(out)
