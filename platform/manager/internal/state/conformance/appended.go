@@ -93,6 +93,7 @@ func RunAppended[P, T any](t *testing.T, open func() AppendedOpen[P, T], fx Appe
 		t.Run("ListingWithItemsEqualsTheCombinedRead", func(t *testing.T) { testListWithItems(t, open(), fx) })
 	}
 
+	t.Run("DeletingTheParentTakesItsItemsWithIt", func(t *testing.T) { testDeleteTakesItems(t, open(), fx) })
 	if fx.HistoryLimit > 0 {
 		t.Run("HistoryKeepsTheNewestItemsUpToItsLimit", func(t *testing.T) { testHistoryLimit(t, open(), fx) })
 	}
@@ -608,4 +609,34 @@ func testWatchWithItemsResumesFromList[P, T any](t *testing.T, o AppendedOpen[P,
 			t.Fatal("the change made after the listing never arrived")
 		}
 	}
+}
+
+// testDeleteTakesItems deletes a parent that has items, then recreates the
+// same key. A backend that keeps items apart from the parent must not let the
+// old ones reappear under the new record.
+func testDeleteTakesItems[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx := context.Background()
+	key := createParent(t, o, fx, "delete-cascade")
+	for _, id := range []string{"gone-1", "gone-2"} {
+		if err := o.Items.Append(ctx, key, fx.NewItem(id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := o.Parent.Delete(ctx, key); err != nil {
+		t.Fatalf("Delete the parent: %v", err)
+	}
+	if _, err := o.Items.List(ctx, key); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("List of a deleted parent's items = %v, want ErrNotFound", err)
+	}
+	if err := o.Items.Append(ctx, key, fx.NewItem("orphan")); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("Append to a deleted parent = %v, want ErrNotFound", err)
+	}
+
+	if _, err := o.Parent.Create(ctx, key, fx.NewParent()); err != nil {
+		t.Fatalf("recreate the parent: %v", err)
+	}
+	eventually(t, "the recreated parent has none of the old items", func() bool {
+		got, err := o.Items.List(ctx, key)
+		return err == nil && len(got) == 0
+	})
 }
