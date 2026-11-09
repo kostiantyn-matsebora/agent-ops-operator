@@ -35,7 +35,7 @@ func testExpiryInvisible[T any](t *testing.T, s state.Expiring[T], decl state.De
 	rec := fx.New()
 	rec = fx.Edit(rec, -1) // fixtures.go: a negative marker on an expiring kind sets a past expiry
 	if _, err := s.Create(ctx, key, rec); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	if _, _, err := s.Get(ctx, key); !errors.Is(err, state.ErrNotFound) {
@@ -70,7 +70,7 @@ func testExpiryObservableOnFeed[T any](t *testing.T, s state.Expiring[T], fx Fix
 	key := fx.Key("expiry-feed")
 	rec := fx.Edit(fx.New(), -1)
 	if _, err := s.Create(ctx, key, rec); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	putEvt := mustRecvEvent(t, events, 5*time.Second)
@@ -102,7 +102,7 @@ func testExpiryAcrossResume[T any](t *testing.T, s state.Expiring[T], fx Fixture
 	}
 	key := fx.Key("expiry-resume")
 	if _, err := s.Create(ctx, key, fx.New()); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 	put := mustRecvEvent(t, events, 5*time.Second)
 	if put.Type != state.EventPut || put.Resume == "" {

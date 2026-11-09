@@ -142,7 +142,7 @@ func testAppendNeverConflicts[P, T any](t *testing.T, o AppendedOpen[P, T], fx A
 
 	items, err := o.Items.List(ctx, key)
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
 	if len(items) != 2 {
 		t.Fatalf("List = %d items, want exactly item-a and item-b", len(items))
@@ -160,7 +160,7 @@ func testListOrder[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixt
 	}
 	items, err := o.Items.List(ctx, key)
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
 	if len(items) != n {
 		t.Fatalf("got %d items, want %d", len(items), n)
@@ -507,7 +507,7 @@ func testHistoryLimit[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedF
 	}
 	got, err := o.Items.List(ctx, key)
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
 	if len(got) != fx.HistoryLimit {
 		t.Fatalf("kept %d items, want the newest %d", len(got), fx.HistoryLimit)

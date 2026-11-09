@@ -239,6 +239,8 @@ Playwright. Each item also names what is still owed to a real run.
 
 ## 6. Documentation
 
+Ticked ahead of the open system tasks in section 5 on purpose. Those need a workstation cluster, and the prose here records what the specs already promise. A system lane that disagrees reopens the page it contradicts.
+
 ### 6.1 Reference docs
 
 - [x] 6.1.1 `docs/concepts.md` and `docs/contracts.md`: where state lives and what backs `/state/*`.

@@ -308,12 +308,12 @@ func TestAppendReportsAFailedWriteAndKeepsHistoryWhenNoLimitIsSet(t *testing.T) 
 	parent := mustConversation(t, b, "p")
 	a := b.Stores.Runs.(*appended[state.ConversationRecord, state.Run])
 
-	real := a.itemsKV
-	a.itemsKV = &scriptedKV{KeyValue: real, create: always(errInjected)}
+	inner := a.itemsKV
+	a.itemsKV = &scriptedKV{KeyValue: inner, create: always(errInjected)}
 	if err := a.Append(ctx, parent, state.Run{RunID: "x"}); !errors.Is(err, errInjected) {
 		t.Fatalf("Append = %v, want the write failure", err)
 	}
-	a.itemsKV = real
+	a.itemsKV = inner
 
 	a.limit = 0
 	for i := 0; i < state.RunHistoryLimit+3; i++ {
@@ -332,14 +332,14 @@ func TestTrimFailureLeavesTheRunAppendedAndHealsOnTheNextAppend(t *testing.T) {
 	ctx := shortCtx(t)
 	parent := mustConversation(t, b, "p")
 	a := b.Stores.Runs.(*appended[state.ConversationRecord, state.Run])
-	real := a.itemsKV
-	a.itemsKV = &scriptedKV{KeyValue: real, purge: always(errInjected)}
+	inner := a.itemsKV
+	a.itemsKV = &scriptedKV{KeyValue: inner, purge: always(errInjected)}
 	for i := 0; i < state.RunHistoryLimit+2; i++ {
 		if err := a.Append(ctx, parent, state.Run{RunID: runName(i)}); err != nil {
 			t.Fatalf("Append %d: a failed trim must not fail the append: %v", i, err)
 		}
 	}
-	a.itemsKV = real
+	a.itemsKV = inner
 	if err := a.Append(ctx, parent, state.Run{RunID: runName(99)}); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
@@ -357,17 +357,17 @@ func TestGrowReportsWhatGoesWrong(t *testing.T) {
 	if err := a.Append(ctx, parent, state.Run{RunID: "r1"}); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	real := a.itemsKV
+	inner := a.itemsKV
 
-	a.itemsKV = &scriptedKV{KeyValue: real, update: always(jetstream.ErrKeyExists)}
+	a.itemsKV = &scriptedKV{KeyValue: inner, update: always(jetstream.ErrKeyExists)}
 	if err := a.Grow(ctx, parent, "r1", state.Run{DeliveryTracked: true}); !errors.Is(err, state.ErrConflict) {
 		t.Fatalf("Grow under endless contention = %v, want ErrConflict", err)
 	}
-	a.itemsKV = &scriptedKV{KeyValue: real, update: always(errInjected)}
+	a.itemsKV = &scriptedKV{KeyValue: inner, update: always(errInjected)}
 	if err := a.Grow(ctx, parent, "r1", state.Run{DeliveryTracked: true}); !errors.Is(err, errInjected) {
 		t.Fatalf("Grow with a failing write = %v", err)
 	}
-	a.itemsKV = &scriptedKV{KeyValue: real, get: func(k string) error {
+	a.itemsKV = &scriptedKV{KeyValue: inner, get: func(k string) error {
 		if strings.Contains(k, ".") {
 			return jetstream.ErrKeyNotFound
 		}
@@ -376,7 +376,7 @@ func TestGrowReportsWhatGoesWrong(t *testing.T) {
 	if err := a.Grow(ctx, parent, "r1", state.Run{DeliveryTracked: true}); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Grow of an item deleted meanwhile = %v, want ErrNotFound", err)
 	}
-	a.itemsKV = &scriptedKV{KeyValue: real, get: func(k string) error {
+	a.itemsKV = &scriptedKV{KeyValue: inner, get: func(k string) error {
 		if strings.Contains(k, ".") {
 			return errInjected
 		}
@@ -622,8 +622,8 @@ func TestTheFeedWithItemsEndsRatherThanLoseAnEventItCannotBuild(t *testing.T) {
 	defer cancel()
 	parent := mustConversation(t, b, "unreadable")
 	a := b.Stores.Runs.(*appended[state.ConversationRecord, state.Run])
-	real := a.parent.kv
-	t.Cleanup(func() { a.parent.kv = real })
+	inner := a.parent.kv
+	t.Cleanup(func() { a.parent.kv = inner })
 
 	ch, err := a.WatchWithItems(ctx, "")
 	if err != nil {
@@ -631,7 +631,7 @@ func TestTheFeedWithItemsEndsRatherThanLoseAnEventItCannotBuild(t *testing.T) {
 	}
 	// The parent cannot be read for a moment: delivering a delete would evict a
 	// record that still exists, and skipping would lose the change.
-	a.parent.kv = &scriptedKV{KeyValue: real, get: always(errInjected)}
+	a.parent.kv = &scriptedKV{KeyValue: inner, get: always(errInjected)}
 	if _, err := a.itemsKV.Create(ctx, runsItemKey(string(parent), "u1"), mustEnvelope(t)); err != nil {
 		t.Fatalf("seed item: %v", err)
 	}
@@ -697,9 +697,9 @@ func TestTheOrphanSweepReportsWhatItCannotRemove(t *testing.T) {
 	if _, err := b.runsKV.Create(ctx, runsItemKey("ghost", "u"), mustEnvelope(t)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	real := b.owned.runsKV
-	b.owned.runsKV = &scriptedKV{KeyValue: real, purge: always(errInjected)}
-	t.Cleanup(func() { b.owned.runsKV = real })
+	inner := b.owned.runsKV
+	b.owned.runsKV = &scriptedKV{KeyValue: inner, purge: always(errInjected)}
+	t.Cleanup(func() { b.owned.runsKV = inner })
 	if err := b.owned.Sweep(ctx); !errors.Is(err, errInjected) {
 		t.Fatalf("Sweep = %v, want the purge failure", err)
 	}
@@ -711,7 +711,7 @@ func TestTheOrphanSweepReportsWhatItCannotRemove(t *testing.T) {
 	realKV := c.kv
 	c.kv = &scriptedKV{KeyValue: realKV, get: always(errInjected)}
 	t.Cleanup(func() { c.kv = realKV })
-	b.owned.runsKV = real
+	b.owned.runsKV = inner
 	if err := b.owned.Sweep(ctx); !errors.Is(err, errInjected) {
 		t.Fatalf("Sweep with an unreadable conversation = %v", err)
 	}

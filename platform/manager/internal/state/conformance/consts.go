@@ -16,6 +16,7 @@ const (
 	fmtPut     = "Put: %v"
 	fmtCreate  = "Create: %v"
 	fmtGet     = "Get: %v"
+	fmtList    = "List: %v"
 	fmtWatch   = "Watch: %v"
 	fmtUpdate  = "Update: %v"
 	fmtDelete  = "Delete: %v"

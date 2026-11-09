@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,21 +57,11 @@ func natsBackendForTest(t *testing.T) (context.Context, *natsstate.Backend) {
 	return ctx, backend
 }
 
-func TestTheConversationStreamOverNatsCarriesCloseReadAndArchive(t *testing.T) {
-	ctx, backend := natsBackendForTest(t)
-
-	s := &Server{Conversations: backend.Stores.Conversations, Runs: backend.Stores.Runs}
-	ts := httptest.NewServer(http.HandlerFunc(s.handleStateConversationsStream))
-	t.Cleanup(ts.Close)
-	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL, nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
+// sseFrames reads an event stream into "<event> <data>" strings until it ends.
+func sseFrames(body io.Reader) <-chan string {
 	frames := make(chan string, 64)
 	go func() {
-		sc := bufio.NewScanner(resp.Body)
+		sc := bufio.NewScanner(body)
 		sc.Buffer(make([]byte, 1<<20), 1<<20)
 		var event string
 		for sc.Scan() {
@@ -84,22 +75,44 @@ func TestTheConversationStreamOverNatsCarriesCloseReadAndArchive(t *testing.T) {
 		}
 		close(frames)
 	}()
+	return frames
+}
+
+// waitForPut consumes frames until a put containing the text arrives.
+func waitForPut(t *testing.T, frames <-chan string, what, contains string) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case f, ok := <-frames:
+			if !ok {
+				t.Fatalf("stream ended before %s", what)
+			}
+			if strings.HasPrefix(f, "put ") && strings.Contains(f, contains) {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no put for %s", what)
+		}
+	}
+}
+
+func TestTheConversationStreamOverNatsCarriesCloseReadAndArchive(t *testing.T) {
+	ctx, backend := natsBackendForTest(t)
+
+	s := &Server{Conversations: backend.Stores.Conversations, Runs: backend.Stores.Runs}
+	ts := httptest.NewServer(http.HandlerFunc(s.handleStateConversationsStream))
+	t.Cleanup(ts.Close)
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	frames := sseFrames(resp.Body)
 	wait := func(what, contains string) {
 		t.Helper()
-		deadline := time.After(10 * time.Second)
-		for {
-			select {
-			case f, ok := <-frames:
-				if !ok {
-					t.Fatalf("stream ended before %s", what)
-				}
-				if strings.HasPrefix(f, "put ") && strings.Contains(f, contains) {
-					return
-				}
-			case <-deadline:
-				t.Fatalf("no put for %s", what)
-			}
-		}
+		waitForPut(t, frames, what, contains)
 	}
 
 	key := state.Key("stream-1")

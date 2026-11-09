@@ -78,7 +78,7 @@ spec:
       {{- end }}
       containers:
         - name: nats
-          image: {{ printf "%s:%s@%s" $v.image.repository $v.image.tag $v.image.digest | quote }}
+          image: {{ if $v.image.digest }}{{ printf "%s:%s@%s" $v.image.repository $v.image.tag $v.image.digest | quote }}{{ else }}{{ printf "%s:%s" $v.image.repository $v.image.tag | quote }}{{ end }}
           args:
             - -js
             - -sd
@@ -165,7 +165,7 @@ spec:
         accessModes: ["ReadWriteOnce"]
         resources:
           requests:
-            storage: {{ $v.persistence.size | quote }}
+            storage: {{ $v.persistence.size | default "10Gi" | quote }}
 {{ include "agentops.storageClassName" $v.persistence | indent 6 }}
 {{- end -}}
 

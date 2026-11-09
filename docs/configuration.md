@@ -660,9 +660,12 @@ of, from `chart/charts/nats/values.yaml`:
 | `nats.auth.secretName` | `agentops-nats-credentials` | the generated Secret's name |
 | `nats.podDisruptionBudget.maxUnavailable` | `1` | servers the budget allows down at once. Losing a second loses quorum, not data |
 
-The credential resolves in the same order as `adapterAuth`/`controlPlaneAuth`:
+The password resolves in the same order as `adapterAuth`/`controlPlaneAuth`:
 an explicit value, then the existing Secret, then generation on install
-only. The manager receives `NATS_URL`, `NATS_USER` and `NATS_PASSWORD` by
+only. The username is never generated.
+
+An upgrade that finds no Secret fails the render, naming
+`agentops-nats-credentials`. The manager receives `NATS_URL`, `NATS_USER` and `NATS_PASSWORD` by
 `valueFrom`, so it reads no Secret of its own.
 
 Every value here, and the rest the dependency takes, is in

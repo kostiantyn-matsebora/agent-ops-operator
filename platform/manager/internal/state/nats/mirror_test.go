@@ -23,11 +23,11 @@ type proxyWatcher struct {
 func (p *proxyWatcher) Updates() <-chan jetstream.KeyValueEntry { return p.out }
 func (p *proxyWatcher) drop()                                   { p.once.Do(func() { close(p.out) }) }
 
-func relay(real jetstream.KeyWatcher, stopAfter int) *proxyWatcher {
-	p := &proxyWatcher{KeyWatcher: real, out: make(chan jetstream.KeyValueEntry)}
+func relay(inner jetstream.KeyWatcher, stopAfter int) *proxyWatcher {
+	p := &proxyWatcher{KeyWatcher: inner, out: make(chan jetstream.KeyValueEntry)}
 	go func() {
 		n := 0
-		for e := range real.Updates() {
+		for e := range inner.Updates() {
 			if stopAfter >= 0 && n >= stopAfter {
 				p.drop()
 				return
@@ -64,14 +64,14 @@ func (s *watchScript) WatchAll(ctx context.Context, o ...jetstream.WatchOpt) (je
 	if err != nil {
 		return nil, err
 	}
-	real, werr := s.KeyValue.WatchAll(ctx, o...)
+	inner, werr := s.KeyValue.WatchAll(ctx, o...)
 	if werr != nil {
 		return nil, werr
 	}
 	if silent {
-		return &proxyWatcher{KeyWatcher: real, out: make(chan jetstream.KeyValueEntry)}, nil
+		return &proxyWatcher{KeyWatcher: inner, out: make(chan jetstream.KeyValueEntry)}, nil
 	}
-	p := relay(real, stopAfter)
+	p := relay(inner, stopAfter)
 	if s.watched != nil {
 		select {
 		case s.watched <- p:

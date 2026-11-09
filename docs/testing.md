@@ -25,7 +25,7 @@ mocked backend, not a behavior proof against a real one.
 |---|---|
 | Unit | ALWAYS, every function and error branch a change touches |
 | Conformance | WHERE APPLICABLE, behaviour a contract promises to more than one implementation |
-| System | OPTIONAL, critical paths a cluster decides (`test/system/`) |
+| System | ALWAYS ADDRESSED (a section, or one ticked line saying why not), critical paths a cluster decides (`test/system/`) |
 | e2e | OPTIONAL, UI paths in a browser (`e2e-live`) |
 
 A test that cannot fail against the old code proves nothing, so show it

@@ -190,12 +190,12 @@ func TestGrowSeesAnItemThatChangesBetweenTheScanAndTheWrite(t *testing.T) {
 	if err := a.Append(ctx, parent, state.Run{RunID: "r1", Status: "s"}); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	real := a.itemsKV
-	t.Cleanup(func() { a.itemsKV = real })
+	inner := a.itemsKV
+	t.Cleanup(func() { a.itemsKV = inner })
 
 	// The scan finds the item; the read right after finds it gone.
 	reads := 0
-	a.itemsKV = &scriptedKV{KeyValue: real, get: func(k string) error {
+	a.itemsKV = &scriptedKV{KeyValue: inner, get: func(k string) error {
 		reads++
 		if reads == 2 {
 			return jetstream.ErrKeyNotFound
@@ -208,7 +208,7 @@ func TestGrowSeesAnItemThatChangesBetweenTheScanAndTheWrite(t *testing.T) {
 
 	// Or the read fails for another reason.
 	reads = 0
-	a.itemsKV = &scriptedKV{KeyValue: real, get: func(k string) error {
+	a.itemsKV = &scriptedKV{KeyValue: inner, get: func(k string) error {
 		reads++
 		if reads == 2 {
 			return errInjected
