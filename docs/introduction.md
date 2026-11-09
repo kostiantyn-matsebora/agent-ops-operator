@@ -82,8 +82,7 @@ where one kind merely references another.</figcaption>
 - **[Conversation]({{ '/crds/conversation/' | relative_url }})** — **the
   running thing** — one incident, one task, one question. It owns the pod
   and names the thread. The operator creates it. Look here to see what
-  happened. Its runs, inputs and messages live in the state store, which by
-  default keeps them off the Kubernetes API.
+  happened.
 
 - **[ConversationInput]({{ '/crds/conversation-input/' | relative_url }})** —
   one large payload — a full alert, say — carried out of line, so the

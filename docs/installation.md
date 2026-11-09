@@ -251,13 +251,14 @@ An existing install upgrading from `kube` imports its records into `nats` on
 the manager's first start. The steps are in the
 [changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
 
-`helm uninstall` removes the workloads but leaves the CRDs, every Conversation,
-the context claim and — under the default `nats` backend — the state
-server's three volumes, so reinstalling finds your data where it was.
+`helm uninstall` removes the workloads but leaves the CRDs, the context claim
+and — under the default `nats` backend — the state server's three volumes, so
+reinstalling finds your data where it was. Under the `kube` backend it also
+leaves every Conversation custom resource.
 
 Helm never deletes CRDs that came from a chart's `crds/` directory, so this is
 not something the chart decides. Removing them means deleting them yourself,
-which takes every Conversation with them:
+which takes every Conversation custom resource (`kube` backend only) with them:
 
 ```sh
 kubectl delete crd $(kubectl get crd -o name | grep '\.agentops\.dev$')

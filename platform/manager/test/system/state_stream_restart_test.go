@@ -29,6 +29,31 @@ func TestStateStreamResumesFromAListedRevisionAcrossAManagerRollout(t *testing.T
 	e.WaitRun(t, conv.Name, 1, 3*time.Minute)
 
 	auth := bearerPrefix + e.Values.AdapterToken
+	revision := listedRevision(t, e, auth)
+
+	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "rollout", "restart", "deployment/agentops-manager"); err != nil {
+		t.Fatalf("rollout restart: %v\n%s", err, out)
+	}
+	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "rollout", "status", "deployment/agentops-manager", "--timeout=8m"); err != nil {
+		t.Fatalf("rollout status: %v\n%s", err, out)
+	}
+
+	sctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	resp := openStateStream(t, sctx, e, auth, revision)
+	defer resp.Body.Close()
+	frames := streamFrames(resp)
+
+	body := []byte(`{"names":["` + conv.Name + `"]}`)
+	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/close", body, bearerPrefix+e.Values.UIToken); code/100 != 2 {
+		t.Fatalf("close: %d %s", code, out)
+	}
+	awaitClosePut(t, frames, conv.Name, revision)
+}
+
+// listedRevision waits for a /state/conversations listing and returns its revision.
+func listedRevision(t *testing.T, e *Env, auth string) string {
+	t.Helper()
 	var listed struct {
 		Revision string `json:"revision"`
 	}
@@ -40,19 +65,15 @@ func TestStateStreamResumesFromAListedRevisionAcrossAManagerRollout(t *testing.T
 		_ = json.Unmarshal([]byte(out), &listed)
 		return listed.Revision != "", nil
 	})
+	return listed.Revision
+}
 
-	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "rollout", "restart", "deployment/agentops-manager"); err != nil {
-		t.Fatalf("rollout restart: %v\n%s", err, out)
-	}
-	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "rollout", "status", "deployment/agentops-manager", "--timeout=8m"); err != nil {
-		t.Fatalf("rollout status: %v\n%s", err, out)
-	}
-
-	sctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
+// openStateStream opens the conversation stream from a revision, retrying until accepted.
+func openStateStream(t *testing.T, ctx context.Context, e *Env, auth, revision string) *http.Response {
+	t.Helper()
 	var resp *http.Response
 	waitFor(t, "the stream to open from the pre-rollout revision", 2*time.Minute, func() (bool, error) {
-		req, _ := http.NewRequestWithContext(sctx, "GET", e.Manager.URL()+"/state/conversations/stream?since="+listed.Revision, nil)
+		req, _ := http.NewRequestWithContext(ctx, "GET", e.Manager.URL()+"/state/conversations/stream?since="+revision, nil)
 		req.Header.Set("Authorization", auth)
 		r, err := http.DefaultClient.Do(req)
 		if err != nil || r.StatusCode != 200 {
@@ -64,8 +85,11 @@ func TestStateStreamResumesFromAListedRevisionAcrossAManagerRollout(t *testing.T
 		resp = r
 		return true, nil
 	})
-	defer resp.Body.Close()
+	return resp
+}
 
+// streamFrames reads SSE frames off the response as "<event> <data>" strings.
+func streamFrames(resp *http.Response) <-chan string {
 	frames := make(chan string, 256)
 	go func() {
 		defer close(frames)
@@ -81,11 +105,12 @@ func TestStateStreamResumesFromAListedRevisionAcrossAManagerRollout(t *testing.T
 			}
 		}
 	}()
+	return frames
+}
 
-	body := []byte(`{"names":["` + conv.Name + `"]}`)
-	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/close", body, bearerPrefix+e.Values.UIToken); code/100 != 2 {
-		t.Fatalf("close: %d %s", code, out)
-	}
+// awaitClosePut requires a put frame showing the conversation Closed, and no resync before it.
+func awaitClosePut(t *testing.T, frames <-chan string, name, revision string) {
+	t.Helper()
 	deadline := time.After(2 * time.Minute)
 	for {
 		select {
@@ -94,9 +119,9 @@ func TestStateStreamResumesFromAListedRevisionAcrossAManagerRollout(t *testing.T
 				t.Fatal("the stream ended before delivering the close")
 			}
 			if strings.HasPrefix(f, "resync ") {
-				t.Fatalf("the new manager refused the revision a listing returned before the rollout (%q): the console would relist for ever", listed.Revision)
+				t.Fatalf("the new manager refused the revision a listing returned before the rollout (%q): the console would relist for ever", revision)
 			}
-			if strings.HasPrefix(f, "put ") && strings.Contains(f, `"`+conv.Name+`"`) && strings.Contains(f, "Closed") {
+			if strings.HasPrefix(f, "put ") && strings.Contains(f, `"`+name+`"`) && strings.Contains(f, "Closed") {
 				return
 			}
 		case <-deadline:

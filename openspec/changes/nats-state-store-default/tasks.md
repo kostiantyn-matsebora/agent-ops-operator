@@ -1,7 +1,6 @@
 ## 1. Sequencing gate
 
-This gate applies when implementation starts. This pull request only proposes.
-
+This gate applies when implementation starts.
 - [x] 1.1 Confirm `state-store-generic-contract` is archived and rebase the branch on master. Nothing below starts before this is ticked.
   Verdict:
   - `state-store-generic-contract` is archived at `openspec/changes/archive/2026-11-08-state-store-generic-contract/` (issue #457, PR #470).

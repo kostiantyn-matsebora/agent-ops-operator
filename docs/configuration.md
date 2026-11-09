@@ -665,7 +665,7 @@ an explicit value, then the existing Secret, then generation on install
 only. The username is never generated.
 
 An upgrade that finds no Secret fails the render, naming
-`agentops-nats-credentials`. The manager receives `NATS_URL`, `NATS_USER` and `NATS_PASSWORD` by
+`agentops-nats-credentials` and `nats.auth.existingSecret`. The manager receives `NATS_URL`, `NATS_USER` and `NATS_PASSWORD` by
 `valueFrom`, so it reads no Secret of its own.
 
 Every value here, and the rest the dependency takes, is in

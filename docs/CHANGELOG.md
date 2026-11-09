@@ -166,6 +166,9 @@ Adapter and manager upgrade in either order: an older manager ignores
 `signalId`. An adapter that reads `conversations` from the response, if you
 wrote one, must stop.
 
+An upgrade that finds no `agentops-nats-credentials` Secret fails the render,
+naming it and `nats.auth.existingSecret`.
+
 The new manager starts, finds the empty `nats` buckets and the `kube`
 records, imports them, and reports ready once the import finishes. Verify
 through the console or `/state/conversations` before trusting it, then
