@@ -165,13 +165,25 @@ func registerNatsImport(mgr ctrl.Manager, conn *natsstate.Conn, backend *natssta
 		OldReplicaPresent: oldManagerReplicaPresent(kubeClient, namespace, env("VERSION", "dev")),
 	}
 	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		select {
-		case <-mgr.Elected():
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		return importer.Run(ctx)
+		return runWhenElected(ctx, mgr.Elected(), importer)
 	}))
+}
+
+// runner is what runWhenElected runs: the import, in production.
+type runner interface {
+	Run(ctx context.Context) error
+}
+
+// runWhenElected waits for this replica to win the leader Lease, then runs r.
+// A replica that never wins it, or whose context ends first, imports nothing:
+// only one replica copies the old state across, and a standby must not race it.
+func runWhenElected(ctx context.Context, elected <-chan struct{}, r runner) error {
+	select {
+	case <-elected:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return r.Run(ctx)
 }
 
 // kubeSourceNames implements natsstate.SourceNames over the kube client: the
