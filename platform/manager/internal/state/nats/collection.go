@@ -329,7 +329,7 @@ func (c *collection[T]) Watch(ctx context.Context, resume state.Revision) (<-cha
 		return nil, fmt.Errorf("nats: watch %s: %w", c.layout.Decl.Name, err)
 	}
 	out := make(chan state.Event[T])
-	go c.drainWatch(ctx, raw, out)
+	go c.drainWatch(ctx, raw, out, bookmarkInterval)
 	return out, nil
 }
 
@@ -338,9 +338,9 @@ func (c *collection[T]) Watch(ctx context.Context, resume state.Revision) (<-cha
 // A variable only so a test need not wait ten seconds for one.
 var bookmarkInterval = 10 * time.Second
 
-func (c *collection[T]) drainWatch(ctx context.Context, raw <-chan kvEntry, out chan<- state.Event[T]) {
+func (c *collection[T]) drainWatch(ctx context.Context, raw <-chan kvEntry, out chan<- state.Event[T], bookmarkEvery time.Duration) {
 	defer close(out)
-	ticker := time.NewTicker(bookmarkInterval)
+	ticker := time.NewTicker(bookmarkEvery)
 	defer ticker.Stop()
 	var lastSeen state.Revision
 	for {

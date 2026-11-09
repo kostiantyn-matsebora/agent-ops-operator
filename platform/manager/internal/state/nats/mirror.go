@@ -2,6 +2,8 @@ package nats
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -12,7 +14,8 @@ import (
 
 // mirrorRetryDelay bounds how fast a mirror whose watch dropped (server
 // restart, network blip) tries again.
-const mirrorRetryDelay = time.Second
+// A variable only so a test need not wait a second per retry.
+var mirrorRetryDelay = time.Second
 
 // mirror is the watch-fed, in-memory read model List serves from (design
 // D-4): one background watch over the whole bucket keeps a map of every
@@ -23,12 +26,14 @@ const mirrorRetryDelay = time.Second
 type mirror[T any] struct {
 	kv jetstream.KeyValue
 
-	mu       sync.RWMutex
-	byKey    map[state.Key]mirrorEntry[T]
-	lastSeq  uint64 // the highest sequence this mirror has observed, any kind of event
-	ready    chan struct{}
-	readyErr error
-	closed   chan struct{}
+	mu      sync.RWMutex
+	byKey   map[state.Key]mirrorEntry[T]
+	lastSeq uint64 // the highest sequence this mirror has observed, any kind of event
+	ready   chan struct{}
+	lastErr error // the latest failure of the watch, for the message of a wait that gives up
+	closed  chan struct{}
+
+	retryDelay time.Duration // read once at construction, from mirrorRetryDelay
 }
 
 // mirrorEntry is one cached record: the envelope and the KV sequence it was
@@ -43,7 +48,7 @@ type mirrorEntry[T any] struct {
 // newMirror starts the background watch and returns at once; a caller that
 // needs the first catch-up waits on waitReady.
 func newMirror[T any](kv jetstream.KeyValue) *mirror[T] {
-	m := &mirror[T]{kv: kv, byKey: map[state.Key]mirrorEntry[T]{}, ready: make(chan struct{}), closed: make(chan struct{})}
+	m := &mirror[T]{kv: kv, byKey: map[state.Key]mirrorEntry[T]{}, ready: make(chan struct{}), closed: make(chan struct{}), retryDelay: mirrorRetryDelay}
 	go m.run()
 	return m
 }
@@ -51,11 +56,22 @@ func newMirror[T any](kv jetstream.KeyValue) *mirror[T] {
 // waitReady blocks until the mirror's first catch-up over the bucket
 // completes, the "List blocks until the first catch-up completes" half of
 // design D-4.
+//
+// A watch that fails or ends before the first catch-up is retried, not
+// recorded: the mirror becomes ready when a watch has replayed the whole
+// bucket, however many attempts that takes, and a caller that cannot wait
+// that long leaves with its own context's error, naming the last failure.
 func (m *mirror[T]) waitReady(ctx context.Context) error {
 	select {
 	case <-m.ready:
-		return m.readyErr
+		return nil
 	case <-ctx.Done():
+		m.mu.RLock()
+		last := m.lastErr
+		m.mu.RUnlock()
+		if last != nil {
+			return fmt.Errorf("%w (the watch last failed: %v)", ctx.Err(), last)
+		}
 		return ctx.Err()
 	}
 }
@@ -73,11 +89,8 @@ func (m *mirror[T]) waitCaughtUpTo(ctx context.Context, target uint64) error {
 	}
 	for {
 		m.mu.RLock()
-		reached, err := m.lastSeq >= target, m.readyErr
+		reached := m.lastSeq >= target
 		m.mu.RUnlock()
-		if err != nil {
-			return err
-		}
 		if reached {
 			return nil
 		}
@@ -101,12 +114,15 @@ func (m *mirror[T]) run() {
 			return
 		default:
 		}
-		err := m.runOnce(ctx)
-		m.markReady(err) // a no-op past the first call
+		if err := m.runOnce(ctx); err != nil {
+			m.mu.Lock()
+			m.lastErr = err
+			m.mu.Unlock()
+		}
 		select {
 		case <-m.closed:
 			return
-		case <-time.After(mirrorRetryDelay):
+		case <-time.After(m.retryDelay):
 		}
 	}
 }
@@ -126,10 +142,11 @@ func (m *mirror[T]) runOnce(ctx context.Context) error {
 			return nil
 		case entry, ok := <-w.Updates():
 			if !ok {
-				return nil
+				// The watch ended, however far it had got: reconnect and replay.
+				return errWatchEnded
 			}
 			if entry == nil {
-				m.markReady(nil) // every initial value has now been replayed
+				m.markReady() // every initial value has now been replayed
 				continue
 			}
 			m.apply(entry)
@@ -137,19 +154,21 @@ func (m *mirror[T]) runOnce(ctx context.Context) error {
 	}
 }
 
-// markReady closes ready exactly once, recording err only the first time:
-// a later reconnect's own success or failure must not retroactively change
-// whether the first catch-up is reported as having happened.
-func (m *mirror[T]) markReady(err error) {
+// markReady closes ready, once. It is called only when a watch has replayed
+// every value the bucket held, so a ready mirror is a complete one.
+func (m *mirror[T]) markReady() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	select {
 	case <-m.ready:
 	default:
-		m.readyErr = err
 		close(m.ready)
 	}
 }
+
+// errWatchEnded is a watch that closed on its own, a dropped connection or a
+// restarted server.
+var errWatchEnded = errors.New("nats: the bucket watch ended")
 
 // apply folds one watch entry into the map: a put decodes and stores the
 // envelope, a delete or purge removes it. The key is recovered from the wire
