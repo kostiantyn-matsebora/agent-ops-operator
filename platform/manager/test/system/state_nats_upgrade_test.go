@@ -12,8 +12,11 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
@@ -41,10 +44,51 @@ func pinToKubeBackend(t *testing.T, ctx context.Context, e *Env) {
 	if err := e.Upgrade(ctx, "stateStore.backend=kube"); err != nil {
 		t.Fatalf("pinning the install to the kube backend: %v", err)
 	}
-	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "delete", "pvc",
-		"-l", natsSelector, "--ignore-not-found", "--wait=true", "--timeout=2m"); err != nil {
-		t.Fatalf("clearing the nats PVCs before a real import: %v\n%s", err, out)
+	deleteNatsPVCs(t, ctx, e)
+}
+
+// deleteNatsPVCs clears every PVC the nats StatefulSet's volumeClaimTemplate
+// minted, named "data-agentops-nats-<ordinal>" by Kubernetes' own
+// convention. NOT by label selector: the volumeClaimTemplate in
+// chart/charts/nats/templates/_helpers.tpl carries no labels of its own, and
+// a StatefulSet copies only the template's OWN metadata onto the PVC it
+// creates, never the pod template's labels — natsSelector
+// ("app.kubernetes.io/name=agentops-nats") matches the pods and the
+// Services, but matches zero PVCs. A label-selector delete would silently
+// no-op here, leaving the OLD JetStream volumes (and their already-written
+// import marker) in place for the later upgrade back onto nats, which is
+// exactly the no-op this function exists to prevent.
+func deleteNatsPVCs(t *testing.T, ctx context.Context, e *Env) {
+	t.Helper()
+	const pvcNamePrefix = "data-agentops-nats-"
+	var pvcs corev1.PersistentVolumeClaimList
+	if err := e.K.List(ctx, &pvcs, client.InNamespace(Namespace)); err != nil {
+		t.Fatalf("listing PVCs to clear the nats bundle's own: %v", err)
 	}
+	var names []string
+	for i := range pvcs.Items {
+		pvc := &pvcs.Items[i]
+		if !strings.HasPrefix(pvc.Name, pvcNamePrefix) {
+			continue
+		}
+		if err := e.K.Delete(ctx, pvc); err != nil && !apierrors.IsNotFound(err) {
+			t.Fatalf("deleting PVC %s: %v", pvc.Name, err)
+		}
+		names = append(names, pvc.Name)
+	}
+	waitFor(t, fmt.Sprintf("%d nats PVC(s) to be gone before a real import", len(names)), 2*time.Minute, func() (bool, error) {
+		for _, name := range names {
+			var pvc corev1.PersistentVolumeClaim
+			err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: name}, &pvc)
+			if err == nil {
+				return false, nil
+			}
+			if !apierrors.IsNotFound(err) {
+				return false, err
+			}
+		}
+		return true, nil
+	})
 }
 
 // 5.5 — the migration path end to end: a fresh kube install with real

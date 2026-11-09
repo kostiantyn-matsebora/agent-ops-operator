@@ -607,10 +607,12 @@ source's cooldown window (the ingest cooldown) and receipt counters.
 |---|---|---|
 | `stateStore.backend` | `nats` | the one backend the manager uses. `nats` keeps state on its own clustered volumes. `kube` keeps it in the custom resources instead |
 
-**`nats` is the default as of chart 19.** A fresh install runs three more
-pods and three more volumes for it, and `kubectl get conv` / `kubectl get
-sig` no longer show anything live — the console does, on either backend.
-Pin the old behaviour:
+**`nats` becoming the default is BREAKING.** A fresh install runs three more
+pods and three more volumes for it. `kubectl get conv` / `kubectl get sig`
+no longer show anything live — the console does, on either backend.
+
+See [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
+for the version this shipped in. Pin the old behaviour:
 
 ```yaml
 stateStore:
@@ -652,7 +654,8 @@ of, from `chart/charts/nats/values.yaml`:
 | `nats.replicas` | `3` | servers in the cluster. `1` is a conscious single point of failure, and the chart notes say so |
 | `nats.persistence`'s `size` | `10Gi` | each server's own store directory |
 | `nats.persistence`'s `storageClassName` | `""` | the cluster's default provisioner — same convention as `persistence.context` above |
-| `nats.auth.user` / `nats.auth.password` | `""` | an explicit credential. Left empty, the chart generates one |
+| `nats.auth.user` | `""` | an explicit username. Left empty, it is the literal `nats`, never generated |
+| `nats.auth.password` | `""` | an explicit password. Left empty, the chart generates one |
 | `nats.auth.existingSecret` | `""` | a Secret you already made, read before the chart generates anything |
 | `nats.auth.secretName` | `agentops-nats-credentials` | the generated Secret's name |
 | `nats.podDisruptionBudget.maxUnavailable` | `1` | servers the budget allows down at once. Losing a second loses quorum, not data |
