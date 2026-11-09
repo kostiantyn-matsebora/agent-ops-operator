@@ -225,6 +225,16 @@ spec:
               path: /readyz
               port: 8081
             initialDelaySeconds: 5
+          # The probe port answers only once the state store has opened, and
+          # on nats that waits for the cluster to elect a leader. Liveness
+          # starts after this passes, so a slow election is waited out (5m)
+          # instead of killing the pod mid-wait.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            periodSeconds: 10
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /healthz
