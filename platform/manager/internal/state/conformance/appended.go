@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -52,6 +53,16 @@ type AppendedFixture[P, T any] struct {
 	EditParent func(rec *P)
 	// ParentChanged reports whether rec carries the change EditParent made.
 	ParentChanged func(rec P) bool
+
+	// HistoryLimit is how many items a parent keeps, the oldest falling off.
+	// Zero means unbounded and skips the scenario.
+	HistoryLimit int
+
+	// ParentIndex, IndexBefore and IndexAfter name an index whose value
+	// EditParent moves the parent from one entry of to another. Needed only by
+	// the index-after-a-parent-write scenario; a zero ParentIndex skips it.
+	ParentIndex             state.Index[P]
+	IndexBefore, IndexAfter string
 }
 
 // RunAppended executes every state.Appended[P, T] scenario against a fresh
@@ -80,6 +91,13 @@ func RunAppended[P, T any](t *testing.T, open func() AppendedOpen[P, T], fx Appe
 
 	if fx.AllIndex.Name() != "" {
 		t.Run("ListingWithItemsEqualsTheCombinedRead", func(t *testing.T) { testListWithItems(t, open(), fx) })
+	}
+
+	if fx.HistoryLimit > 0 {
+		t.Run("HistoryKeepsTheNewestItemsUpToItsLimit", func(t *testing.T) { testHistoryLimit(t, open(), fx) })
+	}
+	if fx.ParentIndex.Name() != "" && fx.EditParent != nil && fx.ParentChanged != nil {
+		t.Run("ListingWithItemsFollowsAParentOnlyWrite", func(t *testing.T) { testListWithItemsAfterParentWrite(t, open(), fx) })
 	}
 
 	t.Run("WatchWithItemsCarriesTheItemsOfEveryPut", func(t *testing.T) { testWatchWithItems(t, open(), fx) })
@@ -467,4 +485,82 @@ func editParent[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture
 	}); err != nil {
 		t.Fatalf("edit the parent: %v", err)
 	}
+}
+
+// testHistoryLimit appends past the limit and checks the oldest fell off, the
+// newest stayed in append order, and an item that aged out is ErrNotFound to
+// Grow, so a caller can tell it from success.
+func testHistoryLimit[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx := context.Background()
+	key := createParent(t, o, fx, "history-limit")
+	total := fx.HistoryLimit + 3
+	id := func(i int) string { return fmt.Sprintf("hist-%03d", i) }
+	for i := 0; i < total; i++ {
+		if err := o.Items.Append(ctx, key, fx.NewItem(id(i))); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+		// Append order is by time on some backends: keep appends distinct.
+		time.Sleep(2 * time.Millisecond)
+	}
+	got, err := o.Items.List(ctx, key)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != fx.HistoryLimit {
+		t.Fatalf("kept %d items, want the newest %d", len(got), fx.HistoryLimit)
+	}
+	want := fx.NewItem(id(total - fx.HistoryLimit))
+	if !reflect.DeepEqual(got[0], want) {
+		t.Fatalf("oldest kept = %+v, want %+v", got[0], want)
+	}
+	if err := o.Items.Grow(ctx, key, id(0), fx.Edit("late")); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("Grow of an item that aged out = %v, want ErrNotFound", err)
+	}
+}
+
+// testListWithItemsAfterParentWrite checks that an index over the parent
+// follows a write that touches no item: the record is listed under its new
+// value with its items, and no longer under the old.
+func testListWithItemsAfterParentWrite[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx := context.Background()
+	key := createParent(t, o, fx, "index-follows")
+	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
+		t.Fatal(err)
+	}
+	has := func(value string) (found bool, items int) {
+		t.Helper()
+		listed, err := o.Items.ListWithItems(ctx, fx.ParentIndex, value)
+		if err != nil {
+			t.Fatalf("ListWithItems(%q): %v", value, err)
+		}
+		for _, w := range listed {
+			if fx.KeyOf(w.Record) == key {
+				return true, len(w.Items)
+			}
+		}
+		return false, 0
+	}
+	if found, _ := has(fx.IndexBefore); !found {
+		t.Fatalf("the parent is not listed under %q before the write", fx.IndexBefore)
+	}
+	editParent(t, o, fx, key)
+	eventually(t, "the parent is listed under its new value with its item", func() bool {
+		found, n := has(fx.IndexAfter)
+		return found && n == 1
+	})
+	if found, _ := has(fx.IndexBefore); found {
+		t.Fatalf("the parent is still listed under %q after the write", fx.IndexBefore)
+	}
+}
+
+func eventually(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("never: %s", what)
 }
