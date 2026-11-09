@@ -202,7 +202,19 @@ func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
 	// patches a Kubernetes object"). Compared by VALUE — the importer's own
 	// read cannot move anything on the source regardless, but a reconciler
 	// loop reacting to a cache resync could, and that is what this guards.
-	assertKubeRecordsUntouched(t, ctx, e, conv.Name, convBefore, sigBefore, sourceName, sourceBefore.Status.Cooldown)
+	assertKubeRecordsUntouched(t, ctx, e, kubeSnapshot{
+		convName: conv.Name, conv: convBefore, sig: sigBefore,
+		sourceName: sourceName, cooldown: sourceBefore.Status.Cooldown,
+	})
+}
+
+// kubeSnapshot is what the kube custom resources held before the upgrade.
+type kubeSnapshot struct {
+	convName   string
+	conv       *agentopsv1alpha1.Conversation
+	sig        *agentopsv1alpha1.Signal
+	sourceName string
+	cooldown   []agentopsv1alpha1.CooldownEntry
 }
 
 // countConversationsFor counts the kube Conversations opened for one initiation id.
@@ -236,10 +248,10 @@ func cooldownHolds(ctx context.Context, e *Env, sourceName, convID string) (bool
 
 // assertKubeRecordsUntouched compares the kube custom resources, by VALUE,
 // against what they were before the upgrade.
-func assertKubeRecordsUntouched(t *testing.T, ctx context.Context, e *Env, convName string,
-	convBefore *agentopsv1alpha1.Conversation, sigBefore *agentopsv1alpha1.Signal,
-	sourceName string, cooldownBefore []agentopsv1alpha1.CooldownEntry) {
+func assertKubeRecordsUntouched(t *testing.T, ctx context.Context, e *Env, before kubeSnapshot) {
 	t.Helper()
+	convName, convBefore, sigBefore := before.convName, before.conv, before.sig
+	sourceName, cooldownBefore := before.sourceName, before.cooldown
 	var convAfter agentopsv1alpha1.Conversation
 	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: convName}, &convAfter); err != nil {
 		t.Fatalf("the kube Conversation must still exist, untouched, after the upgrade: %v", err)

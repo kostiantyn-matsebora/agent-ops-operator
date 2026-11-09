@@ -2,8 +2,10 @@ package nats
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
@@ -39,5 +41,42 @@ func TestBlobLargerThanTheServerMaxPayloadReadsBackByteIdentical(t *testing.T) {
 		t.Fatalf("metadata round-trip mismatch: got %+v", struct {
 			ConversationName, Type, Severity string
 		}{got.ConversationName, got.Type, got.Severity})
+	}
+}
+
+func TestBlobGetOfAMissingKeyIsNotFoundAndDeleteIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	b := openBackend(t, sharedTestConn(t), newScope(t))
+	key := state.Key("gone")
+
+	if _, err := b.Stores.Blobs.Get(ctx, key); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("Get of a missing blob = %v, want ErrNotFound", err)
+	}
+	if err := b.Stores.Blobs.Delete(ctx, key); err != nil {
+		t.Fatalf("Delete of a missing blob must not fail: %v", err)
+	}
+	if err := b.Stores.Blobs.Put(ctx, key, state.Blob{Payload: "x"}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := b.Stores.Blobs.Delete(ctx, key); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := b.Stores.Blobs.Get(ctx, key); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("Get after Delete = %v, want ErrNotFound", err)
+	}
+}
+
+func TestExpiringExpiryReadsTheDeclaredInstant(t *testing.T) {
+	b := openBackend(t, sharedTestConn(t), newScope(t))
+	exp, ok := b.Stores.Signals.(*Expiring[state.SignalRecord])
+	if !ok {
+		t.Fatalf("Signals is %T, want *Expiring[SignalRecord]", b.Stores.Signals)
+	}
+	at := time.Now().Add(time.Hour)
+	if got := exp.Expiry(state.SignalRecord{ExpiresAt: &at}); got == nil || !got.Equal(at) {
+		t.Fatalf("Expiry = %v, want %v", got, at)
+	}
+	if got := exp.Expiry(state.SignalRecord{}); got != nil {
+		t.Fatalf("Expiry of a record with none = %v, want nil", got)
 	}
 }
