@@ -29,6 +29,9 @@ type Option func(*openConfig)
 
 type openConfig struct {
 	sweepInterval time.Duration
+	// orphanInterval is the period of the sweep that removes what no
+	// conversation owns (cascade.go).
+	orphanInterval time.Duration
 }
 
 // WithSweepInterval overrides the expiry sweep's period, for a test that must
@@ -38,7 +41,7 @@ func WithSweepInterval(d time.Duration) Option {
 }
 
 func newOpenConfig(opts []Option) openConfig {
-	cfg := openConfig{sweepInterval: DefaultSweepInterval}
+	cfg := openConfig{sweepInterval: DefaultSweepInterval, orphanInterval: DefaultOrphanSweepInterval}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -87,6 +90,9 @@ type Backend struct {
 	blobsStore     jetstream.ObjectStore
 
 	sweeps []interface{ Run(context.Context) }
+
+	// owned removes what a conversation owns outside its record (cascade.go).
+	owned *children
 }
 
 // OpenStores bootstraps every bucket and the object store of the closed
@@ -115,6 +121,8 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 	if err != nil {
 		return nil, err
 	}
+
+	runsAppended.limit = state.RunHistoryLimit
 
 	signalsKV, signalsBucket, err := b.bootstrapKV(ctx, bucketSignals, replicas)
 	if err != nil {
@@ -161,7 +169,10 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 	}
 	b.adapterStateKV, b.conversations, b.signals, b.cooldowns, b.receipts, b.adapterState = adapterStateKV, conversations, signalsColl, cooldowns, receipts, adapterState
 	b.runsKV, b.blobsStore = runsKV, blobsStore
-	b.sweeps = []interface{ Run(context.Context) }{signalsExpiring}
+	owned := &children{conversations: conversations, runsKV: runsKV, blobs: blobsStore, now: time.Now}
+	b.owned = owned
+	conversations.onRemoved = owned.removed
+	b.sweeps = []interface{ Run(context.Context) }{signalsExpiring, sweepEvery{owned, cfg.orphanInterval}}
 	return b, nil
 }
 
@@ -214,3 +225,22 @@ func (b *Backend) Close() {
 	b.receipts.mirror.stop()
 	b.adapterState.mirror.stop()
 }
+
+// DefaultOrphanSweepInterval is how often the orphan sweep looks for runs and
+// blobs whose conversation is gone.
+const DefaultOrphanSweepInterval = 5 * time.Minute
+
+// WithOrphanSweepInterval overrides the orphan sweep's period, for a test that
+// cannot wait minutes.
+func WithOrphanSweepInterval(d time.Duration) Option {
+	return func(c *openConfig) { c.orphanInterval = d }
+}
+
+// sweepEvery adapts children's interval-taking Run to the one-argument shape
+// Backend.Run starts.
+type sweepEvery struct {
+	c        *children
+	interval time.Duration
+}
+
+func (s sweepEvery) Run(ctx context.Context) { s.c.Run(ctx, s.interval) }

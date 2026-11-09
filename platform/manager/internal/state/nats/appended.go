@@ -29,6 +29,10 @@ type appended[P, T any] struct {
 	bucket     string
 	streamName string
 	decl       state.Decl[T]
+
+	// limit is how many items a parent keeps: when an Append takes it past the
+	// limit the oldest fall off. Zero keeps all.
+	limit int
 }
 
 // newAppended wires an Appended capability over an already-open parent
@@ -59,7 +63,26 @@ func (a *appended[P, T]) Append(ctx context.Context, parent state.Key, item T) e
 	if _, err := a.itemsKV.Create(ctx, runsItemKey(string(parent), nuid.Next()), data); err != nil {
 		return fmt.Errorf("nats: append %s to %q: %w", a.decl.Name, parent, err)
 	}
+	a.trim(ctx, parent)
 	return nil
+}
+
+// trim drops the oldest items beyond the history limit, so a long-lived
+// parent cannot grow without bound (the kube backend bounds status.runs[] the
+// same way). A failure leaves the item appended and is not reported: the next
+// Append trims everything beyond the limit again, so it heals itself.
+func (a *appended[P, T]) trim(ctx context.Context, parent state.Key) {
+	if a.limit <= 0 {
+		return
+	}
+	entries, err := a.listItemEntries(ctx, parent)
+	if err != nil || len(entries) <= a.limit {
+		return
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Env.AppendSeq < entries[j].Env.AppendSeq })
+	for _, e := range entries[:len(entries)-a.limit] {
+		_ = a.itemsKV.Purge(ctx, e.Key)
+	}
 }
 
 // itemEntry is one item as listItemEntries found it: its own wire key

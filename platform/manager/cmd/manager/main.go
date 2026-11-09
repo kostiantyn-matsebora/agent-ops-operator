@@ -252,6 +252,7 @@ func main() {
 		Client:       mgr.GetClient(),
 		Signals:      stores.Signals,
 		Cooldowns:    stores.Cooldowns,
+		Receipts:     stores.Receipts,
 		AdapterState: stores.AdapterState,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "signalsource controller")

@@ -13,9 +13,9 @@ import (
 // object, so each narrows the client.Object it is handed once and maps.
 
 // maxRunHistory bounds status.runs[] on the stored object, so a long-lived
-// conversation cannot grow its CR without limit. It is the bound the work
-// report always applied itself; owning it here keeps every writer inside it.
-const maxRunHistory = 10
+// conversation cannot grow its CR without limit. The number is the contract's,
+// shared with every other backend.
+const maxRunHistory = state.RunHistoryLimit
 
 func asConversation(obj client.Object) *agentopsv1alpha1.Conversation {
 	return obj.(*agentopsv1alpha1.Conversation)

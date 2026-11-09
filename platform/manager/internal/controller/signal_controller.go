@@ -308,7 +308,7 @@ func (r *SignalReconciler) reconcileLive(ctx context.Context, p *signalPass) (ct
 // successor that took the name meanwhile keeps its own signals and window.
 func (r *SignalReconciler) releaseOrphans(ctx context.Context, source string) error {
 	log.FromContext(ctx).Info("releasing the signals of a source that no longer exists", "source", source)
-	releaser := &SourceReleaser{Signals: r.Signals, Cooldowns: r.CooldownWindows, Live: liveSignalSource(r.reader(), r.Namespace)}
+	releaser := &SourceReleaser{Signals: r.Signals, Cooldowns: r.CooldownWindows, Receipts: r.Receipts, Live: liveSignalSource(r.reader(), r.Namespace)}
 	return releaser.Release(ctx, source)
 }
 

@@ -36,6 +36,8 @@ type SignalSourceReconciler struct {
 	// owner reference being honoured (state-store design D-14).
 	Signals   state.Collection[state.SignalRecord]
 	Cooldowns state.Collection[state.CooldownWindow]
+	// Receipts removes the deleted source's receipt counters with it.
+	Receipts state.Collection[state.Received]
 	// AdapterState releases a deleted SignalSource's own adapter-state keys
 	// (state-store-generic-contract design D-4), through the typed
 	// collection rather than a raw annotation reach.
@@ -47,7 +49,7 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	var src agentopsv1alpha1.SignalSource
 	if err := r.Get(ctx, req.NamespacedName, &src); err != nil {
 		if apierrors.IsNotFound(err) {
-			releaser := &SourceReleaser{Signals: r.Signals, Cooldowns: r.Cooldowns, Live: liveSignalSource(r.Client, req.Namespace)}
+			releaser := &SourceReleaser{Signals: r.Signals, Cooldowns: r.Cooldowns, Receipts: r.Receipts, Live: liveSignalSource(r.Client, req.Namespace)}
 			return ctrl.Result{}, releaser.Release(ctx, req.Name)
 		}
 		return ctrl.Result{}, err

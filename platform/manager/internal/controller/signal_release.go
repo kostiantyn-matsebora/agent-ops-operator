@@ -24,13 +24,16 @@ const (
 // false when no source holds the name.
 type LiveSourceID func(ctx context.Context, name string) (id string, held bool, err error)
 
-// SourceReleaser releases a deleted source's signals and cooldown window.
+// SourceReleaser releases a deleted source's signals, cooldown window and
+// receipt counters.
 // It is a helper over the contract, not an operation of it: the decision
 // reads the live source, which is not state-store state.
 type SourceReleaser struct {
 	Signals   state.Collection[state.SignalRecord]
 	Cooldowns state.Collection[state.CooldownWindow]
-	Live      LiveSourceID
+	// Receipts is optional: nil leaves the counters alone.
+	Receipts state.Collection[state.Received]
+	Live     LiveSourceID
 	// Backoff is the first retry delay, doubled each attempt. Zero is the default.
 	Backoff time.Duration
 }
@@ -56,12 +59,20 @@ func (r *SourceReleaser) Release(ctx context.Context, name string) error {
 	if held {
 		return nil
 	}
-	// A clear creates nothing: a source with no window has nothing to clear.
-	_, err = state.Mutate(ctx, r.Cooldowns, state.Key(name), func(w *state.CooldownWindow) error {
-		w.Entries = nil
-		return nil
-	})
-	return state.IgnoreNotFound(err)
+	// Nothing holds the name, so its window and counters go with it. Under the
+	// kube backend they live on the SignalSource object and vanish with it; a
+	// backend that keeps them as records of their own must remove them here, or
+	// every source name ever used leaves two behind. Delete of a record that is
+	// not there is not an error.
+	if err := r.Cooldowns.Delete(ctx, state.Key(name)); err != nil {
+		return fmt.Errorf("remove the cooldown window of source %q: %w", name, err)
+	}
+	if r.Receipts != nil {
+		if err := r.Receipts.Delete(ctx, state.Key(name)); err != nil {
+			return fmt.Errorf("remove the receipt counters of source %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // releaseSignal decides one signal on the version read last and the source

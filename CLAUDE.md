@@ -32,5 +32,19 @@ UNIT then SYSTEM TESTS before it (or one ticked line saying why the tier
 doesn't apply). Enforced by a `PreToolUse` hook refusing `openspec archive`
 while unticked — see `.claude/rules/documentation.md`.
 
+**ALL FUNCTIONALITY IS COVERED BY TESTS** — a gap is a defect to fix, never
+a limit to document.
+
+| Tier | Covers | Required |
+|---|---|---|
+| Unit | every function and error branch a change touches | ALWAYS |
+| Conformance | behaviour a contract promises to more than one implementation (state backends, adapters, runtimes) | WHERE APPLICABLE |
+| System | critical paths a cluster decides (`test/system/`) | OPTIONAL |
+| e2e | UI paths in a browser (`e2e-live`) | OPTIONAL |
+
+A test that cannot fail against the old code proves nothing, so show it
+failing first. Skipping a required tier is the user's call, never mine, and
+the PR says so. See `docs/testing.md`.
+
 **The published site carries its own context** — `docs/CLAUDE.md` plus
 `docs/.claude/`, loaded on demand under `docs/`, never at launch.

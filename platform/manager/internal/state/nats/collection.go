@@ -29,6 +29,21 @@ type collection[T any] struct {
 	js         jetstream.JetStream
 	bucket     string // the scoped bucket name, read only by Watch (rawwatch.go)
 	streamName string // "KV_<bucket>" — the stream backing kv, read by latestSeq and Watch
+
+	// onRemoved runs after a record is really gone (deleted outright, or
+	// released from its last finalizer), so what the record owned outside
+	// this bucket goes with it. Nil for a kind that owns nothing elsewhere.
+	// Its failure is not the caller's: the record is already gone, a retry of
+	// Delete would find nothing to do, and the orphan sweep (cascade.go) is the
+	// net.
+	onRemoved func(ctx context.Context, key state.Key) error
+}
+
+// removed calls onRemoved, if set.
+func (c *collection[T]) removed(ctx context.Context, key state.Key) {
+	if c.onRemoved != nil {
+		_ = c.onRemoved(ctx, key)
+	}
 }
 
 // newCollection opens a collection over an already-bootstrapped bucket. js,
@@ -147,6 +162,7 @@ func (c *collection[T]) Update(ctx context.Context, key state.Key, rev state.Rev
 		if err := c.kv.Delete(ctx, wk, jetstream.LastRevision(revUint)); err != nil {
 			return "", c.conflictOr(err, "release", key)
 		}
+		c.removed(ctx, key)
 		return "", nil
 	}
 
@@ -220,6 +236,7 @@ func (c *collection[T]) Delete(ctx context.Context, key state.Key) error {
 			if err := c.kv.Delete(ctx, wk); err != nil {
 				return fmt.Errorf("nats: delete %s %q: %w", c.layout.Decl.Name, key, err)
 			}
+			c.removed(ctx, key)
 			return nil
 		}
 		if cur.DeletionRequestedAt != nil {
@@ -249,6 +266,7 @@ func (c *collection[T]) DeleteAt(ctx context.Context, key state.Key, rev state.R
 		if err := c.kv.Delete(ctx, wk, jetstream.LastRevision(entry.Revision())); err != nil {
 			return c.conflictOr(err, "deleteAt", key)
 		}
+		c.removed(ctx, key)
 		return nil
 	}
 	if cur.DeletionRequestedAt != nil {
