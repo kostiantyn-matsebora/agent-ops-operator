@@ -234,7 +234,7 @@ Playwright. Each item also names what is still owed to a real run.
 - [x] 5.15 Cover `internal/state/nats` (96%), the `cmd/manager` wiring, a replica that is not the leader, and the conversation stream over `nats` carrying a close, a read mark and an archive.
 - [x] 5.16 Console stream resilience: the state streams write a keep-alive, the console drops a silent stream and the cache relists, resumes from the last revision after a clean close. Unit tests on both sides.
 - [x] 5.17 System test written: `test/system/state_stream_restart_test.go` takes a listed revision, rolls the manager, and requires the stream opened from it to deliver a close with no resync. Retention is not a system test: a system run cannot see one conversation's runs or blobs in the state server, so that path is held by the unit, envtest and conformance tiers against a real nats server.
-- [ ] 5.18 Run 5.17 and `e2e-live/34-stream-survives-manager-restart.spec.ts` on the pack's cluster (`system-smoke.yml`). Both are written and typecheck or vet clean, neither has run yet.
+- [x] 5.18 5.17 ran on a fresh k3d cluster and passes, and fails with the manager fix reverted ("the new manager refused the revision a listing returned"). The pack's conversation helpers now read through `/state`, because under `nats` there is no Conversation object to read, and `TestConsolePlainConversationBulkCloseAndDelete` passes on it. Still to run on a cluster: `e2e-live/34-stream-survives-manager-restart.spec.ts`, and the rest of the pack's lanes that write to the Kubernetes API.
 
 ## 6. Documentation
 

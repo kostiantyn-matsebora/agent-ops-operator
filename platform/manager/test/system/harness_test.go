@@ -227,6 +227,8 @@ func openHarnessEnv(cluster *Cluster, k *Kube, values *InstallValues, artifact s
 	if e.Manager, err = cluster.Forward(Namespace, "svc/agentops-manager", 8080); err != nil {
 		return nil, fmt.Errorf("forward manager: %w", err)
 	}
+	// Conversations are read through /state, which both backends serve.
+	k.StateURL, k.StateToken = e.Manager.URL(), values.AdapterToken
 	if e.Console, err = cluster.Forward(Namespace, "svc/agentops-adapter-console", 8080); err != nil {
 		return nil, fmt.Errorf("forward console: %w", err)
 	}

@@ -4,7 +4,11 @@ package system
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +19,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -32,6 +37,14 @@ type Kube struct {
 	Clientset *kubernetes.Clientset
 	Namespace string
 	Scheme    *runtime.Scheme
+
+	// StateURL and StateToken, once set, make Conversation and Conversations
+	// read through the manager's /state surface. That surface is the one place
+	// both backends serve alike: under the nats backend there is no
+	// Conversation object in the Kubernetes API to read, so a helper that went
+	// there would see nothing.
+	StateURL   string
+	StateToken string
 }
 
 // NewKube builds the client from a kubeconfig.
@@ -145,6 +158,13 @@ func (k *Kube) Pods(ctx context.Context, selector string) ([]corev1.Pod, error) 
 
 // Conversation reads one conversation.
 func (k *Kube) Conversation(ctx context.Context, name string) (*agentopsv1alpha1.Conversation, error) {
+	if k.StateURL != "" {
+		var w stateConversation
+		if err := k.stateGet(ctx, "/state/conversations/"+name, &w); err != nil {
+			return nil, err
+		}
+		return w.object(k.Namespace), nil
+	}
 	var c agentopsv1alpha1.Conversation
 	if err := k.Get(ctx, types.NamespacedName{Namespace: k.Namespace, Name: name}, &c); err != nil {
 		return nil, err
@@ -154,6 +174,19 @@ func (k *Kube) Conversation(ctx context.Context, name string) (*agentopsv1alpha1
 
 // Conversations lists them all.
 func (k *Kube) Conversations(ctx context.Context) ([]agentopsv1alpha1.Conversation, error) {
+	if k.StateURL != "" {
+		var out struct {
+			Items []stateConversation `json:"items"`
+		}
+		if err := k.stateGet(ctx, "/state/conversations", &out); err != nil {
+			return nil, err
+		}
+		items := make([]agentopsv1alpha1.Conversation, 0, len(out.Items))
+		for i := range out.Items {
+			items = append(items, *out.Items[i].object(k.Namespace))
+		}
+		return items, nil
+	}
 	var list agentopsv1alpha1.ConversationList
 	if err := k.List(ctx, &list, client.InNamespace(k.Namespace)); err != nil {
 		return nil, err
@@ -231,4 +264,46 @@ func ensure(ctx context.Context, k *Kube, obj client.Object) error {
 		return nil
 	}
 	return err
+}
+
+// stateConversation is the manager's /state wire shape of a conversation. Its
+// spec and status are the API types themselves, so a reader written against
+// the Kubernetes object reads this unchanged.
+type stateConversation struct {
+	Name      string                              `json:"name"`
+	ID        string                              `json:"id"`
+	CreatedAt time.Time                           `json:"createdAt"`
+	Spec      agentopsv1alpha1.ConversationSpec   `json:"spec"`
+	Status    agentopsv1alpha1.ConversationStatus `json:"status"`
+}
+
+func (w stateConversation) object(namespace string) *agentopsv1alpha1.Conversation {
+	c := &agentopsv1alpha1.Conversation{Spec: w.Spec, Status: w.Status}
+	c.Name, c.Namespace, c.UID = w.Name, namespace, types.UID(w.ID)
+	c.CreationTimestamp = metav1.NewTime(w.CreatedAt)
+	return c
+}
+
+// stateGet reads one /state path into out. A 404 comes back as the same
+// NotFound error the Kubernetes client gives, so callers need not know which
+// source answered.
+func (k *Kube) stateGet(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, k.StateURL+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+k.StateToken)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return apierrors.NewNotFound(schema.GroupResource{Group: "agentops.dev", Resource: "conversations"}, path)
+	case resp.StatusCode/100 != 2:
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return fmt.Errorf("GET %s: %d %s", path, resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }

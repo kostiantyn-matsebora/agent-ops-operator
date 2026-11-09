@@ -31,11 +31,10 @@ func TestStateStreamResumesFromAListedRevisionAcrossAManagerRollout(t *testing.T
 	auth := bearerPrefix + e.Values.AdapterToken
 	revision := listedRevision(t, e, auth)
 
-	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "rollout", "restart", "deployment/agentops-manager"); err != nil {
-		t.Fatalf("rollout restart: %v\n%s", err, out)
-	}
-	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "rollout", "status", "deployment/agentops-manager", "--timeout=8m"); err != nil {
-		t.Fatalf("rollout status: %v\n%s", err, out)
+	// The pack's own restart: a plain rollout restart wedges on this
+	// one-node cluster's hard anti-affinity.
+	if err := restartManagerSchedulable(ctx, e.Cluster); err != nil {
+		t.Fatalf("restart the manager: %v", err)
 	}
 
 	sctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
