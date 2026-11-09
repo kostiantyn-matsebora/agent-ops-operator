@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -270,7 +271,14 @@ func TestAdapterStateAndChannelListing(t *testing.T) {
 	mkChannel(t, "chan-state", "tg-state")
 	srv := apiServer()
 
+	// The listing reads through the cache-backed client, so a Channel created a
+	// moment ago may not be visible yet — poll rather than race the informer.
 	rec := adapterReq(srv, "GET", "/channel/channels?adapter=tg-state", nil, "test-adapter-token")
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline) &&
+		!strings.Contains(rec.Body.String(), `"chan-state"`); {
+		time.Sleep(100 * time.Millisecond)
+		rec = adapterReq(srv, "GET", "/channel/channels?adapter=tg-state", nil, "test-adapter-token")
+	}
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"chan-state"`) || !strings.Contains(rec.Body.String(), `"chatId":"-100"`) {
 		t.Fatalf("channel listing: %d %s", rec.Code, rec.Body.String())
 	}
