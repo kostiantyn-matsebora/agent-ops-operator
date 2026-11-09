@@ -881,10 +881,33 @@ func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *state.
 		logger.Info("close-topic grace expired; releasing the conversation with threads still open",
 			"conversation", conv.Name)
 	}
+	// The conversation is about to go. What it owns outside its record goes
+	// with it, by the manager's own act: nothing may depend on a garbage
+	// collector, which envtest does not run and a state store need not have.
+	if err := r.releaseInputBlobs(ctx, conv); err != nil {
+		return ctrl.Result{}, err
+	}
 	err := state.Patch(ctx, r.Conversations, conv, func(c *state.ConversationRecord) {
 		c.Finalizers = slices.DeleteFunc(c.Finalizers, func(f string) bool { return f == FinalizerCloseTopics })
 	})
 	return ctrl.Result{}, state.IgnoreNotFound(err)
+}
+
+// releaseInputBlobs deletes the out-of-line body of every input still queued
+// on conv. An input already consumed had its blob removed when it was pruned
+// (pruneProcessed), so what the queue still names is exactly what a
+// deleted conversation would otherwise leave behind. Deleting a blob that is
+// already gone is not an error, so a retry after a partial pass is safe.
+func (r *ConversationReconciler) releaseInputBlobs(ctx context.Context, conv *state.ConversationRecord) error {
+	for _, in := range conv.Inputs {
+		if in.PayloadRef == "" {
+			continue
+		}
+		if err := r.Blobs.Delete(ctx, in.PayloadRef); err != nil {
+			return fmt.Errorf("release the blob of input %q of %q: %w", in.ID, conv.Name, err)
+		}
+	}
+	return nil
 }
 
 // liveRuntimePods lists the runtime pods that consume capacity: Running or
