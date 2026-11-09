@@ -255,11 +255,43 @@ func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// The proxy reads the body to forward it, and a failed attempt leaves
+		// nothing to read. A request that falls through to the local handler
+		// must still carry its body, or a POST reaches its handler empty and
+		// is refused as the caller's mistake while the real cause was a leader
+		// mid-rollout. Bodies on this surface are small JSON, so hold a copy.
+		held, restore := holdBody(r)
 		if s.proxyToLeader(w, r) {
 			return
 		}
+		restore(held)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// maxHeldBody bounds the copy kept for a fall-through. A body past it cannot
+// be replayed, and is forwarded as it comes.
+const maxHeldBody = 1 << 20
+
+// holdBody reads r's body into memory so it can be forwarded and, if the
+// forward fails, handed to the local handler. It returns the bytes and a
+// function that restores them onto r. A request with no body, or one too large
+// to hold, is left alone.
+func holdBody(r *http.Request) ([]byte, func([]byte)) {
+	if r.Body == nil || r.Body == http.NoBody {
+		return nil, func([]byte) {}
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, maxHeldBody+1))
+	if err != nil || len(data) > maxHeldBody {
+		// Put back what was read ahead of the rest, so the stream is whole.
+		r.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(data), r.Body), r.Body}
+		return nil, func([]byte) {}
+	}
+	r.Body = io.NopCloser(bytes.NewReader(data))
+	return data, func(b []byte) { r.Body = io.NopCloser(bytes.NewReader(b)) }
 }
 
 // anyAdapterAuth accepts the master token or ANY derived adapter token, channel
