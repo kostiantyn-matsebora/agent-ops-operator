@@ -17,6 +17,16 @@ import (
 type scriptedKV struct {
 	jetstream.KeyValue
 	get, create, update, del, purge func(key string) error
+	keys                            func(filter string) error
+}
+
+func (s *scriptedKV) ListKeysFiltered(ctx context.Context, filters ...string) (jetstream.KeyLister, error) {
+	if s.keys != nil {
+		if err := s.keys(strings.Join(filters, ",")); err != nil {
+			return nil, err
+		}
+	}
+	return s.KeyValue.ListKeysFiltered(ctx, filters...)
 }
 
 func (s *scriptedKV) Get(ctx context.Context, key string) (jetstream.KeyValueEntry, error) {
