@@ -282,3 +282,53 @@ func TestCacheSlowSubscriberIsResyncedNotBlocked(t *testing.T) {
 		t.Fatal("overflow must surface as RESYNC")
 	}
 }
+
+// A stream the server closes cleanly (a rollout draining) resumes from the
+// last revision the cache saw, with no relist: nothing was missed, and a
+// relist per reconnect would flood the manager.
+func TestCacheResumesFromTheLastRevisionAfterACleanClose(t *testing.T) {
+	src := &fakeSource{
+		lists: []listResult{{objs: []*Object{obj("pipelines", "a", "1", "{}", "")}, rv: "10"}},
+		watches: []watchScript{
+			{frames: []frame{{"ADDED", obj("pipelines", "b", "15", "{}", "")}}}, // then the stream ends
+			{block: true},
+		},
+	}
+	c := NewCache(src, []string{"pipelines"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Run(ctx)
+
+	waitFor(t, func() bool {
+		starts := src.watchStarts()
+		return len(starts) >= 2 && starts[1] == "15"
+	})
+	src.mu.Lock()
+	lists := src.listCalls
+	src.mu.Unlock()
+	if lists != 1 {
+		t.Fatalf("a clean close relisted (%d lists); it must resume from the last revision", lists)
+	}
+}
+
+// A stream that went silent may have missed anything, so the cache relists
+// before it resumes.
+func TestCacheRelistsAfterAStreamGoesSilent(t *testing.T) {
+	src := &fakeSource{
+		lists: []listResult{
+			{objs: []*Object{obj("pipelines", "old", "1", "{}", "")}, rv: "10"},
+			{objs: []*Object{obj("pipelines", "fresh", "2", "{}", "")}, rv: "30"},
+		},
+		watches: []watchScript{{err: errStreamIdle}, {block: true}},
+	}
+	c := NewCache(src, []string{"pipelines"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Run(ctx)
+
+	waitFor(t, func() bool { return c.Get("pipelines", "fresh") != nil && c.Get("pipelines", "old") == nil })
+	waitFor(t, func() bool {
+		starts := src.watchStarts()
+		return len(starts) >= 2 && starts[1] == "30"
+	})
+}
