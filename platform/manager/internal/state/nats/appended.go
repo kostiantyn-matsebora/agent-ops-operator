@@ -305,9 +305,14 @@ func (a *appended[P, T]) watchStart(ctx context.Context, resume state.Revision) 
 		}
 		return parentSeq, items.CachedInfo().State.LastSeq, nil
 	}
-	p, i, ok := strings.Cut(string(resume), ".")
-	if !ok {
-		return 0, 0, fmt.Errorf("nats: %q is not a resume this backend minted for a feed with items (want <parent>.<items>)", resume)
+	p, i, paired := strings.Cut(string(resume), ".")
+	if !paired {
+		// A listing hands back a record's own revision, which is a parent
+		// sequence alone. Resume the parent from it and replay the items from
+		// the start of their stream: a put the reader already holds is
+		// harmless, one it never saw is not.
+		parentSeq, err = parseRevision(resume)
+		return parentSeq, 0, err
 	}
 	if parentSeq, err = parseRevision(state.Revision(p)); err != nil {
 		return 0, 0, err

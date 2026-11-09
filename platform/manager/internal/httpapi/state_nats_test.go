@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,7 +21,8 @@ import (
 // /state/conversations/stream. Behind the nats backend each of those is a
 // write to the conversation record alone, touching no run, and each must still
 // arrive as a put carrying the new value.
-func TestTheConversationStreamOverNatsCarriesCloseReadAndArchive(t *testing.T) {
+func natsBackendForTest(t *testing.T) (context.Context, *natsstate.Backend) {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "agentops-http-nats-*")
 	if err != nil {
 		t.Fatal(err)
@@ -44,12 +46,18 @@ func TestTheConversationStreamOverNatsCarriesCloseReadAndArchive(t *testing.T) {
 	}
 	t.Cleanup(conn.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	t.Cleanup(cancel)
 	backend, err := natsstate.OpenStores(ctx, conn, "http")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(backend.Close)
+
+	return ctx, backend
+}
+
+func TestTheConversationStreamOverNatsCarriesCloseReadAndArchive(t *testing.T) {
+	ctx, backend := natsBackendForTest(t)
 
 	s := &Server{Conversations: backend.Stores.Conversations, Runs: backend.Stores.Runs}
 	ts := httptest.NewServer(http.HandlerFunc(s.handleStateConversationsStream))
@@ -140,5 +148,44 @@ func TestAQuietStreamWritesKeepAlives(t *testing.T) {
 	s.streamSSE(rec, httptest.NewRequest("GET", "/state/conversations/stream", nil).WithContext(ctx), open)
 	if n := strings.Count(rec.Body.String(), ": keep-alive"); n < 3 {
 		t.Fatalf("a silent stream wrote %d keep-alives in 400ms, want several: %q", n, rec.Body.String())
+	}
+}
+
+// The console's whole recovery is: list, keep the revision, open the stream
+// from it. If the stream answers resync to that, the console relists and
+// retries at once, for ever.
+func TestAStreamOpenedFromTheListedRevisionIsNotToldToResync(t *testing.T) {
+	ctx, backend := natsBackendForTest(t)
+	key := state.Key("listed-1")
+	if _, err := backend.Stores.Conversations.Create(ctx, key, state.ConversationRecord{Name: "listed-1", Phase: "Active"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.Stores.Runs.Append(ctx, key, state.Run{RunID: "r1"}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{Conversations: backend.Stores.Conversations, Runs: backend.Stores.Runs}
+
+	var rev string
+	eventually := time.Now().Add(10 * time.Second)
+	for rev == "" && time.Now().Before(eventually) {
+		rec := httptest.NewRecorder()
+		s.handleStateConversationsList(rec, httptest.NewRequest("GET", "/state/conversations", nil))
+		var out struct {
+			Revision string `json:"revision"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		rev = out.Revision
+		time.Sleep(10 * time.Millisecond)
+	}
+	if rev == "" {
+		t.Fatal("the listing never carried a revision")
+	}
+
+	sctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	rec := httptest.NewRecorder()
+	s.handleStateConversationsStream(rec, httptest.NewRequest("GET", "/state/conversations/stream?since="+rev, nil).WithContext(sctx))
+	if strings.Contains(rec.Body.String(), "event: resync") {
+		t.Fatalf("the stream refused the revision the listing returned (%q): %q", rev, rec.Body.String())
 	}
 }

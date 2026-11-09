@@ -487,13 +487,18 @@ func TestAnExpiredRecordIsGoneToWriters(t *testing.T) {
 func TestResumeTokensThisBackendDidNotMintAreRefused(t *testing.T) {
 	b := openBackend(t, sharedTestConn(t), newScope(t))
 	ctx := shortCtx(t)
-	for _, resume := range []state.Revision{"junk", "5", "x.1", "1.x", "1.2.3"} {
+	for _, resume := range []state.Revision{"junk", "x.1", "1.x", "1.2.3"} {
 		if _, err := b.Stores.Runs.WatchWithItems(ctx, resume); err == nil {
 			t.Errorf("WatchWithItems resumed from %q", resume)
 		}
 	}
 	if _, err := b.Stores.Conversations.Watch(ctx, "junk"); err == nil {
 		t.Error("Watch resumed from a token that is not a sequence")
+	}
+	// A bare sequence is what a listing returns as a record's revision, and a
+	// reader resumes from exactly that: it must be accepted.
+	if _, err := b.Stores.Runs.WatchWithItems(ctx, "5"); err != nil {
+		t.Errorf("WatchWithItems refused a bare sequence, which is what a listing returns: %v", err)
 	}
 }
 

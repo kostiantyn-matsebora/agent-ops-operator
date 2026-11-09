@@ -101,6 +101,9 @@ func RunAppended[P, T any](t *testing.T, open func() AppendedOpen[P, T], fx Appe
 	}
 
 	t.Run("WatchWithItemsCarriesTheItemsOfEveryPut", func(t *testing.T) { testWatchWithItems(t, open(), fx) })
+	if fx.AllIndex.Name() != "" {
+		t.Run("WatchWithItemsResumesFromAListedRevision", func(t *testing.T) { testWatchWithItemsResumesFromList(t, open(), fx) })
+	}
 	if fx.EditParent != nil && fx.ParentChanged != nil {
 		t.Run("WatchWithItemsCarriesAParentWriteThatTouchesNoItem", func(t *testing.T) { testWatchWithItemsParentOnly(t, open(), fx) })
 		t.Run("WatchWithItemsResumesStrictlyAfterAnEvent", func(t *testing.T) { testWatchWithItemsResume(t, open(), fx) })
@@ -563,4 +566,46 @@ func eventually(t *testing.T, what string, ok func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("never: %s", what)
+}
+
+// testWatchWithItemsResumesFromAListedRevision is the reader's whole recovery
+// path: list, keep the revision the listing gave, open a feed from it. A
+// backend that mints a different token for a feed than for a listing refuses
+// every resume, and the reader relists for ever.
+func testWatchWithItemsResumesFromList[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	key := createParent(t, o, fx, "resume-from-list")
+	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
+		t.Fatal(err)
+	}
+	var listed state.Revision
+	eventually(t, "the listing carries the parent", func() bool {
+		all, err := o.Items.ListWithItems(ctx, fx.AllIndex, fx.AllValue)
+		if err != nil || len(all) == 0 {
+			return false
+		}
+		listed = all[0].Revision
+		return true
+	})
+	feed, err := o.Items.WatchWithItems(ctx, listed)
+	if err != nil {
+		t.Fatalf("a feed opened from the revision a listing returned (%q) was refused: %v", listed, err)
+	}
+	if err := o.Items.Append(ctx, key, fx.NewItem("after-list")); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		select {
+		case ev, ok := <-feed:
+			if !ok {
+				t.Fatal("the feed closed instead of delivering the change made after the listing")
+			}
+			if ev.Type == state.EventPut && ev.Key == key && len(ev.Record.Items) == 2 {
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("the change made after the listing never arrived")
+		}
+	}
 }
