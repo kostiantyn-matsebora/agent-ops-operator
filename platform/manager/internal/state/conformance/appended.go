@@ -11,6 +11,9 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
+// watchWithItemsFailed is the failure format the WatchWithItems cases share.
+const watchWithItemsFailed = "WatchWithItems: %v"
+
 // AppendedOpen pairs one fresh, isolated instance of the parent's Collection
 // with the Appended handle over the very same backend, so a scenario can
 // create a parent and then grow its items under one capability pair —
@@ -349,7 +352,7 @@ func testWatchWithItems[P, T any](t *testing.T, o AppendedOpen[P, T], fx Appende
 	key := createParent(t, o, fx, "watch-with-items")
 	events, err := o.Items.WatchWithItems(ctx, "")
 	if err != nil {
-		t.Fatalf("WatchWithItems: %v", err)
+		t.Fatalf(watchWithItemsFailed, err)
 	}
 	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
 		t.Fatal(err)
@@ -381,7 +384,7 @@ func testWatchWithItemsParentOnly[P, T any](t *testing.T, o AppendedOpen[P, T], 
 	key := createParent(t, o, fx, "watch-parent-only")
 	events, err := o.Items.WatchWithItems(ctx, "")
 	if err != nil {
-		t.Fatalf("WatchWithItems: %v", err)
+		t.Fatalf(watchWithItemsFailed, err)
 	}
 	editParent(t, o, fx, key)
 
@@ -410,7 +413,7 @@ func testWatchWithItemsResume[P, T any](t *testing.T, o AppendedOpen[P, T], fx A
 	key := createParent(t, o, fx, "watch-resume")
 	first, err := o.Items.WatchWithItems(ctx, "")
 	if err != nil {
-		t.Fatalf("WatchWithItems: %v", err)
+		t.Fatalf(watchWithItemsFailed, err)
 	}
 	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
 		t.Fatal(err)

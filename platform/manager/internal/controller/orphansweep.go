@@ -69,8 +69,16 @@ func (s *OrphanSweeper) Start(ctx context.Context) error {
 
 // Sweep makes one pass and returns how many objects it deleted.
 func (s *OrphanSweeper) Sweep(ctx context.Context, now time.Time) (int, error) {
-	deleted := 0
+	pods, err := s.sweepPods(ctx, now)
+	if err != nil {
+		return pods, err
+	}
+	cms, err := s.sweepConfigMaps(ctx, now)
+	return pods + cms, err
+}
 
+func (s *OrphanSweeper) sweepPods(ctx context.Context, now time.Time) (int, error) {
+	deleted := 0
 	pods := &corev1.PodList{}
 	if err := s.Client.List(ctx, pods, client.InNamespace(s.Namespace),
 		client.HasLabels{runtimepod.LabelConversation}); err != nil {
@@ -81,18 +89,19 @@ func (s *OrphanSweeper) Sweep(ctx context.Context, now time.Time) (int, error) {
 		if now.Sub(pod.CreationTimestamp.Time) < orphanMinAge {
 			continue
 		}
-		gone, err := s.recordAbsent(ctx, pod.Labels[runtimepod.LabelConversation])
+		ok, err := s.deleteIfOrphaned(ctx, pod, pod.Labels[runtimepod.LabelConversation], client.GracePeriodSeconds(0))
 		if err != nil {
 			return deleted, err
 		}
-		if gone {
-			if err := s.Client.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
-				return deleted, err
-			}
+		if ok {
 			deleted++
 		}
 	}
+	return deleted, nil
+}
 
+func (s *OrphanSweeper) sweepConfigMaps(ctx context.Context, now time.Time) (int, error) {
+	deleted := 0
 	cms := &corev1.ConfigMapList{}
 	if err := s.Client.List(ctx, cms, client.InNamespace(s.Namespace)); err != nil {
 		return deleted, err
@@ -103,18 +112,28 @@ func (s *OrphanSweeper) Sweep(ctx context.Context, now time.Time) (int, error) {
 		if !strings.HasPrefix(cm.Name, prefix) || now.Sub(cm.CreationTimestamp.Time) < orphanMinAge {
 			continue
 		}
-		gone, err := s.recordAbsent(ctx, strings.TrimPrefix(cm.Name, prefix))
+		ok, err := s.deleteIfOrphaned(ctx, cm, strings.TrimPrefix(cm.Name, prefix))
 		if err != nil {
 			return deleted, err
 		}
-		if gone {
-			if err := s.Client.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
-				return deleted, err
-			}
+		if ok {
 			deleted++
 		}
 	}
 	return deleted, nil
+}
+
+// deleteIfOrphaned deletes obj when the named conversation has no record, and
+// reports whether it did.
+func (s *OrphanSweeper) deleteIfOrphaned(ctx context.Context, obj client.Object, conversation string, opts ...client.DeleteOption) (bool, error) {
+	gone, err := s.recordAbsent(ctx, conversation)
+	if err != nil || !gone {
+		return false, err
+	}
+	if err := s.Client.Delete(ctx, obj, opts...); err != nil && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	return true, nil
 }
 
 // recordAbsent is true only when the store says, definitely, that no record
