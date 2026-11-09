@@ -21,6 +21,17 @@ contract conformance. The system tier does not gate pull requests.
 It is a different suite from `e2e-live` below. A rendering check against a
 mocked backend, not a behavior proof against a real one.
 
+| Tier | Required |
+|---|---|
+| Unit | ALWAYS, every function and error branch a change touches |
+| Conformance | WHERE APPLICABLE, behaviour a contract promises to more than one implementation |
+| System | OPTIONAL, critical paths a cluster decides (`test/system/`) |
+| e2e | OPTIONAL, UI paths in a browser (`e2e-live`) |
+
+A test that cannot fail against the old code proves nothing, so show it
+failing first. Skipping a required tier is the user's call, never the
+author's, and the pull request says so.
+
 **Every change declares its first and third tiers in its own task list.**
 `docs-task` in CI refuses to finish a change missing any of the three — see
 `CONTRIBUTING.md`.
