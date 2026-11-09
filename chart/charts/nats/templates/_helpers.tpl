@@ -91,6 +91,12 @@ spec:
             - nats://0.0.0.0:6222
             - --cluster_name
             - agentops-nats
+            # A JetStream cluster refuses to start without a server name,
+            # and each replica needs its OWN: the pod name, which the
+            # StatefulSet keeps stable across restarts (a changed name is a
+            # different peer to the Raft group).
+            - --server_name
+            - $(POD_NAME)
             - --routes
             - {{ include "nats.routes" . | quote }}
             # Kubernetes expands $(VAR) against THIS container's own env —
@@ -106,6 +112,10 @@ spec:
             - --pass
             - $(POD_NATS_PASSWORD)
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             - name: POD_NATS_USER
               valueFrom:
                 secretKeyRef:

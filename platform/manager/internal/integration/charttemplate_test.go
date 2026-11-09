@@ -3758,6 +3758,12 @@ func TestNatsBundleRendersByDefault(t *testing.T) {
 	if !strings.Contains(sts, "serviceName: agentops-nats-headless") {
 		t.Fatalf("StatefulSet must bind the headless Service:\n%s", sts)
 	}
+	// nats-server exits 1 ("jetstream cluster requires `server_name` to be
+	// set") without a per-replica name; the pod name is the stable one.
+	if !strings.Contains(sts, "--server_name") || !strings.Contains(sts, "$(POD_NAME)") ||
+		!strings.Contains(sts, "fieldPath: metadata.name") {
+		t.Fatalf("every replica must start with --server_name set from its own pod name:\n%s", sts)
+	}
 	for _, name := range []string{"agentops-nats-headless", "agentops-nats-client"} {
 		if findDocByKindAndMetaName(out, "Service", name) == "" {
 			t.Fatalf("Service %s not rendered", name)
