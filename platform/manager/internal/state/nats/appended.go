@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -230,68 +231,124 @@ func (a *appended[P, T]) ListWithItems(ctx context.Context, idx state.Index[P], 
 	return out, nil
 }
 
-// WatchWithItems watches the ITEMS bucket, not the parent: Append and Grow
-// only ever write there (design D-5), so a change the parent's own feed
-// would never see is exactly what this method exists to carry. Each item
-// event re-reads the current parent and its whole item list at delivery
-// time and emits one put keyed by the parent.
+// WatchWithItems merges the parent bucket's feed and the ITEMS bucket's into
+// one, and emits a put keyed by the parent for a write to EITHER. Append and
+// Grow write only the items bucket (design D-5), but a phase change, a close,
+// a read mark or a thread claim writes only the parent, and a consumer — the
+// console — needs every one of them. A feed over the items bucket alone drops
+// those silently: a conversation closed in the store stayed Idle on the
+// console for ever.
 //
-// A parent write that touches no item (a phase change with no run appended)
-// is not observed on this feed — a narrower contract than "the parent's
-// feed" literally reads, accepted here because nothing in the conformance
-// suite exercises it and a merged dual-subscription feed is multiples of
-// this method's own size for no scenario this change proves.
+// The two buckets keep separate sequences, so an Event's Resume is a pair,
+// "<parentSeq>.<itemsSeq>": the last sequence consumed from each. An empty
+// resume starts both at the tips of their streams, so even the first event
+// carries a resumable pair. A resume in any other shape is refused, which the
+// stream handler reads as "relist".
+//
+// Each event re-reads the current parent and its whole item list at delivery
+// time and emits one put, or a delete when the parent is gone. A write that
+// lands on both buckets delivers two puts, which a consumer applying them by
+// revision absorbs.
 func (a *appended[P, T]) WatchWithItems(ctx context.Context, resume state.Revision) (<-chan state.Event[state.WithItems[P, T]], error) {
-	raw, err := watchRaw(ctx, a.js, a.streamName, a.bucket, resume)
+	pSeq, iSeq, err := a.watchStart(ctx, resume)
 	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	pRaw, err := watchRaw(ctx, a.js, a.parent.streamName, a.parent.bucket, formatRevision(pSeq))
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("nats: watch %s parent: %w", a.decl.Name, err)
+	}
+	iRaw, err := watchRaw(ctx, a.js, a.streamName, a.bucket, formatRevision(iSeq))
+	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("nats: watch %s: %w", a.decl.Name, err)
 	}
 	out := make(chan state.Event[state.WithItems[P, T]])
-	go a.drainItemsWatch(ctx, raw, out)
+	go a.drainMergedWatch(ctx, cancel, pRaw, iRaw, pSeq, iSeq, out)
 	return out, nil
 }
 
-func (a *appended[P, T]) drainItemsWatch(ctx context.Context, raw <-chan kvEntry, out chan<- state.Event[state.WithItems[P, T]]) {
+// watchStart resolves a resume to the two sequences the feed starts after.
+func (a *appended[P, T]) watchStart(ctx context.Context, resume state.Revision) (parentSeq, itemsSeq uint64, err error) {
+	if resume == "" {
+		if parentSeq, err = a.parent.latestSeq(ctx); err != nil {
+			return 0, 0, err
+		}
+		items, err := a.js.Stream(ctx, a.streamName)
+		if err != nil {
+			return 0, 0, fmt.Errorf("nats: stream info %q: %w", a.streamName, err)
+		}
+		return parentSeq, items.CachedInfo().State.LastSeq, nil
+	}
+	p, i, ok := strings.Cut(string(resume), ".")
+	if !ok {
+		return 0, 0, fmt.Errorf("nats: %q is not a resume this backend minted for a feed with items (want <parent>.<items>)", resume)
+	}
+	if parentSeq, err = parseRevision(state.Revision(p)); err != nil {
+		return 0, 0, err
+	}
+	if itemsSeq, err = parseRevision(state.Revision(i)); err != nil {
+		return 0, 0, err
+	}
+	return parentSeq, itemsSeq, nil
+}
+
+func (a *appended[P, T]) drainMergedWatch(ctx context.Context, cancel context.CancelFunc, pRaw, iRaw <-chan kvEntry,
+	pSeq, iSeq uint64, out chan<- state.Event[state.WithItems[P, T]]) {
 	defer close(out)
+	defer cancel()
 	for {
+		var parent state.Key
+		parentDeleted := false
 		select {
 		case <-ctx.Done():
 			return
-		case entry, ok := <-raw:
+		case e, ok := <-pRaw:
 			if !ok {
 				return
 			}
-			ev, ok := a.translateItemEvent(ctx, entry)
-			if !ok {
+			pSeq = e.Revision
+			k, err := unwireKey(e.Key)
+			if err != nil {
 				continue
 			}
-			select {
-			case out <- ev:
-			case <-ctx.Done():
+			parent, parentDeleted = state.Key(k), e.IsDelete
+		case e, ok := <-iRaw:
+			if !ok {
 				return
 			}
+			iSeq = e.Revision
+			k, err := parentOfItemKey(e.Key)
+			if err != nil {
+				continue
+			}
+			parent = state.Key(k)
+		}
+		ev := a.mergedEvent(ctx, parent, parentDeleted, state.Revision(fmt.Sprintf("%d.%d", pSeq, iSeq)))
+		select {
+		case out <- ev:
+		case <-ctx.Done():
+			return
 		}
 	}
 }
 
-func (a *appended[P, T]) translateItemEvent(ctx context.Context, entry kvEntry) (state.Event[state.WithItems[P, T]], bool) {
-	parentRaw, err := parentOfItemKey(entry.Key)
-	if err != nil {
-		return state.Event[state.WithItems[P, T]]{}, false
+func (a *appended[P, T]) mergedEvent(ctx context.Context, parent state.Key, parentDeleted bool, resume state.Revision) state.Event[state.WithItems[P, T]] {
+	if parentDeleted {
+		return state.Event[state.WithItems[P, T]]{Type: state.EventDelete, Key: parent, Resume: resume}
 	}
-	parent := state.Key(parentRaw)
-	rev := formatRevision(entry.Revision)
 	rec, parentRev, items, err := a.GetWithItems(ctx, parent)
 	if err != nil {
 		// The parent is gone (or raced a delete): deliver a delete so a
-		// consumer evicts whatever it held for this key, the same meaning
-		// an items-bucket delete/purge already carries.
-		return state.Event[state.WithItems[P, T]]{Type: state.EventDelete, Key: parent, Resume: rev}, true
+		// consumer evicts whatever it held for this key.
+		return state.Event[state.WithItems[P, T]]{Type: state.EventDelete, Key: parent, Resume: resume}
 	}
 	return state.Event[state.WithItems[P, T]]{
 		Type: state.EventPut, Key: parent, Revision: parentRev,
-		Record: state.WithItems[P, T]{Record: rec, Revision: parentRev, Items: items}, Resume: rev,
-	}, true
+		Record: state.WithItems[P, T]{Record: rec, Revision: parentRev, Items: items}, Resume: resume,
+	}
 }
 
 var _ state.Appended[struct{}, struct{}] = (*appended[struct{}, struct{}])(nil)

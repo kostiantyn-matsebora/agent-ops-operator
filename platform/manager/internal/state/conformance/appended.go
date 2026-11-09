@@ -43,6 +43,12 @@ type AppendedFixture[P, T any] struct {
 	// KeyOf reads the key a listed parent belongs under, needed only by that
 	// same scenario.
 	KeyOf func(rec P) state.Key
+	// EditParent changes the parent in a way ParentChanged can read back,
+	// without touching any item. Needed only by the parent-only-write
+	// scenario; nil skips it.
+	EditParent func(rec *P)
+	// ParentChanged reports whether rec carries the change EditParent made.
+	ParentChanged func(rec P) bool
 }
 
 // RunAppended executes every state.Appended[P, T] scenario against a fresh
@@ -74,6 +80,10 @@ func RunAppended[P, T any](t *testing.T, open func() AppendedOpen[P, T], fx Appe
 	}
 
 	t.Run("WatchWithItemsCarriesTheItemsOfEveryPut", func(t *testing.T) { testWatchWithItems(t, open(), fx) })
+	if fx.EditParent != nil && fx.ParentChanged != nil {
+		t.Run("WatchWithItemsCarriesAParentWriteThatTouchesNoItem", func(t *testing.T) { testWatchWithItemsParentOnly(t, open(), fx) })
+		t.Run("WatchWithItemsResumesStrictlyAfterAnEvent", func(t *testing.T) { testWatchWithItemsResume(t, open(), fx) })
+	}
 }
 
 func createParent[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T], name string) state.Key {
@@ -358,5 +368,100 @@ func testWatchWithItems[P, T any](t *testing.T, o AppendedOpen[P, T], fx Appende
 		case <-deadline:
 			t.Fatal("never observed a put carrying the appended item")
 		}
+	}
+}
+
+// WatchWithItems is the parent's feed (store.go): a change to the parent alone
+// — a close, a read mark, a phase — must reach it, not only a change to an
+// item. A backend watching only the items missed exactly these, and a consumer
+// showed a conversation closed in the store as still open for ever.
+func testWatchWithItemsParentOnly[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	key := createParent(t, o, fx, "watch-parent-only")
+	events, err := o.Items.WatchWithItems(ctx, "")
+	if err != nil {
+		t.Fatalf("WatchWithItems: %v", err)
+	}
+	editParent(t, o, fx, key)
+
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatal("WatchWithItems closed before carrying the parent write")
+			}
+			if ev.Type == state.EventPut && ev.Key == key && fx.ParentChanged(ev.Record.Record) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("never observed a put for a write that changed the parent and no item")
+		}
+	}
+}
+
+// A feed resumed from an event's own Resume continues strictly after it: the
+// event it was resumed from is not delivered again, and a write made after
+// the disconnect is. The resume is whatever the backend minted, opaque here.
+func testWatchWithItemsResume[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	key := createParent(t, o, fx, "watch-resume")
+	first, err := o.Items.WatchWithItems(ctx, "")
+	if err != nil {
+		t.Fatalf("WatchWithItems: %v", err)
+	}
+	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
+		t.Fatal(err)
+	}
+	var resume state.Revision
+	deadline := time.After(10 * time.Second)
+	for resume == "" {
+		select {
+		case ev, ok := <-first:
+			if !ok {
+				t.Fatal("feed closed before delivering the append")
+			}
+			if ev.Type == state.EventPut && ev.Key == key {
+				resume = ev.Resume
+			}
+		case <-deadline:
+			t.Fatal("never observed the append")
+		}
+	}
+	cancel()
+
+	// The parent changes while no feed is open; a resumed feed must carry it.
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	editParent(t, o, fx, key)
+	second, err := o.Items.WatchWithItems(ctx2, resume)
+	if err != nil {
+		t.Fatalf("resume from %q: %v", resume, err)
+	}
+	deadline = time.After(10 * time.Second)
+	for {
+		select {
+		case ev, ok := <-second:
+			if !ok {
+				t.Fatal("resumed feed closed before delivering the write made while disconnected")
+			}
+			if ev.Type == state.EventPut && ev.Key == key && fx.ParentChanged(ev.Record.Record) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("a resumed feed never delivered the parent write made after the resume point")
+		}
+	}
+}
+
+func editParent[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T], key state.Key) {
+	t.Helper()
+	if _, err := state.Mutate(context.Background(), o.Parent, key, func(p *P) error {
+		fx.EditParent(p)
+		return nil
+	}); err != nil {
+		t.Fatalf("edit the parent: %v", err)
 	}
 }
