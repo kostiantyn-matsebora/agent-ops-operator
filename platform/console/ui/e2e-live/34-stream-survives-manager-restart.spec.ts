@@ -69,7 +69,16 @@ async function run(browser: import('@playwright/test').Browser) {
   } catch (e) {
     // The close was accepted and did nothing. Say what each manager saw, while
     // the pods that served it are still the live ones.
-    throw new Error(`/close of ${name} was not applied. Manager log lines:\n${managerLogLines(name)}\n${(e as Error).message}`)
+    const view = await actor.evaluate(async (n) => {
+      const r = await fetch(`/api/conversations/${n}`)
+      const j = await r.json()
+      return JSON.stringify({ status: r.status, thread: j.conversation?.consoleThread, joined: j.conversation?.joined, phase: j.conversation?.phase })
+    }, name)
+    const stored = listConversations().find((c) => c.metadata.name === name)
+    const storedThreads = JSON.stringify((stored?.status as { threads?: unknown } | undefined)?.threads ?? null)
+    throw new Error(
+      `/close of ${name} was not applied. The console sees ${view}. The store holds threads ${storedThreads}.\nManager log lines:\n${managerLogLines(name)}\n${(e as Error).message}`,
+    )
   }
 
   // The never-reloaded page sees it.
