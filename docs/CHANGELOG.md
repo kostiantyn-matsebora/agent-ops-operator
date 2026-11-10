@@ -38,6 +38,11 @@ for the source and the reference material beside this file.
 - An upgrade from `kube` imports every conversation, signal, cooldown window
   and receipt counter into `nats` on the manager's first start, before it
   reports ready, and leaves the custom resources in place.
+- The manager's pod now has a startup probe of up to five minutes, so a
+  state server that is slow to elect a leader no longer gets the manager
+  killed by its liveness probe. A non-leader replica that cannot reach the
+  leader keeps the request body for its own handler, and a chat message whose
+  conversation cannot be read is refused for retry instead of dropped.
 - A new NetworkPolicy admits the state server's client port from the manager
   alone, and its peer port from its own pods alone, where network
   restriction is enabled.
