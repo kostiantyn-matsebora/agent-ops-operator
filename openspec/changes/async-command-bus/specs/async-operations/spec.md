@@ -157,7 +157,7 @@ derived from the task, never from the clock, so a redelivery appends once.
 - **THEN** a close task and then an append task are enqueued on the root's key, and the parent receives the message once
 
 #### Scenario: A redelivered append lands once
-- **WHEN** the append task's lease expires after the parent was appended and it is delivered again
+- **WHEN** the append task's lease lapses after the parent was appended and it is delivered again
 - **THEN** the parent holds one copy of the result
 
 ### Requirement: Channel operations run on the bus with their semantics preserved

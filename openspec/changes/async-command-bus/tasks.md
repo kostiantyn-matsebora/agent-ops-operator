@@ -1,7 +1,7 @@
 ## 1. Spike the transport — backend-developer
 
 - [ ] 1.1 Against the test-only `nats-server` the state backend already vendors, show that a publish returns only once JetStream has stored it and that a repeated id is suppressed.
-- [ ] 1.2 Show that a claim made through one connection completes through another and that an expired lease returns the task (design D-3, check 2).
+- [ ] 1.2 Show that a claim made through one connection completes through another and that a lapsed lease returns the task (design D-3, check 2).
 - [ ] 1.3 Show delayed redelivery with a bounded attempt count ending in a dead record.
 - [ ] 1.4 Build the candidate library's required `nats.go` version into the manager module and run the state backend's conformance suite and bench unchanged against it.
 - [ ] 1.5 Record the verdict in the task, numbers included. Choose the library under the transport or `nats.go` KV directly, per design D-3. Delete the spike code.
@@ -13,7 +13,7 @@
 - [ ] 2.3 Define the error-code vocabulary and derive retryability from the code. Record an unknown code as `internal`.
 - [ ] 2.4 Write the `memory` backend.
 - [ ] 2.5 Write the conformance suite and bench, walked once per queue in the inventory, failing and naming a queue left unwired.
-- [ ] 2.6 Conformance covers: durable accept, idempotent submit, dedup across every state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-expiry redelivery, bounded retry into dead, TTL expiry counting as settled, a gap-free resumable feed, dead-letter listing, per-queue statistics.
+- [ ] 2.6 Conformance covers: durable accept, idempotent submit, dedup across every state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-lapse redelivery, bounded retry into dead, TTL expiry counting as settled, a gap-free resumable feed, dead-letter listing, per-queue statistics.
 
 ## 3. `nats` backend — backend-developer
 
@@ -42,6 +42,7 @@
 - [ ] 5.7 Make `delete` of an absent conversation succeed.
 - [ ] 5.8 Add `GET /state/tasks`, `/state/tasks/{id}`, `/state/tasks/stream` (resumable, ordered by revision) and `GET /state/dead-letters`, read-only, on the existing `/state/*` token scheme.
 - [ ] 5.9 Verify each endpoint against `docs/contracts/channel-adapter.md` and `docs/contracts/runtime.md`. Neither is edited. A needed edit is a stop that asks the user.
+- [ ] 5.10 Enqueue a delete cascade over already-closed descendants deepest-first, one task per conversation, on the root's key, ending with the root.
 
 ## 6. `OpQueue` migration — backend-developer
 
@@ -56,7 +57,7 @@
 
 - [ ] 7.1 Exempt `/channel/ops`, `/channel/ops/{id}/done`, `/state/tasks*` and `/state/dead-letters` from the leader proxy. Accept endpoints still proxy.
 - [ ] 7.2 Stop writing `status.threads[].claim` and ignore a value found there. Keep the five-minute lease through `claimStalenessSeconds`.
-- [ ] 7.3 Add a retired-vocabulary entry for the leader-written claim and run `retired-vocabulary-guard.py`.
+- [ ] 7.3 Add the retired-vocabulary entry for `status.threads[].claim` in this change's apply, when the field stops being written. Doing it at proposal time would fail the guard on the published `durable-chat-ops-broker` spec, which still describes the field until archive. Run `retired-vocabulary-guard.py`.
 
 ## 8. Chart — deployment-engineer
 
@@ -90,7 +91,7 @@
 
 - [ ] 11.1 Add lanes to `platform/manager/test/system/`, run against THIS working copy's chart and images, not the default branch's.
 - [ ] 11.2 Lane: the bundle comes up, the credential is projected by the kubelet, and the NetworkPolicy admits only the manager.
-- [ ] 11.3 Lane: a claim on one manager replica completes on another, and an expired lease is redelivered.
+- [ ] 11.3 Lane: a claim on one manager replica completes on another, and a lapsed lease is redelivered.
 - [ ] 11.4 Lane: ordering holds under parallel consumers across two replicas.
 - [ ] 11.5 Lane: a manager restart and a bus-server rolling restart lose no accepted task.
 - [ ] 11.6 Lane: backoff into a dead letter against a surface that really fails.

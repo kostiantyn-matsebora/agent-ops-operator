@@ -147,8 +147,11 @@ one replica SHALL be completable by another replica that presents the claim
 token.
 
 A completion carrying a token that is not the record's current token SHALL be
-refused and SHALL change nothing. A lease that expires SHALL return the task to
-the queue for redelivery, and the expired lease SHALL count as one attempt.
+refused and SHALL change nothing.
+
+A lease that lapses SHALL return the task to the queue for redelivery. The
+lapsed lease SHALL count as one attempt that failed with the code
+`unavailable`, since no consumer reported one.
 
 A lease SHALL NOT live in the memory of one process.
 
@@ -157,12 +160,12 @@ A lease SHALL NOT live in the memory of one process.
 - **THEN** the completion succeeds and the task is succeeded
 
 #### Scenario: A stale token is refused
-- **WHEN** a lease expires, the task is claimed again, and the first claimant then completes it
+- **WHEN** a lease lapses, the task is claimed again, and the first claimant then completes it
 - **THEN** the late completion is refused and the second claim stands
 
-#### Scenario: An expired lease redelivers and counts
+#### Scenario: A lapsed lease redelivers and counts
 - **WHEN** a claimed task's lease passes with no completion
-- **THEN** the task returns to the queue, its attempt count is one higher, and it is claimable again in its original position
+- **THEN** the task returns to the queue, its attempt count is one higher, the attempt is recorded as `unavailable`, and it is claimable again in its original position
 
 ### Requirement: Retry and backoff are owned by the bus
 The bus SHALL retry a failed attempt. Attempts SHALL be bounded. The delay
@@ -365,7 +368,7 @@ The bus SHALL deliver a task at least once. A handler SHALL be idempotent: a
 second delivery of the same task SHALL leave the world as one delivery does.
 
 #### Scenario: A redelivered task changes nothing twice
-- **WHEN** a task's lease expires after its handler already applied its effect and the task is delivered again
+- **WHEN** a task's lease lapses after its handler already applied its effect and the task is delivered again
 - **THEN** the second run observes the effect and completes without applying it again
 
 ### Requirement: Two backends, one contract
@@ -429,7 +432,7 @@ The suite SHALL cover at minimum:
 - idempotent submit
 - dedup, park and release
 - lease completion on a different replica
-- lease expiry and redelivery
+- lease lapse and redelivery
 - dead-letter routing
 - time-to-live expiry
 - gap-free feed resume

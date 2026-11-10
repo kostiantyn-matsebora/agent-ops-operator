@@ -92,7 +92,7 @@ vendors. It must show four things:
 
 1. A publish returns only once JetStream has stored it, and a repeated id is
    suppressed.
-2. A claim on one replica completes on another, and an expired lease returns
+2. A claim on one replica completes on another, and a lapsed lease returns
    the task.
 3. Delayed redelivery and a bounded attempt count end in the dead record.
 4. The `nats.go` version the library needs (1.52 against the state backend's
@@ -109,7 +109,7 @@ uid** is unique per attempt record.
 
 ```
 queued ─claim─▶ running ─ok──────────────▶ succeeded   (id suppressed for the settled window)
-   ▲               │ error (retryable) or lease expiry
+   ▲               │ error (retryable) or lease lapse
    └─ retrying ◀───┘   id stays pending, so a re-derive dedups
                    │ attempts exhausted, or a terminal code
                    ▼
@@ -117,8 +117,10 @@ queued ─claim─▶ running ─ok──────────────▶
 queued past its TTL ─▶ expired   (settled for ordering, never runs)
 ```
 
-- A submit finds the id in `ids` and is suppressed in every state except
-  released.
+- A submit finds the id in `ids` and is suppressed while the latest task is
+  queued, running, retrying, parked, or succeeded within the dedup window.
+- It is not suppressed once the task succeeded past the window, is dead past its
+  cool-off, or expired.
 - A sweep releases a parked id after its cool-off. The dead task's record stays
   in history.
 - `expired` counts as settled for ordering, so a task that never ran cannot
@@ -151,7 +153,8 @@ The vocabulary is closed: `not_found`, `precondition_failed`, `forbidden`,
 | `conflict`, `unavailable`, `internal` | retry with backoff |
 | `not_found`, `precondition_failed`, `forbidden`, `invalid_command` | straight to dead |
 
-A consumer never chooses. An unknown code is recorded as `internal`.
+A consumer never chooses. A lapsed lease counts as an attempt that failed with
+`unavailable`, so a silent adapter is retried and then dead-lettered. An unknown code is recorded as `internal`.
 
 `precondition_failed` is terminal on purpose. A refused `/exit` mid-run must not
 become a surprise release minutes later. An adapter's reported error string

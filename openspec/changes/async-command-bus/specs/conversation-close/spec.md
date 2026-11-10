@@ -260,29 +260,22 @@ again.
 
 ## ADDED Requirements
 
-### Requirement: A close, a delete and a reopen are accepted, then performed
-The reply to a close, a delete or a reopen SHALL mean the command was
-accepted, not performed. The conversation reaches its new phase when the task
+### Requirement: A close, a delete and a reopen are performed by tasks
+A close, a delete and a reopen SHALL be accepted and answered as
+`async-operations` states. The conversation reaches its new phase when the task
 succeeds, and the task is the record of whether it did.
 
-A refusal that depends only on cheap reads SHALL still be returned at accept.
-A delete of a conversation that is not `Closed` SHALL be refused with `409` at
-accept, naming the missing step, and SHALL NOT enqueue a close as a side
-effect.
+A delete SHALL NOT enqueue a close as a side effect.
 
 A reopen whose referenced `AgentProfile` or `Channel` is already missing SHALL
-be refused with `409` at accept. One that goes missing after accept SHALL fail
-its task with `precondition_failed`, naming the missing object. Either way the
-conversation SHALL stay `Closed`.
+be refused at accept as the modified reopen requirement states. One that goes
+missing after accept SHALL fail its task with `precondition_failed`, naming the
+missing object. Either way the conversation SHALL stay `Closed`.
 
-#### Scenario: A close reply precedes the close
-- **WHEN** a surface asks to close a conversation
-- **THEN** the reply is `202` with the task id, and the conversation reaches `Closed` when the task succeeds
+#### Scenario: A close reaches Closed when its task succeeds
+- **WHEN** a close is accepted
+- **THEN** the conversation reaches `Closed` when the task succeeds
 
-#### Scenario: A delete of a live conversation is refused at accept
-- **WHEN** a surface asks to delete a conversation that is `Idle`, `Queued` or `Working`
-- **THEN** the reply is `409` naming the missing step and no task is enqueued
-
-#### Scenario: A reopen over a missing profile fails its task
+#### Scenario: A reopen over a profile deleted after accept fails its task
 - **WHEN** a reopen is accepted and the conversation's profile is deleted before the task runs
 - **THEN** the task goes dead as `precondition_failed` naming the profile and the conversation stays `Closed`
