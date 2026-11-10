@@ -141,7 +141,7 @@ conversation carries `causedBy`.
 | root, uncaused | one `escalate` task |
 | member, caused | a `close` task with cascade, then an `append-result` task, one invocation, one key |
 
-The root's `escalate` task SHALL perform one patch setting `escalatedAt` and
+The root's `escalate` task SHALL perform one patch setting `status.escalatedAt` and
 the message, and SHALL be a no-op when the conversation is already escalated.
 
 The member's close SHALL carry the message as its reason. The `append-result`
@@ -169,7 +169,7 @@ Their existing behaviour SHALL be preserved:
 - after a task goes dead its id SHALL be parked, then released, so reconciliation MAY derive it again
 - a fire-and-forget `send` SHALL carry a short time to live
 - `delete-conversation` SHALL carry a time to live equal to the finalizer's grace and SHALL never be parked, so a deletion never wedges on a down adapter
-- the lease of a claimed operation SHALL be the existing five-minute reclaim bound
+- the lease of a claimed operation SHALL default to the existing five-minute reclaim bound, configurable through `claimStalenessSeconds`
 
 The claim body an adapter reads from `/channel/ops` SHALL be unchanged,
 including its reclaim interval. The queue depth read at `/api/queues` SHALL

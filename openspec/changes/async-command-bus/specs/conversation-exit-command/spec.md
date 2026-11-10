@@ -1,6 +1,11 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: /exit acts only when the conversation needs no worker`
+- TO: `### Requirement: /exit acts only when the conversation needs no agent runtime`
+
 ## MODIFIED Requirements
 
-### Requirement: /exit acts only when the conversation needs no worker
+### Requirement: /exit acts only when the conversation needs no agent runtime
 
 `/exit` SHALL release the pod only when the conversation has nothing inflight
 and nothing queued — the SAME predicate that makes a pod evictable.
@@ -25,7 +30,7 @@ outcome a release must never produce.
 
 A `/exit` with queued input SHALL be REFUSED and say why.
 
-The conversation needs a worker (`dispatch.NeedsWorker`), so the pod would be
+The conversation needs an agent runtime (`dispatch.NeedsWorker`), so the pod would be
 recreated immediately and nothing would be freed.
 
 The refusal SHALL reach the person on the thread as a notice naming its reason,

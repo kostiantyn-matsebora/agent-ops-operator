@@ -265,7 +265,8 @@ recorded. Task 5.4 confirms the call site before the change is finished.
 `stateStore.backend`. A guard fails every contradiction and names the value.
 
 - `nats` requires exactly one of a rendered bundle or `commandBus.nats.url`.
-  A URL needs its own credential.
+  A URL needs its own credential from `commandBus.nats.auth.user` and
+  `password`, or `commandBus.nats.auth.existingSecret`.
 - The default renders a bundle, with the same shape as the state bundle: three
   servers, a volume each, a PodDisruptionBudget, a chart-generated credential.
   Whether the existing subchart can be instantiated a second time under an alias

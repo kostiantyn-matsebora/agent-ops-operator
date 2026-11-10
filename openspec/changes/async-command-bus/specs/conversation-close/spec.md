@@ -19,12 +19,15 @@ reproduce it.
 
 The originators are the `/close` command on a thread, a surface closing
 several conversations at once, the manager's own idle timer, a budget being
-exceeded, and a Coordinator's own MCP `close` verb. What differs between them
+exceeded, a Coordinator's own MCP `close` verb, and a member's `escalate`. What differs between them
 is WHO decided and what the farewell says.
 
 A close issued by a Coordinator's root on itself or on a direct member it
 caused still REQUIRES a reason, unchanged from `A close may carry a
 reason, and a coordinator's close must carry one`.
+
+A close driven by a member's `escalate` carries the escalation message as its
+reason.
 
 The cascade carries that reason VERBATIM to every conversation it reaches.
 

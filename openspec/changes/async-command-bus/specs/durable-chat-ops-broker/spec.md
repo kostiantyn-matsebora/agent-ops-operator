@@ -124,9 +124,9 @@ Most routes this middleware covers read or write the Kubernetes API,
 consistent on any replica, so the proxy changes no response a client could
 already receive.
 
-`/activity*` is the one proxied route whose state is not Kubernetes-API state. Its state is a per-process ring buffer
-with no cross-replica fan-out, not Kubernetes-API state. It is covered for the
-same reason every other route is, not because it is K8s-API-consistent too.
+`/activity*` is the one proxied route whose state is not Kubernetes-API state.
+It is a per-process ring buffer with no cross-replica fan-out. It is covered
+for the same reason every other route is.
 
 Proxying it reaches the leader's buffer, where reconciler-driven events
 land — see `activity-telemetry`'s own requirement for its differing

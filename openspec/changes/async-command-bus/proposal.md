@@ -59,7 +59,7 @@ capability that does not depend on where state is kept.
 ### The operations
 
 - **These operations become asynchronous:**
-  - `close`: console single and bulk, chat, coordinated and budget-exceeded.
+  - `close`: console single and bulk, chat, coordinated, the idle timer, a member's `escalate` and budget-exceeded.
   - `exit`, `reopen`, `delete`, `reset-context` and `escalate`.
   - Inbound chat messages and inbound signals.
 - **Each returns `202`** with an `invocationId` and task ids. It first
