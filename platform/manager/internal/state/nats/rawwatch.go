@@ -45,15 +45,25 @@ type kvEntry struct {
 // DeliverByStartSequencePolicy alone replays every message in order, which
 // is what "at-least-once, no gap" actually requires.
 func watchRaw(ctx context.Context, js jetstream.JetStream, streamName, bucket string, resume state.Revision) (<-chan kvEntry, error) {
-	cfg := jetstream.OrderedConsumerConfig{}
+	cfg := jetstream.OrderedConsumerConfig{DeliverPolicy: jetstream.DeliverByStartSequencePolicy}
 	if resume == "" {
-		cfg.DeliverPolicy = jetstream.DeliverNewPolicy
+		// "From now" is fixed HERE, as a sequence, and never as the server's
+		// "new" policy. An ordered consumer reset before it has delivered
+		// anything is recreated from its original config, and the server
+		// resolves "new" again at that moment, so everything written in
+		// between is skipped for good. Found live: a reconciler's feed reset
+		// 30s after it opened and never heard of the conversations created
+		// meanwhile.
+		stream, err := js.Stream(ctx, streamName)
+		if err != nil {
+			return nil, fmt.Errorf("nats: stream info %q: %w", streamName, err)
+		}
+		cfg.OptStartSeq = stream.CachedInfo().State.LastSeq + 1
 	} else {
 		seq, err := parseRevision(resume)
 		if err != nil {
 			return nil, err
 		}
-		cfg.DeliverPolicy = jetstream.DeliverByStartSequencePolicy
 		cfg.OptStartSeq = seq + 1
 	}
 	consumer, err := js.OrderedConsumer(ctx, streamName, cfg)

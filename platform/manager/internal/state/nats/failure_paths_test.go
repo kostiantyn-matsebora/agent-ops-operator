@@ -123,11 +123,12 @@ func TestEveryOperationFailsLoudlyWhenTheServerIsGone(t *testing.T) {
 			_, e := b.Stores.Conversations.List(ctx, state.ByAll, "")
 			return e
 		},
-		"conversations Watch": func() error { _, e := b.Stores.Conversations.Watch(ctx, "5"); return e },
-		"runs Append":         func() error { return b.Stores.Runs.Append(ctx, "k", state.Run{RunID: "r"}) },
-		"runs List":           func() error { _, e := b.Stores.Runs.List(ctx, "k"); return e },
-		"runs Grow":           func() error { return b.Stores.Runs.Grow(ctx, "k", "r", state.Run{}) },
-		"runs GetWithItems":   func() error { _, _, _, e := b.Stores.Runs.GetWithItems(ctx, "k"); return e },
+		"conversations Watch":          func() error { _, e := b.Stores.Conversations.Watch(ctx, "5"); return e },
+		"conversations Watch from now": func() error { _, e := b.Stores.Conversations.Watch(ctx, ""); return e },
+		"runs Append":                  func() error { return b.Stores.Runs.Append(ctx, "k", state.Run{RunID: "r"}) },
+		"runs List":                    func() error { _, e := b.Stores.Runs.List(ctx, "k"); return e },
+		"runs Grow":                    func() error { return b.Stores.Runs.Grow(ctx, "k", "r", state.Run{}) },
+		"runs GetWithItems":            func() error { _, _, _, e := b.Stores.Runs.GetWithItems(ctx, "k"); return e },
 		"runs ListWithItems": func() error {
 			_, e := b.Stores.Runs.ListWithItems(ctx, state.ByAll, "")
 			return e
