@@ -9,7 +9,7 @@
 ## 2. Contract, `memory` backend, conformance suite — backend-developer
 
 - [ ] 2.1 Define the contract in `platform/manager/internal/commandbus/`: submit, claim with lease, settle, fail with a code, task and dead-letter reads and feeds, per-queue statistics.
-- [ ] 2.2 Define the closed queue inventory and its declarations: key, attempts, backoff, TTL, dedup window, park cool-off, per-invocation in-flight cap.
+- [ ] 2.2 Define the closed queue inventory and its declarations: key, attempts, backoff, TTL, dedup window, park cool-off, per-invocation in-flight cap. A kind may override its queue's attempts and backoff.
 - [ ] 2.3 Define the error-code vocabulary and derive retryability from the code. Record an unknown code as `internal`.
 - [ ] 2.4 Write the `memory` backend.
 - [ ] 2.5 Write the conformance suite and bench, walked once per queue in the inventory, failing and naming a queue left unwired.

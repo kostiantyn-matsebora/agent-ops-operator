@@ -115,7 +115,9 @@ that governs deleting the NAMED conversation does not apply to the
 descendants the cascade reaches on its behalf.
 
 A `delete` task for a conversation that is already gone SHALL succeed. It
-SHALL NOT go dead for `not_found`.
+SHALL NOT go dead for `not_found`. This is the one stated exception to
+`not_found` being terminal, because an absent target is the outcome the caller
+wanted.
 
 Deletion's own per-descendant notice (`delete-conversation` on every bound
 thread) still applies to each conversation the cascade deletes — which is

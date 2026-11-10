@@ -89,7 +89,7 @@ that thread, cleared when delivery succeeds.
 - **THEN** the claim is a lease in the bus's ledger, it expires on its own, and the op is redelivered to the next matching poll on any replica
 
 ### Requirement: A restart-resilience matrix is documented and maintained
-The documentation SHALL carry a matrix naming every component, the state it
+The documentation, in `docs/concepts.md`, SHALL carry a matrix naming every component, the state it
 holds, that state's declared home, and what a restart of that component costs.
 Adding state to a component SHALL require adding its row.
 

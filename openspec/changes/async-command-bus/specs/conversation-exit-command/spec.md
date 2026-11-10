@@ -5,6 +5,51 @@
 
 ## MODIFIED Requirements
 
+### Requirement: /exit releases the runtime and keeps the conversation
+
+`/exit`, sent in a conversation's own thread, SHALL delete that conversation's
+runtime pod and nothing else. The Conversation object, its thread bindings, its
+inputs, its run history and its stored context handle SHALL be untouched.
+
+It SHALL be recognised when the inbound message is processed, BEFORE the text
+becomes an input, for the same reason `/close` is: handing it to the agent would
+both dispatch a work unit for a command and leave the pod running. Recognition
+enqueues an `exit` task, and the pod is deleted when that task runs.
+
+The next input SHALL admit the conversation again and give it a fresh runtime
+pod, resuming from its context handle — the behavior an eviction already
+produces. `/exit` SHALL NOT delete the conversation, archive its thread, or
+cancel anything queued.
+
+Recognition SHALL match `/close`'s: the bare command and its bot-suffixed form
+(`/exit@SomeBot`), and trailing text SHALL disqualify it — "exit the
+maintenance window when you are done" is an instruction for the agent, not a
+command for the manager.
+
+#### Scenario: An idle conversation releases its runtime
+
+- **WHEN** a person sends `/exit` in the thread of a conversation whose runtime
+  pod is running and which has nothing inflight and nothing queued
+- **THEN** the runtime pod is deleted
+- **AND** the Conversation still exists with its threads, inputs and context
+  handle unchanged
+
+#### Scenario: The conversation resumes afterwards
+
+- **WHEN** a message arrives in that thread after an `/exit`
+- **THEN** a fresh runtime pod is created and the run continues the same
+  context, exactly as after an eviction
+
+#### Scenario: The command never reaches the agent
+
+- **WHEN** `/exit` is sent in a conversation thread
+- **THEN** no input is appended and no work unit is dispatched for it
+
+#### Scenario: Trailing text is not the command
+
+- **WHEN** a person sends `/exit the node from the cluster once it drains`
+- **THEN** it is treated as an ordinary reply to the agent and no pod is deleted
+
 ### Requirement: /exit acts only when the conversation needs no agent runtime
 
 `/exit` SHALL release the pod only when the conversation has nothing inflight

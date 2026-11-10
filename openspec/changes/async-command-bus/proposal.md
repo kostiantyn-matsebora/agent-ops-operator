@@ -62,7 +62,8 @@ capability that does not depend on where state is kept.
   - `close`: console single and bulk, chat, coordinated, the idle timer, a member's `escalate` and budget-exceeded.
   - `exit`, `reopen`, `delete`, `reset-context` and `escalate`.
   - Inbound chat messages and inbound signals.
-- **Each returns `202`** with an `invocationId` and task ids. It first
+- **Each returns `202`** with an `invocationId` and task ids. A coordinator verb
+  keeps the `200` and body it returns today and gains the same two fields. It first
   validates and durably enqueues. The work then runs on a manager consumer, on
   any replica.
 - **Tasks are atomic.** One verb, one target.
