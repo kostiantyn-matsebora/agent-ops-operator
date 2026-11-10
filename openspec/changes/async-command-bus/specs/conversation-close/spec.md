@@ -27,7 +27,8 @@ caused still REQUIRES a reason, unchanged from `A close may carry a
 reason, and a coordinator's close must carry one`.
 
 A close driven by a member's `escalate` carries the escalation message as its
-reason.
+reason. A close driven by a budget being exceeded carries the reason
+`budget-exceeded`, and no caller supplies one.
 
 The cascade carries that reason VERBATIM to every conversation it reaches.
 

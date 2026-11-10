@@ -261,10 +261,11 @@ The bus SHALL keep a ledger record per task attempt chain. A record SHALL carry:
 - the actor
 - the enqueued instant
 - the attempt number and the state
-- the last error code
+- the last error code and its message
 - the lease, as claim token and lease-until
 
-The ledger SHALL be bounded by a retention cap declared per queue. Past the cap
+The ledger SHALL be bounded by a retention cap declared per queue, in age and
+in size. Past either cap
 the oldest settled records SHALL be removed. The ledger SHALL be declared
 lossy telemetry. Its loss SHALL cost history and unfinished work, never
 conversation correctness.

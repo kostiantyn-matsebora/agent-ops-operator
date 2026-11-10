@@ -85,7 +85,7 @@ release rather than erroring.
 
 #### Scenario: Continuity survives the release
 
-- **WHEN** `/exit` succeeds on an install whose runtime keeps context on a home
+- **WHEN** `/exit` succeeds on an install whose runtime keeps context on a context
   volume that is provided
 - **THEN** the reply says the conversation is still open and keeps its context
 

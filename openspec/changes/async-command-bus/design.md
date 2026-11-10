@@ -188,7 +188,7 @@ re-checks its descendants when it runs.
 
 | Case | Tasks |
 |---|---|
-| Uncaused root | one `escalate` task: a patch setting `escalatedAt` and the bounded message, a no-op when already set |
+| Uncaused root | one `escalate` task: a patch setting `status.escalatedAt` and the message, a no-op when already set |
 | Caused member | a cascading `close`, then `append-result`, one invocation, one key (the root's) |
 
 `append-result` is a new verb on `conv`, keyed by the parent's root. Its dedup

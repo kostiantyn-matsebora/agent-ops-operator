@@ -66,7 +66,7 @@ the ordinary rule. Nothing about an input's timing relative to
 
 #### Scenario: Escalate posts the digest into the open thread
 - **WHEN** an uncaused root escalates with a message
-- **THEN** that message posts into every one of its already-bound channels as the digest
+- **THEN** that message posts into every one of its already-bound channels as the message
 - **AND** no channel is newly bound by the call
 - **AND** no earlier member result is replayed into it
 
