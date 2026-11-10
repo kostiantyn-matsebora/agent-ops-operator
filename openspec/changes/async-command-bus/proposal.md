@@ -169,7 +169,9 @@ capability that does not depend on where state is kept.
 
 - `docs/concepts.md`: where work and state live, and what a reply means.
 - `docs/contracts.md`: the accept semantics of each endpoint, `/state/tasks`
-  and `/state/dead-letters`.
+  and `/state/dead-letters`. No `docs/contracts/` page is added. That folder
+  holds contracts with implementers outside the manager, and the bus has none.
+  Its contract is the `command-bus` spec.
 - `docs/configuration.md`: `commandBus.*`.
 - `docs/security.md`: a new trust boundary and its control.
 - `docs/testing.md`: the bus conformance suite and the new lanes.

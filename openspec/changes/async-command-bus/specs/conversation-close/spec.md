@@ -59,7 +59,7 @@ a way to close. Deleting's cascade is the requirement added in this file.
 
 #### Scenario: A batch close is N ordinary closes
 - **WHEN** a surface closes several conversations in one gesture
-- **THEN** each conversation receives `/close` on that surface's thread with it, each becomes its own `close` task, and the tasks share one invocation id
+- **THEN** each conversation is closed through its own thread as an ordinary close, each becomes its own `close` task, and the tasks share one invocation id
 
 #### Scenario: Teardown is identical whatever ordered the close
 - **WHEN** a conversation is closed by a batch, by a hand-typed `/close`, or by the manager's idle timer

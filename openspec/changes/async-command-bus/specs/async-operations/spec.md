@@ -207,6 +207,23 @@ messages resolve through:
 - **WHEN** an adapter built against the channel contract polls for operations
 - **THEN** it receives the same claim body and completes it through the same endpoint as before
 
+### Requirement: A reset-context is a task
+A request to reset a conversation's context SHALL be accepted and enqueued as
+one `reset-context` task on the conversation's root key. The task SHALL clear
+the runtime context handle, the retired session id and the context checkpoint,
+and SHALL record that the continuity condition changed.
+
+A conversation that carries no context handle SHALL make the task succeed and
+report that there was nothing to clear. It SHALL NOT go dead.
+
+#### Scenario: A reset is accepted before it is done
+- **WHEN** a surface asks to reset the context of a conversation that carries a handle
+- **THEN** the reply is `202` with the invocation and task ids, and the handle is cleared when the task succeeds
+
+#### Scenario: Nothing to reset
+- **WHEN** a `reset-context` task runs on a conversation with no context handle
+- **THEN** the task succeeds, reports that nothing was cleared, and no error is recorded
+
 ### Requirement: A reply to a command means accepted
 A `202` from `close`, `exit`, `reopen`, `delete`, `reset-context` or
 `escalate` SHALL mean the command was accepted. So SHALL the `200` that the
