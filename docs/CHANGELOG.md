@@ -155,6 +155,9 @@ for the source and the reference material beside this file.
   its own handler.
 - A chat message whose conversation cannot be read is refused for retry
   instead of dropped.
+- A state-store feed opened without a resume point no longer skips what is
+  written after the server resets its consumer. The reconciler could miss new
+  conversations for good, leaving them with no status and no pod.
 
 ### Upgrade
 
