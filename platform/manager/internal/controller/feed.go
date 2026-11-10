@@ -49,6 +49,9 @@ func (f feed[E]) pump(ctx context.Context, q workqueue.TypedRateLimitingInterfac
 	for ctx.Err() == nil {
 		started := time.Now()
 		events, err := f.open(ctx, resume)
+		if err == nil {
+			logger.Info("opened the feed", "what", f.what, "resume", string(resume))
+		}
 		if err != nil {
 			logger.Error(err, "opening the "+f.what+" feed")
 			// A resume point the store rejects would otherwise be retried
@@ -59,6 +62,7 @@ func (f feed[E]) pump(ctx context.Context, q workqueue.TypedRateLimitingInterfac
 				f.enqueueAll(ctx, q)
 			}
 			last, delivered := f.forward(events, q)
+			logger.Info("the feed ended", "what", f.what, "delivered", delivered, "resume", string(last))
 			if delivered {
 				resume = last
 			} else if resume != "" && time.Since(started) < feedResumeGrace {
@@ -97,6 +101,7 @@ func (f feed[E]) enqueueAll(ctx context.Context, q workqueue.TypedRateLimitingIn
 			for _, key := range keys {
 				q.Add(f.request(key))
 			}
+			log.FromContext(ctx).WithName("state-feed").Info("enqueued every record", "what", f.what, "count", len(keys))
 			return
 		}
 		log.FromContext(ctx).Error(err, "listing "+f.what+"s for the initial reconcile; retrying")
