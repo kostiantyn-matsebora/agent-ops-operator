@@ -59,7 +59,7 @@ Order, lease and backoff all live in the ledger, never in the transport.
 | Lease (claim token, lease-until) | the task record, written by compare-and-swap on its revision |
 | Next eligible time after a failure | `notBefore` on the task record |
 | Per-key order | claim-time rule over the ledger's ordered feed |
-| Wake-up of an idle worker | the ledger's change feed |
+| Wake-up of an idle consumer | the ledger's change feed |
 
 This is what lets a claim on one replica be completed on another. A message
 object's acknowledgement cannot do that.
@@ -68,7 +68,7 @@ The `nats` backend therefore needs only JetStream KV buckets and their watches:
 `tasks`, `ids` (command id to current task) and `dead`. It needs no delivery
 stream.
 
-**Why the ordering rule is safe under a stale view.** A worker claims a task
+**Why the ordering rule is safe under a stale view.** A consumer claims a task
 only when no earlier task of its key is unsettled. Three facts make that sound:
 
 1. The change feed is ordered. Seeing task 2 means task 1 was already seen.
@@ -151,7 +151,7 @@ The vocabulary is closed: `not_found`, `precondition_failed`, `forbidden`,
 | `conflict`, `unavailable`, `internal` | retry with backoff |
 | `not_found`, `precondition_failed`, `forbidden`, `invalid_command` | straight to dead |
 
-A worker never chooses. An unknown code is recorded as `internal`.
+A consumer never chooses. An unknown code is recorded as `internal`.
 
 `precondition_failed` is terminal on purpose. A refused `/exit` mid-run must not
 become a surprise release minutes later. An adapter's reported error string
@@ -202,8 +202,8 @@ The accept step runs, in order:
 1. Authentication, adapter or state scope, body shape.
 2. Unknown channel or source.
 3. For signals: the Wired reason and the attribute-filter reason.
-4. For coordinator verbs: the move stamp.
-5. The activity "signal received" receipt.
+4. For signals: the activity "signal received" receipt.
+5. For coordinator verbs: the move stamp.
 6. For inbound chat: the thread-to-conversation lookup that yields the key.
 7. Mint the `invocationId`, enqueue durably, reply `202` with
    `{invocationId, taskIds}`, added to whatever the endpoint returned before.
@@ -229,7 +229,7 @@ router, reconciler and handlers do not change.
 - **`Pending(id)` and `Settled(id)`** run on every reconcile pass. They read a
   watch-fed local mirror of pending and settled ids, never the server.
 - **Ephemeral sends** carry the short TTL in D-5.
-- **In-process providers** become a worker consuming `out.<type>`.
+- **In-process providers** become a consumer consuming `out.<type>`.
 - **`/api/queues`** keeps working from the per-queue statistics.
 
 ### D-11: The leader proxy narrows and the claim placeholder retires
@@ -275,7 +275,7 @@ recorded. Task 5.4 confirms the call site before the change is finished.
 | Tier | Decides |
 |---|---|
 | Unit | the conformance suite against `memory` and against an in-process `nats-server`, the bench, handlers against `memory`, the chart's render and guard tests |
-| System | what a cluster decides: the bundle, credential projection, the NetworkPolicy, a claim on one replica completed on another, restart durability, ordering under parallel workers, backoff into a dead letter |
+| System | what a cluster decides: the bundle, credential projection, the NetworkPolicy, a claim on one replica completed on another, restart durability, ordering under parallel consumers, backoff into a dead letter |
 | End-to-end | full flows through the real HTTP surface with the task stream observed, in the full tier |
 
 The end-to-end flows are listed in the tasks. The repo's docs-task guard fixes

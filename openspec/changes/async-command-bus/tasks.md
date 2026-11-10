@@ -13,7 +13,7 @@
 - [ ] 2.3 Define the error-code vocabulary and derive retryability from the code. Record an unknown code as `internal`.
 - [ ] 2.4 Write the `memory` backend.
 - [ ] 2.5 Write the conformance suite and bench, walked once per queue in the inventory, failing and naming a queue left unwired.
-- [ ] 2.6 Conformance covers: durable accept, idempotent submit, dedup across every state, park then release, FIFO with a retry keeping its place, serialization per key under parallel workers, lease completion through a second handle, lease-expiry redelivery, bounded retry into dead, TTL expiry counting as settled, a gap-free resumable feed, dead-letter listing, per-queue statistics.
+- [ ] 2.6 Conformance covers: durable accept, idempotent submit, dedup across every state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-expiry redelivery, bounded retry into dead, TTL expiry counting as settled, a gap-free resumable feed, dead-letter listing, per-queue statistics.
 
 ## 3. `nats` backend — backend-developer
 
@@ -27,13 +27,13 @@
 ## 4. Manager wiring — backend-developer
 
 - [ ] 4.1 Select the backend from `COMMANDBUS_BACKEND`, reading `COMMANDBUS_NATS_URL`, `COMMANDBUS_NATS_USER` and `COMMANDBUS_NATS_PASSWORD`. Never read `NATS_*`.
-- [ ] 4.2 Run the workers on every replica, one pool per queue, with a configurable concurrency.
+- [ ] 4.2 Run the consumers on every replica, one pool per queue, with a configurable concurrency.
 - [ ] 4.3 Report not ready while the bus is unreachable.
 - [ ] 4.4 Refuse `memory` with more than one replica.
 
 ## 5. Accept and process — backend-developer
 
-- [ ] 5.1 Build the accept step: authentication, scope, shape, unknown channel or source, signal Wired and filter reasons, the move stamp, the receipt, the thread-to-conversation lookup, then mint `invocationId`, enqueue, reply `202 {invocationId, taskIds}` additively.
+- [ ] 5.1 Build the accept step: authentication, scope, shape, unknown channel or source, signal Wired and filter reasons, the receipt, the move stamp, the thread-to-conversation lookup, then mint `invocationId`, enqueue, reply `202 {invocationId, taskIds}` additively.
 - [ ] 5.2 Move `close` (console single and bulk, chat, coordinated, budget-exceeded), `exit`, `reopen`, `delete` and `reset-context` into handlers. Keep immediate refusals that need only a cheap read, such as `delete` of a conversation not Closed.
 - [ ] 5.3 Enqueue a cascade at accept, members before the parent on the root's key. The ancestor re-checks its descendants at run time and closes any open one or fails `precondition_failed`.
 - [ ] 5.4 Confirm where `CloseBudgetExceeded` is called relative to `recordRun`. Enqueue it as a `close` task after the run is recorded, or record why it must stay inline.
@@ -49,7 +49,7 @@
 - [ ] 6.2 Keep the dedup rule: a stable id is suppressed while pending, retrying, parked or settled. A failure never suppresses its own recovery.
 - [ ] 6.3 Keep `Complete`'s handlers synchronous before the `200`. A failing handler releases the id.
 - [ ] 6.4 Give ephemeral sends their short TTL and `delete-conversation` a TTL of the finalizer's grace, never parked.
-- [ ] 6.5 Run in-process providers as a worker over `out.<type>`.
+- [ ] 6.5 Run in-process providers as a consumer over `out.<type>`.
 - [ ] 6.6 Keep `/api/queues` working from the per-queue statistics.
 
 ## 7. Leader proxy and claim placeholder — backend-developer
@@ -91,7 +91,7 @@
 - [ ] 11.1 Add lanes to `platform/manager/test/system/`, run against THIS working copy's chart and images, not the default branch's.
 - [ ] 11.2 Lane: the bundle comes up, the credential is projected by the kubelet, and the NetworkPolicy admits only the manager.
 - [ ] 11.3 Lane: a claim on one manager replica completes on another, and an expired lease is redelivered.
-- [ ] 11.4 Lane: ordering holds under parallel workers across two replicas.
+- [ ] 11.4 Lane: ordering holds under parallel consumers across two replicas.
 - [ ] 11.5 Lane: a manager restart and a bus-server rolling restart lose no accepted task.
 - [ ] 11.6 Lane: backoff into a dead letter against a surface that really fails.
 - [ ] 11.7 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.

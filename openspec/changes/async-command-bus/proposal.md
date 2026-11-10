@@ -23,7 +23,8 @@ Two pieces of groundwork now exist:
 
 - The state store sits behind a generic contract with a conformance suite
   (`state-store`).
-- A clustered NATS server is arriving as a bundle (`nats-state-store-default`).
+- A clustered NATS server chart is arriving with `nats-state-store-default`,
+  which the bus can reuse as a template.
 
 Accepting work durably and doing it later is the next step. It is a manager
 capability that does not depend on where state is kept.
@@ -34,7 +35,7 @@ capability that does not depend on where state is kept.
 
 - **New command bus**, its own abstraction in
   `platform/manager/internal/commandbus/`, independent of the state store.
-  - It carries accepted work to a worker and records what became of it.
+  - It carries accepted work to a consumer and records what became of it.
   - Two backends, `nats` and `memory`, pass one conformance suite and a bench.
   - `memory` is for tests and local development only. A production install
     selects `nats`.
@@ -62,7 +63,7 @@ capability that does not depend on where state is kept.
   - `exit`, `reopen`, `delete`, `reset-context` and `escalate`.
   - Inbound chat messages and inbound signals.
 - **Each returns `202`** with an `invocationId` and task ids. It first
-  validates and durably enqueues. The work then runs on a manager worker, on
+  validates and durably enqueues. The work then runs on a manager consumer, on
   any replica.
 - **Tasks are atomic.** One verb, one target.
   - A batch is only an `invocationId` tag shared by its tasks.
@@ -157,7 +158,7 @@ capability that does not depend on where state is kept.
 | `internal/chat/ops.go` | facade over the bus |
 | `internal/httpapi/` | accept and process split, `/state/tasks`, `/state/dead-letters` |
 | `internal/chat/coordinate.go` | escalate and close as tasks |
-| `cmd/manager/` | worker roles, backend selection, readiness |
+| `cmd/manager/` | consumer roles, backend selection, readiness |
 | `go.mod` | `nats.go` moves from 1.39.1 to the version the chosen library requires. The state backend's suite is re-run against it |
 | `chart/`, `chart/templates/_helpers.tpl` | selector, bundle or external URL, credential, NetworkPolicy, deployment env, guard |
 | `platform/manager/test/system/` | bus lanes, multi-replica claim-and-complete, restart durability |
@@ -186,8 +187,9 @@ capability that does not depend on where state is kept.
 
 ### Dependencies
 
-- The `nats` backend's server bundle comes from `nats-state-store-default`
-  (PR #471, in final verification). This change designs against it and is
-  implemented after it merges.
+- The bus renders its own server bundle and owns its credential (design D-13).
+  It reuses the NATS chart template that `nats-state-store-default` (PR #471,
+  in final verification) adds. The two bundles are independent installs of one
+  template. Implementation follows that merge.
 - The change does not depend on the state-store contract. It adds nothing to
   `state.Stores`, and `kube`-store installs can run the bus.

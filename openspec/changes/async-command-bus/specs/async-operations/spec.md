@@ -1,6 +1,6 @@
 ## Purpose
 How the manager uses the command bus. A request is validated and durably
-accepted at once, then performed later by a worker on any replica, and what
+accepted at once, then performed later by a consumer on any replica, and what
 became of it is a task a caller can read.
 
 This capability owns the command inventory, the accept and process split, the
@@ -11,7 +11,7 @@ operations that stay synchronous.
 
 ### Requirement: Every asynchronous request is accepted, then processed
 A request for an asynchronous command SHALL run an ACCEPT step in the request
-and a PROCESS step on a manager worker. The worker MAY be on any replica.
+and a PROCESS step on a manager consumer. The consumer MAY be on any replica.
 
 The accept step SHALL be synchronous and cheap. It SHALL do, in order:
 
@@ -22,7 +22,7 @@ The accept step SHALL be synchronous and cheap. It SHALL do, in order:
 5. for a signal, record the activity "signal received" receipt
 6. for a coordinator verb, stamp the move
 7. mint an invocation id and durably enqueue the tasks
-8. reply `202` with the invocation id and the task ids
+8. reply `202` with the invocation id and the task ids, except that a coordinator verb keeps the `200` and body it returns today and gains the same two fields
 
 Everything else SHALL be the process step. The accept step SHALL NOT perform
 the command's effect.
@@ -208,8 +208,9 @@ messages resolve through:
 - **THEN** it receives the same claim body and completes it through the same endpoint as before
 
 ### Requirement: A reply to a command means accepted
-A `200` or `202` from `close`, `exit`, `reopen`, `delete`, `reset-context` or
-`escalate` SHALL mean the command was accepted. It SHALL NOT mean it was
+A `202` from `close`, `exit`, `reopen`, `delete`, `reset-context` or
+`escalate` SHALL mean the command was accepted. So SHALL the `200` that the
+coordinator verbs `close` and `escalate` already return. It SHALL NOT mean it was
 performed. A caller that needs the outcome SHALL read the task.
 
 A refusal the caller could act on that depends only on cheap reads SHALL still

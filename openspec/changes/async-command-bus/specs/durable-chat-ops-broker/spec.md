@@ -110,6 +110,8 @@ The routes served by any replica are:
 - `GET /state/tasks`, `GET /state/tasks/{id}`, `GET /state/tasks/stream` and
   `GET /state/dead-letters`
 
+`/activity*` is not among them. It is proxied, as the paragraph below states.
+
 The proxy runs before the request reaches a handler, through one middleware
 wrapping the whole mux.
 
@@ -122,7 +124,7 @@ Most routes this middleware covers read or write the Kubernetes API,
 consistent on any replica, so the proxy changes no response a client could
 already receive.
 
-`/activity*` is the one exception: its state is a per-process ring buffer
+`/activity*` is the one proxied route whose state is not Kubernetes-API state. Its state is a per-process ring buffer
 with no cross-replica fan-out, not Kubernetes-API state. It is covered for the
 same reason every other route is, not because it is K8s-API-consistent too.
 

@@ -2,7 +2,7 @@
 The contract every backend for accepted work meets, the conformance suite
 that defines it, and the one chart selector that picks a backend.
 
-A command bus carries accepted work to a worker, records what became of it,
+A command bus carries accepted work to a consumer, records what became of it,
 and retries what failed. It is independent of the state store.
 
 ## ADDED Requirements
@@ -33,7 +33,7 @@ A submit that cannot be recorded SHALL fail with `unavailable` and SHALL leave
 no partial task.
 
 #### Scenario: A restart after acknowledgement loses nothing
-- **WHEN** a submit returns success and every manager replica then restarts before any worker claims the task
+- **WHEN** a submit returns success and every manager replica then restarts before any consumer claims the task
 - **THEN** the task is claimable after the restart and runs once to completion
 
 #### Scenario: A failed submit leaves nothing behind
@@ -96,7 +96,7 @@ stays as history.
 - **THEN** no point in its life makes a resubmit return it as succeeded
 
 ### Requirement: Every queue is FIFO and a retry keeps its place
-A worker SHALL claim the oldest eligible task of a queue first. A task is
+A consumer SHALL claim the oldest eligible task of a queue first. A task is
 eligible when it is queued or retrying with its backoff elapsed, and no
 ordering rule below holds it back.
 
@@ -104,18 +104,20 @@ A retried task SHALL keep its original position in the queue. A retry never
 queues behind tasks that were submitted after it.
 
 #### Scenario: Oldest first
-- **WHEN** three tasks of different keys are queued in order and one worker claims three times
+- **WHEN** three tasks of different keys are queued in order and one consumer claims three times
 - **THEN** it receives them in submission order
 
 #### Scenario: A retry keeps its position
 - **WHEN** the oldest task fails once and is retrying while a newer task is queued
 - **THEN** the retry is claimed before the newer task as soon as its backoff elapsed
 
-### Requirement: A queue may declare an ordering key
-A queue MAY declare how a task's ordering key is derived. Tasks of one queue
-sharing a key SHALL be serialized. A task SHALL NOT be claimable until the
-previous task of its key has settled. Tasks of different keys SHALL be
-claimable in parallel.
+### Requirement: A queue declares an ordering key and tasks sharing one are serialized
+A queue SHALL declare how a task's ordering key is derived, or declare that it
+has none.
+
+- Tasks of one queue sharing a key SHALL be serialized.
+- A task SHALL NOT be claimable until the previous task of its key has settled.
+- Tasks of different keys SHALL be claimable in parallel.
 
 A task has settled when it is succeeded, dead or expired.
 
@@ -123,11 +125,11 @@ The rule SHALL be enforced at claim time from the ledger. Partitioning is not
 part of the contract and no behaviour SHALL depend on it.
 
 #### Scenario: One key runs one task at a time
-- **WHEN** four tasks share one key and four workers claim at once
+- **WHEN** four tasks share one key and four consumers claim at once
 - **THEN** exactly one claim succeeds, and the next task of the key is claimable only after the previous settled
 
 #### Scenario: Different keys run in parallel
-- **WHEN** tasks of three different keys are queued and three workers claim at once
+- **WHEN** tasks of three different keys are queued and three consumers claim at once
 - **THEN** all three claim succeed
 
 #### Scenario: A dead task releases its key
@@ -167,7 +169,7 @@ The bus SHALL retry a failed attempt. Attempts SHALL be bounded. The delay
 between attempts SHALL grow exponentially with jitter. Each queue SHALL declare
 the maximum attempts and the backoff, and a kind of command MAY override them.
 
-A worker SHALL NOT schedule a retry. It reports the attempt's outcome with a
+A consumer SHALL NOT schedule a retry. It reports the attempt's outcome with a
 code from the closed vocabulary and the bus decides.
 
 An attempt whose code is not retryable SHALL send the task straight to dead
@@ -179,17 +181,17 @@ to dead.
 - **THEN** the gaps between attempts grow, the third failure makes the task dead, and a dead-letter record exists
 
 #### Scenario: An invalid command is never retried
-- **WHEN** a worker reports `invalid_command`
+- **WHEN** a consumer reports `invalid_command`
 - **THEN** the task is dead after that one attempt
 
-#### Scenario: A retry is never scheduled by the worker
-- **WHEN** a worker reports a retryable code
+#### Scenario: A retry is never scheduled by the consumer
+- **WHEN** a consumer reports a retryable code
 - **THEN** the next attempt time is the bus's, derived from the declared backoff
 
 ### Requirement: Failures use a closed code vocabulary
 An attempt that does not succeed SHALL be reported with exactly one code. The
 vocabulary is closed. Whether a code is retryable SHALL be derived from the
-code alone and SHALL NOT be chosen by a worker.
+code alone and SHALL NOT be chosen by a consumer.
 
 | Code | Retryable |
 |---|---|
@@ -205,11 +207,11 @@ A code outside the vocabulary SHALL be refused by the bus and recorded as
 `internal`.
 
 #### Scenario: Retryability follows the code
-- **WHEN** a worker reports `conflict` and then another task reports `not_found`
+- **WHEN** a consumer reports `conflict` and then another task reports `not_found`
 - **THEN** the first is retried and the second is dead
 
 #### Scenario: An unknown code is not trusted
-- **WHEN** a worker reports a code the vocabulary does not name
+- **WHEN** a consumer reports a code the vocabulary does not name
 - **THEN** the ledger records `internal` and the task follows the `internal` rule
 
 ### Requirement: A task is in one of six states
@@ -239,7 +241,7 @@ A task already `running` SHALL NOT expire.
 
 #### Scenario: A stale fire-and-forget task does not run
 - **WHEN** a task with a one-minute time to live is still queued after one minute
-- **THEN** it is `expired`, no worker claims it, and no dead letter is recorded
+- **THEN** it is `expired`, no consumer claims it, and no dead letter is recorded
 
 #### Scenario: A running task is not expired
 - **WHEN** a claimed task passes its time to live while running
@@ -343,7 +345,7 @@ a contract change with a conformance scenario.
 
 Each queue SHALL declare:
 
-- its ordering key
+- its ordering key, or that it has none
 - its maximum attempts and its backoff
 - its time to live, where one applies
 - its ledger retention
@@ -423,7 +425,7 @@ scenarios of the suite. A backend-specific scenario SHALL NOT exist.
 
 The suite SHALL cover at minimum:
 
-- ordering per key under parallel workers
+- ordering per key under parallel consumers
 - idempotent submit
 - dedup, park and release
 - lease completion on a different replica
@@ -435,7 +437,7 @@ The suite SHALL cover at minimum:
 
 The suite SHALL be walked once per queue of the closed inventory. The bench
 SHALL measure, per backend and per queue, the submit-to-complete latency, the
-claims per second under parallel workers and the bytes stored per task, and
+claims per second under parallel consumers and the bytes stored per task, and
 SHALL report them on one table.
 
 #### Scenario: A backend that fails one scenario is not shippable

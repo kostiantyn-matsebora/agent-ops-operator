@@ -219,6 +219,45 @@ found by that member's second sweep, and not after it.
 - **WHEN** a conversation that is already `Closed` calls `invoke`
 - **THEN** the call is refused, no member is created, and the refusal names the closed caller
 
+### Requirement: A closed conversation can be reopened
+The manager SHALL offer a reopen that returns a `Closed` conversation to phase
+`Idle`, clears `status.closedAt` — which stops the delete clock — and advances
+`status.reopens`.
+
+Reopening SHALL leave every materialized ref EXACTLY as it is. Refs are
+snapshots whose CONTENT is re-read at every use, so a reopen that re-resolved
+wiring would let a Pipeline edit re-wire a conversation that already exists. A
+reopened conversation is the SAME conversation with the same profile and the
+same capabilities, or it is a new conversation wearing an old name.
+
+A reopen whose referenced `AgentProfile` or `Channel` no longer exists SHALL
+FAIL, naming the missing object. A ref already missing at accept SHALL be
+refused with `409`. A ref that disappears after accept SHALL fail the task with
+`precondition_failed`. It SHALL NOT partially reopen and SHALL NOT silently
+drop a binding.
+
+Continuity SHALL be restored only where it was promised: under a runtime whose
+`contextStorage` keeps context on a volume the agent resumes with its workspace
+and its context handle; under `none` it answers fresh and says so.
+
+The manager SHALL announce the reopen on every bound thread. The announcement is
+the MANAGER's, not each adapter's — a closing thread already receives a farewell
+from the manager, and synthesizing the reopen adapter-side would put it on
+whichever surface implemented it and leave the others silently starting to work
+again.
+
+#### Scenario: Reopen restores the same conversation
+- **WHEN** a closed conversation is reopened
+- **THEN** it returns to `Idle` with `status.closedAt` cleared, and its profile, channel bindings, toolsets, MCP configs, recorded runs and context handle are unchanged
+
+#### Scenario: Reopen names a missing ref
+- **WHEN** a reopen is requested for a conversation whose profile no longer exists
+- **THEN** it is refused at accept with `409` naming that profile and the conversation stays `Closed`
+
+#### Scenario: Every bound thread is told
+- **WHEN** a conversation bound to two channels is reopened
+- **THEN** both threads receive a notice that the conversation is live again, exactly once per reopen
+
 ## ADDED Requirements
 
 ### Requirement: A close, a delete and a reopen are accepted, then performed
@@ -231,8 +270,9 @@ A delete of a conversation that is not `Closed` SHALL be refused with `409` at
 accept, naming the missing step, and SHALL NOT enqueue a close as a side
 effect.
 
-A reopen whose referenced `AgentProfile` or `Channel` no longer exists SHALL
-fail its task with `precondition_failed`, naming the missing object, and the
+A reopen whose referenced `AgentProfile` or `Channel` is already missing SHALL
+be refused with `409` at accept. One that goes missing after accept SHALL fail
+its task with `precondition_failed`, naming the missing object. Either way the
 conversation SHALL stay `Closed`.
 
 #### Scenario: A close reply precedes the close

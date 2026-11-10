@@ -10,9 +10,9 @@ a cluster the conformance suite does not run:
 2. **Restart durability.** A task accepted before every manager replica
    restarts, and before the bus server restarts, runs once to completion
    afterwards.
-3. **Ordering under parallel workers.** Tasks sharing an ordering key run one
+3. **Ordering under parallel consumers.** Tasks sharing an ordering key run one
    at a time in submission order while tasks of other keys run alongside, with
-   more than one worker replica claiming.
+   more than one consumer replica claiming.
 4. **Backoff, then dead letter.** A task whose handler always fails
    retryably is retried with growing gaps and then goes dead. It appears in
    the dead-letter listing, and its id is resubmittable after the cool-off.
@@ -29,7 +29,7 @@ but the manager reaches the server.
 - **WHEN** a command is accepted and every manager replica and the bus server are then restarted
 - **THEN** the task completes once and its effect appears on the conversation exactly once
 
-#### Scenario: Ordering holds with several workers
+#### Scenario: Ordering holds with several consumers
 - **WHEN** several `close` and `delete` tasks of one root and tasks of other roots are accepted together with more than one replica serving
 - **THEN** the ledger shows the one root's tasks never overlapping and in submission order
 
