@@ -74,8 +74,22 @@ async function run(browser: import('@playwright/test').Browser) {
       const j = await r.json()
       return JSON.stringify({ status: r.status, thread: j.conversation?.consoleThread, joined: j.conversation?.joined, phase: j.conversation?.phase })
     }, name)
-    const stored = listConversations().find((c) => c.metadata.name === name)
-    const storedThreads = JSON.stringify((stored?.status as { threads?: unknown } | undefined)?.threads ?? null)
+    // The forward opened at the top died with the manager it was bound to.
+    let storedThreads = 'unreadable'
+    try {
+      const fresh = await portForward('agentops-manager', 8080)
+      const before = process.env.E2E_LIVE_MANAGER_URL
+      process.env.E2E_LIVE_MANAGER_URL = `http://127.0.0.1:${fresh.localPort}`
+      try {
+        const stored = listConversations().find((c) => c.metadata.name === name)
+        storedThreads = JSON.stringify((stored?.status as { threads?: unknown } | undefined)?.threads ?? null)
+      } finally {
+        process.env.E2E_LIVE_MANAGER_URL = before
+        fresh.stop()
+      }
+    } catch (probe) {
+      storedThreads = `unreadable (${(probe as Error).message.slice(0, 80)})`
+    }
     throw new Error(
       `/close of ${name} was not applied. The console sees ${view}. The store holds threads ${storedThreads}.\nManager log lines:\n${managerLogLines(name)}\n${(e as Error).message}`,
     )
