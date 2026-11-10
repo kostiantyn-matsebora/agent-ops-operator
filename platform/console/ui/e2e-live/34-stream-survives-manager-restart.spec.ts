@@ -71,7 +71,19 @@ async function run(browser: import('@playwright/test').Browser) {
     await expect(watcher.getByTestId(`row-${name}`)).toBeVisible({ timeout: 60_000 })
   } catch (e) {
     const ids = await watcher.locator('[data-testid^="row-"]').evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))
-    throw new Error(`row-${name} never appeared in the open Archive view. Rows present: ${JSON.stringify(ids)}\n${(e as Error).message}`)
+    // Tell a browser that missed the update from a console that never had it:
+    // the console's own listing, and what a reload of this page shows.
+    const consolePhase = await watcher.evaluate(async (n) => {
+      const r = await fetch('/api/conversations')
+      const j = await r.json()
+      const items = Array.isArray(j) ? j : (j.items ?? [])
+      const hit = items.find((i: { name?: string; metadata?: { name?: string } }) => (i.name ?? i.metadata?.name) === n)
+      return hit ? JSON.stringify(hit).slice(0, 200) : 'absent'
+    }, name)
+    await watcher.reload()
+    await watcher.getByTestId('scope-Archive').click()
+    const afterReload = await watcher.getByTestId(`row-${name}`).isVisible({ timeout: 10_000 }).catch(() => false)
+    throw new Error(`row-${name} never appeared in the open Archive view. Rows present: ${JSON.stringify(ids)}. Console says: ${consolePhase}. Visible after a reload: ${afterReload}\n${(e as Error).message}`)
   }
   await watcher.screenshot({ path: 'e2e-live/proofs/34-stream-survives-manager-restart.png', fullPage: true })
   await ctx.close()

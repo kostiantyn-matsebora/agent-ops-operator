@@ -133,6 +133,38 @@ describe('one event, every view holding that object', () => {
     expect(client.getQueryData<ConversationPage>(['conversations', params])!.items).toHaveLength(1)
   })
 
+  it('re-reads a filtered page when a modified row it does not hold may now belong', () => {
+    const client = newClient()
+    const [params, p] = page([summary({ name: 'older', phase: 'Closed' })], 'phase=Closed&limit=50&offset=0')
+    client.setQueryData(['conversations', params], p)
+    const invalidate = vi.spyOn(client, 'invalidateQueries').mockResolvedValue()
+
+    // Closing a conversation is a MODIFIED, and the Archive page does not hold
+    // it yet. Skipping it left an open Archive view stale until some other
+    // event happened to reload it.
+    applyDelta(client, {
+      type: 'MODIFIED', kind: 'conversations', name: 'just-closed',
+      conversationRow: summary({ name: 'just-closed', phase: 'Closed' }),
+    })
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['conversations', params] })
+  })
+
+  it('leaves the unfiltered first page alone for a modified row it does not hold', () => {
+    const client = newClient()
+    const [params, p] = page([summary({ name: 'newer' })])
+    client.setQueryData(['conversations', params], p)
+    const invalidate = vi.spyOn(client, 'invalidateQueries').mockResolvedValue()
+
+    applyDelta(client, {
+      type: 'MODIFIED', kind: 'conversations', name: 'old-one',
+      conversationRow: summary({ name: 'old-one' }),
+    })
+
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(client.getQueryData<ConversationPage>(['conversations', params])!.items).toHaveLength(1)
+  })
+
   it('removes a deleted conversation from the list and drops its page', () => {
     const client = newClient()
     const [params, p] = page([summary(), summary({ name: 'other' })])
