@@ -64,7 +64,13 @@ async function run(browser: import('@playwright/test').Browser) {
   if (await modal.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await modal.getByTestId('close-confirm-ok').click()
   }
-  await expect(actor.getByText('This thread was archived')).toBeVisible({ timeout: 30_000 })
+  try {
+    await expect(actor.getByText('This thread was archived')).toBeVisible({ timeout: 30_000 })
+  } catch (e) {
+    // The close was accepted and did nothing. Say what each manager saw, while
+    // the pods that served it are still the live ones.
+    throw new Error(`/close of ${name} was not applied. Manager log lines:\n${managerLogLines(name)}\n${(e as Error).message}`)
+  }
 
   // The never-reloaded page sees it.
   try {
@@ -87,4 +93,19 @@ async function run(browser: import('@playwright/test').Browser) {
   }
   await watcher.screenshot({ path: 'e2e-live/proofs/34-stream-survives-manager-restart.png', fullPage: true })
   await ctx.close()
+}
+
+function managerLogLines(name: string): string {
+  const pods = kubectl(['get', 'pods', '-l', 'app.kubernetes.io/name=agentops-manager', '-o', 'name']).split('\n').filter(Boolean)
+  return pods
+    .map((p) => {
+      const log = kubectl(['logs', p, '--tail=400'])
+      const hit = log
+        .split('\n')
+        .filter((l) => /dropped|conversation closed|leader proxy|inbound|leaderelection|signal stored/.test(l) || l.includes(name))
+        .slice(-12)
+        .map((l) => l.slice(0, 260))
+      return `-- ${p}\n${hit.join('\n')}`
+    })
+    .join('\n')
 }
