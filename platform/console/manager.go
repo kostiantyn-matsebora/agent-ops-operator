@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -26,6 +28,13 @@ type Manager struct {
 	Token   string
 	HTTP    *http.Client
 }
+
+// dialAttempts and dialRetryPause bound how long a call waits out a refused
+// connection, which is what a Service answers for the moment a rollout swaps
+// the pod behind it.
+const dialAttempts = 10
+
+var dialRetryPause = 500 * time.Millisecond
 
 // NewManager builds a contract client; the timeout leaves room for the 25s
 // ops long-poll.
@@ -220,23 +229,15 @@ type ChannelInfo struct {
 }
 
 func (m *Manager) do(ctx context.Context, method, path string, in, out any) (int, error) {
-	var body io.Reader
+	var payload []byte
 	if in != nil {
 		b, err := json.Marshal(in)
 		if err != nil {
 			return 0, err
 		}
-		body = bytes.NewReader(b)
+		payload = b
 	}
-	req, err := http.NewRequestWithContext(ctx, method, m.BaseURL+path, body)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+m.Token)
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := m.HTTP.Do(req)
+	resp, err := m.send(ctx, method, path, payload)
 	if err != nil {
 		return 0, err
 	}
@@ -249,6 +250,45 @@ func (m *Manager) do(ctx context.Context, method, path string, in, out any) (int
 		return resp.StatusCode, json.NewDecoder(resp.Body).Decode(out)
 	}
 	return resp.StatusCode, nil
+}
+
+// send makes the request, waiting out a refused connection. A Service refuses
+// for a moment while a rollout swaps the pod behind it, and a refusal means
+// nothing reached any server, so repeating the request cannot act twice. Any
+// other failure may have come after the request was written and is returned at
+// once.
+func (m *Manager) send(ctx context.Context, method, path string, payload []byte) (*http.Response, error) {
+	var lastErr error
+	for attempt := 0; attempt < dialAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, lastErr
+			case <-time.After(dialRetryPause):
+			}
+		}
+		var body io.Reader
+		if payload != nil {
+			body = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, m.BaseURL+path, body)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+m.Token)
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := m.HTTP.Do(req)
+		if err == nil {
+			return resp, nil
+		}
+		if !errors.Is(err, syscall.ECONNREFUSED) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 // NextOp long-polls for the next outbound op; nil when none arrived in time.

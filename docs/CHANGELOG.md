@@ -155,6 +155,9 @@ for the source and the reference material beside this file.
   its own handler.
 - A chat message whose conversation cannot be read is refused for retry
   instead of dropped.
+- The console waits out a refused connection to the manager for a few seconds
+  instead of failing the call, so a message or a close typed while the manager
+  rolls is no longer lost.
 - A state-store feed opened without a resume point no longer skips what is
   written after the server resets its consumer. The reconciler could miss new
   conversations for good, leaving them with no status and no pod.
