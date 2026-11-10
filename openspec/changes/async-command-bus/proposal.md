@@ -142,11 +142,11 @@ capability that does not depend on where state is kept.
   the task.
 - `state-durability`: the ledger and dead-letter record are a third declared
   home, bounded and lossy.
-- `component-network-isolation`: the manager may reach the command-bus server.
+- `component-network-isolation`: adds a requirement. The manager may reach the command-bus server.
   No other component may.
-- `chart-managed-secrets`: the command-bus credential is chart-generated and
+- `chart-managed-secrets`: adds a requirement. The command-bus credential is chart-generated and
   stable across upgrades.
-- `end-to-end-testing`: the system pack gains the bus lanes, and the full tier
+- `end-to-end-testing`: adds requirements. The system pack gains the bus lanes, and the full tier
   gains the end-to-end flows.
 
 ## Impact
