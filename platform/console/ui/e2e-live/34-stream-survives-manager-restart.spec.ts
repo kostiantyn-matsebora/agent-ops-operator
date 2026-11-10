@@ -44,6 +44,15 @@ async function run(browser: import('@playwright/test').Browser) {
   await expect(actor.getByText(/is answering/)).toBeVisible({ timeout: 20_000 })
   const name = await waitFor('the started conversation to exist', () => rowNameByTitle(marker), 30_000)
 
+  // The conversation this spec closes later must be a settled one. A thread
+  // still being created when the manager rolls cannot be written to, and what
+  // this spec proves is the stream, not topic creation across a rollout.
+  await waitFor('the conversation to have an established console thread', () => {
+    const c = listConversations().find((x) => x.metadata.name === name)
+    const threads = (c?.status as { threads?: { channel?: string; threadId?: string }[] } | undefined)?.threads ?? []
+    return threads.some((t) => t.channel === 'console' && t.threadId) ? true : undefined
+  }, 60_000)
+
   // The watcher goes to the Archive scope and stays there.
   await watcher.goto('/conversations')
   await expect(watcher.getByTestId('inbox')).toBeVisible()
@@ -82,7 +91,8 @@ async function run(browser: import('@playwright/test').Browser) {
       process.env.E2E_LIVE_MANAGER_URL = `http://127.0.0.1:${fresh.localPort}`
       try {
         const stored = listConversations().find((c) => c.metadata.name === name)
-        storedThreads = JSON.stringify((stored?.status as { threads?: unknown } | undefined)?.threads ?? null)
+        const st = stored?.status as { threads?: unknown; phase?: string; closedAt?: string } | undefined
+        storedThreads = `${JSON.stringify(st?.threads ?? null)} and phase ${st?.phase} closedAt ${st?.closedAt}`
       } finally {
         process.env.E2E_LIVE_MANAGER_URL = before
         fresh.stop()
