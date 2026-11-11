@@ -187,8 +187,7 @@ render SHALL name the loss of the guarantee in the chart notes.
 #### Scenario: Changing the replica count after install is warned and left unapplied
 - **WHEN** `nats.replicas` is changed after the buckets exist
 - **THEN** the manager keeps the existing buckets unchanged, logs a warning
-  naming both counts, and records a drop in the activity log, and the docs
-  give the rebuild path
+  naming the bucket and both counts, and the docs give the rebuild path
 
 #### Scenario: One replica is explicit
 - **WHEN** the adopter sets `nats.replicas` to 1
