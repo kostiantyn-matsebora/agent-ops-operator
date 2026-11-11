@@ -656,7 +656,7 @@ of, from `chart/charts/nats/values.yaml`:
 | `nats.persistence`'s `storageClassName` | `""` | the cluster's default provisioner — same convention as `persistence.context` above |
 | `nats.auth.user` | `""` | an explicit username. Left empty, it is the literal `nats`, never generated |
 | `nats.auth.password` | `""` | an explicit password. Left empty, the chart generates one |
-| `nats.auth.existingSecret` | `""` | a Secret you already made, read before the chart generates anything |
+| `nats.auth.existingSecret` | `""` | a Secret you already made, read before the chart generates anything. It must carry the keys `user` and `password` |
 | `nats.auth.secretName` | `agentops-nats-credentials` | the generated Secret's name |
 | `nats.podDisruptionBudget.maxUnavailable` | `1` | servers the budget allows down at once. Losing a second loses quorum, not data |
 

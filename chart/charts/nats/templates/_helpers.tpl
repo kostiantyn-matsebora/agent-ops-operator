@@ -10,6 +10,10 @@ on its own — chart.md: "A SUBCHART READS NO PARENT SCOPE BUT `global.`") and
 calls these with an explicit `(dict "root" $ "nats" .Values.nats)`.
 */ -}}
 
+{{- /*
+A Secret named by `nats.auth.existingSecret` MUST carry the keys `user` and
+`password`: the StatefulSet reads exactly those two keys from it.
+*/ -}}
 {{- define "nats.credentialSecretName" -}}
 {{- $auth := .nats.auth | default dict -}}
 {{- $auth.existingSecret | default ($auth.secretName | default "agentops-nats-credentials") -}}
@@ -272,7 +276,7 @@ that finds no Secret fails loudly". A render with no cluster access still
 can't tell "missing" from "unknown" and renders nothing either way.
 */ -}}
 {{- if and $connected (not $root.Release.IsInstall) (not $explicitPassword) (not $existingPassword) }}
-{{- fail (printf "Secret %q does not exist or carries no "password" key, and neither nats.auth.password nor nats.auth.existingSecret is set. Set one of them before upgrading to the nats state-store backend." $name) }}
+{{- fail (printf "Secret %q does not exist, or exists without a non-empty password key, and neither nats.auth.password nor nats.auth.existingSecret is set. Set one of them before upgrading to the nats state-store backend." $name) }}
 {{- end }}
 {{- if or $explicitPassword $existingPassword $root.Release.IsInstall $connected }}
 apiVersion: v1
