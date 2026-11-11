@@ -229,12 +229,14 @@ spec:
           # on nats that waits for the cluster to elect a leader. Liveness
           # starts after this passes, so a slow election is waited out (5m)
           # instead of killing the pod mid-wait.
+          {{- if ne (include "agentops.stateBackend" .) "kube" }}
           startupProbe:
             httpGet:
               path: /healthz
               port: 8081
             periodSeconds: 10
             failureThreshold: 30
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

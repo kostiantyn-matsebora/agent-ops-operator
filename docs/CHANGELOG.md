@@ -150,7 +150,6 @@ for the source and the reference material beside this file.
 ### Fixed
 
 - A change the state feed named could be skipped for good on a three-server state store, because reads of a record could be answered by a follower that had not applied the write yet. Reads now go to the stream leader.
-
 - The manager's liveness probe no longer kills it while a slow state server
   elects a leader. The pod now has a startup probe of up to five minutes.
 - A non-leader replica that cannot reach the leader keeps the request body for
