@@ -97,6 +97,7 @@ func deleteNatsPVCs(t *testing.T, ctx context.Context, e *Env) {
 // custom resources left exactly as they were (design D-10: "it never
 // patches a Kubernetes object").
 func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
+	requireNats(t)
 	fullTier(t)
 	e := requireEnv(t)
 	ctx := context.Background()
@@ -284,6 +285,7 @@ func assertKubeRecordsUntouched(t *testing.T, ctx context.Context, e *Env, befor
 // changing what actually runs — the safe way to force one on this pack's
 // own single node, with no second real image to pull.
 func TestNatsRollingServerImageUpgradeKeepsWritesSucceeding(t *testing.T) {
+	requireNats(t)
 	fullTier(t)
 	e := requireEnv(t)
 	ctx := context.Background()

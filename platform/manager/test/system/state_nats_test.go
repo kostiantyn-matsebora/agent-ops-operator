@@ -127,6 +127,7 @@ func conversationExistsFor(ctx context.Context, e *Env, id string) (bool, error)
 // natsReadinessCheck) must survive it: one of three down is comfortably
 // inside quorum.
 func TestNatsServerPodDeletionMidConversationCompletes(t *testing.T) {
+	requireNats(t)
 	fullTier(t)
 	e := requireEnv(t)
 	ctx := context.Background()
@@ -173,6 +174,7 @@ func TestNatsServerPodDeletionMidConversationCompletes(t *testing.T) {
 // quorum is down. Once the third server is restored, the pre-outage record
 // must still read back correctly and the held write must resume on its own.
 func TestNatsTwoServersDownHoldsWorkThenResumes(t *testing.T) {
+	requireNats(t)
 	fullTier(t)
 	e := requireEnv(t)
 	ctx := context.Background()
@@ -233,6 +235,7 @@ func TestNatsTwoServersDownHoldsWorkThenResumes(t *testing.T) {
 // already does, at the StatefulSet level. The drain itself is therefore NOT
 // EXERCISED here; only the object the chart renders is.
 func TestNatsPodDisruptionBudgetAllowsOnlyOneDown(t *testing.T) {
+	requireNats(t)
 	e := requireEnv(t)
 	ctx := context.Background()
 	var pdb policyv1.PodDisruptionBudget

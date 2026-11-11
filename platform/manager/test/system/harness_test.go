@@ -284,6 +284,17 @@ func requireEnv(t *testing.T) *Env {
 	return env
 }
 
+// requireNats skips a test that exercises the nats state server when the run
+// pins the whole pack to the kube fallback (SYSTEM_STATE_BACKEND=kube, task
+// 5.7): there is no state server to delete, no budget to read and no import
+// to wait for, so asserting one would fail a run that is correct.
+func requireNats(t *testing.T) {
+	t.Helper()
+	if os.Getenv("SYSTEM_STATE_BACKEND") == "kube" {
+		t.Skip("the run is pinned to the kube backend (SYSTEM_STATE_BACKEND=kube)")
+	}
+}
+
 // fullTier skips a test that belongs to the full pack when the gating tier
 // runs, reporting it as skipped rather than failed.
 func fullTier(t *testing.T) {
