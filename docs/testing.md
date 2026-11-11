@@ -202,7 +202,7 @@ tests.
 |---|---|
 | A state server pod deleted mid-conversation | the conversation completes, no input is lost, the manager stays ready |
 | Two of three servers stopped | work is held and `/state/*` reports the outage, not a loss — every record written before is readable once they return |
-| A drain of the state servers | the budget allows one eviction and refuses a second while the first server is down. The Eviction API is what a drain issues per pod, and the one-node pack cluster serves it |
+| A drain of the state servers | the budget allows one eviction and refuses a second while the first server is down. The Eviction API is what a drain issues per pod, and the single-node pack cluster serves it |
 | A rolling server image upgrade | two servers stay up throughout and no write fails |
 | An install on `kube` upgraded to the default | the conversation, signal and cooldown window opened before the upgrade read back through `/state/*` afterward, and the custom resources stay untouched |
 | `stateStore.backend: kube` | the smoke tier passes and the install renders no state server, so the pin is exercised, not only rendered |

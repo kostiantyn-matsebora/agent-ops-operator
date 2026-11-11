@@ -652,8 +652,8 @@ of, from `chart/charts/nats/values.yaml`:
 | Key | Default | Consequence |
 |---|---|---|
 | `nats.replicas` | `3` | servers in the cluster. `1` is a conscious single point of failure, and the chart notes say so. Set at install: buckets that exist keep their count and the manager logs the difference. A different count needs a fresh install on new volumes, which starts with empty buckets and carries no live state over |
-| `nats.persistence`'s `size` | `10Gi` | each server's own store directory |
-| `nats.persistence`'s `storageClassName` | `""` | the cluster's default provisioner — same convention as `persistence.context` above |
+| `nats.persistence.size` | `10Gi` | each server's own store directory |
+| `nats.persistence.storageClassName` | `""` | the cluster's default provisioner — same convention as `persistence.context` above |
 | `nats.auth.user` | `""` | an explicit username. Left empty, it is the literal `nats`, never generated |
 | `nats.auth.password` | `""` | an explicit password. Left empty, the chart generates one |
 | `nats.auth.existingSecret` | `""` | a Secret you already made, read before the chart generates anything. It must carry the keys `user` and `password` |

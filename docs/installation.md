@@ -174,7 +174,7 @@ checkouts, and is off by default because agents re-clone instead.
 |---|---|---|
 | `persistence.context.accessModes` | `[]` — the chart picks | `ReadWriteMany`, or `ReadWriteOnce` in demo mode where `local-path` refuses RWX. Set it yourself and your value wins |
 | `persistence.context.storageClassName` | `""` | empty uses the cluster's default provisioner. To bind a volume you made yourself, see [pointing a volume at existing storage](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#pointing-a-volume-at-storage-the-chart-did-not-create) |
-| `nats.persistence.storageClassName` | `""` | sets the state servers' volumes' storage class. Empty uses the cluster's default provisioner. Fixed once the claims exist |
+| `nats.persistence.storageClassName` | `""` | the storage class of the state servers' volumes. Empty uses the cluster's default provisioner. Fixed once the claims exist |
 
 Set the access mode before you install. A claim cannot be edited once it
 exists, so changing your mind means deleting it and starting again.
@@ -241,8 +241,8 @@ alert. See the changelog entry before you upgrade a production install.
 
 **The next release is BREAKING too: the default state backend changes to
 `nats`.** A fresh install now also runs three more pods and three more
-volumes — a clustered state server replacing the `Conversation`, `Signal`
-and cooldown custom resources as the live record.
+volumes — a clustered state server replacing the `Conversation` and `Signal`
+custom resources and the cooldown window on `SignalSource` as the live record.
 
 The state servers' volumes are claims too, so their storage class is set
 before install. See [Storage](#storage).

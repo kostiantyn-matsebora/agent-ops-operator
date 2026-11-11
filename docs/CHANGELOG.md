@@ -35,8 +35,8 @@ for the source and the reference material beside this file.
   no longer freezes the console's view.
 - The manager waits for the state server to accept its buckets instead of
   exiting while the cluster forms its quorum.
-- An upgrade from `kube` imports every conversation, signal, cooldown window
-  and receipt counter into `nats` on the manager's first start, before it
+- An upgrade from `kube` imports every conversation with its runs and queued inputs,
+  every signal, cooldown window, receipt counter and adapter cursor into `nats` on the manager's first start, before it
   reports ready, and leaves the custom resources in place.
 - A new NetworkPolicy admits the state server's client port from the manager
   alone, and its peer port from its own pods alone, where network

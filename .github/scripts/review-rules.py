@@ -83,6 +83,7 @@ TABLE: list[tuple[str, list[str]]] = [
     ("openspec/**", ["authoring", "writing", "terminology", "documentation", "change-tests", "test-coverage"]),
     ("**/*_test.go", ["test-coverage"]),
     ("docs/testing.md", ["test-coverage"]),
+    (".github/tests/**", ["test-coverage"]),
     (".github/components.sh", ["structure"]),
     (".github/workflows/**", ["structure"]),
     ("**/Dockerfile", ["structure"]),
