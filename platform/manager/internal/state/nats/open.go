@@ -197,6 +197,12 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 	if err != nil {
 		return nil, fmt.Errorf("nats: bootstrap object store %q: %w", blobsBucket, err)
 	}
+	if err := leaderReadsOnly(ctx, conn.js, objectStreamName(blobsBucket)); err != nil {
+		return nil, fmt.Errorf("nats: object store %q direct reads: %w", blobsBucket, err)
+	}
+	if blobsStore, err = conn.js.ObjectStore(ctx, blobsBucket); err != nil {
+		return nil, fmt.Errorf("nats: open object store %q: %w", blobsBucket, err)
+	}
 
 	b.Stores = state.Stores{
 		Conversations: conversations,
@@ -237,6 +243,14 @@ func (b *Backend) bootstrapKV(ctx context.Context, base string, replicas int) (j
 	kv, err := b.conn.js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: name, Replicas: replicas, History: bucketHistory})
 	if err != nil {
 		return nil, "", fmt.Errorf("nats: bootstrap bucket %q: %w", name, err)
+	}
+	if err := leaderReadsOnly(ctx, b.conn.js, kvStreamName(name)); err != nil {
+		return nil, "", fmt.Errorf("nats: bucket %q direct reads: %w", name, err)
+	}
+	// Reopen so the handle reads the stream's settings as they are now.
+	kv, err = b.conn.js.KeyValue(ctx, name)
+	if err != nil {
+		return nil, "", fmt.Errorf("nats: open bucket %q: %w", name, err)
 	}
 	return kv, name, nil
 }

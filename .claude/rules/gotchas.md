@@ -25,6 +25,7 @@
 | `jetstream.KeyValue.WatchAll`'s `ResumeFromRevision` implies `DeliverLastPerSubject` | it silently collapses every intermediate write to one key's LATEST value — a resumed `Watch` must subscribe to the raw stream directly |
 | A KV bucket with `History: 1` keeps nothing to replay after a purge | `History` must exceed 1 on any bucket a resumed `Watch` reads |
 | An ordered consumer's reset reuses its ORIGINAL delivery policy | `DeliverNew` is re-resolved at recreation, losing writes in between — start at an explicit sequence (`DeliverByStartSequence`, `LastSeq+1`) |
+| A KV bucket and an object store are created with direct gets ON, and any replica may answer one, including a follower that has not applied the write the feed just named | the reconciler read not-found, took it as deleted, and a Signal was stored and never passed over — turn `AllowDirect` off on every stream and reopen the handle. Verify: `TestNoBucketAllowsAReadFromAReplicaThatMayLag` |
 
 ### Wiring, review and CI mechanics
 

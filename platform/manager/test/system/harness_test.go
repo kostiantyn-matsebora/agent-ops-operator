@@ -295,6 +295,16 @@ func requireNats(t *testing.T) {
 	}
 }
 
+// requireKube skips a test that reaches into the kube backend's own storage,
+// a SignalSource's status for instance, when the run is on the chart's default
+// (nats). The behaviour such a lane proves is asserted for nats by a sibling.
+func requireKube(t *testing.T) {
+	t.Helper()
+	if os.Getenv("SYSTEM_STATE_BACKEND") != "kube" {
+		t.Skip("reaches into the kube backend's storage, run with SYSTEM_STATE_BACKEND=kube")
+	}
+}
+
 // fullTier skips a test that belongs to the full pack when the gating tier
 // runs, reporting it as skipped rather than failed.
 func fullTier(t *testing.T) {

@@ -13,6 +13,11 @@
 # to spend. A dispatched run always runs.
 #
 #   gh workflow run system-full.yml
+#   gh workflow run system-full.yml -f state_backend=kube
+#
+# `state_backend` pins the state store backend for a dispatched run. Left empty
+# it is the chart's default (nats). `kube` is how the lanes that reach into the
+# kube backend's own storage run at all.
 #
 # Cadence: the cron below and nowhere else; docs/testing.md names this file.
 name: system-full
@@ -21,6 +26,12 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      state_backend:
+        description: pin the state store backend (empty keeps the chart default)
+        type: choice
+        options: ["", nats, kube]
+        default: ""
 
 permissions:
   contents: read
@@ -65,4 +76,5 @@ jobs:
     uses: ./.github/workflows/system.yml
     with:
       tier: full
+      stateBackend: ${{ inputs.state_backend }}
     secrets: inherit

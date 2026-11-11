@@ -172,7 +172,8 @@ func TestNatsServerPodDeletionMidConversationCompletes(t *testing.T) {
 // stale view — never asserted as one exact status code, since nothing in
 // design D-4/D-8 pins one; only that neither path reports success while
 // quorum is down. Once the third server is restored, the pre-outage record
-// must still read back correctly and the held write must resume on its own.
+// must still read back correctly and the publisher's retry of the refused
+// write must be accepted and open its conversation.
 func TestNatsTwoServersDownHoldsWorkThenResumes(t *testing.T) {
 	requireNats(t)
 	fullTier(t)
@@ -209,7 +210,13 @@ func TestNatsTwoServersDownHoldsWorkThenResumes(t *testing.T) {
 		code, out := e.do(t, "GET", e.Manager.URL()+"/state/conversations/"+baseline.Name, nil, bearerPrefix+e.Values.AdapterToken)
 		return code == 200 && strings.Contains(out, baselineID), nil
 	})
-	waitFor(t, "the held write to resume once quorum returns", 3*time.Minute, func() (bool, error) {
+	// A write refused during the outage was stored nowhere, so what resumes is
+	// the publisher's retry, as every adapter retries a refused publish.
+	waitFor(t, "the retried write to be accepted once quorum returns", 3*time.Minute, func() (bool, error) {
+		code, _ := postSignalRaw(e, t, SourceTasks, outageID)
+		return code == 200, nil
+	})
+	waitFor(t, "the retried write to open its conversation", 3*time.Minute, func() (bool, error) {
 		return conversationExistsFor(ctx, e, outageID)
 	})
 	t.Cleanup(func() {

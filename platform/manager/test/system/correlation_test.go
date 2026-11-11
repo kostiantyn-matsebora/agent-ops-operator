@@ -164,6 +164,7 @@ func TestCorrelationIDReachesThreadBinding(t *testing.T) {
 // assertion, and SYSTEM_TIER=full is what 9.2 runs.
 func TestCorrelationRepeatOutsideCooldownRecursOnOpenConversation(t *testing.T) {
 	fullTier(t)
+	requireKube(t)
 	e := requireEnv(t)
 	ctx := context.Background()
 	const name = "e2e-corr-cooldown"
@@ -190,6 +191,50 @@ func TestCorrelationRepeatOutsideCooldownRecursOnOpenConversation(t *testing.T) 
 	}
 	if len(all) != 1 {
 		t.Fatalf("a repeat outside the cooldown window must recur into the open conversation, not open a second one, got %d conversations", len(all))
+	}
+}
+
+// 9.1.e The window a source recorded is recovered from the state store after a
+// real manager restart, so a repeat of the same initiationId inside it is
+// dropped as a cooldown and opens nothing. This is the nats backend's sibling
+// of 9.1.d, which backdates an entry in the kube backend's own storage and so
+// cannot run there. It holds on either backend.
+func TestCorrelationCooldownWindowSurvivesAManagerRestart(t *testing.T) {
+	fullTier(t)
+	e := requireEnv(t)
+	ctx := context.Background()
+	const name = "e2e-corr-window"
+	setupDedicatedCorrelationSource(t, ctx, e, name)
+
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	id := "e2e-corr-window-" + stamp
+	e.PostSignal(t, name, map[string]any{"initiationId": id, "kind": "task", "payload": "first", "title": id})
+	conv := e.ConversationFor(t, id, 2*time.Minute)
+	conv = e.WaitRun(t, conv.Name, 1, 5*time.Minute)
+
+	restartManager(t, ctx, e)
+
+	e.PostSignal(t, name, map[string]any{"initiationId": id, "kind": "task", "payload": "second", "title": id})
+	waitFor(t, "the repeat inside the window to be dropped as a cooldown", 2*time.Minute, func() (bool, error) {
+		items, err := e.K.Signals(ctx)
+		if err != nil {
+			return false, err
+		}
+		for i := range items {
+			s := &items[i]
+			if s.Spec.SourceRef.Name == name && s.Spec.InitiationID == id &&
+				s.Status.Phase == agentopsv1alpha1.SignalDropped && s.Status.Reason == agentopsv1alpha1.SignalDropCooldown {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	all, err := conversationsFromSource(ctx, e, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("a repeat inside the window must open nothing, got %d conversations", len(all))
 	}
 }
 

@@ -245,8 +245,7 @@ func (k *Kube) DeleteAllConversations(ctx context.Context) error {
 // deleteStored closes, then deletes, the named conversations through the
 // manager. A name already gone is not
 // an error: a cleanup that races another is still a cleanup. A conversation
-// with no thread yet, still queued for a slot, has nothing to post a close on
-// and is reported, never skipped.
+// with no thread has nothing to post a close on, so only its pod is removed.
 func (k *Kube) deleteStored(ctx context.Context, names []string) error {
 	var live, open []string
 	channels := map[string]string{}
@@ -265,7 +264,15 @@ func (k *Kube) deleteStored(ctx context.Context, names []string) error {
 			continue
 		}
 		if thread == "" {
-			return fmt.Errorf("%s is %s with no thread to close it through", n, c.Status.Phase)
+			// No channel holds it, so no manager verb can close it: a thread is
+			// what a close is posted on. What a caller clearing the admission
+			// pool needs is the slot, and a slot is a pod. The record stays,
+			// Idle and holding nothing.
+			live = live[:len(live)-1]
+			if err := k.deleteConversationPods(ctx, n); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := k.managerPost(ctx, "/channel/inbound", map[string]any{
 			"channel": channel, "threadId": thread, "sender": "system-pack", "text": "/close"}); err != nil {
@@ -292,6 +299,20 @@ func (k *Kube) deleteStored(ctx context.Context, names []string) error {
 	// did: a deleted conversation lingers under its close-topics finalizer for
 	// up to two minutes, and what a caller needs is the pod and the slot, which
 	// the close already released.
+	return nil
+}
+
+// deleteConversationPods removes the runtime pods of one conversation.
+func (k *Kube) deleteConversationPods(ctx context.Context, name string) error {
+	pods, err := k.Pods(ctx, "agentops.dev/conversation="+name)
+	if err != nil {
+		return err
+	}
+	for i := range pods {
+		if err := k.Client.Delete(ctx, &pods[i]); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
 	return nil
 }
 
