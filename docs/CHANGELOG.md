@@ -161,6 +161,11 @@ for the source and the reference material beside this file.
 - A state-store feed opened without a resume point no longer skips what is
   written after the server resets its consumer. The reconciler could miss new
   conversations for good, leaving them with no status and no pod.
+- The manager's start-up against a state server that is still forming its
+  cluster no longer spends the whole two-minute wait on one request the server
+  never answers. Each attempt is bounded and retried.
+- A changed `nats.replicas` leaves the existing buckets as they are and logs
+  the difference. It no longer re-replicates a live bucket.
 
 ### Upgrade
 

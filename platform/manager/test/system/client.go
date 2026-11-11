@@ -3,6 +3,7 @@
 package system
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -45,6 +46,13 @@ type Kube struct {
 	// there would see nothing.
 	StateURL   string
 	StateToken string
+
+	// ConsoleURL and ConsoleToken, once set, let Delete remove a Conversation
+	// the Kubernetes API does not hold. The console's close and delete are
+	// the supported way to remove one on any backend, and the only one when
+	// the manager's store is not the API server.
+	ConsoleURL   string
+	ConsoleToken string
 }
 
 // NewKube builds the client from a kubeconfig.
@@ -194,9 +202,164 @@ func (k *Kube) Conversations(ctx context.Context) ([]agentopsv1alpha1.Conversati
 	return list.Items, nil
 }
 
+// Delete overrides the embedded client's. A Conversation object is removed
+// the ordinary way where one exists. Where none does, because the manager's
+// store holds it, the conversation is closed and deleted through the console,
+// which is what an operator does. Every other kind is the embedded client's.
+func (k *Kube) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	conv, ok := obj.(*agentopsv1alpha1.Conversation)
+	if !ok || k.ConsoleURL == "" {
+		return k.Client.Delete(ctx, obj, opts...)
+	}
+	err := k.Client.Delete(ctx, obj, opts...)
+	if err == nil || !apierrors.IsNotFound(err) {
+		return err
+	}
+	return k.deleteStored(ctx, []string{conv.Name})
+}
+
+// DeleteAllConversations removes every conversation, whichever store holds it.
+func (k *Kube) DeleteAllConversations(ctx context.Context) error {
+	if k.ConsoleURL != "" {
+		items, err := k.Conversations(ctx)
+		if err != nil {
+			return err
+		}
+		names := make([]string, 0, len(items))
+		for i := range items {
+			names = append(names, items[i].Name)
+		}
+		if len(names) > 0 {
+			if err := k.deleteStored(ctx, names); err != nil {
+				return err
+			}
+		}
+	}
+	var list agentopsv1alpha1.ConversationList
+	if err := k.List(ctx, &list, client.InNamespace(k.Namespace)); err != nil {
+		return err
+	}
+	for i := range list.Items {
+		if err := k.Client.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteStored closes, then deletes, the named conversations through the
+// console and waits until the manager no longer lists them. A name already
+// gone is not an error: a cleanup that races another is still a cleanup.
+func (k *Kube) deleteStored(ctx context.Context, names []string) error {
+	var live, open []string
+	for _, n := range names {
+		c, err := k.Conversation(ctx, n)
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		live = append(live, n)
+		if c.Status.Phase != agentopsv1alpha1.ConversationClosed {
+			open = append(open, n)
+		}
+	}
+	if len(live) == 0 {
+		return nil
+	}
+	if len(open) > 0 {
+		if err := k.consolePost(ctx, "/api/conversations/close", open); err != nil {
+			return fmt.Errorf("close %v: %w", open, err)
+		}
+		if err := k.waitConversations(ctx, open, func(c *agentopsv1alpha1.Conversation, gone bool) bool {
+			return gone || c.Status.Phase == agentopsv1alpha1.ConversationClosed
+		}); err != nil {
+			return fmt.Errorf("waiting for %v to close: %w", open, err)
+		}
+	}
+	if err := k.consolePost(ctx, "/api/conversations/delete", live); err != nil {
+		return fmt.Errorf("delete %v: %w", live, err)
+	}
+	return k.waitConversations(ctx, live, func(_ *agentopsv1alpha1.Conversation, gone bool) bool { return gone })
+}
+
+// consolePost sends a bulk verb to the console, retrying a transport error:
+// a port-forward whose pod just rolled answers EOF once and recovers.
+func (k *Kube) consolePost(ctx context.Context, path string, names []string) error {
+	body, _ := json.Marshal(map[string]any{"names": names})
+	var last error
+	for attempt := 0; attempt < 3; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, k.ConsoleURL+path, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+k.ConsoleToken)
+		resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+		if err != nil {
+			last = err
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		resp.Body.Close()
+		if resp.StatusCode/100 != 2 {
+			return fmt.Errorf("POST %s: %d %s", path, resp.StatusCode, strings.TrimSpace(string(b)))
+		}
+		return nil
+	}
+	return last
+}
+
+// waitConversations polls until done holds for every name, or ctx ends or two
+// minutes pass.
+func (k *Kube) waitConversations(ctx context.Context, names []string, done func(c *agentopsv1alpha1.Conversation, gone bool) bool) error {
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		pending := 0
+		for _, n := range names {
+			c, err := k.Conversation(ctx, n)
+			switch {
+			case apierrors.IsNotFound(err):
+				continue
+			case err != nil:
+				return err
+			case !done(c, false):
+				pending++
+			}
+		}
+		if pending == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%d of %d still not done after 2m", pending, len(names))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
 // Signal reads one Signal — the persist-then-ack record signal-persistence
-// adds, mirrored off Conversation's own shape above.
+// adds, mirrored off Conversation's own shape above. With a state URL it reads
+// through the manager, which is the only place a signal exists on a backend
+// that keeps no Signal object.
 func (k *Kube) Signal(ctx context.Context, name string) (*agentopsv1alpha1.Signal, error) {
+	if k.StateURL != "" {
+		items, err := k.Signals(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for i := range items {
+			if items[i].Name == name {
+				return &items[i], nil
+			}
+		}
+		return nil, apierrors.NewNotFound(schema.GroupResource{Group: "agentops.dev", Resource: "signals"}, name)
+	}
 	var s agentopsv1alpha1.Signal
 	if err := k.Get(ctx, types.NamespacedName{Namespace: k.Namespace, Name: name}, &s); err != nil {
 		return nil, err
@@ -206,6 +369,19 @@ func (k *Kube) Signal(ctx context.Context, name string) (*agentopsv1alpha1.Signa
 
 // Signals lists them all.
 func (k *Kube) Signals(ctx context.Context) ([]agentopsv1alpha1.Signal, error) {
+	if k.StateURL != "" {
+		var out struct {
+			Items []stateSignal `json:"items"`
+		}
+		if err := k.stateGet(ctx, "/state/signals", &out); err != nil {
+			return nil, err
+		}
+		items := make([]agentopsv1alpha1.Signal, 0, len(out.Items))
+		for i := range out.Items {
+			items = append(items, *out.Items[i].object(k.Namespace))
+		}
+		return items, nil
+	}
 	var list agentopsv1alpha1.SignalList
 	if err := k.List(ctx, &list, client.InNamespace(k.Namespace)); err != nil {
 		return nil, err
@@ -282,6 +458,24 @@ func (w stateConversation) object(namespace string) *agentopsv1alpha1.Conversati
 	c.Name, c.Namespace, c.UID = w.Name, namespace, types.UID(w.ID)
 	c.CreationTimestamp = metav1.NewTime(w.CreatedAt)
 	return c
+}
+
+// stateSignal is a /state/signals item. Spec and status are the API types
+// themselves, as for a conversation, so a reader written against the
+// Kubernetes object reads this unchanged.
+type stateSignal struct {
+	Name      string                        `json:"name"`
+	ID        string                        `json:"id"`
+	CreatedAt time.Time                     `json:"createdAt"`
+	Spec      agentopsv1alpha1.SignalSpec   `json:"spec"`
+	Status    agentopsv1alpha1.SignalStatus `json:"status"`
+}
+
+func (w stateSignal) object(namespace string) *agentopsv1alpha1.Signal {
+	s := &agentopsv1alpha1.Signal{Spec: w.Spec, Status: w.Status}
+	s.Name, s.Namespace, s.UID = w.Name, namespace, types.UID(w.ID)
+	s.CreationTimestamp = metav1.NewTime(w.CreatedAt)
+	return s
 }
 
 // stateGet reads one /state path into out. A 404 comes back as the same

@@ -139,8 +139,8 @@ func closeConsoleConversationsMatching(t *testing.T, ctx context.Context, e *Env
 	}
 	waitFor(t, fmt.Sprintf("%d conversations to close", len(names)), 2*time.Minute, func() (bool, error) {
 		for _, name := range names {
-			var c agentopsv1alpha1.Conversation
-			if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: name}, &c); err != nil {
+			c, err := e.K.Conversation(ctx, name)
+			if err != nil {
 				return false, err
 			}
 			if c.Status.Phase != agentopsv1alpha1.ConversationClosed {

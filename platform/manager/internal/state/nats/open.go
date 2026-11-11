@@ -32,6 +32,8 @@ type openConfig struct {
 	// orphanInterval is the period of the sweep that removes what no
 	// conversation owns (cascade.go).
 	orphanInterval time.Duration
+	// attemptTimeout bounds one OpenStoresWhenReady attempt.
+	attemptTimeout time.Duration
 	// onDrift is told of every bucket whose live replica count differs from
 	// the configured one (replicas.go).
 	onDrift func(bucket string, have, want int)
@@ -43,6 +45,12 @@ func WithSweepInterval(d time.Duration) Option {
 	return func(c *openConfig) { c.sweepInterval = d }
 }
 
+// WithOpenAttemptTimeout bounds each attempt OpenStoresWhenReady makes, so a
+// request the server never answers costs one attempt and not the whole budget.
+func WithOpenAttemptTimeout(d time.Duration) Option {
+	return func(c *openConfig) { c.attemptTimeout = d }
+}
+
 // WithReplicaDriftHook is called once for every bucket or object store whose
 // existing replica count differs from the configured one. The backend has
 // already logged the difference and left the bucket as it is, so the hook is
@@ -52,7 +60,7 @@ func WithReplicaDriftHook(fn func(bucket string, have, want int)) Option {
 }
 
 func newOpenConfig(opts []Option) openConfig {
-	cfg := openConfig{sweepInterval: DefaultSweepInterval, orphanInterval: DefaultOrphanSweepInterval}
+	cfg := openConfig{sweepInterval: DefaultSweepInterval, orphanInterval: DefaultOrphanSweepInterval, attemptTimeout: DefaultOpenAttemptTimeout}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -287,8 +295,14 @@ func OpenStoresWhenReady(ctx context.Context, conn *Conn, scope string, interval
 	if interval <= 0 {
 		interval = DefaultOpenRetryInterval
 	}
+	attemptTimeout := newOpenConfig(opts).attemptTimeout
 	for {
-		b, err := OpenStores(ctx, conn, scope, opts...)
+		// A request the server never answers waits for its whole context, so an
+		// attempt is bounded on its own. The context ends with the attempt and
+		// the opened backend keeps nothing of it.
+		actx, cancel := context.WithTimeout(ctx, attemptTimeout)
+		b, err := OpenStores(actx, conn, scope, opts...)
+		cancel()
 		if err == nil {
 			return b, nil
 		}
@@ -299,6 +313,11 @@ func OpenStoresWhenReady(ctx context.Context, conn *Conn, scope string, interval
 		}
 	}
 }
+
+// DefaultOpenAttemptTimeout bounds one attempt to bootstrap the buckets. Long
+// enough for a placement on a healthy cluster, short enough that a request the
+// server dropped is asked again well inside the manager's startup budget.
+const DefaultOpenAttemptTimeout = 15 * time.Second
 
 // DefaultOpenRetryInterval is how long OpenStoresWhenReady waits between attempts.
 const DefaultOpenRetryInterval = 3 * time.Second
