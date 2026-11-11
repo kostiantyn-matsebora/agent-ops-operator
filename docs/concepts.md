@@ -1989,8 +1989,9 @@ adapter's own cursor, the same annotation it always was.
 - **Under `kube`**, a restart costs what the Kubernetes API's own guarantee
   allows. A write is acknowledged once the API server has it.
 - **Under `nats`**, a restart costs what the clustered KV's own guarantee
-  allows. A write is acknowledged once two of the three servers have it, so
-  losing one server loses nothing.
+  allows. Under the default three servers a write is acknowledged once two
+  have it, so losing one server loses nothing. With `replicas: 1` there is no
+  second copy.
 - **Reads of one record go to the server**, never a cache, so a
   compare-and-swap precondition is never a guess. Listings are served from an
   in-memory mirror kept current by a watch, since a full list of a large

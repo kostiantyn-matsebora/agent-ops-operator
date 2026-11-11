@@ -174,7 +174,6 @@ checkouts, and is off by default because agents re-clone instead.
 |---|---|---|
 | `persistence.context.accessModes` | `[]` — the chart picks | `ReadWriteMany`, or `ReadWriteOnce` in demo mode where `local-path` refuses RWX. Set it yourself and your value wins |
 | `persistence.context.storageClassName` | `""` | empty uses the cluster's default provisioner. To bind a volume you made yourself, see [pointing a volume at existing storage](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#pointing-a-volume-at-storage-the-chart-did-not-create) |
-| `nats.persistence.storageClassName` | `""` | the state servers' volumes under the default `nats` backend. Empty uses the cluster's default provisioner, and the setting is immutable once the claims exist |
 
 Set the access mode before you install. A claim cannot be edited once it
 exists, so changing your mind means deleting it and starting again.

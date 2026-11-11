@@ -637,8 +637,8 @@ reads the choice as `STATE_BACKEND`, and a value its binary does not carry
 stops it at start, naming the value.
 
 **An upgrade from `kube` imports automatically.** The first start on `nats`
-copies every conversation, signal, cooldown window and receipt counter out
-of the custom resources before the manager reports ready.
+copies every conversation, run, queued input, signal, cooldown window,
+receipt counter and adapter cursor out of the custom resources before the manager reports ready.
 
 It leaves the custom resources in place. See
 [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)

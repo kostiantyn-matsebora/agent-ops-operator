@@ -45,6 +45,7 @@ resources: {}
 auth:
   user: ""
   password: ""
+  # An existingSecret must carry the keys `user` and `password`.
   existingSecret: ""
   secretName: agentops-nats-credentials
 
