@@ -13,6 +13,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -232,15 +233,11 @@ func TestNatsTwoServersDownHoldsWorkThenResumes(t *testing.T) {
 	})
 }
 
-// 5.4 — the PodDisruptionBudget design D-8 renders (chart task 3.1) actually
-// exists on the live cluster and still names maxUnavailable: 1. This pack's
-// own cluster is single-node (cluster.go's `k3d cluster create --no-lb`, one
-// node): every replica already shares that node's one failure domain
-// regardless of the budget, so draining a node that holds all three proves
-// nothing an eviction-blocking assertion would not already prove by
-// deleting a second pod outright — which TestNatsTwoServersDownHoldsWorkThenResumes
-// already does, at the StatefulSet level. The drain itself is therefore NOT
-// EXERCISED here; only the object the chart renders is.
+// 5.4 — the PodDisruptionBudget design D-8 renders (chart task 3.1) exists
+// with maxUnavailable: 1 AND is enforced: a drain evicts through the Eviction
+// API, which this single-node cluster serves like any other, so evicting one
+// state server is allowed and evicting a second while the first is down is
+// refused. A node drain is exactly this request repeated per pod.
 func TestNatsPodDisruptionBudgetAllowsOnlyOneDown(t *testing.T) {
 	requireNats(t)
 	e := requireEnv(t)
@@ -251,5 +248,21 @@ func TestNatsPodDisruptionBudgetAllowsOnlyOneDown(t *testing.T) {
 	}
 	if pdb.Spec.MaxUnavailable == nil || pdb.Spec.MaxUnavailable.IntValue() != 1 {
 		t.Fatalf("maxUnavailable must be 1, got %+v", pdb.Spec.MaxUnavailable)
+	}
+
+	pods := natsPods(t, ctx, e)
+	if len(pods) < 2 {
+		t.Fatalf("need at least two state servers to prove the budget, got %d", len(pods))
+	}
+	evict := func(name string) error {
+		return e.K.Clientset.CoreV1().Pods(Namespace).EvictV1(ctx, &policyv1.Eviction{
+			ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: name}})
+	}
+	t.Cleanup(func() { waitNatsStatefulSetReady(t, context.Background(), e, int32(len(pods))) })
+	if err := evict(pods[0].Name); err != nil {
+		t.Fatalf("the first eviction must be allowed within the budget: %v", err)
+	}
+	if err := evict(pods[1].Name); !apierrors.IsTooManyRequests(err) {
+		t.Fatalf("a second eviction while one server is down must be refused by the budget, got: %v", err)
 	}
 }

@@ -191,9 +191,9 @@ wrote one, must stop.
 An upgrade that finds no `agentops-nats-credentials` Secret fails the render.
 The error names the Secret and `nats.auth.existingSecret`.
 
-The new manager starts, finds the empty `nats` buckets and the `kube`
-records, imports them, and reports ready once the import finishes. Verify
-through the console or `/state/conversations` before trusting it, then
+The new manager starts and finds the empty `nats` buckets and the `kube`
+records. The replica that wins the leader lease imports them and reports
+ready once the import finishes. Verify through the console or `/state/conversations` before trusting it, then
 delete the old custom resources yourself once you have — the import never
 does:
 

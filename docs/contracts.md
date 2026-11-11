@@ -467,9 +467,9 @@ events do carry a record's `runs[].inputs[]`.
 
 **The wire record** carries a kind's published field names only — `name`,
 `id`, `revision`, `createdAt`, `deletionRequestedAt`, `spec`, `status` — never
-Kubernetes metadata, labels or annotations. Under `kube`, `spec` and `status`
-are the object's own bytes. Under `nats`, they decode from the backend's own
-envelope to the same shape.
+Kubernetes metadata, labels or annotations. `spec` and `status` have the same shape
+whichever backend is selected: the object's own bytes, or the backend's own
+envelope decoded to it.
 
 **`since` is a resume token handed back by a listing or an earlier frame,
 never something a caller constructs.** An unrecognized or stale one is not an

@@ -8,11 +8,13 @@
 # profile lists a block once per binary. Summing the lines reads a fully covered
 # package as covered by 1/N of the binaries. A block is covered when ANY line for
 # it has a count above zero, and weighs its statement count.
+# <path-fragment> matches from a path boundary: "internal/state/nats/" names that
+# package and no other directory merely ending the same way.
 set -euo pipefail
 profile=$1 frag=$2 floor=$3
 
 pct=$(awk -v frag="$frag" '
-  NR > 1 && index($1, frag) {
+  NR > 1 && index("/" $1, "/" frag) {
     n[$1] = $2
     if ($3 > 0) hit[$1] = 1
   }

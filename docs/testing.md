@@ -194,7 +194,7 @@ Compare two backends by running the same bench against each. Do not compare
 ## The default backend's system lanes
 
 The conformance suite proves the `nats` backend meets the contract with no
-cluster. What a real cluster decides about it — pod loss, quorum, a drain,
+cluster. What a real cluster decides about it — pod loss, quorum loss, a drain,
 the import racing an old replica — is the system tier's job, never unit
 tests.
 
@@ -202,7 +202,7 @@ tests.
 |---|---|
 | A state server pod deleted mid-conversation | the conversation completes, no input is lost, the manager stays ready |
 | Two of three servers stopped | work is held and `/state/*` reports the outage, not a loss — every record written before is readable once they return |
-| The PodDisruptionBudget object | it renders with `maxUnavailable: 1`. The pack's own cluster is single-node, so draining it is not exercised — "two of three servers stopped," above, already proves the eviction-blocking outcome at a level this cluster can |
+| A drain of the state servers | the budget allows one eviction and refuses a second while the first server is down. The Eviction API is what a drain issues per pod, and the one-node pack cluster serves it |
 | A rolling server image upgrade | two servers stay up throughout and no write fails |
 | An install on `kube` upgraded to the default | the conversation, signal and cooldown window opened before the upgrade read back through `/state/*` afterward, and the custom resources stay untouched |
 | `stateStore.backend: kube` | the smoke tier passes and the install renders no state server, so the pin is exercised, not only rendered |

@@ -32,8 +32,5 @@ UNIT then SYSTEM TESTS before it (or one ticked line saying why the tier
 doesn't apply). Enforced by a `PreToolUse` hook refusing `openspec archive`
 while unticked — see `.claude/rules/documentation.md`.
 
-**ALL FUNCTIONALITY IS COVERED BY TESTS** — a gap is a defect to fix, never
-a limit to document. `docs/testing.md` owns the tiers and which are required.
-
 **The published site carries its own context** — `docs/CLAUDE.md` plus
 `docs/.claude/`, loaded on demand under `docs/`, never at launch.

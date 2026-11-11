@@ -151,7 +151,7 @@ This gate applies when implementation starts.
   - Fixed the two pre-existing tests the default flip broke (`TestStateBackendEnvIsRenderedFromTheSelector`, `TestStateStoreNullFallsBackToTheKubeDefault`) to expect `nats`.
   - `go test ./internal/integration/...` (`KUBEBUILDER_ASSETS=/root/.envtest/k8s/1.31.0-linux-amd64`, `TZ=Europe/Helsinki`) passes in full.
 - [x] 4.5 The retired-vocabulary and publication guards pass.
-  Verdict: re-run after sections 2, 3, 5 and 6 all landed. `python3 .github/scripts/publication-guard.py` and `python3 .github/scripts/retired-vocabulary-guard.py` both report clean against the whole tree.
+  Verdict: re-run after the code, chart and documentation sections landed. `python3 .github/scripts/publication-guard.py` and `python3 .github/scripts/retired-vocabulary-guard.py` both report clean against the whole tree.
 
 ## 5. System tests
 
