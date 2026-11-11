@@ -4,7 +4,7 @@ The project ships four runtimes, and three of them lock an adopter to one
 vendor's model access: `claude` and `claude-cli` to Anthropic, `copilot` to
 GitHub. `ollama` is the only model-agnostic one, and its harness is our own.
 
-[pi](https://pi.dev/) is a minimal coding harness that talks to many model
+pi is a minimal coding harness that talks to many model
 providers and embeds through an SDK. A route that runs on it gets a
 model-agnostic runtime without the project owning the agent loop.
 
