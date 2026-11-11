@@ -232,9 +232,6 @@ func openHarnessEnv(cluster *Cluster, k *Kube, values *InstallValues, artifact s
 	if e.Console, err = cluster.Forward(Namespace, "svc/agentops-adapter-console", 8080); err != nil {
 		return nil, fmt.Errorf("forward console: %w", err)
 	}
-	// A conversation the Kubernetes API does not hold is removed through the
-	// console, as an operator would.
-	k.ConsoleURL, k.ConsoleToken = e.Console.URL(), values.UIToken
 	if e.BotAPI, err = cluster.Forward(Namespace, "svc/agentops-test-fake-bot-api", 8081); err != nil {
 		return nil, fmt.Errorf("forward fake bot api: %w", err)
 	}

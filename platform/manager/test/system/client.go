@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -46,13 +47,6 @@ type Kube struct {
 	// there would see nothing.
 	StateURL   string
 	StateToken string
-
-	// ConsoleURL and ConsoleToken, once set, let Delete remove a Conversation
-	// the Kubernetes API does not hold. The console's close and delete are
-	// the supported way to remove one on any backend, and the only one when
-	// the manager's store is not the API server.
-	ConsoleURL   string
-	ConsoleToken string
 }
 
 // NewKube builds the client from a kubeconfig.
@@ -204,11 +198,12 @@ func (k *Kube) Conversations(ctx context.Context) ([]agentopsv1alpha1.Conversati
 
 // Delete overrides the embedded client's. A Conversation object is removed
 // the ordinary way where one exists. Where none does, because the manager's
-// store holds it, the conversation is closed and deleted through the console,
-// which is what an operator does. Every other kind is the embedded client's.
+// store holds it, the conversation is closed and deleted through the manager's
+// own channel verbs, as a channel adapter does. Every other kind is the
+// embedded client's.
 func (k *Kube) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
 	conv, ok := obj.(*agentopsv1alpha1.Conversation)
-	if !ok || k.ConsoleURL == "" {
+	if !ok || k.StateURL == "" {
 		return k.Client.Delete(ctx, obj, opts...)
 	}
 	err := k.Client.Delete(ctx, obj, opts...)
@@ -220,7 +215,7 @@ func (k *Kube) Delete(ctx context.Context, obj client.Object, opts ...client.Del
 
 // DeleteAllConversations removes every conversation, whichever store holds it.
 func (k *Kube) DeleteAllConversations(ctx context.Context) error {
-	if k.ConsoleURL != "" {
+	if k.StateURL != "" {
 		items, err := k.Conversations(ctx)
 		if err != nil {
 			return err
@@ -248,10 +243,13 @@ func (k *Kube) DeleteAllConversations(ctx context.Context) error {
 }
 
 // deleteStored closes, then deletes, the named conversations through the
-// console and waits until the manager no longer lists them. A name already
-// gone is not an error: a cleanup that races another is still a cleanup.
+// manager. A name already gone is not
+// an error: a cleanup that races another is still a cleanup. A conversation
+// with no thread yet, still queued for a slot, has nothing to post a close on
+// and is reported, never skipped.
 func (k *Kube) deleteStored(ctx context.Context, names []string) error {
 	var live, open []string
+	channels := map[string]string{}
 	for _, n := range names {
 		c, err := k.Conversation(ctx, n)
 		if apierrors.IsNotFound(err) {
@@ -261,41 +259,69 @@ func (k *Kube) deleteStored(ctx context.Context, names []string) error {
 			return err
 		}
 		live = append(live, n)
-		if c.Status.Phase != agentopsv1alpha1.ConversationClosed {
-			open = append(open, n)
+		channel, thread := conversationChannel(c)
+		channels[n] = channel
+		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+			continue
 		}
+		if thread == "" {
+			return fmt.Errorf("%s is %s with no thread to close it through", n, c.Status.Phase)
+		}
+		if err := k.managerPost(ctx, "/channel/inbound", map[string]any{
+			"channel": channel, "threadId": thread, "sender": "system-pack", "text": "/close"}); err != nil {
+			return fmt.Errorf("close %s: %w", n, err)
+		}
+		open = append(open, n)
 	}
 	if len(live) == 0 {
 		return nil
 	}
 	if len(open) > 0 {
-		if err := k.consolePost(ctx, "/api/conversations/close", open); err != nil {
-			return fmt.Errorf("close %v: %w", open, err)
-		}
-		if err := k.waitConversations(ctx, open, func(c *agentopsv1alpha1.Conversation, gone bool) bool {
-			return gone || c.Status.Phase == agentopsv1alpha1.ConversationClosed
+		if err := k.waitConversations(ctx, open, func(c *agentopsv1alpha1.Conversation, _ bool) bool {
+			return c.Status.Phase == agentopsv1alpha1.ConversationClosed
 		}); err != nil {
 			return fmt.Errorf("waiting for %v to close: %w", open, err)
 		}
 	}
-	if err := k.consolePost(ctx, "/api/conversations/delete", live); err != nil {
-		return fmt.Errorf("delete %v: %w", live, err)
+	for _, n := range live {
+		if err := k.managerPost(ctx, "/channel/conversations/"+url.PathEscape(n)+"/delete", map[string]any{"channel": channels[n]}); err != nil {
+			return fmt.Errorf("delete %s: %w", n, err)
+		}
 	}
-	return k.waitConversations(ctx, live, func(_ *agentopsv1alpha1.Conversation, gone bool) bool { return gone })
+	// Returns once the deletes are accepted, as `kubectl delete --wait=false`
+	// did: a deleted conversation lingers under its close-topics finalizer for
+	// up to two minutes, and what a caller needs is the pod and the slot, which
+	// the close already released.
+	return nil
 }
 
-// consolePost sends a bulk verb to the console, retrying a transport error:
-// a port-forward whose pod just rolled answers EOF once and recovers.
-func (k *Kube) consolePost(ctx context.Context, path string, names []string) error {
-	body, _ := json.Marshal(map[string]any{"names": names})
+// conversationChannel names the channel a conversation is bound to and the
+// thread it holds there. The thread is empty until the topic exists.
+func conversationChannel(c *agentopsv1alpha1.Conversation) (channel, thread string) {
+	for _, t := range c.Status.Threads {
+		if t.ThreadID != "" {
+			return t.Channel, t.ThreadID
+		}
+	}
+	if len(c.Spec.ChannelRefs) > 0 {
+		return c.Spec.ChannelRefs[0].Name, ""
+	}
+	return "", ""
+}
+
+// managerPost sends a verb to the manager with the master adapter token,
+// retrying a transport error: a port-forward whose pod just rolled answers EOF
+// once and recovers.
+func (k *Kube) managerPost(ctx context.Context, path string, payload map[string]any) error {
+	body, _ := json.Marshal(payload)
 	var last error
 	for attempt := 0; attempt < 3; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, k.ConsoleURL+path, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, k.StateURL+path, bytes.NewReader(body))
 		if err != nil {
 			return err
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+k.ConsoleToken)
+		req.Header.Set("Authorization", "Bearer "+k.StateToken)
 		resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
 		if err != nil {
 			last = err
