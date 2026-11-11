@@ -7,10 +7,25 @@
 #
 # (GitHub offers a workflow for dispatch once its file is on the default
 # branch; from then on --ref runs the copy on the branch you name.)
+#
+# `state_backend` pins the state store backend for the run. Left empty it is
+# the chart's default (nats). `kube` runs the whole pack on the fallback, a
+# real install and not only a render (nats-state-store-default task 5.7):
+#
+#   gh workflow run system-smoke.yml --ref <branch> -f state_backend=kube
+#
+# It is an input here, not a second workflow file, because a new
+# workflow_dispatch file cannot be dispatched until it is on the default branch.
 name: system-smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      state_backend:
+        description: pin the state store backend (empty keeps the chart default)
+        type: choice
+        options: ["", nats, kube]
+        default: ""
 
 permissions:
   contents: read
@@ -20,3 +35,4 @@ jobs:
     uses: ./.github/workflows/system.yml
     with:
       tier: smoke
+      stateBackend: ${{ inputs.state_backend }}
