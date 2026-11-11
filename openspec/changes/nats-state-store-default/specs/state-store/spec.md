@@ -72,6 +72,8 @@ SHALL refuse to start on a name it does not implement.
 - **WHEN** the selector names `kube` and `nats.enabled` is true
 - **THEN** the render fails and names `nats.enabled`
 
+## ADDED Requirements
+
 ### Requirement: A deleted source's signals are released by the manager
 The manager SHALL release a source through a helper over the contract. The helper:
 
@@ -133,7 +135,7 @@ The release SHALL happen before the record is let go.
 
 Under the `nats` backend it SHALL also remove the conversation's runs.
 
-A periodic sweep SHALL remove the runs and blobs a crash left without an owner.
+Under the `nats` backend a periodic sweep SHALL remove the runs and blobs a crash left without an owner.
 
 The sweep SHALL wait a grace first. A blob written ahead of the input naming it is not an orphan.
 

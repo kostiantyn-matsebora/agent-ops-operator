@@ -431,7 +431,7 @@
     },
     {
       "id": "flat-persistence-keys",
-      "pattern": "(?<!nats\\.)persistence\\.(enabled|name|size|storageClassName|accessModes|volumeName|existingClaim)\\b",
+      "pattern": "(?<!\\bnats\\.)persistence\\.(enabled|name|size|storageClassName|accessModes|volumeName|existingClaim)\\b",
       "says": "the block moved wholesale: persistence.context.* and persistence.workspace.*",
       "allow": [
         "removed",
@@ -454,6 +454,12 @@
         "flat",
         "persistence\\.(context|workspace)\\.",
         "gone"
+      ],
+      "$comment": [
+        "THE NATS STATE SERVER'S OWN KEYS ARE NOT THE RETIRED ONES.",
+        "nats.persistence.* is the state server's volume block, a live key that",
+        "spells the retired flat names exactly. The word-bounded lookbehind exempts",
+        "only a key directly under nats., so xnats.persistence.* is still flagged."
       ]
     },
     {
