@@ -285,6 +285,9 @@ interactive one. */ -}}
 {{- if hasKey $bv "enabled" -}}
 {{- $want := eq $backend $b -}}
 {{- if ne $bv.enabled $want -}}
+{{- if $want -}}
+{{- fail (printf "stateStore.backend=%q conflicts with %s.enabled=%v: the selector picks exactly one backend, and %s.enabled is hand-set to the opposite of what that needs. Remove %s.enabled — it follows the selector on its own." $backend $b $bv.enabled $b $b) -}}
+{{- end -}}
 {{- fail (printf "stateStore.backend=%q conflicts with %s.enabled=%v: the selector picks exactly one backend, and %s.enabled is hand-set to the opposite of what that needs. Remove %s.enabled — it follows the selector on its own — or set stateStore.backend to %q." $backend $b $bv.enabled $b $b $b) -}}
 {{- end -}}
 {{- end -}}

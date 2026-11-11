@@ -78,7 +78,7 @@ SHALL refuse to start on a name it does not implement.
 The manager SHALL release a source through a helper over the contract. The helper:
 
 - lists the source's signals by the any-phase source index
-- deletes each one under the revision it listed
+- deletes each one not held by the source currently holding the name, under the revision it listed
 - clears the source's cooldown window, only when no source holds the name
 - clears the source's receipt counters, only when no source holds the name
 
