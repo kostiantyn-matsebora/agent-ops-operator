@@ -41,7 +41,7 @@ import (
 // this lane exists to prove would silently no-op.
 func pinToKubeBackend(t *testing.T, ctx context.Context, e *Env) {
 	t.Helper()
-	if err := e.Upgrade(ctx, "stateStore.backend=kube"); err != nil {
+	if err := e.UpgradeManager(ctx, "stateStore.backend=kube"); err != nil {
 		t.Fatalf("pinning the install to the kube backend: %v", err)
 	}
 	deleteNatsPVCs(t, ctx, e)
@@ -104,7 +104,7 @@ func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
 	stamp := fmt.Sprint(time.Now().UnixNano())
 
 	t.Cleanup(func() {
-		if err := e.Upgrade(context.Background(), "stateStore.backend=nats"); err != nil {
+		if err := e.UpgradeManager(context.Background(), "stateStore.backend=nats"); err != nil {
 			t.Errorf("restoring the install to its default (nats) backend: %v", err)
 		}
 	})
@@ -154,7 +154,7 @@ func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := e.Upgrade(ctx, "stateStore.backend=nats"); err != nil {
+	if err := e.UpgradeManager(ctx, "stateStore.backend=nats"); err != nil {
 		t.Fatalf("upgrading to the nats backend: %v", err)
 	}
 

@@ -221,6 +221,23 @@ func (e *Env) Upgrade(ctx context.Context, extraSet ...string) error {
 	return WaitReady(ctx, e.K, &v)
 }
 
+// UpgradeManager is Upgrade for a change that rolls the manager. Its hard pod
+// anti-affinity leaves the new ReplicaSet Pending behind the old pods on this
+// pack's one-node cluster, so the rollout is driven through
+// restartManagerSchedulable, which clears the affinity and removes what blocks
+// the new pods, before readiness is awaited.
+func (e *Env) UpgradeManager(ctx context.Context, extraSet ...string) error {
+	v := *e.Values
+	v.ExtraSet = extraSet
+	if err := Install(ctx, e.Cluster, &v); err != nil {
+		return err
+	}
+	if err := restartManagerSchedulable(ctx, e.Cluster); err != nil {
+		return err
+	}
+	return WaitReady(ctx, e.K, &v)
+}
+
 // WaitReady waits for the manager and every enabled adapter Deployment.
 func WaitReady(ctx context.Context, k *Kube, v *InstallValues) error {
 	deployments := []string{
