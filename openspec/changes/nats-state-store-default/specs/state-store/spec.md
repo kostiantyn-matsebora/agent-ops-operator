@@ -118,7 +118,7 @@ The cooldown window and the receipt counters SHALL be cleared only when no sourc
 - **WHEN** a source is released by name while a signal recorded under the
   identity of a source that now holds that name exists
 - **THEN** the previous incarnation's signals are gone and the successor's stay,
-  and under `kube` so does the successor's window
+  and so does the successor's window
 
 #### Scenario: A signal that changes during release is decided again
 - **WHEN** a listed signal is modified before its delete is attempted

@@ -64,4 +64,19 @@ it "passes a package that is covered, whatever the other packages hold"
 out=$(bash "$FLOOR" "$dir/iso.out" "internal/other/" 90 2>&1); status=$?
 assert_status 0 "$status"
 
+it "reports an unreadable profile as unreadable, never as a missing package"
+out=$(bash "$FLOOR" "$dir/does-not-exist.out" "$PKG" 90 2>&1); status=$?
+assert_status 1 "$status"
+assert_not_contains "$out" "package not found"
+assert_contains "$out" "could not read"
+
+it "reports a fragment no block matches as a missing package"
+out=$(bash "$FLOOR" "$dir/iso.out" "internal/nowhere/" 90 2>&1); status=$?
+assert_status 1 "$status"
+assert_contains "$out" "package not found"
+
+it "matches the fragment from a path boundary, not as a substring"
+out=$(bash "$FLOOR" "$dir/iso.out" "nal/other/" 90 2>&1); status=$?
+assert_contains "$out" "package not found"
+
 summary

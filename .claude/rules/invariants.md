@@ -24,7 +24,7 @@
 | Channel config is opaque to the operator | Never parsed manager-side. `configSchema` applies mechanically (advisory `ConfigValid` only) |
 | Manager composes meaning, adapters compose presentation | No transport dialect in `internal/`. Ops carry a TYPED message, never rendered text. Adapters parse the markdown+block-grammar body, not the manager |
 | A thread opens with the event that caused it | Every input delivers to every bound channel EXCEPT the one it entered on. "Already seen" is a SURFACE fact, never a message fact |
-| A conversation's messages are state-store state | the run inputs on the conversation record are the permanent record, written before the input queue is pruned. Both backends keep them in the record itself |
+| A conversation's messages are state-store state | the run inputs on the conversation record are the permanent record, written before the input queue is pruned, whichever backend keeps them |
 | No relay loops | An adapter must never re-ingest its own outbound post as inbound |
 | No signal loops | An observing signal adapter must NEVER emit a signal about agent-ops' own machinery — `selfexclude.go`: name prefix, owner/label, own-namespace |
 | No coordination loops | `invoke` refuses a cycle by walking `causedBy` to the root before allowing a call. NO depth limit — only a repeat is refused |

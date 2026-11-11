@@ -13,6 +13,7 @@
 set -euo pipefail
 profile=$1 frag=$2 floor=$3
 
+rc=0
 pct=$(awk -v frag="$frag" '
   NR > 1 && index("/" $1, "/" frag) {
     n[$1] = $2
@@ -20,9 +21,11 @@ pct=$(awk -v frag="$frag" '
   }
   END {
     for (k in n) { t += n[k]; if (k in hit) c += n[k] }
-    if (!t) exit 2
+    if (!t) exit 3
     printf "%.4f", 100 * c / t
-  }' "$profile") || { echo "package not found: no block in ${profile} matches ${frag}"; exit 1; }
+  }' "$profile") || rc=$?
+if [ "$rc" -eq 3 ]; then echo "package not found: no block in ${profile} matches ${frag}"; exit 1; fi
+if [ "$rc" -ne 0 ]; then echo "could not read ${profile}: awk exited ${rc}"; exit 1; fi
 
 printf '%s statement coverage: %.1f%%\n' "$frag" "$pct"
 awk -v p="$pct" -v f="$floor" 'BEGIN { exit !(p >= f) }' || { echo "below the ${floor}% floor"; exit 1; }
