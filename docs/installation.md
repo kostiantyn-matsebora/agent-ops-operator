@@ -245,8 +245,8 @@ and cooldown custom resources as the live record.
 
 The state servers' volumes are claims like any other, so `storageClassName`
 is immutable on them too. It defaults to `""`, the cluster's default
-provisioner. Set `nats.persistence.storageClassName` at install if you need
-another.
+provisioner. Set `storageClassName` in the `nats` bundle's `persistence` block at
+install if you need another.
 
 `kubectl get conversations` stops showing anything on a default install. Pin
 the old behaviour with `stateStore.backend: kube` — see
