@@ -1,9 +1,17 @@
 ## MODIFIED Requirements
 
 ### Requirement: The agent definition's declared tools are honoured
-When a work unit names an agent and the profile's checkout contains that agent's definition, the runtime SHALL read its YAML frontmatter and treat a declared `tools:` list as that agent's own capability declaration. WHERE the definition lives is the RUNTIME's fact, not the contract's: `runtime-claude`, `runtime-ollama` and `runtime-pi` read `.claude/agents/<agent>.md`, `runtime-copilot` reads `.github/agents/<agent>.agent.md`, and another backend may read somewhere else. A definition that is absent, has no frontmatter, or declares no `tools:` SHALL contribute nothing — not an error and not a default. Frontmatter the runtime cannot parse SHALL be logged and treated as contributing nothing, never as a failure that blocks the run: an unreadable role file must not stop an agent from answering.
+When a work unit names an agent and the profile's checkout contains that agent's definition, the runtime SHALL read its YAML frontmatter and treat a declared `tools:` list as that agent's own capability declaration.
 
-"Contributes nothing" is the CONTRACT's rule and binds every runtime, including one whose vendor reads an absent declaration as a grant of everything. A runtime SHALL neutralise such a default at the boundary — passing the composed allowlist explicitly, empty when the composition produced nothing — rather than letting the vendor's reading of an omitted field widen a route nobody widened.
+WHERE the definition lives is the RUNTIME's fact, not the contract's. `runtime-claude`, `runtime-ollama` and `runtime-pi` read `.claude/agents/<agent>.md`, `runtime-copilot` reads `.github/agents/<agent>.agent.md`, and another backend may read somewhere else.
+
+A definition that is absent, has no frontmatter, or declares no `tools:` SHALL contribute nothing, not an error and not a default.
+
+Frontmatter the runtime cannot parse SHALL be logged and treated as contributing nothing. It SHALL never be a failure that blocks the run, because an unreadable role file must not stop an agent from answering.
+
+"Contributes nothing" is the CONTRACT's rule and binds every runtime, including one whose vendor reads an absent declaration as a grant of everything.
+
+A runtime SHALL neutralise such a default at the boundary. It passes the composed allowlist explicitly, empty when the composition produced nothing, rather than letting the vendor's reading of an omitted field widen a route nobody widened.
 
 #### Scenario: A declared tool list participates
 - **WHEN** an agent definition declares `tools:` and its conversation's wiring grants a toolset

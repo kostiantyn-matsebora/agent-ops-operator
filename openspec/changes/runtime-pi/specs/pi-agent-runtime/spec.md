@@ -1,11 +1,21 @@
 ## Purpose
 
-The fifth reference runtime, driving the pi coding harness through its SDK: its obligations under the work contract, tool enablement from the composed allowlist, MCP servers reached from the compiled configuration, the agent definition as system prompt, the runtime-minted context handle, telemetry, and the bundle that declares it.
+The fifth reference runtime, driving the pi coding harness through its SDK.
+
+It covers the runtime's obligations under the work contract, tool enablement from the composed allowlist, and MCP servers reached from the compiled configuration. It also covers the agent definition joining the system prompt, the runtime-minted context handle, telemetry, and the bundle that declares it.
 
 ## ADDED Requirements
 
 ### Requirement: A fifth reference runtime implements the same work contract
-The project SHALL ship a fifth reference `AgentRuntime` image, `runtime-pi`, driving pi through its SDK in-process. It SHALL be a self-contained component under `runtimes/pi/` with no dependency on any other module here, and SHALL implement the work contract unchanged: long-poll `GET $CONTROL_URL/work`, execute the returned unit against the checkout at `/data/workspace`, stream a human-readable transcript to stdout, `POST $CONTROL_URL/work/done` carrying `continuity`/`continuityReason`, and exit `0` after `RUNTIME_IDLE_TTL_M` minutes without work.
+The project SHALL ship a fifth reference `AgentRuntime` image, `runtime-pi`, driving pi through its SDK in-process. It SHALL be a self-contained component under `runtimes/pi/` with no dependency on any other module here.
+
+It SHALL implement the work contract unchanged:
+
+- long-poll `GET $CONTROL_URL/work`
+- execute the returned unit against the checkout at `/data/workspace`
+- stream a human-readable transcript to stdout
+- `POST $CONTROL_URL/work/done` carrying `continuity`/`continuityReason`
+- exit `0` after `RUNTIME_IDLE_TTL_M` minutes without work
 
 No CRD field, manager behaviour, `Pipeline`, `AgentProfile` or `MCPToolset` SHALL need to change for a conversation to run on it. `Pipeline.spec.runtimeRef` SHALL be the entire switch between vendors.
 
@@ -33,7 +43,9 @@ The runtime SHALL conform to the version of `docs/contracts/runtime.md` its page
 ### Requirement: Built-in tools are enabled only when the composed allowlist names them
 The runtime SHALL compose the allowlist as the work unit's `toolsMode` directs, from the wiring's `allowedTools` and the named agent's declared `tools:`. It SHALL enable a pi built-in tool for the session only when the composed allowlist names its agent-ops equivalent: `Read`, `Write`, `Edit`, `Bash`, `Grep` or `Glob`.
 
-Enablement SHALL be all or nothing per tool. A sub-command-scoped shell pattern such as `Bash(kubectl:*)` SHALL NOT enable the shell and SHALL NOT narrow it. It SHALL be logged as a pattern the runtime cannot enforce and SHALL grant nothing, so it never widens a route. Each runtime's page states which of the two postures it takes.
+Enablement SHALL be all or nothing per tool. A sub-command-scoped shell pattern such as `Bash(kubectl:*)` SHALL NOT enable the shell and SHALL NOT narrow it.
+
+Such a pattern SHALL be logged as one the runtime cannot enforce and SHALL grant nothing, so it never widens a route. Each runtime's page states which of the two postures it takes.
 
 An empty composition SHALL leave the session with no built-in tools. The runtime SHALL NOT substitute a default, and SHALL NOT let a vendor default apply. A pattern the runtime does not recognise SHALL be logged and SHALL contribute nothing.
 
@@ -60,13 +72,22 @@ No run SHALL be able to block on an interactive permission prompt. Every decisio
 - **THEN** the runtime logs it and the conversation does not receive it
 
 ### Requirement: Bound MCP servers reach the agent through the compiled configuration alone
-Pi has no MCP client of its own, so the image SHALL ship an extension that provides one. The extension SHALL read the compiled MCP configuration at `MCP_CONFIG` and connect only to the servers that file lists. The runtime SHALL start no server of its own choosing, and SHALL read no other source of MCP configuration.
+Pi has no MCP client of its own, so the image SHALL ship an extension that provides one. The extension SHALL read the compiled MCP configuration at `MCP_CONFIG` and connect only to the servers that file lists.
 
-Both transports the compiled file carries SHALL be preserved. A server declared as a local command is started by the runtime exactly as the other runtimes start it. A server declared as an HTTP endpoint is reached as any other client in the pod reaches it, so egress mediation applies to this runtime exactly as to the others.
+The runtime SHALL start no server of its own choosing. It SHALL read no other source of MCP configuration.
 
-Each tool SHALL be registered under the name `mcp__<server>__<tool>`, and only when the composed allowlist permits it. A pattern scoping one server as a whole, `mcp__<server>__*`, SHALL permit every tool of that server and no tool of another. An absent configuration file SHALL mean no MCP tools, and an unreadable one SHALL be reported as a single logged failure.
+Both transports the compiled file carries SHALL be preserved.
 
-Secret-backed values SHALL be resolved in-process from the pod environment before use, and SHALL never be written to the transcript, a log line or the run result. A placeholder that cannot be resolved SHALL fail that one server's registration with a logged reason, never reaching a server as literal placeholder text, and SHALL leave the other servers unaffected.
+- A server declared as a local command is started by the runtime exactly as the other runtimes start it.
+- A server declared as an HTTP endpoint is reached as any other client in the pod reaches it, so egress mediation applies exactly as to the others.
+
+Each tool SHALL be registered under the name `mcp__<server>__<tool>`, and only when the composed allowlist permits it. A pattern scoping one server as a whole, `mcp__<server>__*`, SHALL permit every tool of that server and no tool of another.
+
+An absent configuration file SHALL mean no MCP tools. An unreadable one SHALL be reported as a single logged failure.
+
+Secret-backed values SHALL be resolved in-process from the pod environment before use. They SHALL never be written to the transcript, a log line or the run result.
+
+A placeholder that cannot be resolved SHALL fail that one server's registration with a logged reason. It SHALL never reach a server as literal placeholder text, and the other servers SHALL be unaffected.
 
 #### Scenario: A bound server's tools are reachable
 - **WHEN** a Pipeline binds an `MCPConfig` and a toolset naming one of its tools, and the conversation runs on the pi runtime
@@ -93,7 +114,9 @@ Secret-backed values SHALL be resolved in-process from the pod environment befor
 - **THEN** that server fails to register with a logged reason, and the other servers register normally
 
 ### Requirement: The agent definition's body is appended to the system prompt
-When a work unit names an agent and the checkout contains `.claude/agents/<agent>.md`, the runtime SHALL append the definition's body to the session's system prompt, and SHALL then append the work unit's `systemPrompt`, definition first. It SHALL do so on every run, resumes included. The definition's declared `tools:` SHALL take part in the composed allowlist as `toolsMode` directs.
+When a work unit names an agent and the checkout contains `.claude/agents/<agent>.md`, the runtime SHALL append the definition's body to the session's system prompt. It SHALL then append the work unit's `systemPrompt`, definition first.
+
+It SHALL do so on every run, resumes included. The definition's declared `tools:` SHALL take part in the composed allowlist as `toolsMode` directs.
 
 A definition that is absent, unreadable, or has frontmatter the runtime cannot parse SHALL contribute nothing to the allowlist, SHALL be logged where unreadable, and SHALL NOT block the run. The work unit's `systemPrompt` alone SHALL then apply.
 
@@ -118,11 +141,17 @@ A definition that is absent, unreadable, or has frontmatter the runtime cannot p
 - **THEN** the run proceeds on the unit's `systemPrompt` and the wiring's tools alone
 
 ### Requirement: The context handle is minted by the runtime and stays opaque
-The runtime SHALL mint `runtimeContextId` itself and map it to a pi session whose state lives under `$HOME`, the CONTEXT volume or the pod-local copy `context-sync` restores. On a unit carrying no `runtimeContextId` it SHALL create a session under a generated identifier and report it with `continuity: new`. On a unit carrying one it SHALL resume that session and report `continuity: continued`. The reported handle SHALL be latest-wins.
+The runtime SHALL mint `runtimeContextId` itself and map it to a pi session whose state lives under `$HOME`. That is the CONTEXT volume, or the pod-local copy `context-sync` restores.
+
+- On a unit carrying no `runtimeContextId` it SHALL create a session under a generated identifier and report it with `continuity: new`.
+- On a unit carrying one it SHALL resume that session and report `continuity: continued`.
+- The reported handle SHALL be latest-wins.
 
 The identifier SHALL NOT encode the conversation name or any derivable value. The bundle SHALL declare the session-state directory in `contextSync.paths`, because only the runtime knows where its backend keeps context.
 
-When a resume fails, the runtime SHALL tell a store that says the context is GONE from one that did not ANSWER, re-checking after short bounded delays. An unreadable path SHALL be treated as present, and the run retried once. A context confirmed absent SHALL fail the run with `continuity: unavailable` and a `continuityReason` naming the context volume, never starting a fresh session and presenting it as a continuation.
+When a resume fails, the runtime SHALL tell a store that says the context is GONE from one that did not ANSWER. It SHALL re-check after short bounded delays.
+
+An unreadable path SHALL be treated as present, and the run retried once. A context confirmed absent SHALL fail the run with `continuity: unavailable` and a `continuityReason` naming the context volume. The runtime SHALL NOT start a fresh session and present it as a continuation.
 
 #### Scenario: A first run establishes a handle
 - **WHEN** a first work unit arrives with no `runtimeContextId`
@@ -141,7 +170,9 @@ When a resume fails, the runtime SHALL tell a store that says the context is GON
 - **THEN** the run fails with `continuity: unavailable` and no answer is produced from an empty context
 
 ### Requirement: Telemetry reports what pi observed, bounded and never invented
-The runtime SHALL report one `turns[]` entry per model call and one `toolCalls[]` entry per tool call, from the events pi emits, trimmed to the published bounds before posting. A fact pi does not report SHALL be omitted, never reported as zero. A tool's input or output SHALL NOT be reported. Neither array SHALL be reported when the run made neither kind of call.
+The runtime SHALL report one `turns[]` entry per model call and one `toolCalls[]` entry per tool call. They come from the events pi emits and are trimmed to the published bounds before posting.
+
+A fact pi does not report SHALL be omitted, never reported as zero. A tool's input or output SHALL NOT be reported. Neither array SHALL be reported when the run made neither kind of call.
 
 Tool names in `toolCalls[]` SHALL be in the agent-ops vocabulary: `Read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob`, or `mcp__<server>__<tool>`.
 
@@ -165,7 +196,9 @@ The runtime SHALL take its model provider, model and credential from environment
 - **THEN** the runtime's pod receives the credential through `valueFrom` or `envFrom`, and the manager reads no secret
 
 ### Requirement: The runtime ships as a bundle that declares only its vendor
-The chart SHALL ship the runtime as `chart/charts/pi/`, OFF by default, in the same shape as the other runtime bundles: one `AgentRuntime` rendered through the parent's shared runtime renderer, carrying only what names this vendor, which is the image, its credential Secret reference, its `contextSync.paths` and its own env. It SHALL render no defaults, no floor account, no context volume and no identity of its own.
+The chart SHALL ship the runtime as `chart/charts/pi/`, OFF by default, in the same shape as the other runtime bundles. It is one `AgentRuntime` rendered through the parent's shared runtime renderer.
+
+It SHALL carry only what names this vendor: the image, its credential Secret reference, its `contextSync.paths` and its own env. It SHALL render no defaults, no floor account, no context volume and no identity of its own.
 
 The bundle SHALL be visible to the parent's declared-runtime list, so that the default-runtime guard, the `default` copy and the manager's bootstrap env account for it as for any other runtime. The image SHALL be pinned to an exact vendor version and installed from a lockfile.
 
