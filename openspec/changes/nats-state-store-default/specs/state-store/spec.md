@@ -94,7 +94,7 @@ After listing the signals, the release SHALL read the source by that name from t
 
 A signal recorded under the identity of the source that holds the name now SHALL be kept. Every other signal of the name SHALL be deleted under the revision it was listed at.
 
-A conflict SHALL re-read that signal and decide again, with exponential back-off and a bounded number of attempts. When the attempts are exhausted the release SHALL return the conflict as an error, leave that signal in place, and let the next pass retry it.
+A conflict SHALL re-read that signal and decide again, with exponential back-off and at most 20 attempts. When the attempts are exhausted the release SHALL return the conflict as an error, leave that signal in place, and let the next pass retry it.
 
 The cooldown window and the receipt counters SHALL be cleared only when no source holds the name. The caller supplies no identity, so a successor created at any point during the release keeps its signals.
 
@@ -137,7 +137,7 @@ Under the `nats` backend it SHALL also remove the conversation's runs.
 
 Under the `nats` backend a periodic sweep SHALL remove the runs and blobs a crash left without an owner.
 
-The sweep SHALL wait a grace first. A blob written ahead of the input naming it is not an orphan.
+The sweep SHALL wait a grace of 10 minutes first. A blob written ahead of the input naming it is not an orphan.
 
 #### Scenario: A queued input's blob goes with the conversation
 - **WHEN** a conversation with a queued input held out of line is deleted

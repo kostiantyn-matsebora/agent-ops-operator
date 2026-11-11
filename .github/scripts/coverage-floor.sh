@@ -18,8 +18,9 @@ pct=$(awk -v frag="$frag" '
   }
   END {
     for (k in n) { t += n[k]; if (k in hit) c += n[k] }
-    if (t) printf "%.1f", 100 * c / t; else print 0
-  }' "$profile")
+    if (!t) exit 2
+    printf "%.4f", 100 * c / t
+  }' "$profile") || { echo "package not found: no block in ${profile} matches ${frag}"; exit 1; }
 
-echo "${frag} statement coverage: ${pct}%"
+printf '%s statement coverage: %.1f%%\n' "$frag" "$pct"
 awk -v p="$pct" -v f="$floor" 'BEGIN { exit !(p >= f) }' || { echo "below the ${floor}% floor"; exit 1; }

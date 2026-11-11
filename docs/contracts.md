@@ -447,8 +447,7 @@ TOKEN, so an adapter naming another in `adapter` is refused with 403.
 
 **One door onto Conversations and Signals, for every reader that is not a
 reconciler.** `/state/*`, read-only, serving the same records the selected
-state-store backend keeps on those two kinds — `nats` by default, `kube` the
-alternative — never a Kubernetes watch, and never the reader's own RBAC.
+state-store backend keeps on those two kinds, never a Kubernetes watch, and never the reader's own RBAC.
 
 The console and the housekeeping job both used to watch Conversations (and,
 for the console, Signals) directly against the Kubernetes API. Both now read

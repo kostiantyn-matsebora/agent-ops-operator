@@ -148,6 +148,7 @@ for the source and the reference material beside this file.
 - A cascading close closes descendants before the ancestor.
 
 ### Fixed
+
 - A change the state feed named could be skipped for good on a three-server state store, because reads of a record could be answered by a follower that had not applied the write yet. Reads now go to the stream leader.
 
 - The manager's liveness probe no longer kills it while a slow state server
@@ -170,7 +171,7 @@ for the source and the reference material beside this file.
 
 ### Upgrade
 
-**Breaking: the default state backend changes to `nats`.** Helm never
+**BREAKING: the default state backend changes to `nats`.** Helm never
 upgrades an existing CRD, so apply the new and changed ones with the chart
 before `helm upgrade`:
 
@@ -187,8 +188,8 @@ Adapter and manager upgrade in either order: an older manager ignores
 `signalId`. An adapter that reads `conversations` from the response, if you
 wrote one, must stop.
 
-An upgrade that finds no `agentops-nats-credentials` Secret fails the render,
-naming it and `nats.auth.existingSecret`.
+An upgrade that finds no `agentops-nats-credentials` Secret fails the render.
+The error names the Secret and `nats.auth.existingSecret`.
 
 The new manager starts, finds the empty `nats` buckets and the `kube`
 records, imports them, and reports ready once the import finishes. Verify

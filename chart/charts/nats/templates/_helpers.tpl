@@ -170,7 +170,7 @@ spec:
         resources:
           requests:
             storage: {{ $v.persistence.size | default "10Gi" | quote }}
-{{ include "agentops.storageClassName" $v.persistence | indent 6 }}
+{{ include "agentops.storageClassName" $v.persistence | indent 8 }}
 {{- end -}}
 
 {{- define "nats.services" -}}

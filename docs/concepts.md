@@ -1995,7 +1995,7 @@ adapter's own cursor, the same annotation it always was.
 - **Reads of one record go to the server**, never a cache, so a
   compare-and-swap precondition is never a guess. Listings are served from an
   in-memory mirror kept current by a watch, since a full list of a large
-  install is slow either backend.
+  install is slow on either backend.
 - **A later backend adds its own row**, stating its own guarantee.
 - **Release is explicit.** The manager deletes a closed or evicted
   conversation's pod and ConfigMap itself under every backend, so no row

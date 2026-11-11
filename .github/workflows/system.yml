@@ -25,7 +25,8 @@
 #   fallback backend instead, a REAL cluster install and test run — not
 #   only the `helm template` render task 3.5 already proved renders no
 #   state server — so the fallback path is exercised, not only rendered.
-#   `system-smoke.yml`'s `state_backend` input is the one caller that sets it.
+#   `system-smoke.yml`'s `state_backend` input is the one caller that sets it;
+#   `system-full.yml` also calls this workflow and leaves it empty.
 #
 # WHAT THIS WORKFLOW OWNS is the cluster-based jobs only. Per-module build, vet
 # and test, the envtest suite and chart lint stay in ci.yml — one definition
