@@ -224,7 +224,10 @@ archive hook checks it.
   tool-enablement posture and the `renders bundle=pi` marker, claiming
   specification 2.0.2. Add its diagram spec to `RUNTIME_DIAGRAMS` in
   `.github/scripts/docs_diagrams.py`.
-- [ ] 10.7 `docs/_data/nav.yml`: one entry in the Runtimes group.
+- [ ] 10.7 `docs/_data/nav.yml`: one entry in the Runtimes group. Before the
+  new page links the pi project, add its host to
+  `.github/publication-allowlist.json` as a linked upstream project, never by
+  loosening a rule. Verify: `publication-guard.py` passes.
 - [ ] 10.8 The pages that list the shipped runtimes: `docs/introduction.md`,
   `docs/index.md`, `docs/installation.md` and `docs/guides/agent-runtime.md`.
 - [ ] 10.9 `README.md`: the runtime list only. Verify: `wc -l README.md` is
