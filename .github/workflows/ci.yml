@@ -193,13 +193,10 @@ jobs:
       - run: go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...
       # A coverage FLOOR for the nats state backend. Its failure paths are only
       # reachable by tests written for them, so a drop means a branch lost its
-      # test. Statement coverage of that package alone, weighted by each
-      # block's statement count, read straight from the profile above.
+      # test. The script counts each block once: -coverpkg makes every test
+      # binary list every block, so summing lines read 96% as 7%.
       - name: Hold the nats state backend's coverage floor
-        run: |
-          pct=$(awk 'NR > 1 && $1 ~ /internal\/state\/nats\// { t += $2; if ($3 > 0) c += $2 } END { if (t) printf "%.1f", 100*c/t; else print 0 }' coverage.out)
-          echo "internal/state/nats statement coverage: ${pct}%"
-          awk -v p="$pct" 'BEGIN { exit !(p >= 90) }' || { echo "below the 90% floor"; exit 1; }
+        run: bash .github/scripts/coverage-floor.sh coverage.out internal/state/nats/ 90
       # The suite FAILS without assets rather than skipping (verified: envtest
       # start returns an error and the package reports FAIL), so `go test ./...`
       # above already proves it ran. This only catches provisioning that
