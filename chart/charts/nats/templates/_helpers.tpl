@@ -147,14 +147,14 @@ spec:
             httpGet:
               path: /healthz
               port: monitor
-            initialDelaySeconds: {{ $v.probes.initialDelaySeconds | default 5 }}
-            periodSeconds: {{ $v.probes.periodSeconds | default 10 }}
+            initialDelaySeconds: {{ ($v.probes | default dict).initialDelaySeconds | default 5 }}
+            periodSeconds: {{ ($v.probes | default dict).periodSeconds | default 10 }}
           livenessProbe:
             httpGet:
               path: /healthz
               port: monitor
-            initialDelaySeconds: {{ $v.probes.initialDelaySeconds | default 5 }}
-            periodSeconds: {{ $v.probes.periodSeconds | default 10 }}
+            initialDelaySeconds: {{ ($v.probes | default dict).initialDelaySeconds | default 5 }}
+            periodSeconds: {{ ($v.probes | default dict).periodSeconds | default 10 }}
           {{- with $v.resources }}
           resources:
 {{ toYaml . | indent 12 }}
@@ -231,7 +231,7 @@ spec:
   # available through a voluntary eviction. Meaningless at replicas: 1 —
   # rendered anyway, since a template that special-cased it would be a
   # second place this number could drift from the StatefulSet's own.
-  maxUnavailable: {{ $v.podDisruptionBudget.maxUnavailable | default 1 }}
+  maxUnavailable: {{ ($v.podDisruptionBudget | default dict).maxUnavailable | default 1 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: agentops-nats
