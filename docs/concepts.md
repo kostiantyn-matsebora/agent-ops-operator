@@ -1996,7 +1996,7 @@ adapter's own cursor, the same annotation it always was.
   compare-and-swap precondition is never a guess. Listings are served from an
   in-memory mirror kept current by a watch, since a full list of a large
   install is slow on either backend.
-- **A later backend adds its own row**, stating its own guarantee.
+- **A future backend adds its own row**, stating its own guarantee.
 - **Release is explicit.** The manager deletes a closed or evicted
   conversation's pod and ConfigMap itself under every backend, so no row
   depends on owner-reference garbage collection.
