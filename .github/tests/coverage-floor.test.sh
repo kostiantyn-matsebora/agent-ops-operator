@@ -53,4 +53,14 @@ it "ignores packages other than the one named"
 out=$(bash "$FLOOR" "$dir/dup.out" "internal/other/" 90 2>&1); status=$?
 assert_status 1 "$status"
 
+cat > "$dir/iso.out" <<'P'
+mode: set
+m/internal/state/nats/a.go:1.1,5.2 10 0
+m/internal/other/c.go:1.1,5.2 500 1
+P
+
+it "passes a package that is covered, whatever the other packages hold"
+out=$(bash "$FLOOR" "$dir/iso.out" "internal/other/" 90 2>&1); status=$?
+assert_status 0 "$status"
+
 summary
