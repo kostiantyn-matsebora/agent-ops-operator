@@ -144,7 +144,7 @@ boundary, not a limitation to work around.
 ## The state store conformance suite
 
 The manager reaches conversation state, `Signal`s, each source's cooldown
-window and receipt counters, and adapter cursors through one GENERIC
+window and receipt counters, and adapter state through one GENERIC
 contract (`internal/state`): `Collection[T]`, `Expiring[T]`, `Appended[P,
 T]` and `Blobs`, composed into one closed inventory, `Stores`, naming every
 kind the manager keeps.

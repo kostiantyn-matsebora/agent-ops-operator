@@ -246,3 +246,7 @@ tested. The `kube` pin SHALL be exercised by a system run of its own.
 #### Scenario: The kube pin passes the smoke
 - **WHEN** the smoke tier runs with `stateStore.backend` set to `kube`
 - **THEN** it passes and the install renders no state server
+
+#### Scenario: An uninstall keeps the state servers' volumes
+- **WHEN** the chart is uninstalled on the default backend
+- **THEN** the state servers' volumes remain, so a reinstall finds its data where it was

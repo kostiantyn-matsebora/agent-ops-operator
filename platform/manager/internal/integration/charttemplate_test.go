@@ -3775,6 +3775,11 @@ func TestNatsBundleRendersByDefault(t *testing.T) {
 	if secretDoc(out, "agentops-nats-credentials") == "" {
 		t.Fatal("agentops-nats-credentials Secret not generated on install")
 	}
+	// An uninstall keeps the volumes: the StatefulSet must not ask Kubernetes
+	// to delete its claims, which is what the default (retain) policy avoids.
+	if strings.Contains(sts, "persistentVolumeClaimRetentionPolicy") {
+		t.Fatalf("the state StatefulSet must keep its claims on delete and scale-down:\n%s", sts)
+	}
 	// kube renders none of it.
 	outKube := helmTemplate(t, "--set", "stateStore.backend=kube")
 	for _, kind := range []string{"StatefulSet", "PodDisruptionBudget"} {
