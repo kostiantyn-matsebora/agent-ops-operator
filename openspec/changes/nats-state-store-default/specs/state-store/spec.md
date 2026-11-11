@@ -77,8 +77,8 @@ The manager SHALL release a source through a helper over the contract. The helpe
 
 - lists the source's signals by the any-phase source index
 - deletes each one under the revision it listed
-- clears the source's cooldown window
-- clears the source's receipt counters
+- clears the source's cooldown window, only when no source holds the name
+- clears the source's receipt counters, only when no source holds the name
 
 Release is idempotent and raises no error for a source with none.
 
@@ -92,7 +92,7 @@ After listing the signals, the release SHALL read the source by that name from t
 
 A signal recorded under the identity of the source that holds the name now SHALL be kept. Every other signal of the name SHALL be deleted under the revision it was listed at.
 
-A conflict SHALL re-read that signal and decide again, with exponential back-off and a bounded number of attempts.
+A conflict SHALL re-read that signal and decide again, with exponential back-off and a bounded number of attempts. When the attempts are exhausted the release SHALL return the conflict as an error, leave that signal in place, and let the next pass retry it.
 
 The cooldown window and the receipt counters SHALL be cleared only when no source holds the name. The caller supplies no identity, so a successor created at any point during the release keeps its signals.
 

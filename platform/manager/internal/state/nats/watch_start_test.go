@@ -97,27 +97,34 @@ func dropWatchConsumers(t *testing.T, ctx context.Context, conn *Conn, scope str
 		if !strings.HasPrefix(name, "KV_") || !strings.Contains(name, scope) || !strings.HasSuffix(name, "conversations") {
 			continue
 		}
-		stream, err := conn.js.Stream(ctx, name)
-		if err != nil {
-			t.Fatalf("stream %s: %v", name, err)
-		}
-		consumers := stream.ListConsumers(ctx)
-		dropped := 0
-		for info := range consumers.Info() {
-			if info.Config.DeliverPolicy == jetstream.DeliverLastPerSubjectPolicy {
-				continue
-			}
-			if err := stream.DeleteConsumer(ctx, info.Name); err != nil {
-				t.Fatalf("delete consumer %s: %v", info.Name, err)
-			}
-			dropped++
-		}
-		if dropped == 0 {
+		if dropNonMirrorConsumers(t, ctx, conn, name) == 0 {
 			t.Fatal("no watch consumer found to drop")
 		}
 		return
 	}
 	t.Fatal("conversations stream not found")
+}
+
+// dropNonMirrorConsumers deletes every consumer on the named stream except the
+// mirror's last-per-subject one, and returns how many it deleted.
+func dropNonMirrorConsumers(t *testing.T, ctx context.Context, conn *Conn, name string) int {
+	t.Helper()
+	stream, err := conn.js.Stream(ctx, name)
+	if err != nil {
+		t.Fatalf("stream %s: %v", name, err)
+	}
+	dropped := 0
+	consumers := stream.ListConsumers(ctx)
+	for info := range consumers.Info() {
+		if info.Config.DeliverPolicy == jetstream.DeliverLastPerSubjectPolicy {
+			continue
+		}
+		if err := stream.DeleteConsumer(ctx, info.Name); err != nil {
+			t.Fatalf("delete consumer %s: %v", info.Name, err)
+		}
+		dropped++
+	}
+	return dropped
 }
 
 // The invariant behind the two tests above. An ordered consumer that is reset

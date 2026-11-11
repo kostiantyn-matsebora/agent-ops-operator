@@ -273,13 +273,18 @@ func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
 // be replayed, and is forwarded as it comes.
 const maxHeldBody = 1 << 20
 
+// noRestore is the restore function for a body that was not held.
+func noRestore([]byte) {
+	// Nothing was held, so there is nothing to put back.
+}
+
 // holdBody reads r's body into memory so it can be forwarded and, if the
 // forward fails, handed to the local handler. It returns the bytes and a
 // function that restores them onto r. A request with no body, or one too large
 // to hold, is left alone.
 func holdBody(r *http.Request) ([]byte, func([]byte)) {
 	if r.Body == nil || r.Body == http.NoBody {
-		return nil, func([]byte) {}
+		return nil, noRestore
 	}
 	data, err := io.ReadAll(io.LimitReader(r.Body, maxHeldBody+1))
 	if err != nil || len(data) > maxHeldBody {
@@ -288,7 +293,7 @@ func holdBody(r *http.Request) ([]byte, func([]byte)) {
 			io.Reader
 			io.Closer
 		}{io.MultiReader(bytes.NewReader(data), r.Body), r.Body}
-		return nil, func([]byte) {}
+		return nil, noRestore
 	}
 	r.Body = io.NopCloser(bytes.NewReader(data))
 	return data, func(b []byte) { r.Body = io.NopCloser(bytes.NewReader(b)) }

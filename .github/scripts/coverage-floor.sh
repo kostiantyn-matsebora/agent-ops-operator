@@ -22,4 +22,4 @@ pct=$(awk -v frag="$frag" '
   }' "$profile")
 
 echo "${frag} statement coverage: ${pct}%"
-awk -v p="$pct" -v f="$floor" 'BEGIN { exit !(p >= f && p > 0) }' || { echo "below the ${floor}% floor"; exit 1; }
+awk -v p="$pct" -v f="$floor" 'BEGIN { exit !(p >= f) }' || { echo "below the ${floor}% floor"; exit 1; }

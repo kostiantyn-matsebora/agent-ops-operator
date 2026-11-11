@@ -44,7 +44,7 @@ maxQueuedConversations: 50
 # D-9). `kube` is the baseline (the Conversation custom resources) and
 # renders NO bundle. The manager reads the choice as STATE_BACKEND.
 #
-# `nats` is the DEFAULT as of chart 19 (nats-state-store-default): state
+# `nats` is the DEFAULT (nats-state-store-default): state
 # lives on its own clustered volumes rather than as custom resources, so
 # `kubectl get conversations` no longer shows anything live. Pin the old
 # behaviour with `stateStore.backend: kube` — ONE value, no second one to

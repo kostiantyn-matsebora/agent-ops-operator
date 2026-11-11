@@ -651,7 +651,7 @@ of, from `chart/charts/nats/values.yaml`:
 
 | Key | Default | Consequence |
 |---|---|---|
-| `nats.replicas` | `3` | servers in the cluster. `1` is a conscious single point of failure, and the chart notes say so. Set at install: buckets that exist keep their count and the manager logs the difference, so changing it later means rebuilding the state |
+| `nats.replicas` | `3` | servers in the cluster. `1` is a conscious single point of failure, and the chart notes say so. Set at install: buckets that exist keep their count and the manager logs the difference. A different count needs a fresh install on new volumes, which starts with empty buckets and carries no live state over |
 | `nats.persistence`'s `size` | `10Gi` | each server's own store directory |
 | `nats.persistence`'s `storageClassName` | `""` | the cluster's default provisioner — same convention as `persistence.context` above |
 | `nats.auth.user` | `""` | an explicit username. Left empty, it is the literal `nats`, never generated |

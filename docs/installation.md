@@ -243,6 +243,11 @@ alert. See the changelog entry before you upgrade a production install.
 volumes — a clustered state server replacing the `Conversation`, `Signal`
 and cooldown custom resources as the live record.
 
+The state servers' volumes are claims like any other, so `storageClassName`
+is immutable on them too. It defaults to `""`, the cluster's default
+provisioner. Set `nats.persistence.storageClassName` at install if you need
+another.
+
 `kubectl get conversations` stops showing anything on a default install. Pin
 the old behaviour with `stateStore.backend: kube` — see
 [configuration](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#state-store).

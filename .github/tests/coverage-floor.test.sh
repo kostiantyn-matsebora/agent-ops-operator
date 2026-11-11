@@ -11,6 +11,7 @@ FLOOR="$ROOT/.github/scripts/coverage-floor.sh"
 
 PKG='internal/state/nats/'
 dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
 
 # Three test binaries, each listing the same two nats blocks (10 + 10
 # statements). Only the nats binary hits them.
