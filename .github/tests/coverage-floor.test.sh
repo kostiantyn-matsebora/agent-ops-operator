@@ -79,4 +79,9 @@ it "matches the fragment from a path boundary, not as a substring"
 out=$(bash "$FLOOR" "$dir/iso.out" "nal/other/" 90 2>&1); status=$?
 assert_contains "$out" "package not found"
 
+it "names its usage when given the wrong number of arguments"
+out=$(bash "$FLOOR" "$dir/iso.out" 2>&1); status=$?
+assert_status 1 "$status"
+assert_contains "$out" "usage: coverage-floor.sh"
+
 summary

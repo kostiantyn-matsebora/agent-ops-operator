@@ -11,6 +11,10 @@
 # <path-fragment> matches from a path boundary: "internal/state/nats/" names that
 # package and no other directory merely ending the same way.
 set -euo pipefail
+if [ "$#" -ne 3 ]; then
+  echo "usage: coverage-floor.sh <profile> <path-fragment> <floor-percent>"
+  exit 1
+fi
 profile=$1 frag=$2 floor=$3
 
 rc=0
