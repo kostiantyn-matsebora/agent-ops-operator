@@ -16,7 +16,8 @@ sections 2 to 4 depends on an answer until its spike is recorded.
   resulting prompt from a scripted session, before and after a resume.
 - [ ] 1.4 S3 and S4: create and resume a session by a caller-chosen id, and
   place the state root under a given `$HOME`. Verify: the finding lists the
-  paths a session writes, which become `contextSync.paths`.
+  paths a session writes, which become `contextSync.paths`, and says whether
+  the runtime needs its own id-to-session mapping file (design D5).
 - [ ] 1.5 S5: read per-turn usage, cache counts and stop reason from the
   events. Verify: the finding maps each to a `turns[]` field and names the
   ones pi does not report.
@@ -59,8 +60,9 @@ sections 2 to 4 depends on an answer until its spike is recorded.
 - [ ] 2.7 Answer every permission decision from the composed allowlist, deny
   by default, with no path to an interactive prompt. Verify: a test drives a
   denied call and asserts the run continues and the denial is logged.
-- [ ] 2.8 `continuity.js`: mint `runtimeContextId`, create or resume the
-  session, and on a failed resume re-check the state with bounded delays,
+- [ ] 2.8 `continuity.js`: mint `runtimeContextId` (always the runtime's own
+  id, mapped to pi's session by a file in the state directory when S3 found
+  pi cannot take one), create or resume the session, and on a failed resume re-check the state with bounded delays,
   treating an unreadable path as present and retrying once. A confirmed-absent
   context fails with `continuity: unavailable` and a reason naming the
   context volume. Verify: tests for new, continued, slow store, unreadable

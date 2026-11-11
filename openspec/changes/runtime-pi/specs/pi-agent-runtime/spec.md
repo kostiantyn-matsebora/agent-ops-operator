@@ -143,7 +143,7 @@ When a resume fails, the runtime SHALL tell a store that says the context is GON
 ### Requirement: Telemetry reports what pi observed, bounded and never invented
 The runtime SHALL report one `turns[]` entry per model call and one `toolCalls[]` entry per tool call, from the events pi emits, trimmed to the published bounds before posting. A fact pi does not report SHALL be omitted, never reported as zero. A tool's input or output SHALL NOT be reported. Neither array SHALL be reported when the run made neither kind of call.
 
-Tool names in `toolCalls[]` SHALL be in the agent-ops vocabulary: `Bash`, `Read`, or `mcp__<server>__<tool>`.
+Tool names in `toolCalls[]` SHALL be in the agent-ops vocabulary: `Read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob`, or `mcp__<server>__<tool>`.
 
 #### Scenario: A run with calls reports them
 - **WHEN** a run makes model calls and tool calls

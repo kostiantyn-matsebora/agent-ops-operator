@@ -129,8 +129,14 @@ as `runtimeContextId`. The bundle declares the session directory in
 `contextSync.paths`.
 
 Whether pi accepts a caller-chosen id is spike S3. Whether its state root can
-sit under `$HOME` is spike S4. If pi names its own sessions, the runtime reports pi's identifier instead, and the handle is
-still opaque to the manager.
+sit under `$HOME` is spike S4.
+
+The runtime always mints the identifier it reports, as the spec requires.
+
+If pi names its own sessions, the runtime keeps a small mapping from the
+minted id to pi's session inside the declared state directory. The mapping
+checkpoints and restores with the context. The handle stays opaque to the
+manager.
 
 ### D6. Telemetry comes from pi's events
 
