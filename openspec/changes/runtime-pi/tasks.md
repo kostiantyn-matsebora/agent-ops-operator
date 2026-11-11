@@ -60,13 +60,15 @@ sections 2 to 4 depends on an answer until its spike is recorded.
 - [ ] 2.7 Answer every permission decision from the composed allowlist, deny
   by default, with no path to an interactive prompt. Verify: a test drives a
   denied call and asserts the run continues and the denial is logged.
-- [ ] 2.8 `continuity.js`: mint `runtimeContextId` (always the runtime's own
-  id, mapped to pi's session by a file in the state directory when S3 found
-  pi cannot take one), create or resume the session, and on a failed resume re-check the state with bounded delays,
-  treating an unreadable path as present and retrying once. A confirmed-absent
-  context fails with `continuity: unavailable` and a reason naming the
-  context volume. Verify: tests for new, continued, slow store, unreadable
-  path and lost, ported from `runtimes/copilot/continuity.test.js`.
+- [ ] 2.8 `continuity.js`: mint `runtimeContextId`, always the runtime's own
+  id. When S3 found pi cannot take a caller-chosen id, map it to pi's session
+  by a file in the state directory. Create or resume the session from it.
+  Verify: tests for a first run, a resume and the mapping file.
+- [ ] 2.8a On a failed resume, re-check the state with bounded delays. Treat
+  an unreadable path as present and retry once. A confirmed-absent context
+  fails with `continuity: unavailable` and a reason naming the context
+  volume. Verify: tests for a slow store, an unreadable path and a lost
+  context, ported from `runtimes/copilot/continuity.test.js`.
 - [ ] 2.9 Apply the S6 finding: if pi loads workspace context files by
   itself, turn that off, or record the behaviour for the runtime's page.
   Verify: a test with an `AGENTS.md` in the checkout asserts the prompt the

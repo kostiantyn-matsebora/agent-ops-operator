@@ -141,7 +141,7 @@ A definition that is absent, unreadable, or has frontmatter the runtime cannot p
 - **THEN** the run proceeds on the unit's `systemPrompt` and the wiring's tools alone
 
 ### Requirement: The context handle is minted by the runtime and stays opaque
-The runtime SHALL mint `runtimeContextId` itself and map it to a pi session whose state lives under `$HOME`. That is the CONTEXT volume, or the pod-local copy `context-sync` restores.
+The runtime SHALL mint `runtimeContextId` itself and map it to a pi session whose state lives under `$HOME`, the live context mount. That is the CONTEXT volume at `/data/context`, or the pod-local copy `context-sync` restores.
 
 - On a unit carrying no `runtimeContextId` it SHALL create a session under a generated identifier and report it with `continuity: new`.
 - On a unit carrying one it SHALL resume that session and report `continuity: continued`.
