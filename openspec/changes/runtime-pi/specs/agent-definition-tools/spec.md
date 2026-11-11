@@ -3,7 +3,7 @@
 ### Requirement: The agent definition's declared tools are honoured
 When a work unit names an agent and the profile's checkout contains that agent's definition, the runtime SHALL read its YAML frontmatter and treat a declared `tools:` list as that agent's own capability declaration.
 
-WHERE the definition lives is the RUNTIME's fact, not the contract's. `runtime-claude`, `runtime-ollama` and `runtime-pi` read `.claude/agents/<agent>.md`, `runtime-copilot` reads `.github/agents/<agent>.agent.md`, and another backend may read somewhere else.
+WHERE the definition lives is the RUNTIME's fact, not the contract's. `runtime-claude`, `runtime-claude-cli`, `runtime-ollama` and `runtime-pi` read `.claude/agents/<agent>.md`, `runtime-copilot` reads `.github/agents/<agent>.agent.md`, and another backend may read somewhere else.
 
 A definition that is absent, has no frontmatter, or declares no `tools:` SHALL contribute nothing, not an error and not a default.
 
