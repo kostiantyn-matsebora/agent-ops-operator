@@ -329,6 +329,15 @@ func (c *Cluster) Dump(dir string) {
 		}
 		write("log-"+pod+".txt", "-n", Namespace, "logs", pod, "--all-containers", "--tail=2000")
 		write("log-"+pod+"-previous.txt", "-n", Namespace, "logs", pod, "--all-containers", "--previous", "--tail=500")
+		// A state server's own account of itself: what its meta group looks
+		// like and whether it considers the cluster healthy. A bucket refused
+		// with "no suitable peers" is invisible in the pod log alone.
+		if strings.HasPrefix(pod, "agentops-nats-") {
+			for _, ep := range []string{"jsz?meta=1&config=1&streams=1&accounts=1", "routez", "healthz", "varz"} {
+				name := strings.NewReplacer("?", "-", "&", "-", "=", "").Replace(ep)
+				write("nats-"+pod+"-"+name+".txt", "-n", Namespace, "exec", pod, "--", "wget", "-qO-", "http://localhost:8222/"+ep)
+			}
+		}
 	}
 	fmt.Fprintf(os.Stderr, "diagnostics written to %s\n", dir)
 }
