@@ -82,10 +82,20 @@ func (k *Kube) WaitDeploymentAvailable(ctx context.Context, name string, timeout
 		case err != nil:
 			return err
 		default:
-			if d.Status.AvailableReplicas >= 1 {
+			// Settled means the rollout is over: the newest spec observed, every
+			// replica on it and available. One available old replica is not
+			// enough, it keeps answering with the previous configuration while
+			// a lane assumes the upgrade it just ran has taken effect.
+			want := int32(1)
+			if d.Spec.Replicas != nil {
+				want = *d.Spec.Replicas
+			}
+			if d.Status.ObservedGeneration >= d.Generation && d.Status.AvailableReplicas >= 1 &&
+				d.Status.UpdatedReplicas == want && d.Status.Replicas == want && d.Status.AvailableReplicas == want {
 				return nil
 			}
-			last = fmt.Sprintf("available=%d ready=%d", d.Status.AvailableReplicas, d.Status.ReadyReplicas)
+			last = fmt.Sprintf("available=%d ready=%d updated=%d replicas=%d want=%d", d.Status.AvailableReplicas,
+				d.Status.ReadyReplicas, d.Status.UpdatedReplicas, d.Status.Replicas, want)
 		}
 		time.Sleep(2 * time.Second)
 	}
