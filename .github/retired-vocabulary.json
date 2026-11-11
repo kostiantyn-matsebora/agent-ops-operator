@@ -431,7 +431,7 @@
     },
     {
       "id": "flat-persistence-keys",
-      "pattern": "persistence\\.(enabled|name|size|storageClassName|accessModes|volumeName|existingClaim)\\b",
+      "pattern": "(?<!nats\\.)persistence\\.(enabled|name|size|storageClassName|accessModes|volumeName|existingClaim)\\b",
       "says": "the block moved wholesale: persistence.context.* and persistence.workspace.*",
       "allow": [
         "removed",
