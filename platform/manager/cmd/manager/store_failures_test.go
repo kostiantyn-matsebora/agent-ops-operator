@@ -86,7 +86,7 @@ func TestTheReadinessCheckPassesOnceTheImportHasCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	check := natsReadinessCheck(conn, dest)
+	check := natsReadinessCheck(conn, dest, elected())
 	req := httptest.NewRequest("GET", "/readyz", nil)
 	if err := check(req); err == nil || !strings.Contains(err.Error(), "import") {
 		t.Fatalf("before the import: %v, want not ready naming the import", err)

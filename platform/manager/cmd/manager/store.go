@@ -126,20 +126,30 @@ func newNatsStores(mgr ctrl.Manager, namespace string) (state.Stores, error) {
 	if err := registerNatsImport(mgr, conn, backend, namespace); err != nil {
 		return state.Stores{}, err
 	}
-	if err := mgr.AddReadyzCheck("state-store", natsReadinessCheck(conn, backend)); err != nil {
+	if err := mgr.AddReadyzCheck("state-store", natsReadinessCheck(conn, backend, mgr.Elected())); err != nil {
 		return state.Stores{}, fmt.Errorf("registering the nats state store's readiness check: %w", err)
 	}
 	return backend.Stores, nil
 }
 
-// natsReadinessCheck answers "not ready" while the server cannot be reached
-// or the one-time import has not completed — task 2.8's own verify clause,
-// and design D-10's "the manager serves nothing until it returns".
-func natsReadinessCheck(conn *natsstate.Conn, backend *natsstate.Backend) healthz.Checker {
+// natsReadinessCheck answers "not ready" while the server cannot be reached,
+// and, on the elected replica, while the one-time import has not completed:
+// task 2.8's own verify clause, and design D-10's "the manager serves nothing
+// until it returns". A replica that does not hold the Lease runs no import and
+// serves nothing itself, every route proxies to the leader, so it is ready
+// once the server is reachable. Gating it on the import too would deadlock an
+// upgrade from kube: the old replicas hold the Lease until the new ones are
+// ready, and the new ones can never import without it.
+func natsReadinessCheck(conn *natsstate.Conn, backend *natsstate.Backend, elected <-chan struct{}) healthz.Checker {
 	return func(req *http.Request) error {
 		ctx := req.Context()
 		if err := conn.Reachable(ctx); err != nil {
 			return err
+		}
+		select {
+		case <-elected:
+		default:
+			return nil
 		}
 		imported, err := backend.Imported(ctx)
 		if err != nil {

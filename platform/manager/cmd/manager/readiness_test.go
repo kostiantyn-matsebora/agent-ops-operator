@@ -48,7 +48,7 @@ func TestNatsReadinessCheckGatesOnTheImportAndTheServer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	check := natsReadinessCheck(conn, backend)
+	check := natsReadinessCheck(conn, backend, elected())
 	req := httptest.NewRequest("GET", "/readyz", nil)
 	if err := check(req); err == nil {
 		t.Fatal("want not-ready before the import has completed")
@@ -57,5 +57,43 @@ func TestNatsReadinessCheckGatesOnTheImportAndTheServer(t *testing.T) {
 	conn.Close()
 	if err := check(req); err == nil {
 		t.Fatal("want not-ready with the server unreachable")
+	}
+}
+
+// elected is the channel a replica holding the Lease sees: already closed.
+func elected() <-chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}
+
+// A replica that has not won the Lease is ready once the server is reachable,
+// import or not. The import is the leader's, and the old replicas keep the
+// Lease until a new one is ready, so waiting on it would stall an upgrade
+// from kube forever.
+func TestNatsReadinessCheckDoesNotWaitForTheImportOnAStandby(t *testing.T) {
+	srv := startTestNats(t)
+	conn, err := natsstate.Connect(natsstate.Config{URL: srv.ClientURL(), Replicas: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	backend, err := natsstate.OpenStores(context.Background(), conn, "agent-ops")
+	if err != nil {
+		t.Fatal(err)
+	}
+	standby := make(chan struct{})
+	check := natsReadinessCheck(conn, backend, standby)
+	req := httptest.NewRequest("GET", "/readyz", nil)
+	if err := check(req); err != nil {
+		t.Fatalf("a standby with a reachable server and no import: %v, want ready", err)
+	}
+	close(standby)
+	if err := check(req); err == nil {
+		t.Fatal("once elected, the replica must not be ready before the import has completed")
+	}
+	conn.Close()
+	if err := natsReadinessCheck(conn, backend, make(chan struct{}))(req); err == nil {
+		t.Fatal("a standby is not ready with the server unreachable")
 	}
 }
