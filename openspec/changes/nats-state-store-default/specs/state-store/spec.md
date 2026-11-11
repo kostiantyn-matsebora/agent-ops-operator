@@ -145,9 +145,13 @@ The sweep SHALL wait a grace of 10 minutes first. A blob written ahead of the in
 - **WHEN** a conversation with a queued input held out of line is deleted
 - **THEN** that blob is gone and a blob no queue names is untouched
 
-#### Scenario: Runs go with the conversation and the sweep spares a fresh blob
-- **WHEN** a conversation with runs is deleted under `nats`, and a blob younger than the grace names no input
-- **THEN** the runs are gone, the sweep removes orphaned runs and old unowned blobs, and the young blob stays
+#### Scenario: Runs go with the conversation
+- **WHEN** a conversation with runs is deleted under `nats`
+- **THEN** its runs are removed by that delete
+
+#### Scenario: The sweep spares a fresh blob
+- **WHEN** the sweep runs while a blob younger than the grace names no input
+- **THEN** it removes orphaned runs and old unowned blobs, and the young blob stays
 
 ### Requirement: Run history is bounded the same on every backend
 A conversation SHALL keep its newest ten runs on every backend, the oldest falling off. Growing a run that has aged out SHALL report not-found.

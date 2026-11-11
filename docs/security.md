@@ -187,7 +187,7 @@ server beside the manager rather than in the Kubernetes API.
 | | |
 |---|---|
 | **Threat** | crossing 7 — any pod that reaches the state server reads or writes a conversation's own record directly, including another conversation's messages |
-| **Control** | the client port always requires the chart-managed credential (`nats.auth`). Where network policy is enabled, it also admits the manager's pods alone — the server's peer port admits only its own pods |
+| **Control** | the client port always requires the chart-managed credential. Where network policy is enabled, it also admits the manager's pods alone — the server's peer port admits only its own pods |
 | **Cost** | none beyond the install's existing network-policy decision |
 | **Residual risk** | the credential is one shared secret, not a token per caller, so anything holding it is indistinguishable from the manager. A policy applies where nothing enforces it, silently, same as crossing 1 |
 
