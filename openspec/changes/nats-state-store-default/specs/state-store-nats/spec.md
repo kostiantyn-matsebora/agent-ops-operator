@@ -229,6 +229,15 @@ tested. The `kube` pin SHALL be exercised by a system run of its own.
 - **THEN** all three are readable through `/state/*` and the console after the
   first start, and the custom resources are unchanged
 
+#### Scenario: A rolling server image upgrade keeps writes working
+- **WHEN** the state servers are rolled to a new image one at a time
+- **THEN** two servers stay up throughout and no write fails
+
+#### Scenario: The console renders across an upgrade from kube
+- **WHEN** an install on `kube` is upgraded to the default while the console
+  shows a conversation
+- **THEN** the page keeps rendering and the thread's unread state survives
+
 #### Scenario: The console renders across a server loss
 - **WHEN** a state server is deleted while the console shows a conversation
 - **THEN** the page keeps rendering and the thread, its unread state and its
