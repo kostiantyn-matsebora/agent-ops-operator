@@ -159,13 +159,15 @@ func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
 	}
 
 	// /state/*: the conversation and the signal, through the manager's own
-	// read surface — the readiness gate (store.go's natsReadinessCheck)
-	// already waited out the import inside e.Upgrade's own WaitReady, so a
-	// 200 here is the import having actually completed, not a race with it.
-	code, out := e.do(t, "GET", e.Manager.URL()+"/state/conversations/"+conv.Name, nil, bearerPrefix+e.Values.AdapterToken)
-	if code != 200 || !strings.Contains(out, convID) {
-		t.Fatalf("the conversation must read through /state/* after the import: %d %s", code, out)
-	}
+	// read surface. The import is the elected replica's, run once the old
+	// replicas have released the Lease, so it completes after the rollout
+	// settles and is waited for here: a 200 is the import having completed.
+	var code int
+	var out string
+	waitFor(t, "the conversation to read through /state/* once the import has completed", 4*time.Minute, func() (bool, error) {
+		code, out = e.do(t, "GET", e.Manager.URL()+"/state/conversations/"+conv.Name, nil, bearerPrefix+e.Values.AdapterToken)
+		return code == 200 && strings.Contains(out, convID), nil
+	})
 	code, out = e.do(t, "GET", e.Manager.URL()+"/state/signals", nil, bearerPrefix+e.Values.AdapterToken)
 	if code != 200 || !strings.Contains(out, convID) {
 		t.Fatalf("the signal must read through /state/signals after the import: %d %s", code, out)
@@ -187,10 +189,10 @@ func TestNatsImportFromKubeOnUpgrade(t *testing.T) {
 	// a manager restart is the only way this pack can ask the importer to
 	// run again.
 	restartManager(t, ctx, e)
-	code, out = e.do(t, "GET", e.Manager.URL()+"/state/conversations/"+conv.Name, nil, bearerPrefix+e.Values.AdapterToken)
-	if code != 200 || !strings.Contains(out, convID) {
-		t.Fatalf("the conversation must still read after a second manager restart: %d %s", code, out)
-	}
+	waitFor(t, "the conversation to still read after a second manager restart", 2*time.Minute, func() (bool, error) {
+		code, out = e.do(t, "GET", e.Manager.URL()+"/state/conversations/"+conv.Name, nil, bearerPrefix+e.Values.AdapterToken)
+		return code == 200 && strings.Contains(out, convID), nil
+	})
 	n, err := countConversationsFor(ctx, e, convID)
 	if err != nil {
 		t.Fatal(err)
