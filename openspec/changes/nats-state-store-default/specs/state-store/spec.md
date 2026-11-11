@@ -94,7 +94,7 @@ After listing the signals, the release SHALL read the source by that name from t
 
 A signal recorded under the identity of the source that holds the name now SHALL be kept. Every other signal of the name SHALL be deleted under the revision it was listed at.
 
-A conflict SHALL re-read that signal and decide again, with exponential back-off and at most 20 attempts. The back-off base is an implementation detail.
+A conflict SHALL re-read that signal and decide again. Retries SHALL back off exponentially, at most 20 attempts. The back-off base is an implementation detail.
 
 When the attempts are exhausted the release SHALL return the conflict as an error and leave that signal in place. The next pass retries it.
 

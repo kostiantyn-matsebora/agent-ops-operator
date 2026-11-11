@@ -240,9 +240,12 @@ adapter's default `correlationStrategy` changes what counts as a repeat
 alert. See the changelog entry before you upgrade a production install.
 
 **The next release is BREAKING too: the default state backend changes to
-`nats`.** A fresh install now also runs three more pods and three more
-volumes — a clustered state server replacing the `Conversation` and `Signal`
-custom resources and the cooldown window on `SignalSource` as the live record.
+`nats`.**
+
+A fresh install now also runs three more pods and three more volumes.
+They are a clustered state server. It replaces the `Conversation` and
+`Signal` custom resources and the cooldown window on `SignalSource` status
+as the live record.
 
 The state servers' volumes are claims too, so their storage class is set
 before install. See [Storage](#storage).
