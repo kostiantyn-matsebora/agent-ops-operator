@@ -368,6 +368,9 @@ func mirroringAssertThreadedReplyRelaysAndAcksBoth(t *testing.T, ctx context.Con
 	if rec.Code != 202 {
 		t.Fatalf("threaded reply: %d %s", rec.Code, rec.Body.String())
 	}
+	// async-command-bus: the reply and its relay land once the "conv" queue's
+	// own task (taskInboundMessage) has run.
+	drainConvTasks(t)
 	var bound agentopsv1alpha1.Conversation
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: convName}, &bound)
 	n := len(bound.Spec.Inputs)

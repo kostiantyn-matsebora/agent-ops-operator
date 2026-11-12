@@ -222,6 +222,10 @@ func TestCoordinateCloseCascadesThroughTheRealAPI(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("close: %d %s", rec.Code, rec.Body.String())
 	}
+	// async-command-bus: /coordinate/close only ACCEPTS synchronously now;
+	// the close cascade itself runs as "conv" queue tasks (taskClose,
+	// taskCloseCoordinated).
+	drainConvTasks(t)
 	if got := getConv(t, member.Name); got.Status.Phase != agentopsv1alpha1.ConversationClosed {
 		t.Fatalf("the direct member must close, got %s", got.Status.Phase)
 	}
@@ -274,6 +278,9 @@ func TestCoordinateEscalateDeliversTheDigestThroughARealReconcile(t *testing.T) 
 	if rec.Code != 200 {
 		t.Fatalf("escalate: %d %s", rec.Code, rec.Body.String())
 	}
+	// async-command-bus: /coordinate/escalate only ACCEPTS synchronously now;
+	// the digest stamp runs inside the "conv" queue's own task (taskEscalate).
+	drainConvTasks(t)
 	got := getConv(t, root.Name)
 	if got.Status.EscalatedAt == nil || got.Status.EscalationMessage != "three members failed, see the tree" {
 		t.Fatalf("escalate must stamp the digest, admitted by the real schema: %+v", got.Status)
@@ -405,6 +412,9 @@ func TestCoordinateMemberResultsReachTheAlreadyBoundThreadBeforeAndAfterEscalati
 	if rec.Code != 200 {
 		t.Fatalf("escalate: %d %s", rec.Code, rec.Body.String())
 	}
+	// async-command-bus: the digest stamp runs inside the "conv" queue's own
+	// task (taskEscalate) — reconcileConversation below needs it landed first.
+	drainConvTasks(t)
 	reconcileConversation(t, srv, root.Name)
 	digestOp := nextEsc3SendOp(t, srv, "the digest queued as a send op")
 	if !strings.Contains(digestOp.Message.Body, "three members failed") {
@@ -429,6 +439,7 @@ func TestCoordinateMemberResultsReachTheAlreadyBoundThreadBeforeAndAfterEscalati
 		srv.AdapterToken); rec.Code != 202 {
 		t.Fatalf("channel/inbound: %d %s", rec.Code, rec.Body.String())
 	}
+	drainConvTasks(t)
 	assertRootHasInput(t, root.Name, "who is handling this?")
 }
 

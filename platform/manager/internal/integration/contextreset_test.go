@@ -53,10 +53,15 @@ func TestResetClearsTheHandleAndKeepsEverythingElse(t *testing.T) {
 	mkChanConv(t, "reset-1", "p-reset", "ch-reset")
 	setContextHandle(t, "reset-1", "session-abc")
 
+	// async-command-bus: reset-context now only ACCEPTS synchronously (202);
+	// the patch and the announcement run inside the "conv" queue's own task
+	// (taskResetContext), so the effects below only land once that task has
+	// been drained.
 	rec := resetContext(t, "reset-1", "ch-reset")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
+	drainConvTasks(t)
 
 	var conv agentopsv1alpha1.Conversation
 	if err := k8sClient.Get(context.Background(),
@@ -98,9 +103,10 @@ func TestResetClearsTheLegacyHandleToo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if rec := resetContext(t, "reset-2", "ch-reset2"); rec.Code != 200 {
+	if rec := resetContext(t, "reset-2", "ch-reset2"); rec.Code != 202 {
 		t.Fatalf("status = %d", rec.Code)
 	}
+	drainConvTasks(t)
 	var after agentopsv1alpha1.Conversation
 	if err := k8sClient.Get(context.Background(), key, &after); err != nil {
 		t.Fatal(err)
@@ -112,16 +118,35 @@ func TestResetClearsTheLegacyHandleToo(t *testing.T) {
 
 // Resetting a conversation that has no handle is a no-op success: the caller
 // wanted a conversation with no stale handle and that is what they have.
+//
+// async-command-bus: the old synchronous reply carried `"cleared":false` to
+// say so directly; the accept step now only answers 202 (ok/invocationId/
+// taskIds, task 5.9's own breaking change), and taskResetContext's own
+// no-handle branch returns before ever touching the condition it would
+// otherwise set — so the no-op is now pinned by what DIDN'T change: the
+// handle stays empty and no continuity-loss condition appears, unlike the
+// "actually cleared" case TestResetClearsTheHandleAndKeepsEverythingElse
+// pins.
 func TestResetWithNoHandleIsANoOp(t *testing.T) {
 	mkProfile(t, "p-reset3")
 	mkChannel(t, "ch-reset3", "telegram")
 	mkChanConv(t, "reset-3", "p-reset3", "ch-reset3")
 	rec := resetContext(t, "reset-3", "ch-reset3")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `"cleared":false`) {
-		t.Fatalf("body = %s, want cleared:false", rec.Body.String())
+	drainConvTasks(t)
+
+	var after agentopsv1alpha1.Conversation
+	if err := k8sClient.Get(context.Background(),
+		types.NamespacedName{Namespace: ns, Name: "reset-3"}, &after); err != nil {
+		t.Fatal(err)
+	}
+	if after.ContextID() != "" {
+		t.Fatalf("no handle was ever set, so none should appear: %q", after.ContextID())
+	}
+	if cond := apimeta.FindStatusCondition(after.Status.Conditions, controller.ConditionContextContinuity); cond != nil {
+		t.Fatalf("a no-op reset must not stamp a continuity-loss condition: %+v", cond)
 	}
 }
 

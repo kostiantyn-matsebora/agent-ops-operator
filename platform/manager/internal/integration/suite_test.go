@@ -30,6 +30,9 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/consumer"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
@@ -198,6 +201,17 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 		// The consumer shares it, as in production: a fresh Server is a fresh
 		// cooldown, which is how a test stands in for "outside the window".
 		Cooldowns: ingest.NewCooldownBook(),
+		// A fresh, in-memory command bus (async-command-bus design D-1) —
+		// never nats, these are fast in-process envtest tests. Every accept
+		// handler in internal/httpapi (reopen, delete, reset-context,
+		// channel-inbound, coordinate/close, coordinate/escalate) calls
+		// s.Bus.Submit unconditionally, so this must never be nil here, exactly
+		// as it is never nil in a real install. Fresh per Server, matching the
+		// Cooldowns/Ops pattern above: a test standing in for "a restart"
+		// builds a second apiServer() and gets a second, empty bus, which is
+		// the right model for memory's own "tests and local development only"
+		// backend.
+		Bus: memory.Open(),
 	}
 	lastServer = srv
 	return srv, acts
@@ -208,6 +222,88 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 // the leader's consumer pool — which a test with no manager running stands in
 // for by reconciling the Signals a post created, synchronously.
 var lastServer *httpapi.Server
+
+// drainConvTasks is the "conv" queue's own analogue of postSignal's own
+// consumeNewSignals: an accept handler only ENQUEUES a task
+// (acceptAndEnqueue, internal/httpapi/accept.go) — the work itself runs on
+// whichever replica's consumer.Pool next claims it (HandleConvTask), and no
+// manager process runs in these tests to do that claiming. drainConvTasks
+// stands in for that pool, running every task currently pending or scheduled
+// on httpapi.ConvQueue (and anything draining them enqueues in turn, e.g. a
+// close cascade's own member tasks) to completion, against lastServer — the
+// same API server whose Bus the test just posted to.
+//
+// Built on the REAL consumer.Pool (internal/commandbus/consumer), not a
+// hand-rolled claim/handle/settle loop: Pool.settleOrFail's own mapping from
+// a handler's returned error to the bus's recorded ErrorCode (consumer.
+// WithCode's wrapped code vs. commandbus.ParseErrorCode's fallback) is not
+// reconstructable from outside the package (CodedError carries no exported
+// accessor), so reusing the pool is what keeps a terminal code (forbidden,
+// not_found, precondition_failed) going straight to Dead here exactly as it
+// does in production, rather than silently falling back to a retryable
+// internal and masking a slow, backoff-laden drain behind a wrong code.
+//
+// The wait is for the ACTUAL drained state (commandbus.Bus.Stats showing no
+// pending, running or scheduled task on the queue), polled rather than
+// slept for a guessed duration — the one difference from a fixed sleep that
+// keeps this deterministic: the pool runs in its own goroutine for exactly
+// as long as there is work, and this call blocks until Stats says there is
+// none, or the deadline fails the test loudly rather than hanging it.
+func drainConvTasks(t *testing.T) {
+	t.Helper()
+	srv := lastServer
+	if srv == nil || srv.Bus == nil {
+		return // nothing was wired to enqueue onto — nothing to drain
+	}
+	pool, err := consumer.New(consumer.Config{
+		Bus: srv.Bus, Queue: httpapi.ConvQueue, Handler: srv.HandleConvTask,
+		Concurrency: 1, ConsumerID: "test-drain",
+	})
+	if err != nil {
+		t.Fatalf("drainConvTasks: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = pool.Run(ctx)
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		stats, err := srv.Bus.Stats(context.Background(), httpapi.ConvQueue, commandbus.KindDefault)
+		if err != nil {
+			cancel()
+			<-done
+			t.Fatalf("drainConvTasks: stats: %v", err)
+		}
+		if stats.Pending == 0 && stats.Running == 0 && stats.Scheduled == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatalf("drainConvTasks: conv queue did not drain within 10s: %+v", stats)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+}
+
+// acceptedTaskIDs decodes an accept handler's response body (acceptAndEnqueue's
+// own {"invocationId","taskIds",...} shape, async-command-bus design D-9) and
+// returns its taskIds — the handle a test needs to read one task's own
+// outcome back (commandbus.Bus.GetTask) once drainConvTasks has run it.
+func acceptedTaskIDs(t *testing.T, rec *httptest.ResponseRecorder) []string {
+	t.Helper()
+	var out struct {
+		TaskIDs []string `json:"taskIds"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode accepted response: %v, body=%s", err, rec.Body.String())
+	}
+	return out.TaskIDs
+}
 
 func mkProfile(t *testing.T, name string) {
 	t.Helper()

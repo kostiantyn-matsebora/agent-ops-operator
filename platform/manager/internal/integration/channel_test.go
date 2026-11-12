@@ -249,6 +249,10 @@ func TestThreadedReplyQueuesInputWithBusyAck(t *testing.T) {
 	if rec.Code != 202 {
 		t.Fatalf("threaded inbound: %d %s", rec.Code, rec.Body.String())
 	}
+	// async-command-bus: /channel/inbound only ACCEPTS synchronously now; the
+	// replay of HandleMessage (the reply input, the busy ack) runs inside the
+	// "conv" queue's own task (taskInboundMessage).
+	drainConvTasks(t)
 	var after agentopsv1alpha1.Conversation
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "reply-1"}, &after)
 	if len(after.Spec.Inputs) != 1 || after.Spec.Inputs[0].Type != agentopsv1alpha1.InputReply {

@@ -200,6 +200,9 @@ func TestConsoleWiredPipelineBindsAConsoleThread(t *testing.T) {
 	if rec.Code != 202 {
 		t.Fatalf("console inbound: %d %s", rec.Code, rec.Body.String())
 	}
+	// async-command-bus: the reply lands once the "conv" queue's own task
+	// (taskInboundMessage) has run.
+	drainConvTasks(t)
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "console-conv"}, &after)
 	last := after.Spec.Inputs[len(after.Spec.Inputs)-1]
 	if last.Type != agentopsv1alpha1.InputReply || last.Payload != "also check the disks" {

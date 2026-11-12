@@ -11,6 +11,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
@@ -141,6 +142,9 @@ func TestReopenRestoresIdleAndLeavesWiringExactlyAsItWas(t *testing.T) {
 	if rec.Code != 202 {
 		t.Fatalf("reopen: %d %s", rec.Code, rec.Body.String())
 	}
+	// async-command-bus: reopen only ACCEPTS synchronously now; the actual
+	// transition runs inside the "conv" queue's own task (taskReopen).
+	drainConvTasks(t)
 	got := getConv(t, "verb-reopen")
 	if got.Status.Phase != agentopsv1alpha1.ConversationIdle {
 		t.Fatalf("reopen must restore Idle, got %q", got.Status.Phase)
@@ -165,6 +169,12 @@ func TestReopenRestoresIdleAndLeavesWiringExactlyAsItWas(t *testing.T) {
 
 // A reopen whose wiring is gone fails NAMING the missing object, rather than
 // producing a conversation that looks alive and can never dispatch.
+//
+// async-command-bus (design D-6/D-9): ReopenConversation's own refusals —
+// including this one — are no longer cheap enough to answer inline, so they
+// are deferred into taskReopen and surface on the TASK (precondition_failed,
+// terminal, never retried) rather than as a synchronous 409. The accept step
+// itself cannot fail on this: the response is 202, same as any other reopen.
 func TestReopenFailsNamingAMissingProfile(t *testing.T) {
 	srv := apiServer()
 	mkChannel(t, "verb-ch-gone", "tg")
@@ -176,11 +186,27 @@ func TestReopenFailsNamingAMissingProfile(t *testing.T) {
 
 	rec := adapterReq(srv, "POST", "/channel/conversations/verb-gone/reopen",
 		map[string]string{"channel": "verb-ch-gone"}, "test-adapter-token")
-	if rec.Code != 409 {
-		t.Fatalf("reopen with a missing profile must fail, got %d", rec.Code)
+	if rec.Code != 202 {
+		t.Fatalf("reopen accept must still succeed synchronously, got %d %s", rec.Code, rec.Body.String())
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "profile-that-never-existed") {
-		t.Errorf("the failure must NAME the missing ref: %s", body)
+	taskIDs := acceptedTaskIDs(t, rec)
+	if len(taskIDs) != 1 {
+		t.Fatalf("reopen must enqueue exactly one task, got %v", taskIDs)
+	}
+	drainConvTasks(t)
+
+	task, err := srv.Bus.GetTask(context.Background(), taskIDs[0])
+	if err != nil {
+		t.Fatalf("get reopen task: %v", err)
+	}
+	if task.State != commandbus.StateDead {
+		t.Fatalf("reopen with a missing profile must fail terminally, got state %q", task.State)
+	}
+	if task.Code != commandbus.CodePreconditionFailed {
+		t.Fatalf("reopen with a missing profile must be precondition_failed, got %q", task.Code)
+	}
+	if !strings.Contains(task.Detail, "profile-that-never-existed") {
+		t.Errorf("the failure must NAME the missing ref: %s", task.Detail)
 	}
 	if getConv(t, "verb-gone").Status.Phase != agentopsv1alpha1.ConversationClosed {
 		t.Error("a failed reopen must not partially reopen")
@@ -197,6 +223,9 @@ func TestDeleteReclaimsAClosedConversation(t *testing.T) {
 	if rec.Code != 202 {
 		t.Fatalf("delete of a closed conversation: %d %s", rec.Code, rec.Body.String())
 	}
+	// async-command-bus: delete only ACCEPTS synchronously now; the actual
+	// removal runs inside the "conv" queue's own task (taskDelete).
+	drainConvTasks(t)
 	var got agentopsv1alpha1.Conversation
 	err := k8sClient.Get(context.Background(),
 		types.NamespacedName{Namespace: ns, Name: "verb-del"}, &got)
@@ -250,6 +279,7 @@ func TestDeleteCascadesToDescendantsAtAnyDepth(t *testing.T) {
 	if rec.Code != 202 {
 		t.Fatalf("delete of the root: %d %s", rec.Code, rec.Body.String())
 	}
+	drainConvTasks(t)
 
 	for _, name := range []string{"cascade-root", "cascade-member-a", "cascade-member-b", "cascade-grandchild"} {
 		var got agentopsv1alpha1.Conversation

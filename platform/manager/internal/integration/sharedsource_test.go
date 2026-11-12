@@ -409,6 +409,9 @@ func TestThreadReplyNeedsNoAddressOnASharedSurface(t *testing.T) {
 	if rec.Code != 202 {
 		t.Fatalf("threaded reply: %d %s", rec.Code, rec.Body.String())
 	}
+	// async-command-bus: the reply lands once the "conv" queue's own task
+	// (taskInboundMessage) has run.
+	drainConvTasks(t)
 	var after agentopsv1alpha1.Conversation
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "thread-conv"}, &after); err != nil {
 		t.Fatal(err)

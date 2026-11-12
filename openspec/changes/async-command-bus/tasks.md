@@ -87,6 +87,16 @@ shape. The spike (a throwaway module outside the repo) is deleted.
 - [x] 5.10 Enqueue a delete cascade over already-closed descendants deepest-first, one task per conversation, on the root's key, ending with the root.
   `deleteCascadeRequests`/`deleteCascadeOrder` in `internal/httpapi/server.go`.
 
+**Harness regression, fixed.** 5.1/5.2/5.5's own notes describe tests
+"updated to drain before asserting". `internal/integration/suite_test.go`
+never actually gained a `Bus`, though. Every converted endpoint panicked
+on a nil `Bus.Submit` and aborted the whole envtest binary.
+
+Fix: wire an in-process `commandbus/memory` bus into
+`apiServerWithActivity()`. Add `drainConvTasks` (`suite_test.go`) — the
+`conv` queue's own analogue of `postSignal`'s `consumeNewSignals`. The full
+suite now passes (`go test ./internal/integration/...`).
+
 ## 6. `OpQueue` migration — backend-developer
 
 - [ ] 6.1 Re-implement `OpQueue` over the bus as `out.<channelType>`, keyed by conversation and channel, keeping `Enqueue*`, `Claim`, `Complete`, `Settled`, `Pending` and `Stats`.
