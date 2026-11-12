@@ -118,6 +118,15 @@ type Bus interface {
 	// reaches, never silently invent an entry.
 	DeadLetters(ctx context.Context, queue Queue) ([]Task, error)
 
+	// Running lists the tasks on queue that are Running under a lease still
+	// in force, oldest Order first: the set a consumer that lost its
+	// connection (and possibly its replica) may still be holding. A lapsed
+	// lease is excluded -- the backend reclaims it and Claim hands it out
+	// again. Each Task carries its current Lease, so a replica that never made
+	// the claim can adopt it and Settle with the token (design D-16, the
+	// console feed's resume).
+	Running(ctx context.Context, queue Queue) ([]Task, error)
+
 	// Feed delivers a gap-free, resumable stream of TaskEvent across every
 	// queue, resuming strictly after resume (the zero Sequence starts from
 	// now, mirroring internal/state.Watch's empty-Revision convention). The

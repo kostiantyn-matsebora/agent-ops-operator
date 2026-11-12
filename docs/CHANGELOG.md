@@ -89,6 +89,13 @@ for the source and the reference material beside this file.
   `GET /state/dead-letters`, on the existing `/state/*` token scheme.
 - `GET /channel/ops` and `POST /channel/ops/{id}/done` are now answered by
   any manager replica. Both used to proxy to the leader.
+- A new optional endpoint, `GET /channel/ops/stream`: the same ops as the
+  long-poll, pushed over one server-sent-events connection in queue order,
+  each with a stable sequence, and resumable after a drop through
+  `Last-Event-ID` on any manager replica. The console now consumes it, so a
+  dropped connection or a rollout no longer leaves it stale until a refresh,
+  and falls back to the long-poll against a manager without it. Telegram keeps
+  the long-poll. Additive: the long-poll and `/done` are unchanged.
 
 ### Changed
 

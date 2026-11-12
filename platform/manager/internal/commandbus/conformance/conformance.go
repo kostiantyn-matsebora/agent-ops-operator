@@ -97,6 +97,7 @@ var declarationScenarios = []declarationScenario{
 	{"FIFO with a retry keeping its place", testFIFOWithRetryKeepingPlace},
 	{"serialization per key under parallel consumers", testSerializationPerKeyUnderParallelConsumers},
 	{"lease completion through a second handle", testLeaseCompletionThroughASecondHandle},
+	{"running lists held leases through a second handle", testRunningListsHeldLeases},
 	{"lease-lapse redelivery", testLeaseLapseRedelivery},
 	{"lease-lapse expires under a short TTL", testLeaseLapseExpiresUnderAShortTTL},
 	{"bounded retry into dead", testBoundedRetryIntoDead},

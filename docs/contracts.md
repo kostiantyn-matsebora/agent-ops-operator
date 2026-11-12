@@ -515,10 +515,13 @@ token that does not derive at all is 401.
 **Every replica serves `/state/`**, leader or not. A store read needs no
 leader.
 
-`GET /channel/ops` and `POST /channel/ops/{id}/done` join `/healthz` and
-`/state/` in bypassing the leader-proxy, alongside them. The command bus
-(below) makes that queue bus-backed rather than leader-held, so any replica
-answers a poll or a completion directly.
+`GET /channel/ops`, `GET /channel/ops/stream` and
+`POST /channel/ops/{id}/done` join `/healthz` and `/state/` in bypassing the
+leader-proxy, alongside them. The command bus (below) makes that queue
+bus-backed rather than leader-held, so any replica answers a poll, a stream or
+a completion directly. The stream is the optional, resumable push form of the
+poll, specified in [the channel adapter
+contract](contracts/channel-adapter.md#get-channelopsstream).
 
 Every other endpoint still proxies to the leader.
 

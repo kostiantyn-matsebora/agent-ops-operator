@@ -13,6 +13,7 @@
 // plus the channel adapter contract (bearer-token auth, see ADAPTER_TOKEN):
 //
 //	GET  /channel/ops?adapter=&wait=    outbound op long-poll (204 on timeout)
+//	GET  /channel/ops/stream?adapter=   the same ops pushed over SSE, resumable (optional)
 //	POST /channel/ops/{id}/done         async op completion
 //	POST /channel/inbound               {"channel","threadId","text"} -> router
 //	GET  /channel/channels?adapter=     channels served by an adapter (+config)
@@ -200,6 +201,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /work/done", s.handleWorkDone)
 	mux.HandleFunc("POST /work/context", s.handleContextReport)
 	mux.HandleFunc("GET /channel/ops", s.adapterAuth(s.handleChannelOps))
+	mux.HandleFunc("GET /channel/ops/stream", s.adapterAuth(s.handleChannelOpsStream))
 	mux.HandleFunc("POST /channel/ops/{id}/done", s.adapterAuth(s.handleChannelOpDone))
 	mux.HandleFunc("POST /channel/inbound", s.adapterAuth(s.handleChannelInbound))
 	mux.HandleFunc("POST /channel/conversations/{name}/reopen", s.adapterAuth(s.handleConversationReopen))
@@ -276,6 +278,7 @@ func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" ||
 			r.URL.Path == "/channel/ops" ||
+			r.URL.Path == "/channel/ops/stream" ||
 			isChannelOpDonePath(r.URL.Path) ||
 			strings.HasPrefix(r.URL.Path, "/state/") ||
 			s.isLeader(r.Context()) {

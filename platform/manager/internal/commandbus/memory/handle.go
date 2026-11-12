@@ -30,6 +30,10 @@ func (h *handle) DeadLetters(_ context.Context, queue commandbus.Queue) ([]comma
 	return h.s.deadLetters(queue)
 }
 
+func (h *handle) Running(_ context.Context, queue commandbus.Queue) ([]commandbus.Task, error) {
+	return h.s.running(queue), nil
+}
+
 func (h *handle) Feed(ctx context.Context, resume commandbus.Sequence) (<-chan commandbus.TaskEvent, error) {
 	return h.s.feed(ctx, resume), nil
 }

@@ -395,6 +395,23 @@ func (s *store) deadLetters(queue commandbus.Queue) ([]commandbus.Task, error) {
 	return out, nil
 }
 
+// running lists queue's tasks Running under a lease still in force, oldest
+// Order first.
+func (s *store) running(queue commandbus.Queue) []commandbus.Task {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	s.reapLocked(now)
+	var out []commandbus.Task
+	for _, t := range s.tasks {
+		if t.Queue == queue && t.State == commandbus.StateRunning && t.Lease != nil && t.Lease.Until.After(now) {
+			out = append(out, *t)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Order < out[j].Order })
+	return out
+}
+
 func (s *store) stats(queue commandbus.Queue, kind commandbus.Kind) (commandbus.QueueStats, error) {
 	if queue == "" {
 		return commandbus.QueueStats{}, fmt.Errorf("%w: Stats needs a queue", commandbus.ErrInvalidRequest)

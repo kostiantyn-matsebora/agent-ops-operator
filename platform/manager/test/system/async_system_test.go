@@ -3,10 +3,14 @@
 package system
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -664,5 +668,216 @@ func awaitTelegramTaskUID(t *testing.T, frames <-chan string, conversation strin
 		case <-deadline:
 			t.Fatal("the telegram ensure-topic task never appeared on the task stream")
 		}
+	}
+}
+
+// ---- 11.7 -------------------------------------------------------------
+
+// consoleOpFrame is one `op` event off GET /channel/ops/stream.
+type consoleOpFrame struct {
+	Sequence uint64
+	OpID     string
+	Kind     string
+}
+
+// 11.7 The console's feed resumes after a drop: nothing is lost, nothing
+// acknowledged is delivered again, and the replay is in sequence order
+// (design D-16). The live console is scaled to zero for the lane so this
+// test is the only consumer of the console channel's queue, then reads the
+// SAME endpoint the console reads, as the master token.
+//
+// WRITTEN, COMPILES, NOT RUN — no cluster in this environment. One
+// assumption it cannot check here: that the ChannelAdapter reconciler leaves
+// `spec.replicas` of the console Deployment alone (gotchas.md says it
+// re-applies `spec.image`, which is a different field). If it does not, the
+// scale-down never holds and this lane fails at its first read, naming that.
+func TestAsyncConsoleStreamResumesAfterADropWithoutLossOrDuplicates(t *testing.T) {
+	fullTier(t)
+	e := requireEnv(t)
+	ctx := context.Background()
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	auth := bearerPrefix + e.Values.AdapterToken
+
+	stopConsoleConsumer(t, ctx, e)
+
+	// Three conversations: each opens with an ensure-topic op on the console
+	// channel, on its own key, so none is serialized behind another.
+	for i := 0; i < 3; i++ {
+		fp := fmt.Sprintf("e2e-async-console-stream-%s-%d", stamp, i)
+		e.PostTask(t, SourceTasks, fp, "echo "+fp)
+	}
+
+	first := readConsoleOpStream(t, e, auth, "", 3, 0, 3*time.Minute)
+	assertStrictlyIncreasing(t, first)
+
+	// Acknowledge only the first, then drop (readConsoleOpStream closed the
+	// connection). The other two stay pushed-and-unacknowledged.
+	ackConsoleOp(t, e, auth, first[0])
+
+	replay := readConsoleOpStream(t, e, auth, fmt.Sprint(first[0].Sequence), 2, 0, time.Minute)
+	assertStrictlyIncreasing(t, replay)
+	if replay[0].OpID != first[1].OpID || replay[1].OpID != first[2].OpID {
+		t.Fatalf("a reconnect after sequence %d must replay %s then %s, got %+v", first[0].Sequence, first[1].OpID, first[2].OpID, replay)
+	}
+	for _, f := range replay {
+		if f.OpID == first[0].OpID {
+			t.Fatalf("op %s was acknowledged and must not be delivered again", f.OpID)
+		}
+	}
+
+	// Everything seen so far is acknowledged; a reconnect from the start
+	// replays none of it.
+	acked := map[string]bool{first[0].OpID: true}
+	for _, f := range replay {
+		ackConsoleOp(t, e, auth, f)
+		acked[f.OpID] = true
+	}
+	for _, f := range readConsoleOpStream(t, e, auth, "0", 0, 15*time.Second, time.Minute) {
+		if acked[f.OpID] {
+			t.Fatalf("acknowledged op %s was delivered again after a reconnect: %+v", f.OpID, f)
+		}
+	}
+}
+
+// stopConsoleConsumer scales the console Deployment to zero and restores it
+// when the test ends.
+func stopConsoleConsumer(t *testing.T, ctx context.Context, e *Env) {
+	t.Helper()
+	const name = "agentops-adapter-console"
+	var dep appsv1.Deployment
+	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: name}, &dep); err != nil {
+		t.Fatal(err)
+	}
+	orig := fmt.Sprint(derefOr(dep.Spec.Replicas, 1))
+	scale := func(n string) error {
+		out, err := e.Cluster.Kubectl(context.Background(), "-n", Namespace, "scale", "deploy/"+name, "--replicas="+n)
+		if err != nil {
+			return fmt.Errorf("%w\n%s", err, out)
+		}
+		return nil
+	}
+	// Registered BEFORE the scale-down, as scaleManagerReplicas does.
+	t.Cleanup(func() { _ = scale(orig) })
+	if err := scale("0"); err != nil {
+		t.Fatalf("scaling the console consumer to zero: %v", err)
+	}
+	waitFor(t, "the console consumer to stop", 2*time.Minute, func() (bool, error) {
+		var d appsv1.Deployment
+		if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: name}, &d); err != nil {
+			return false, err
+		}
+		return d.Status.Replicas == 0, nil
+	})
+}
+
+// readConsoleOpStream opens GET /channel/ops/stream as the console adapter,
+// resuming from lastEventID when non-empty, and collects `op` frames until
+// `want` have arrived (want > 0), or until `idle` passes with none (idle > 0),
+// or max elapses. It then closes the connection, which is the drop.
+func readConsoleOpStream(t *testing.T, e *Env, auth, lastEventID string, want int, idle, max time.Duration) []consoleOpFrame {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), max)
+	defer cancel()
+	url := e.Manager.URL() + "/channel/ops/stream?adapter=console&contract=2"
+	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req.Header.Set("Authorization", auth)
+	if lastEventID != "" {
+		req.Header.Set("Last-Event-ID", lastEventID)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("opening the console op stream: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET /channel/ops/stream = %d, want 200", resp.StatusCode)
+	}
+
+	frames := make(chan consoleOpFrame)
+	go func() {
+		defer close(frames)
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
+		var event, id, data string
+		for sc.Scan() {
+			line := sc.Text()
+			switch {
+			case line == "":
+				if event == "op" {
+					var op struct {
+						ID   string `json:"id"`
+						Kind string `json:"kind"`
+					}
+					seq, perr := strconv.ParseUint(id, 10, 64)
+					if json.Unmarshal([]byte(data), &op) == nil && perr == nil {
+						select {
+						case frames <- consoleOpFrame{Sequence: seq, OpID: op.ID, Kind: op.Kind}:
+						case <-ctx.Done():
+							return
+						}
+					}
+				}
+				event, id, data = "", "", ""
+			case strings.HasPrefix(line, "event: "):
+				event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "id: "):
+				id = strings.TrimPrefix(line, "id: ")
+			case strings.HasPrefix(line, "data: "):
+				data = strings.TrimPrefix(line, "data: ")
+			}
+		}
+	}()
+
+	var got []consoleOpFrame
+	quiet := time.NewTimer(max)
+	if idle > 0 {
+		quiet.Reset(idle)
+	}
+	defer quiet.Stop()
+	for {
+		select {
+		case f, ok := <-frames:
+			if !ok {
+				t.Fatalf("the op stream ended on its own after %d frames", len(got))
+			}
+			got = append(got, f)
+			if want > 0 && len(got) >= want {
+				return got
+			}
+			if idle > 0 {
+				quiet.Reset(idle)
+			}
+		case <-quiet.C:
+			if want > 0 {
+				t.Fatalf("only %d of %d op frames arrived (is the console consumer really stopped?)", len(got), want)
+			}
+			return got
+		case <-ctx.Done():
+			t.Fatalf("the op stream read ran out of time with %d frames", len(got))
+		}
+	}
+}
+
+// assertStrictlyIncreasing fails unless the frames' sequences rise.
+func assertStrictlyIncreasing(t *testing.T, frames []consoleOpFrame) {
+	t.Helper()
+	for i := 1; i < len(frames); i++ {
+		if frames[i].Sequence <= frames[i-1].Sequence {
+			t.Fatalf("sequences must rise in delivery order: %+v", frames)
+		}
+	}
+}
+
+// ackConsoleOp acknowledges one op through the existing done endpoint. An
+// ensure-topic is completed with a thread id, as the console does.
+func ackConsoleOp(t *testing.T, e *Env, auth string, f consoleOpFrame) {
+	t.Helper()
+	body := []byte(`{}`)
+	if f.Kind == "ensure-topic" {
+		body, _ = json.Marshal(map[string]string{"threadId": "system-pack-" + f.OpID})
+	}
+	code, out := e.do(t, "POST", e.Manager.URL()+"/channel/ops/"+url.PathEscape(f.OpID)+"/done", body, auth)
+	if code != 200 {
+		t.Fatalf("acknowledging %s: %d %s", f.OpID, code, out)
 	}
 }

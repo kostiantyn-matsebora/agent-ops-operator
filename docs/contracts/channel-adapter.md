@@ -15,7 +15,7 @@ next:
   url: /agent-ops-operator/crds/channel-adapter/
 ---
 
-**Version 1.3.0**
+**Version 1.4.0**
 
 This specification gives everything necessary to build and maintain a
 `ChannelAdapter` — a component agent-ops does not ship, that carries a
@@ -29,7 +29,7 @@ stable ID, prefixed by the section it belongs to:
 
 | Prefix | Section |
 |---|---|
-| `OPS-n` | [GET /channel/ops](#get-channelops) / [POST /channel/ops/{id}/done](#post-channelopsiddone) |
+| `OPS-n` | [GET /channel/ops](#get-channelops) / [POST /channel/ops/{id}/done](#post-channelopsiddone) / [GET /channel/ops/stream](#get-channelopsstream) |
 | `IN-n` | [POST /channel/inbound](#post-channelinbound) |
 | `READ-n` | [POST /channel/read](#post-channelread) |
 | `MGR-n` | [Manager's provisions](#managers-provisions) |
@@ -172,6 +172,56 @@ reason retrying cannot fix — is reported at once, never ridden out.
 | `ADA-3.2` | The retry budget is PER OPERATION, never per transport call. An operation making several calls — a reopen plus a create, one send per chunk, a fallback — MUST charge every call's wait, retry and own timeout against the one budget. |
 | `ADA-3.3` | Reporting a retryable condition as an operation failure is permitted but degrades the system to the manager's recovery path for a condition the adapter could have ridden out. An adapter MUST NOT treat it as the normal path. |
 | `ADA-4` | An adapter MUST pace its own sending so bursts are spread rather than rejected, and MUST gate pacing before it CLAIMS an op, never before it sends. |
+
+## GET /channel/ops/stream
+
+**Optional.** The same ops as [GET /channel/ops](#get-channelops), pushed by
+the manager over one server-sent-events connection and resumable after a
+drop. An adapter that never calls it is unaffected, and Telegram keeps the
+long-poll.
+
+`GET $MANAGER_URL/channel/ops/stream?adapter=<name>&contract=2`
+
+| Param | Required | Meaning |
+|---|---|---|
+| `adapter` | yes | This `ChannelAdapter` CR's own name — the routing key. |
+| `contract` | yes | The outbound message contract version this adapter speaks. |
+| `since` | no | The resume point, an unsigned integer. Wins over `Last-Event-ID`. |
+
+A reconnect that sends the SSE `Last-Event-ID` header carries the same
+resume point. Any other parameter is refused by name.
+
+| Status | Body |
+|---|---|
+| `200` | `text/event-stream`, below. |
+| `400` | as for the long-poll, or a `since` / `Last-Event-ID` that is not an unsigned integer. |
+| `401`, `403` | as for the long-poll. |
+| `404`, `405` | a manager that predates this endpoint. Fall back to the long-poll. |
+
+The response sets `X-Accel-Buffering: no`, and carries
+`X-Agentops-Vocabulary-Revision` as the long-poll does.
+
+### The stream's events
+
+| Event | `id:` | `data:` |
+|---|---|---|
+| `op` | the op's sequence, an unsigned integer | a [claimed op](#the-claim-window), byte for byte what the long-poll returns |
+| `vocabulary` | none | `{"revision": "<revision>"}`, sent when the revision changes after the connection opened |
+
+A comment line, `: keep-alive`, is sent when the stream is otherwise idle.
+
+| ID | Requirement |
+|---|---|
+| `OPS-12` | The manager MUST push an adapter's ops in queue order, one `op` event each, and MUST claim each through the same path as the long-poll, so the claim window, at-least-once delivery and id-based deduplication are unchanged. |
+| `OPS-13` | An op's sequence is stable for the life of that op: it is assigned when the op is enqueued and does not change if the op is delivered again. Sequences are unique per adapter and rise in enqueue order. They are not necessarily monotonic in delivery order, because an op the adapter failed keeps its place and is delivered again later. |
+| `OPS-14` | A consumer MUST acknowledge an op with [`POST /channel/ops/{id}/done`](#post-channelopsiddone), exactly as for the long-poll. An op pushed and not acknowledged stays claimed until its window lapses, and is then delivered again. |
+| `OPS-15` | On a reconnect naming a resume point, the manager MUST first send every op of that adapter that is still claimed and not acknowledged with a sequence above the point, oldest first, and then continue with new ops. It MUST NOT send an acknowledged op. A replayed op's `reclaimAfterSeconds` is the time left on its existing claim. |
+| `OPS-16` | A resume MUST work on any manager replica. The claim is read back from the command bus, and an acknowledgement reaching a replica that did not make the claim still completes it. |
+| `OPS-17` | A consumer SHOULD resume from the lowest sequence it holds unacknowledged, less one, or from the last sequence it acknowledged when it holds none. A resume point that is too low replays only unacknowledged ops. One that is too high skips an op the consumer holds. |
+
+A consumer SHOULD treat a stream silent for several keep-alive intervals as
+dead and reconnect with backoff. A consumer MUST tolerate a duplicate by
+op `id`, as for the long-poll.
 
 ## POST /channel/inbound
 
@@ -460,6 +510,7 @@ All `/channel/*` calls carry `Authorization: Bearer <token>`.
 | Thread reopening | honour `previousThreadId` and resume the archived thread (`ADA-7`) | its transport can un-archive a thread |
 | Name translation | translate a vocabulary name on the way out and back (`ADA-6.1`) | its transport rejects the name's own characters |
 | Reset-context | expose [`reset-context`](#acting-on-a-bound-conversation) as a user action | its surface offers that control |
+| Op stream | consume [`GET /channel/ops/stream`](#get-channelopsstream) in place of the long-poll, resuming after a drop | it holds a long-lived connection and wants ops pushed |
 
 An adapter implementing none of these stays fully conformant — see
 [Conformance](#conformance).
@@ -477,6 +528,7 @@ An adapter implementing none of these stays fully conformant — see
 | `MGR-6.1` | **Delivery exclusion** — an input MUST be delivered to every bound channel except the surface it entered on, unless that surface declares `ChannelAdapter.spec.echoesOwnMessages: false`. |
 | `MGR-6.2` | **Idempotent reply ids** — a reply op's id MUST be stable per conversation × channel × run (`send:<conversation>:<channel>:<runId>`), so a manager restart between completion and claim re-derives the answer, appending the channel to `status.runs[].delivered[]`. |
 | `MGR-12` | **`conversationId` on every op** — each operation delivered on `/channel/ops` additionally carries the conversation's correlation id, ADDITIVE and opaque to the adapter, absent only on a conversation created before the field existed. |
+| `MGR-13` | **The op stream** — `GET /channel/ops/stream`, the long-poll's ops pushed in queue order with a stable sequence, resumable after a drop on any replica (`OPS-12` to `OPS-17`). OPTIONAL: an adapter that never calls it is unaffected. |
 
 ## Enums
 
@@ -511,6 +563,7 @@ its own integer series, unrelated to this document's semver:
 
 | Document version | Wire `contract` value |
 |---|---|
+| 1.4.0 | `2` |
 | 1.3.0 | `2` |
 | 1.2.0 | `2` |
 | 1.1.0 | `2` |
@@ -540,6 +593,7 @@ Both stay fully conformant with this version unchanged.
 
 | Version | Date | Changed |
 |---|---|---|
+| 1.4.0 | 2026-11-12 | An optional push form of the ops feed, `GET /channel/ops/stream`: the same ops as server-sent events in queue order, each with a stable sequence, resumable after a drop on any manager replica (`OPS-12` to `OPS-17`, `MGR-13`). ADDITIVE: `/channel/ops` and `/channel/ops/{id}/done` are unchanged, the wire `contract` value is unchanged, and an adapter that never calls it stays fully conformant. |
 | 1.3.0 | 2026-10-21 | The retry budget is explicitly PER OPERATION, never per transport call — every call an operation makes charges one total (`ADA-3.2`, `ADA-3.3`, `OPS-4`). Published the two delivery operation id shapes, `send:<conversation>:<channel>:<runId>` and `input:<conversation>:<input>:<channel>` (`OPS-10`, `OPS-11`, `ADA-15`) — any other id stays opaque. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the published shapes stays fully conformant. |
 | 1.2.0 | 2026-10-21 | The typed message's `signal` kind may carry an optional `severity` — one of `critical`, `error`, `warning`, `info`, mirroring the signal adapter contract's own field. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the field stays fully conformant. |
 | 1.1.0 | 2026-10-18 | Every `/channel/ops` operation additionally carries the conversation's `conversationId` (`OPS-9`, `MGR-12`), opaque to the adapter. A channel adapter MUST NOT mint one (`ADA-14`, `IN-4`) — it only translates it to and from the transport's thread id. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the field stays fully conformant. |

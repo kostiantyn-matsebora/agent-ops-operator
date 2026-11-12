@@ -388,6 +388,59 @@ func testLeaseCompletionThroughASecondHandle(t *testing.T, open func() Backing, 
 	}
 }
 
+// testRunningListsHeldLeases pins Running: a claimed task is listed, with
+// its lease token, through a handle that did not claim it (the resume case:
+// the reconnect lands on another replica); a settled one is not; a lapsed
+// lease is not.
+func testRunningListsHeldLeases(t *testing.T, open func() Backing, d commandbus.Declaration, queue commandbus.Queue) {
+	b := open()
+	if d.Policy.TTL > 0 && d.Policy.TTL <= b.LeaseDuration() {
+		t.Skip("queue's TTL does not outlive a lapsed lease")
+	}
+	ctx, cancel := withTimeout()
+	defer cancel()
+	first, second := b.Bus(), b.Bus()
+
+	a, err := first.Submit(ctx, req(queue, d.Kind, "cmd-run-a", "key-run-a"))
+	mustNoErr(t, err, "Submit a")
+	if _, err := first.Submit(ctx, req(queue, d.Kind, "cmd-run-b", "key-run-b")); err != nil {
+		t.Fatalf("Submit b: %v", err)
+	}
+	if got, err := second.Running(ctx, queue); err != nil || len(got) != 0 {
+		t.Fatalf("Running before any claim = %v, %v; want none", got, err)
+	}
+	claimedA, err := first.Claim(ctx, queue, "c1")
+	mustNoErr(t, err, "Claim a")
+	claimedB, err := first.Claim(ctx, queue, "c1")
+	mustNoErr(t, err, "Claim b")
+
+	got, err := second.Running(ctx, queue)
+	mustNoErr(t, err, "Running")
+	if len(got) != 2 || got[0].UID != a.UID || got[0].Order >= got[1].Order {
+		t.Fatalf("Running = %+v, want both claimed tasks oldest Order first", got)
+	}
+	if got[0].Lease == nil || got[0].Lease.Token != claimedA.Lease.Token {
+		t.Fatalf("Running must carry the live lease token so another replica can settle it")
+	}
+	if other, _ := second.Running(ctx, queue+"-other"); len(other) != 0 {
+		t.Fatalf("Running listed another queue's tasks: %v", other)
+	}
+
+	mustNoErr(t, second.Settle(ctx, claimedA.UID, claimedA.Lease.Token), "Settle a")
+	got, err = first.Running(ctx, queue)
+	mustNoErr(t, err, "Running after settle")
+	if len(got) != 1 || got[0].UID != claimedB.UID {
+		t.Fatalf("Running after settling a = %+v, want only b", got)
+	}
+
+	b.Advance(b.LeaseDuration() + time.Second)
+	got, err = first.Running(ctx, queue)
+	mustNoErr(t, err, "Running after lapse")
+	if len(got) != 0 {
+		t.Fatalf("Running listed a lapsed lease: %+v", got)
+	}
+}
+
 func testLeaseLapseRedelivery(t *testing.T, open func() Backing, d commandbus.Declaration, queue commandbus.Queue) {
 	b := open()
 	lease := b.LeaseDuration()

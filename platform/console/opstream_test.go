@@ -1,0 +1,364 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"sync"
+	"testing"
+	"time"
+)
+
+// streamingManager is the manager's /channel/ops/stream and /done as the
+// console sees them: ops with sequences, a resume that replays what is
+// unacknowledged above Last-Event-ID, and acknowledgements that settle.
+type streamingManager struct {
+	t      *testing.T
+	server *httptest.Server
+
+	mu       sync.Mutex
+	ops      []streamedOp
+	acked    map[string]int // id -> acknowledgements received
+	settled  map[string]bool
+	failAck  map[string]int // id -> acknowledgements to refuse with a 500 before accepting
+	resumes  []string       // Last-Event-ID of each connection, in order
+	wake     chan struct{}
+	dropConn []context.CancelFunc
+}
+
+type streamedOp struct {
+	seq uint64
+	op  Op
+}
+
+func newStreamingManager(t *testing.T) *streamingManager {
+	t.Helper()
+	m := &streamingManager{t: t, acked: map[string]int{}, settled: map[string]bool{}, failAck: map[string]int{}, wake: make(chan struct{})}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /channel/channels", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, []ChannelInfo{{Name: "console"}})
+	})
+	mux.HandleFunc("POST /channel/channels/{name}/status", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
+	mux.HandleFunc("GET /channel/ops/stream", m.serveStream)
+	mux.HandleFunc("POST /channel/ops/{id}/done", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if m.failAck[id] > 0 {
+			m.failAck[id]--
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		m.acked[id]++
+		m.settled[id] = true
+		w.WriteHeader(http.StatusOK)
+	})
+	m.server = httptest.NewServer(mux)
+	t.Cleanup(m.server.Close)
+	return m
+}
+
+func (m *streamingManager) push(seq uint64, id string) {
+	m.mu.Lock()
+	m.ops = append(m.ops, streamedOp{seq: seq, op: Op{
+		ID: id, Channel: "console", Kind: "send", ThreadID: strPtr("thread-" + id),
+		Message: &OpMessage{Kind: "answer", Body: "body " + id},
+	}})
+	old := m.wake
+	m.wake = make(chan struct{})
+	m.mu.Unlock()
+	close(old)
+}
+
+func strPtr(s string) *string { return &s }
+
+func (m *streamingManager) serveStream(w http.ResponseWriter, r *http.Request) {
+	since, _ := strconv.ParseUint(r.Header.Get("Last-Event-ID"), 10, 64)
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	m.mu.Lock()
+	m.resumes = append(m.resumes, r.Header.Get("Last-Event-ID"))
+	m.dropConn = append(m.dropConn, cancel)
+	m.mu.Unlock()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(200)
+	flusher := w.(http.Flusher)
+	flusher.Flush()
+	sent := map[uint64]bool{}
+	for {
+		m.mu.Lock()
+		var due []streamedOp
+		for _, o := range m.ops {
+			if o.seq > since && !m.settled[o.op.ID] && !sent[o.seq] {
+				due = append(due, o)
+				sent[o.seq] = true
+			}
+		}
+		wake := m.wake
+		m.mu.Unlock()
+		for _, o := range due {
+			data, _ := json.Marshal(claimedOpWire{Op: o.op, ReclaimAfterSeconds: 300})
+			fmt.Fprintf(w, "event: op\nid: %d\ndata: %s\n\n", o.seq, data)
+			flusher.Flush()
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-wake:
+		}
+	}
+}
+
+// claimedOpWire is the manager's claimedOp: the op plus the lease hint.
+type claimedOpWire struct {
+	Op
+	ReclaimAfterSeconds int `json:"reclaimAfterSeconds"`
+}
+
+// resume is the Last-Event-ID of connection i (negative counts from the last).
+func (m *streamingManager) resume(i int) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if i < 0 {
+		i += len(m.resumes)
+	}
+	return m.resumes[i]
+}
+
+func (m *streamingManager) dropAll() {
+	m.mu.Lock()
+	cancels := m.dropConn
+	m.dropConn = nil
+	m.mu.Unlock()
+	for _, c := range cancels {
+		c()
+	}
+}
+
+func (m *streamingManager) waitFor(what string, cond func() bool) {
+	m.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		ok := cond()
+		m.mu.Unlock()
+		if ok {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	m.t.Fatalf("timed out waiting for %s", what)
+}
+
+func fastReconnect(t *testing.T) {
+	t.Helper()
+	oi, om := streamBackoffInitial, streamBackoffMax
+	streamBackoffInitial, streamBackoffMax = time.Millisecond, 5*time.Millisecond
+	t.Cleanup(func() { streamBackoffInitial, streamBackoffMax = oi, om })
+}
+
+func startConsole(t *testing.T, m *streamingManager) (*Adapter, *Transcripts) {
+	t.Helper()
+	cache := staticCache()
+	for _, k := range ConfigurableKinds {
+		cache.replace(k, cache.List(k))
+	}
+	tr := NewTranscripts()
+	a := NewAdapter(NewManager(m.server.URL, "token"), cache, tr, "console")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.Run(ctx)
+	}()
+	// Stopped before the test returns: Run reads package settings a later test
+	// changes.
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	return a, tr
+}
+
+func TestConsoleConsumesTheStreamInOrderAndAcknowledgesEachOp(t *testing.T) {
+	m := newStreamingManager(t)
+	_, tr := startConsole(t, m)
+	m.push(10, "a")
+	m.push(11, "b")
+	m.push(12, "c")
+
+	m.waitFor("three acknowledgements", func() bool { return len(m.settled) == 3 })
+	for _, id := range []string{"a", "b", "c"} {
+		if msgs := tr.Thread("thread-" + id); len(msgs) != 1 || msgs[0].Text != "body "+id {
+			t.Fatalf("thread-%s = %+v, want the one op rendered", id, msgs)
+		}
+	}
+	if m.resume(0) != "" {
+		t.Fatalf("a first connection has nothing to resume, sent %q", m.resume(0))
+	}
+}
+
+func TestConsoleResumesAfterADropWithoutLosingOrDuplicating(t *testing.T) {
+	fastReconnect(t)
+	m := newStreamingManager(t)
+	_, tr := startConsole(t, m)
+
+	m.push(10, "a")
+	m.push(11, "b")
+	m.waitFor("a and b acknowledged", func() bool { return m.settled["a"] && m.settled["b"] })
+
+	// c is delivered and rendered, but its acknowledgement is refused: the
+	// manager still holds it unacknowledged when the console reconnects.
+	m.mu.Lock()
+	m.failAck["c"] = 1
+	m.mu.Unlock()
+	m.push(12, "c")
+	m.waitFor("a reconnect after the refused ack", func() bool { return len(m.resumes) >= 2 })
+	m.waitFor("c acknowledged on the replay", func() bool { return m.settled["c"] })
+
+	if got := m.resume(1); got != "11" {
+		t.Fatalf("the reconnect sent Last-Event-ID %q, want 11: just under the unacknowledged c", got)
+	}
+	m.push(13, "d")
+	m.waitFor("d acknowledged", func() bool { return m.settled["d"] })
+
+	// A forced drop with everything acknowledged resumes from the last
+	// acknowledged sequence and replays nothing.
+	m.mu.Lock()
+	before := len(m.resumes)
+	m.mu.Unlock()
+	m.dropAll()
+	m.waitFor("a reconnect after the forced drop", func() bool { return len(m.resumes) > before })
+	if got := m.resume(-1); got != "13" {
+		t.Fatalf("after acknowledging everything the reconnect sent %q, want 13", got)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, id := range []string{"a", "b", "c", "d"} {
+		if msgs := tr.Thread("thread-" + id); len(msgs) != 1 {
+			t.Errorf("thread-%s rendered %d times, want exactly once", id, len(msgs))
+		}
+		if m.acked[id] != 1 {
+			t.Errorf("%s acknowledged %d times, want once", id, m.acked[id])
+		}
+	}
+}
+
+func TestConsoleFallsBackToTheLongPollWhenTheManagerHasNoStream(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			f := newFakeManager(t, ChannelInfo{Name: "console"})
+			streamHits := 0
+			var mu sync.Mutex
+			inner := f.server.Config.Handler
+			f.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/channel/ops/stream" {
+					mu.Lock()
+					streamHits++
+					mu.Unlock()
+					w.WriteHeader(status)
+					return
+				}
+				inner.ServeHTTP(w, r)
+			})
+			a, tr, _ := consoleUnderTest(t, f)
+			thread := "console-uid-1"
+			f.queue(Op{ID: "p1", Channel: "console", Kind: "send", ThreadID: &thread, Message: &OpMessage{Kind: "answer", Body: "polled"}})
+
+			runUntil(t, a, func() bool { return len(f.completions()) == 1 })
+			if msgs := tr.Thread(thread); len(msgs) != 1 || msgs[0].Text != "polled" {
+				t.Fatalf("the long-poll did not serve the op: %+v", msgs)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if streamHits != 1 {
+				t.Fatalf("the stream was asked %d times, want once and then the long-poll", streamHits)
+			}
+		})
+	}
+}
+
+func TestStreamOpsReportsAnUnsupportedManagerAndRefusals(t *testing.T) {
+	status := http.StatusNotFound
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
+	t.Cleanup(srv.Close)
+	m := NewManager(srv.URL, "t")
+	call := func() error {
+		return m.StreamOps(context.Background(), "console", "", nil, func(*Op, uint64) error { return nil })
+	}
+	if err := call(); !errors.Is(err, errStreamUnsupported) {
+		t.Fatalf("404 = %v, want errStreamUnsupported", err)
+	}
+	status = http.StatusForbidden
+	if err := call(); err == nil || errors.Is(err, errStreamUnsupported) {
+		t.Fatalf("403 must be an error to back off from, not a fallback: %v", err)
+	}
+}
+
+func TestStreamOpsCarriesVocabularyRevisionsAndTheResumeHeader(t *testing.T) {
+	var gotID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotID = r.Header.Get("Last-Event-ID")
+		w.Header().Set(VocabularyRevisionHeader, "r1")
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, ": keep-alive\n\nevent: vocabulary\ndata: {\"revision\":\"r2\"}\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	var revs []string
+	err := NewManager(srv.URL, "t").StreamOps(context.Background(), "console", "7",
+		func(r string) { revs = append(revs, r) }, func(*Op, uint64) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotID != "7" || len(revs) != 2 || revs[0] != "r1" || revs[1] != "r2" {
+		t.Fatalf("Last-Event-ID %q, revisions %v", gotID, revs)
+	}
+}
+
+func TestStreamOpsTreatsASilentConnectionAsDead(t *testing.T) {
+	old := streamIdleTimeout
+	streamIdleTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { streamIdleTimeout = old })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	err := NewManager(srv.URL, "t").StreamOps(context.Background(), "console", "", nil, func(*Op, uint64) error { return nil })
+	if !errors.Is(err, errStreamIdle) {
+		t.Fatalf("a stream that went silent returned %v, want errStreamIdle", err)
+	}
+}
+
+func TestFeedCursorResumeToken(t *testing.T) {
+	var c feedCursor
+	if got := c.resumeToken(); got != "" {
+		t.Fatalf("nothing received: %q", got)
+	}
+	c.received(10)
+	c.acknowledged(10)
+	if got := c.resumeToken(); got != "10" {
+		t.Fatalf("after acking 10: %q", got)
+	}
+	c.received(20)
+	c.received(15) // another channel's op, lower sequence, delivered later
+	if got := c.resumeToken(); got != "14" {
+		t.Fatalf("outstanding 15 and 20 must resume under the lowest: %q", got)
+	}
+	c.acknowledged(20)
+	if got := c.resumeToken(); got != "14" {
+		t.Fatalf("15 is still outstanding after 20 was acknowledged: %q", got)
+	}
+	c.acknowledged(15)
+	if got := c.resumeToken(); got != "15" {
+		t.Fatalf("all acknowledged: %q", got)
+	}
+}

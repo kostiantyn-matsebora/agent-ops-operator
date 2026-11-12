@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -107,7 +108,8 @@ func NewAdapter(mgr *Manager, cache *Cache, transcripts *Transcripts, adapterNam
 	}
 }
 
-// Run refreshes the served channel list, then long-polls for ops until ctx ends.
+// Run refreshes the served channel list, then serves ops until ctx ends: from the
+// manager's push stream, or the long-poll against a manager without one.
 //
 // It waits for the watch cache first: thread ids are derived from conversation
 // UIDs, so serving an ensure-topic before the cache is warm would mint an id
@@ -117,7 +119,49 @@ func (a *Adapter) Run(ctx context.Context) {
 	a.adoptProjectedCredentials()
 	a.refreshChannels(ctx)
 	go a.refreshLoop(ctx)
+	a.serveOps(ctx)
+}
+
+// Stream reconnect pacing. Variables so a test can shorten them.
+var (
+	streamBackoffInitial = time.Second
+	streamBackoffMax     = 30 * time.Second
+	// streamReprobe is how often a console that fell back to the long-poll
+	// asks again whether the manager has learned the stream, so a rollout to a
+	// newer manager moves it over without a restart.
+	streamReprobe = 5 * time.Minute
+)
+
+// serveOps feeds the console from the manager's push stream, resuming it after
+// every drop, and serves the ops long-poll for as long as the manager has no
+// stream to offer.
+func (a *Adapter) serveOps(ctx context.Context) {
+	feed := &opFeed{a: a}
+	backoff := streamBackoffInitial
 	for ctx.Err() == nil {
+		delivered, err := feed.run(ctx)
+		switch {
+		case errors.Is(err, errStreamUnsupported):
+			log.Printf("ops stream: %v; using the long-poll", err)
+			a.pollOpsFor(ctx, streamReprobe)
+			continue
+		case err != nil && ctx.Err() == nil:
+			log.Printf("ops stream: %v; reconnecting with the last acknowledged sequence", err)
+		}
+		if delivered {
+			backoff = streamBackoffInitial
+		}
+		if ctx.Err() == nil {
+			sleepCtx(ctx, backoff)
+			backoff = min(backoff*2, streamBackoffMax)
+		}
+	}
+}
+
+// pollOpsFor serves the long-poll for d, the pre-stream contract unchanged.
+func (a *Adapter) pollOpsFor(ctx context.Context, d time.Duration) {
+	until := time.Now().Add(d)
+	for ctx.Err() == nil && time.Now().Before(until) {
 		op, revision, err := a.mgr.NextOp(ctx, a.adapterName, 25)
 		a.noteVocabularyRevision(revision)
 		if err != nil {
@@ -135,6 +179,50 @@ func (a *Adapter) Run(ctx context.Context) {
 			log.Printf("complete op %s: %v", op.ID, err)
 		}
 	}
+}
+
+// opFeed is the console's state across stream connections: how far it has
+// acknowledged, and the outcome of any op it executed but could not
+// acknowledge, so a replay re-acknowledges it rather than rendering it twice.
+type opFeed struct {
+	a      *Adapter
+	cursor feedCursor
+	// unacked holds an executed op's result until its acknowledgement lands.
+	unacked map[string]opOutcome
+}
+
+type opOutcome struct{ threadID, opErr string }
+
+// run is one connection. delivered reports whether it carried at least one op,
+// which is what tells a healthy drop from a manager that keeps refusing.
+func (f *opFeed) run(ctx context.Context) (delivered bool, err error) {
+	err = f.a.mgr.StreamOps(ctx, f.a.adapterName, f.cursor.resumeToken(), f.a.noteVocabularyRevision,
+		func(op *Op, seq uint64) error {
+			delivered = true
+			return f.handle(ctx, op, seq)
+		})
+	return delivered, err
+}
+
+// handle executes one op, at most once per id, then acknowledges it. A failed
+// acknowledgement ends the connection: the op stays outstanding in the cursor,
+// so the reconnect replays it and the cached outcome is acknowledged again.
+func (f *opFeed) handle(ctx context.Context, op *Op, seq uint64) error {
+	f.cursor.received(seq)
+	out, seen := f.unacked[op.ID]
+	if !seen {
+		out.threadID, out.opErr = f.a.execute(ctx, op)
+		if f.unacked == nil {
+			f.unacked = map[string]opOutcome{}
+		}
+		f.unacked[op.ID] = out
+	}
+	if err := f.a.mgr.CompleteOp(ctx, op.ID, out.threadID, out.opErr); err != nil {
+		return fmt.Errorf("complete op %s: %w", op.ID, err)
+	}
+	delete(f.unacked, op.ID)
+	f.cursor.acknowledged(seq)
+	return nil
 }
 
 // refreshLoop re-reads the served channels: FAST while none have resolved,

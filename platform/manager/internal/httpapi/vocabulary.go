@@ -22,12 +22,17 @@ const VocabularyRevisionHeader = "X-Agentops-Vocabulary-Revision"
 // missing header means "nothing to tell you", which is the same thing an older
 // manager said.
 func (s *Server) setVocabularyRevision(ctx context.Context, w http.ResponseWriter) {
-	if s.Router == nil {
-		return
-	}
-	if rev := s.Router.Vocabulary(ctx).Revision; rev != "" {
+	if rev := s.vocabularyRevision(ctx); rev != "" {
 		w.Header().Set(VocabularyRevisionHeader, rev)
 	}
+}
+
+// vocabularyRevision is the current revision, or "" with no router.
+func (s *Server) vocabularyRevision(ctx context.Context) string {
+	if s.Router == nil {
+		return ""
+	}
+	return s.Router.Vocabulary(ctx).Revision
 }
 
 // handleVocabulary serves what may be typed on a chat surface.
