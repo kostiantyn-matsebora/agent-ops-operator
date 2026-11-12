@@ -46,8 +46,8 @@ type Key string
 type CommandID string
 
 // Kind refines a submission's purpose within one Queue, where more than one
-// applies (design D-5): the "out" family declares three — KindOutStable,
-// KindOutEphemeral and KindOutDeleteConversation — each a full policy of its
+// applies (design D-5): the "out" family declares four — KindOutStable,
+// KindOutEphemeral, KindOutTopic and KindOutDeleteConversation — each a full policy of its
 // own, not only the attempts and backoff the design text calls out by name.
 // KindDefault is every other queue's only kind.
 type Kind string
@@ -55,10 +55,11 @@ type Kind string
 // KindDefault is the kind of a queue that declares no distinct kinds.
 const KindDefault Kind = ""
 
-// The three kinds of the "out" family (design D-5).
+// The kinds of the "out" family (design D-5, D-17).
 const (
 	KindOutStable             Kind = "stable"
 	KindOutEphemeral          Kind = "ephemeral"
+	KindOutTopic              Kind = "topic"
 	KindOutDeleteConversation Kind = "delete-conversation"
 )
 
@@ -141,20 +142,24 @@ type Bus interface {
 	// channel closes when ctx is done.
 	Feed(ctx context.Context, resume Sequence) (<-chan TaskEvent, error)
 
-	// Publish appends payload to feed (a FeedQueue name) under id, once: a
-	// repeat of an id the feed holds from inside its DedupWindow is
-	// suppressed, and created reports whether this call appended. The entry is
-	// never rewritten and never removed by delivery, only by the feed's age
-	// and count (design D-16). id must be non-empty and at most MaxFeedIDLen.
-	Publish(ctx context.Context, feed Queue, id CommandID, payload []byte) (entry FeedEntry, created bool, err error)
+	// Peek lists up to limit of the tasks of queue a consumer may be handed
+	// next, oldest first, and changes nothing: no claim, no lease, no entry. A
+	// task is offered when it is queued (or retrying with its backoff elapsed),
+	// no earlier task of its key is unsettled, and its invocation is under its
+	// cap. A task that was peeked and not acknowledged is simply offered again
+	// (design D-17).
+	Peek(ctx context.Context, queue Queue, limit int) ([]Task, error)
 
-	// Follow delivers the entries of feed after the one with command id after,
-	// in log order, then each new entry as it is appended, until ctx is done
-	// and the channel closes. An after that is empty, or that the feed no
-	// longer holds, starts from the oldest entry retained. Following claims,
-	// leases and deletes nothing: any number of followers, and one that
-	// stopped reading, are independent of one another and of the producer.
-	Follow(ctx context.Context, feed Queue, after CommandID) (<-chan FeedEntry, error)
+	// Acknowledge hands the message of command id on a hand-over queue (a
+	// Declaration with DeliveryTTL) to holder: a claim whose lease runs the
+	// declared DeliveryTTL, after which the message is never offered again and,
+	// with no report by then, is failed. It is idempotent: a message already
+	// acknowledged and still within its TTL comes back unchanged with its
+	// Lease, so a retried acknowledgement, or one landing on another replica,
+	// hands over nothing twice. ErrNotFound when the queue holds no such
+	// message, ErrNotOffered when it exists but is not offered (blocked behind
+	// an unfinished message of its key, backing off, or finished).
+	Acknowledge(ctx context.Context, queue Queue, id CommandID, holder string) (Task, error)
 
 	// Stats snapshots the counts for one (queue, kind) pair — the same pair
 	// Resolve matches against DefaultInventory. kind is KindDefault for a

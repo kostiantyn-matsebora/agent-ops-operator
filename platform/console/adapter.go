@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sort"
@@ -125,17 +126,21 @@ var (
 	streamBackoffMax     = 30 * time.Second
 )
 
-// serveOps feeds the console from the manager's push stream, resuming it after
-// every drop from the last event it received. It is a plain SSE consumer: no
-// claim, no acknowledgement, and an op's id is rendered once however often it
-// arrives.
+// serveOps feeds the console from the manager's push stream. Each op is applied
+// to the console's own state and then acknowledged, which is the console's
+// receipt of it. After a drop the manager offers again whatever was not
+// acknowledged, so there is no cursor to keep, and an op's id is rendered once
+// however often it arrives.
 func (a *Adapter) serveOps(ctx context.Context) {
-	feed := &opFeed{a: a}
 	backoff := streamBackoffInitial
 	for ctx.Err() == nil {
-		delivered, err := feed.run(ctx)
+		delivered := false
+		err := a.mgr.StreamOps(ctx, a.adapterName, a.noteVocabularyRevision, func(op *Op) error {
+			delivered = true
+			return a.receive(ctx, op)
+		})
 		if err != nil && ctx.Err() == nil {
-			log.Printf("ops stream: %v; reconnecting after event %q", err, feed.lastReceived)
+			log.Printf("ops stream: %v; reconnecting", err)
 		}
 		if delivered {
 			backoff = streamBackoffInitial
@@ -147,33 +152,19 @@ func (a *Adapter) serveOps(ctx context.Context) {
 	}
 }
 
-// opFeed is the console's state across stream connections: the id of the last
-// event it received, which is the cursor a reconnect sends.
-type opFeed struct {
-	a            *Adapter
-	lastReceived string
-}
-
-// run is one connection. delivered reports whether it carried at least one op,
-// which is what tells a healthy drop from a manager that keeps refusing.
-func (f *opFeed) run(ctx context.Context) (delivered bool, err error) {
-	err = f.a.mgr.StreamOps(ctx, f.a.adapterName, f.lastReceived, f.a.noteVocabularyRevision,
-		func(op *Op, id string) error {
-			delivered = true
-			f.handle(op, id)
-			return nil
-		})
-	return delivered, err
-}
-
-// handle applies one event to the console's own state and moves the cursor to
-// it. An op that cannot be applied is logged and skipped, never retried: the
-// manager keeps no claim to redeliver, and a replay would fail the same way.
-func (f *opFeed) handle(op *Op, id string) {
-	if _, opErr := f.a.execute(context.Background(), op); opErr != "" {
+// receive applies one op to the console's own state, then acknowledges it. An op
+// that cannot be applied is logged and still acknowledged: the manager keeps
+// nothing to redeliver for it, and a replay would fail the same way. A failed
+// acknowledgement drops the connection, so the reconnect is offered the op
+// again, and applying it twice is harmless because the transcript dedups by id.
+func (a *Adapter) receive(ctx context.Context, op *Op) error {
+	if _, opErr := a.execute(context.Background(), op); opErr != "" {
 		log.Printf("op %s (%s): %s", op.ID, op.Kind, opErr)
 	}
-	f.lastReceived = id
+	if err := a.mgr.AckOp(ctx, a.adapterName, op.ID); err != nil {
+		return fmt.Errorf("acknowledge op %s: %w", op.ID, err)
+	}
+	return nil
 }
 
 // refreshLoop re-reads the served channels: FAST while none have resolved,

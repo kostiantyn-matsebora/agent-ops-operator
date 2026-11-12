@@ -351,6 +351,13 @@ there is no delivery TTL and no report, and the manager DELETES the message from
 the queue at the ACK, as a regular queue does. Telegram uses all three steps with a
 delivery TTL. This supersedes D-16's retained feed, which was built first.
 
+The mechanism is generic. It is the default for every channel adapter, present and
+future, so introducing a new adapter needs no manager or bus code and no
+per-adapter inventory entry: delivery TTLs are declared per message kind, never
+per adapter. The console is the one exception, a small declared set of
+"receipt-only" adapters set by configuration (the console by default), and
+everything outside that set gets the generic contract.
+
 - **GET** reads the next message of the adapter's channel queue and changes
   nothing. A message read by an adapter that dies before acknowledging is simply
   offered again, since no delivery had begun.
@@ -368,6 +375,25 @@ service can produce, such as the topic id of a Telegram `ensure-topic`, travels
 back in the DONE report. Messages declare their delivery TTL per kind: 10 minutes for stable messages
 (replies, inputs), 2 minutes for ephemeral notices, 5 minutes for topic
 operations. Each is a chart-overridable queue value.
+
+**As built.** One bus declaration field, `Policy.DeliveryTTL`, makes a queue a
+hand-over queue: a claim is the acknowledgement, its lease runs the delivery TTL, a
+lapse or a failure is final (Dead, never Retrying), and attempts and backoff do not
+apply. New `Bus.Peek` (read, no entry) and `Bus.Acknowledge` (idempotent claim by
+command id, conditional on the key's last entry, so two replicas hand over once);
+`Publish`/`Follow` and the retained feed are gone. Message kinds are `stable` (10m),
+`ephemeral` (2m), a new `topic` kind for ensure-topic and close-topic (5m) and
+`delete-conversation` (5m); the manager reads each from
+`CHANNEL_DELIVERY_TTL_{STABLE,EPHEMERAL,TOPIC,DELETE_CONVERSATION}`. The receipt-only
+set is `CHANNEL_RECEIPT_ADAPTERS` (default `console`). HTTP: `GET /channel/ops`
+reads one message, `POST /channel/ops/{id}/ack?adapter=` answers
+`{deliveryTtlSeconds, consumed}` (404 gone, 409 not offered), `POST .../done`
+reports (an `error` fails it), `GET /channel/ops/stream` pushes unacknowledged
+messages to a receipt adapter. Deviations: a failed Telegram message is final, so
+the reconciler re-derives it only after the kind's park cool-off; the console's
+thread id keeps the `console-<uid>` shape, applied to any receipt adapter by
+configuration; the old `claimedOp.reclaimAfterSeconds` field is replaced by the ack
+reply.
 
 ### D-12: What stays synchronous, and why
 

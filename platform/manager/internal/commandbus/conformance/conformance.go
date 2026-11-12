@@ -42,13 +42,6 @@ type Backing interface {
 	// queue's, and a backend may wait a short grace before doing so. A backend
 	// that removes them inside Settle does nothing here.
 	Compact()
-	// SetFeedPolicy declares policy for every retained feed (commandbus.FeedPolicy),
-	// before the handles that will use it are opened.
-	SetFeedPolicy(p commandbus.FeedPolicy)
-	// AgeFeed makes every retained feed entry d older, and returns once the
-	// backend has had the chance to trim what that makes expired: a backend with
-	// a virtual clock advances it, one whose server keeps the time waits.
-	AgeFeed(d time.Duration)
 }
 
 // scenarioTimeout bounds every blocking call (chiefly Claim) a scenario
@@ -74,12 +67,21 @@ func Run(t *testing.T, open func() Backing) {
 			for _, sc := range declarationScenarios {
 				sc := sc
 				t.Run(sc.name, func(t *testing.T) {
+					if sc.retryOnly && d.Policy.DeliveryTTL > 0 {
+						t.Skip("a hand-over queue (design D-17) has no retry, no backoff and no lease redelivery")
+					}
 					sc.run(t, open, d, queue)
 				})
 			}
+			if d.Policy.DeliveryTTL > 0 {
+				for _, sc := range handoverScenarios {
+					sc := sc
+					t.Run("handover/"+sc.name, func(t *testing.T) { sc.run(t, open, d, queue) })
+				}
+			}
 		})
 	}
-	runFeed(t, open)
+	t.Run("acknowledge needs a hand-over queue", func(t *testing.T) { testAcknowledgeNeedsHandover(t, open) })
 	t.Run("gap-free resumable feed", func(t *testing.T) { testGapFreeResumableFeed(t, open) })
 }
 
@@ -105,28 +107,31 @@ func sampleQueue(t *testing.T, d commandbus.Declaration) commandbus.Queue {
 // queue.
 type declarationScenario struct {
 	name string
-	run  func(t *testing.T, open func() Backing, d commandbus.Declaration, queue commandbus.Queue)
+	// retryOnly marks a scenario about attempts, backoff or lease redelivery,
+	// which a hand-over queue does not have.
+	retryOnly bool
+	run       func(t *testing.T, open func() Backing, d commandbus.Declaration, queue commandbus.Queue)
 }
 
 var declarationScenarios = []declarationScenario{
-	{"durable accept", testDurableAccept},
-	{"idempotent submit", testIdempotentSubmit},
-	{"dedup across every state", testDedupAcrossEveryState},
-	{"park then release", testParkThenRelease},
-	{"FIFO with a retry keeping its place", testFIFOWithRetryKeepingPlace},
-	{"serialization per key under parallel consumers", testSerializationPerKeyUnderParallelConsumers},
-	{"lease completion through a second handle", testLeaseCompletionThroughASecondHandle},
-	{"running lists held leases through a second handle", testRunningListsHeldLeases},
-	{"lease-lapse redelivery", testLeaseLapseRedelivery},
-	{"lease-lapse expires under a short TTL", testLeaseLapseExpiresUnderAShortTTL},
-	{"bounded retry into dead", testBoundedRetryIntoDead},
-	{"TTL expiry counts as settled", testTTLExpiryCountsAsSettled},
-	{"dead-letter listing", testDeadLetterListing},
-	{"per-queue statistics", testPerQueueStatistics},
-	{"per-invocation in-flight cap", testPerInvocationInFlightCap},
-	{"running resumes after a command id", testRunningResumesAfterACommandID},
-	{"nothing is rewritten", testNothingIsRewritten},
-	{"a submit is one write under a racing consumer", testSubmitIsOneWriteUnderARacingConsumer},
-	{"state folds from the entries", testStateFoldsFromEntries},
-	{"a lapsed lease redelivers with no write", testLapsedLeaseRedeliversWithNoWrite},
+	{name: "durable accept", run: testDurableAccept},
+	{name: "idempotent submit", run: testIdempotentSubmit},
+	{name: "dedup across every state", run: testDedupAcrossEveryState},
+	{name: "park then release", run: testParkThenRelease},
+	{name: "FIFO with a retry keeping its place", retryOnly: true, run: testFIFOWithRetryKeepingPlace},
+	{name: "serialization per key under parallel consumers", run: testSerializationPerKeyUnderParallelConsumers},
+	{name: "lease completion through a second handle", run: testLeaseCompletionThroughASecondHandle},
+	{name: "running lists held leases through a second handle", retryOnly: true, run: testRunningListsHeldLeases},
+	{name: "lease-lapse redelivery", retryOnly: true, run: testLeaseLapseRedelivery},
+	{name: "lease-lapse expires under a short TTL", retryOnly: true, run: testLeaseLapseExpiresUnderAShortTTL},
+	{name: "bounded retry into dead", run: testBoundedRetryIntoDead},
+	{name: "TTL expiry counts as settled", run: testTTLExpiryCountsAsSettled},
+	{name: "dead-letter listing", run: testDeadLetterListing},
+	{name: "per-queue statistics", run: testPerQueueStatistics},
+	{name: "per-invocation in-flight cap", run: testPerInvocationInFlightCap},
+	{name: "running resumes after a command id", retryOnly: true, run: testRunningResumesAfterACommandID},
+	{name: "nothing is rewritten", retryOnly: true, run: testNothingIsRewritten},
+	{name: "a submit is one write under a racing consumer", run: testSubmitIsOneWriteUnderARacingConsumer},
+	{name: "state folds from the entries", retryOnly: true, run: testStateFoldsFromEntries},
+	{name: "a lapsed lease redelivers with no write", retryOnly: true, run: testLapsedLeaseRedeliversWithNoWrite},
 }

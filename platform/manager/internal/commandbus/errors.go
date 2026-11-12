@@ -17,6 +17,11 @@ var ErrLeaseLost = errors.New("commandbus: lease lost")
 // Resolve does not find in DefaultInventory.
 var ErrUnknownQueue = errors.New("commandbus: unknown queue")
 
+// ErrNotOffered is returned by Acknowledge for a message the queue holds but is
+// not offering: blocked behind an unfinished message of its key, backing off, or
+// already finished.
+var ErrNotOffered = errors.New("commandbus: message not offered")
+
 // ErrInvalidRequest is returned by Submit for a request missing a field the
 // contract requires (CommandID, Key).
 var ErrInvalidRequest = errors.New("commandbus: invalid request")

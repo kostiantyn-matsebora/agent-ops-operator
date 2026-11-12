@@ -150,7 +150,7 @@ const settledWindowSize = 512
 // outKinds is every commandbus.Kind the "out" family declares (design D-5) —
 // Stats() asks the bus about each in turn, since the bus has no single call
 // answering "every kind of this queue at once".
-var outKinds = []commandbus.Kind{commandbus.KindOutStable, commandbus.KindOutEphemeral, commandbus.KindOutDeleteConversation}
+var outKinds = []commandbus.Kind{commandbus.KindOutStable, commandbus.KindOutEphemeral, commandbus.KindOutTopic, commandbus.KindOutDeleteConversation}
 
 // OpQueue is the channel-adapter-facing outbound surface: Enqueue* submits
 // one task per op onto the command bus's "out.<channelType>" queue family
@@ -199,10 +199,13 @@ type OpQueue struct {
 	// Registry-registered channel queue (design D-10's "in-process providers
 	// become a consumer"). Defaults to 1 when zero or negative.
 	Concurrency int
-	// FeedAdapters names the adapters whose ops are read from a retained feed
-	// (feed.go) instead of claimed and acknowledged: the console. Telegram and
-	// every other adapter keep the claim and acknowledgement of /channel/ops.
-	FeedAdapters []string
+	// ReceiptAdapters names the adapters whose acknowledgement is their receipt
+	// of the message from the manager, and nothing more (the console, which
+	// pushes on to browsers fire-and-forget): the manager consumes the message
+	// at the acknowledgement. Every other adapter (Telegram) reports done or
+	// failed after delivering to its surface, within the delivery TTL that
+	// starts at its acknowledgement (design D-17).
+	ReceiptAdapters []string
 
 	mu sync.Mutex
 	// claimed indexes a currently-claimed op's PUBLISHED id (the id an
@@ -235,13 +238,8 @@ type OpQueue struct {
 	// the bus has no "list every queue in use" call, so this is the one place
 	// the channel->adapter fact lives (design D-10: one queue per Channel).
 	channelAdapter map[string]string
-	// claimRotor rotates which of an adapter's channel queues Claim tries
-	// first, so a channel with a deep backlog cannot starve its siblings.
-	claimRotor map[string]int
 	// poolWake nudges Run to start a consumer for a newly learned channel.
 	poolWake chan struct{}
-	// delivering holds the feed ops whose side effects are running now.
-	delivering map[string]bool
 }
 
 // claimEntry is one externally-claimed op's bus-side credentials, keyed by
@@ -260,9 +258,7 @@ func (q *OpQueue) init() {
 		q.pending = map[string]bool{}
 		q.settled = map[string]bool{}
 		q.channelAdapter = map[string]string{}
-		q.claimRotor = map[string]int{}
 		q.poolWake = make(chan struct{}, 1)
-		q.delivering = map[string]bool{}
 	}
 }
 
@@ -305,14 +301,14 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 		ID: id, Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.ConversationID,
 		Kind: OpEnsureTopic, Topic: &topic, channelType: ch.Spec.Adapter, stable: true,
 	}
-	if q.IsFeed(ch.Spec.Adapter) {
+	if q.IsReceipt(ch.Spec.Adapter) {
 		// A feed adapter is told its thread, never asked for one: nothing comes
 		// back from a stream.
 		if conv.ID == "" {
-			log.FromContext(ctx).Error(errors.New("conversation has no UID"), "enqueue ensure-topic on a feed channel", "conversation", conv.Name, "channel", ch.Name)
+			log.FromContext(ctx).Error(errors.New("conversation has no UID"), "enqueue ensure-topic on a receipt channel", "conversation", conv.Name, "channel", ch.Name)
 			return
 		}
-		tid := FeedThreadID(conv)
+		tid := ReceiptThreadID(conv)
 		op.ThreadID = &tid
 	}
 	q.enqueue(ctx, op)
@@ -529,6 +525,9 @@ func outKindFor(op *Op) commandbus.Kind {
 	if op.Kind == OpDeleteConversation {
 		return commandbus.KindOutDeleteConversation
 	}
+	if op.Kind == OpEnsureTopic || op.Kind == OpCloseTopic {
+		return commandbus.KindOutTopic
+	}
 	if op.stable {
 		return commandbus.KindOutStable
 	}
@@ -633,10 +632,6 @@ func decodeOp(id string, raw []byte) (*Op, error) {
 // hidden behind a local cache the design went to some trouble to make the
 // BUS own instead (the 2026-08-13 incident, Complete's own doc comment).
 func (q *OpQueue) enqueue(ctx context.Context, op *Op) {
-	if q.IsFeed(op.channelType) {
-		q.publishFeed(ctx, op)
-		return
-	}
 	q.mu.Lock()
 	alreadySucceeded := q.settled[op.ID]
 	q.mu.Unlock()
@@ -779,46 +774,6 @@ func resultingStateAfterFail(code commandbus.ErrorCode, attempt, maxAttempts int
 	return commandbus.StateDead
 }
 
-// Claim pops the oldest claimable op of an adapter over the command bus, or
-// nil when nothing is — NON-BLOCKING, unlike Bus.Claim's own block-until-
-// available contract (design D-2): handleChannelOps (server.go) already owns
-// the long-poll wait, calling this once a second, and blocking a second time
-// inside it would double that wait.
-//
-// An adapter drains the queue of EVERY Channel that names it (design D-10),
-// so GET /channel/ops?adapter= is unchanged by the queue being per channel.
-// The queues are tried in a rotating order, so one channel's backlog never
-// starves another's, and a channel whose ops nobody acknowledges holds only
-// its own queue.
-//
-// claimPollTimeout, not a literal zero deadline: the nats backend's own
-// Claim opens by waiting on its mirror's readiness, a select between "the
-// mirror is ready" and "ctx is already done" — with BOTH channels already
-// closed (the common, steady-state case), Go's select picks between ready
-// cases at random, so a zero-deadline context would spuriously report
-// "nothing claimable" on roughly half of calls even with a task actually
-// sitting there. A short but non-zero deadline gives that select a
-// deterministic winner (the already-ready mirror) before ctx's own
-// cancellation can tie it — see this package's own non-blocking-claim test
-// for both backends.
-func (q *OpQueue) Claim(adapter string) *Op {
-	channels := q.channelsOf(adapter)
-	if len(channels) == 0 {
-		return nil
-	}
-	q.mu.Lock()
-	q.init()
-	start := q.claimRotor[adapter] % len(channels)
-	q.claimRotor[adapter] = start + 1
-	q.mu.Unlock()
-	for i := range channels {
-		if op, ok := q.claimFrom(channels[(start+i)%len(channels)], adapter); ok {
-			return op
-		}
-	}
-	return nil
-}
-
 // adopt records a Running task's claim in this process, as claimFrom does for
 // one it claimed itself. task.Lease must be non-nil (Bus.Running guarantees it).
 func (q *OpQueue) adopt(task commandbus.Task, adapter string) (*Op, bool) {
@@ -873,49 +828,8 @@ func (q *OpQueue) adoptRunning(ctx context.Context, id string) (claimEntry, bool
 	return claimEntry{}, false
 }
 
-// claimFrom claims one task off one channel's queue.
-func (q *OpQueue) claimFrom(channel, adapter string) (*Op, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), claimPollTimeout)
-	defer cancel()
-	task, err := q.Bus.Claim(ctx, commandbus.OutQueue(channel), channelOpsConsumerID)
-	if err != nil {
-		if !errors.Is(err, context.DeadlineExceeded) {
-			log.FromContext(context.Background()).Error(err, "claim channel op", "adapter", adapter, "channel", channel)
-		}
-		return nil, false
-	}
-	op, err := decodeOp(string(task.CommandID), task.Payload)
-	if err != nil {
-		// A payload this package itself wrote should always decode. Failing
-		// the task (rather than returning nil, which would strand it claimed
-		// forever under a lease nobody will ever Settle or Fail) hands it to
-		// the bus's own retry/dead-letter path instead.
-		log.FromContext(context.Background()).Error(err, "decode claimed channel op; failing the task", "task", task.UID)
-		_ = q.Bus.Fail(context.Background(), task.UID, leaseTokenOf(task), commandbus.CodeInvalidCommand, err.Error())
-		q.markFromState(string(task.CommandID), resultingStateAfterFail(commandbus.CodeInvalidCommand, task.Attempt, task.MaxAttempts))
-		return nil, false
-	}
-	op.channelType = adapter
-	op.enqueuedAt = task.SubmittedAt
-	op.claimedAt = time.Now()
-
-	q.noteChannel(channel, adapter)
-	q.mu.Lock()
-	q.init()
-	q.claimed[op.ID] = claimEntry{uid: task.UID, token: leaseTokenOf(task), attempt: task.Attempt, maxAttempts: task.MaxAttempts, op: op}
-	q.mu.Unlock()
-	q.markFromState(op.ID, task.State)
-
-	cp := *op
-	return &cp, true
-}
-
-// claimPollTimeout is the deadline Claim gives Bus.Claim — see Claim's own
-// doc comment for why it is a few milliseconds rather than exactly zero.
-const claimPollTimeout = 50 * time.Millisecond
-
-// channelOpsConsumerID names every claim this surface makes, for a human
-// reading a Lease's Holder back (/state/tasks) — never consulted by Settle
+// channelOpsConsumerID names every acknowledgement this surface makes, for a
+// human reading a Lease's Holder back (/state/tasks) — never consulted by Settle
 // or Fail.
 const channelOpsConsumerID = "channel-ops"
 

@@ -379,7 +379,7 @@ func runChatDropCase(t *testing.T, tc chatDropCase) {
 	if e.events(activity.KindSignalDropped, tc.code) != 1 {
 		t.Fatalf("want one %s drop event", tc.code)
 	}
-	op := e.ops.Claim(ch.Spec.Adapter)
+	op := claimOp(e.ops, ch.Spec.Adapter)
 	if op == nil || op.Message == nil || !strings.Contains(op.Message.Body, tc.notice) {
 		t.Fatalf("the surface must be told %q, got %+v", tc.notice, op)
 	}
@@ -499,7 +499,7 @@ func TestConsumerAddressedChatTakesTheNamedTargetAsItsOneClaimant(t *testing.T) 
 	if convs[0].Spec.OriginReader == nil || convs[0].Spec.OriginReader.Channel != "surface" {
 		t.Fatalf("the person who typed it is owed the read mark: %+v", convs[0].Spec.OriginReader)
 	}
-	if op := e.ops.Claim(ch.Spec.Adapter); op != nil {
+	if op := claimOp(e.ops, ch.Spec.Adapter); op != nil {
 		t.Fatalf("a routed message tells the surface nothing: %+v", op)
 	}
 }

@@ -59,24 +59,20 @@ func commandBusConsumerConcurrency() int {
 	return envInt(commandBusConsumerConcurrencyEnv, defaultCommandBusConsumerConcurrency)
 }
 
-// The retained feed of an adapter the manager pushes ops to over a stream
-// (design D-16: the console). CHANNEL_FEED_ADAPTERS names the adapters, comma
-// separated; each one's feed keeps entries CHANNEL_FEED_RETENTION long (30s) and
-// at most CHANNEL_FEED_MAX_ENTRIES (5000), whether or not they were read. Every
-// other adapter keeps its claim and acknowledgement.
+// The adapters whose acknowledgement is only their receipt of a message
+// (design D-17: the console), comma separated. The manager consumes a message at
+// that acknowledgement; every other adapter reports done or failed within the
+// delivery TTL its acknowledgement starts. An explicitly empty value means none.
 const (
-	channelFeedAdaptersEnv     = "CHANNEL_FEED_ADAPTERS"
-	channelFeedRetentionEnv    = "CHANNEL_FEED_RETENTION"
-	channelFeedMaxEntriesEnv   = "CHANNEL_FEED_MAX_ENTRIES"
-	defaultChannelFeedAdapters = "console"
+	channelReceiptAdaptersEnv     = "CHANNEL_RECEIPT_ADAPTERS"
+	defaultChannelReceiptAdapters = "console"
 )
 
-// channelFeedAdapters is the list of adapters that read a feed. An explicitly
-// empty value means none.
-func channelFeedAdapters() []string {
-	raw, ok := os.LookupEnv(channelFeedAdaptersEnv)
+// channelReceiptAdapters is the list of receipt adapters.
+func channelReceiptAdapters() []string {
+	raw, ok := os.LookupEnv(channelReceiptAdaptersEnv)
 	if !ok {
-		raw = defaultChannelFeedAdapters
+		raw = defaultChannelReceiptAdapters
 	}
 	var out []string
 	for _, name := range strings.Split(raw, ",") {
@@ -87,11 +83,28 @@ func channelFeedAdapters() []string {
 	return out
 }
 
-// channelFeedInventory declares the feed retention from the environment.
-func channelFeedInventory() []commandbus.FeedDeclaration {
-	inv := commandbus.DefaultFeedInventory()
-	inv[0].Policy.MaxAge = envDurationOr(channelFeedRetentionEnv, commandbus.DefaultFeedMaxAge)
-	inv[0].Policy.MaxEntries = envInt(channelFeedMaxEntriesEnv, commandbus.DefaultFeedMaxEntries)
+// The delivery TTL of each kind of outbound message (design D-17): how long an
+// adapter has, from acknowledging a message, to report it done before the manager
+// fails it. Each is a Go duration; unset keeps the inventory's declared value.
+var channelDeliveryTTLEnvs = map[commandbus.Kind]string{
+	commandbus.KindOutStable:             "CHANNEL_DELIVERY_TTL_STABLE",
+	commandbus.KindOutEphemeral:          "CHANNEL_DELIVERY_TTL_EPHEMERAL",
+	commandbus.KindOutTopic:              "CHANNEL_DELIVERY_TTL_TOPIC",
+	commandbus.KindOutDeleteConversation: "CHANNEL_DELIVERY_TTL_DELETE_CONVERSATION",
+}
+
+// channelInventory is the default inventory with each outbound kind's delivery
+// TTL read from the environment.
+func channelInventory() []commandbus.Declaration {
+	inv := commandbus.DefaultInventory()
+	for i := range inv {
+		if inv[i].Queue != commandbus.OutFamily {
+			continue
+		}
+		if env, ok := channelDeliveryTTLEnvs[inv[i].Kind]; ok {
+			inv[i].Policy.DeliveryTTL = envDurationOr(env, inv[i].Policy.DeliveryTTL)
+		}
+	}
 	return inv
 }
 
@@ -163,7 +176,7 @@ func managerReplicas() int {
 func newCommandBus(mgr ctrl.Manager, namespace, backend string) (commandbus.Bus, error) {
 	switch backend {
 	case commandBusBackendMemory:
-		return commandbusmemory.Open(commandbusmemory.WithFeedInventory(channelFeedInventory())), nil
+		return commandbusmemory.Open(commandbusmemory.WithInventory(channelInventory())), nil
 	case commandBusBackendNats:
 		return newNatsCommandBus(mgr, namespace)
 	}
@@ -190,7 +203,7 @@ func newNatsCommandBus(mgr ctrl.Manager, namespace string) (commandbus.Bus, erro
 	}
 
 	bus, err := openCommandBusWhenReady(context.Background(), conn, namespace, commandBusOpenTimeout, commandBusOpenRetryInterval,
-		append([]commandbusnats.Option{commandbusnats.WithFeedInventory(channelFeedInventory())}, commandBusNatsOptions...)...)
+		append([]commandbusnats.Option{commandbusnats.WithInventory(channelInventory())}, commandBusNatsOptions...)...)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("opening the nats command bus: %w", err)

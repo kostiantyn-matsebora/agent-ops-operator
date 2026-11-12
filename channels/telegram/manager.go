@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -131,23 +132,27 @@ type Op struct {
 	Topic   *TopicDescriptor `json:"topic,omitempty"`   // ensure-topic
 	Message *Message         `json:"message,omitempty"` // send, delete-conversation
 
-	// ReclaimAfterSeconds is how long the manager leaves this claim with us
-	// before returning the op to its queue. Absent (0) means an older manager.
-	ReclaimAfterSeconds int `json:"reclaimAfterSeconds,omitempty"`
+	// deliveryTTL is how long the manager gives this op from its acknowledgement:
+	// with no done or failed report by then the manager fails it and never sends
+	// it again. Not part of the op on the wire; AckOp answers it.
+	deliveryTTL time.Duration
 }
 
-// RetryBudget is how long this op may spend absorbing transport backpressure.
-//
-// HALF the advertised claim window, deliberately. The op still has to be sent
-// and completed after the last retry, and a budget equal to the window would
-// finish exactly as the manager reclaims it — handing a second claimant the
-// same message. Half leaves room for the work either side of the waiting.
+// RetryBudget is how long this op may spend absorbing transport backpressure:
+// the delivery TTL its acknowledgement started, less a margin that still leaves
+// room to report the outcome. The adapter retries against its surface until
+// then and reports FAILED if it has not delivered (async-command-bus design
+// D-17). A manager that stated no TTL gets a conservative default.
 func (o *Op) RetryBudget() time.Duration {
-	if o.ReclaimAfterSeconds <= 0 {
+	if o.deliveryTTL <= 0 {
 		return defaultRetryBudget
 	}
-	return time.Duration(o.ReclaimAfterSeconds) * time.Second / 2
+	margin := min(maxReportMargin, o.deliveryTTL/10)
+	return o.deliveryTTL - margin
 }
+
+// maxReportMargin is the most of the delivery TTL held back for the report.
+const maxReportMargin = 15 * time.Second
 
 // ChannelInfo is one channel served by this adapter, with its opaque config.
 // CredentialEnvPrefix (set when the Channel declares credentialsSecretRef)
@@ -207,7 +212,9 @@ func (m *Manager) doH(ctx context.Context, method, path string, in, out any) (in
 // pull-only, so the news rides the connection we are already blocked in.
 const VocabularyRevisionHeader = "X-Agentops-Vocabulary-Revision"
 
-// NextOp long-polls for the next outbound op; nil when none arrived in time.
+// NextOp long-polls for the next outbound op; nil when none arrived in time. It
+// only READS: the op stays the manager's, and is offered again, until AckOp
+// hands it over.
 // The second return is the vocabulary revision the manager reported, empty from
 // a manager that predates it.
 func (m *Manager) NextOp(ctx context.Context, channelType string, waitSeconds int) (*Op, string, error) {
@@ -279,7 +286,31 @@ type VocabularyEntry struct {
 	Profile string `json:"profile,omitempty"`
 }
 
-// CompleteOp reports an op result (threadID for ensure-topic; opErr on failure).
+// errOpNotOffered is an acknowledgement the manager refused because the op is
+// gone (consumed, failed by its TTL) or is held back behind an earlier op of its
+// conversation: nothing to deliver now, and nothing to report.
+var errOpNotOffered = errors.New("op is not offered")
+
+// AckOp acknowledges an op: the hand-over. From it the manager never sends the op
+// again, and the delivery TTL it answers starts. The caller then delivers and
+// reports with CompleteOp. Idempotent on the manager's side.
+func (m *Manager) AckOp(ctx context.Context, channelType, opID string) (time.Duration, error) {
+	var reply struct {
+		TTLSeconds int `json:"deliveryTtlSeconds"`
+	}
+	code, err := m.do(ctx, "POST",
+		fmt.Sprintf("/channel/ops/%s/ack?adapter=%s", url.PathEscape(opID), url.QueryEscape(channelType)), nil, &reply)
+	if code == http.StatusNotFound || code == http.StatusConflict {
+		return 0, errOpNotOffered
+	}
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(reply.TTLSeconds) * time.Second, nil
+}
+
+// CompleteOp reports an acknowledged op's outcome: done (threadID for
+// ensure-topic) or, with opErr, failed. A failure is final on the manager's side.
 func (m *Manager) CompleteOp(ctx context.Context, opID, threadID, opErr string) error {
 	body := map[string]string{}
 	if threadID != "" {

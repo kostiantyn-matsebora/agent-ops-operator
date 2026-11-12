@@ -325,7 +325,7 @@ func TestDeletionTellsEveryBoundThread(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	op := ops.Claim("tg")
+	op := claimOp(ops, "tg")
 	if op == nil {
 		t.Fatal("deletion must enqueue an operation for the bound thread")
 	}
@@ -339,7 +339,7 @@ func TestDeletionTellsEveryBoundThread(t *testing.T) {
 		t.Fatalf("it must carry the notice: %+v", op.Message)
 	}
 	// and NOT close-topic: one lifecycle event, one operation
-	if again := ops.Claim("tg"); again != nil {
+	if again := claimOp(ops, "tg"); again != nil {
 		t.Fatalf("deletion must send exactly one operation per thread, also got %q", again.Kind)
 	}
 }
@@ -371,7 +371,7 @@ func TestCloseTopicSkipsAThreadWithNoTopicYet(t *testing.T) {
 		}
 	}
 
-	if op := ops.Claim("tg"); op != nil {
+	if op := claimOp(ops, "tg"); op != nil {
 		t.Fatalf("a thread with no topic yet must get no close-topic op, got %q", op.Kind)
 	}
 	if got := getConv(t, "no-topic-conv"); got.Status.ThreadArchived("no-topic-ch") {
@@ -399,7 +399,7 @@ func TestCloseTopicResumesOnceATopicArrives(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	if op := ops.Claim("tg"); op != nil {
+	if op := claimOp(ops, "tg"); op != nil {
 		t.Fatalf("still no topic: no op expected yet, got %q", op.Kind)
 	}
 
@@ -413,7 +413,7 @@ func TestCloseTopicResumesOnceATopicArrives(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	op := ops.Claim("tg")
+	op := claimOp(ops, "tg")
 	if op == nil {
 		t.Fatal("a thread that just got a real topic must have close-topic enqueued")
 	}

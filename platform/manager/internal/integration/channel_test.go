@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +38,29 @@ func mkChannel(t *testing.T, name, typ string) {
 	}
 }
 
+// adapterReq is one HTTP call as an adapter makes it. A GET /channel/ops that
+// returns an op is followed by its acknowledgement, so the suite's many "take the
+// next op, then report it" flows keep reading as a claim: the adapter's two
+// steps (design D-17). rawAdapterReq is the call alone, for a test about what a
+// read does by itself.
 func adapterReq(srv *httpapi.Server, method, path string, body any, token string) *httptest.ResponseRecorder {
+	rec := rawAdapterReq(srv, method, path, body, token)
+	if method == "GET" && strings.HasPrefix(path, "/channel/ops?") && rec.Code == 200 {
+		var op struct {
+			ID string `json:"id"`
+		}
+		adapter := ""
+		if u, err := url.Parse(path); err == nil {
+			adapter = u.Query().Get("adapter")
+		}
+		if json.Unmarshal(rec.Body.Bytes(), &op) == nil && op.ID != "" && adapter != "" {
+			rawAdapterReq(srv, "POST", "/channel/ops/"+url.PathEscape(op.ID)+"/ack?adapter="+url.QueryEscape(adapter), nil, token)
+		}
+	}
+	return rec
+}
+
+func rawAdapterReq(srv *httpapi.Server, method, path string, body any, token string) *httptest.ResponseRecorder {
 	var buf bytes.Buffer
 	if body != nil {
 		_ = json.NewEncoder(&buf).Encode(body)
@@ -305,12 +328,11 @@ func opBody(op chat.Op) string {
 	return op.Message.Body
 }
 
-// The claim window is ADVERTISED, not guessed. An adapter that sleeps out a
-// transport's backpressure must finish inside it or the manager reclaims the op
-// and a second claimant posts the same message twice — an inequality spanning
-// two dependency-free modules, which is exactly the kind of constant that drifts
-// the first time someone tunes ReclaimAfter.
-func TestClaimedOpAdvertisesTheReclaimInterval(t *testing.T) {
+// The delivery TTL is STATED by the acknowledgement, not guessed. An adapter
+// that sleeps out a transport's backpressure must finish inside it, or the
+// manager fails the op: the TTL is the manager's to declare per kind, and the
+// adapter's to respect (design D-17). A read changes nothing and states none.
+func TestAcknowledgedOpStatesItsDeliveryTTL(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-reclaim")
 	mkChannel(t, "chan-reclaim", "tg-reclaim")
@@ -330,24 +352,40 @@ func TestClaimedOpAdvertisesTheReclaimInterval(t *testing.T) {
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "conv-reclaim"}}); err != nil {
 		t.Fatal(err)
 	}
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-reclaim&contract=2&wait=0", nil, "test-adapter-token")
+	rec := rawAdapterReq(srv, "GET", "/channel/ops?adapter=tg-reclaim&contract=2&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
-		t.Fatalf("expected a claimed op: %d", rec.Code)
+		t.Fatalf("expected an offered op: %d", rec.Code)
 	}
 	var got struct {
-		ID                  string `json:"id"`
-		Kind                string `json:"kind"`
-		ReclaimAfterSeconds int    `json:"reclaimAfterSeconds"`
+		ID   string `json:"id"`
+		Kind string `json:"kind"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if want := int(chat.ReclaimAfter.Seconds()); got.ReclaimAfterSeconds != want {
-		t.Fatalf("reclaimAfterSeconds=%d, want %d", got.ReclaimAfterSeconds, want)
-	}
-	// the op itself still marshals as before — the field is ADDITIVE
 	if got.ID == "" || got.Kind != string(chat.OpEnsureTopic) {
 		t.Fatalf("the op payload changed shape: %+v", got)
+	}
+	// Reading changed nothing: the same op is offered again.
+	again := rawAdapterReq(srv, "GET", "/channel/ops?adapter=tg-reclaim&contract=2&wait=0", nil, "test-adapter-token")
+	if again.Code != 200 || !strings.Contains(again.Body.String(), got.ID) {
+		t.Fatalf("a read op must be offered again until acknowledged: %d %s", again.Code, again.Body.String())
+	}
+	ack := rawAdapterReq(srv, "POST", "/channel/ops/"+url.PathEscape(got.ID)+"/ack?adapter=tg-reclaim", nil, "test-adapter-token")
+	if ack.Code != 200 {
+		t.Fatalf("ack: %d %s", ack.Code, ack.Body.String())
+	}
+	var reply struct {
+		TTL int `json:"deliveryTtlSeconds"`
+	}
+	if err := json.Unmarshal(ack.Body.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+	if want := int((5 * time.Minute).Seconds()); reply.TTL != want { // a topic operation
+		t.Fatalf("deliveryTtlSeconds=%d, want %d", reply.TTL, want)
+	}
+	if gone := rawAdapterReq(srv, "GET", "/channel/ops?adapter=tg-reclaim&contract=2&wait=0", nil, "test-adapter-token"); gone.Code != 204 {
+		t.Fatalf("an acknowledged op must never be offered again: %d", gone.Code)
 	}
 }
 

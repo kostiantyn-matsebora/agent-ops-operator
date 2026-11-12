@@ -97,10 +97,10 @@ func TestEnsureTopicsDispatchesUnconditionallyDedupedByTheBus(t *testing.T) {
 		t.Fatalf("pending=%v err=%v, want still pending on the second pass (no thread landed yet)", pending, err)
 	}
 
-	if r.Ops.Claim("slack") == nil {
+	if claimOp(r.Ops, "slack") == nil {
 		t.Fatal("the first pass's op must be claimable")
 	}
-	if op := r.Ops.Claim("slack"); op != nil {
+	if op := claimOp(r.Ops, "slack"); op != nil {
 		t.Fatalf("a second pass must not have dispatched a second op — the bus must have deduped it: %+v", op)
 	}
 
@@ -137,10 +137,10 @@ func TestEnsureTopicsDispatchIsIndifferentToReplicaIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if ops.Claim("slack") == nil {
+	if claimOp(ops, "slack") == nil {
 		t.Fatal("one op must be claimable, from whichever replica dispatched it")
 	}
-	if op := ops.Claim("slack"); op != nil {
+	if op := claimOp(ops, "slack"); op != nil {
 		t.Fatalf("the second replica's pass must not have added a second op: %+v", op)
 	}
 }
@@ -162,7 +162,7 @@ func TestEnsureTopicsCarriesThePreviousThreadIDOnReopen(t *testing.T) {
 		t.Fatalf("pending=%v err=%v, want pending", pending, err)
 	}
 
-	op := r.Ops.Claim("slack")
+	op := claimOp(r.Ops, "slack")
 	if op == nil || op.Topic == nil || op.Topic.PreviousThreadID != "old-thread" {
 		t.Fatalf("op = %+v, want a topic descriptor naming the previous thread", op)
 	}
@@ -194,7 +194,7 @@ func TestFanOutThreadRunReplySkipsAClaimOnlyPlaceholder(t *testing.T) {
 	rec := claimRec(t, r.Conversations, "conv-1")
 	r.fanOutThread(context.Background(), rec, claimRuns(t, r.Runs, "conv-1"))
 
-	if op := r.Ops.Claim("slack"); op != nil {
+	if op := claimOp(r.Ops, "slack"); op != nil {
 		t.Fatalf("a claim-only binding must not be delivered into: %+v", op)
 	}
 	cond := rec.FindCondition(ConditionDeliveryPending)
@@ -219,7 +219,7 @@ func TestFanOutThreadRunReplyDeliversOnceTheThreadIsReal(t *testing.T) {
 	rec := claimRec(t, r.Conversations, "conv-1")
 	r.fanOutThread(context.Background(), rec, claimRuns(t, r.Runs, "conv-1"))
 
-	if r.Ops.Claim("slack") == nil {
+	if claimOp(r.Ops, "slack") == nil {
 		t.Fatal("a bound real thread must get the reply enqueued")
 	}
 }
@@ -252,7 +252,7 @@ func TestFanOutThreadRunReplySettlesANoteLeftByACrashAfterTheRunMarker(t *testin
 			rec := claimRec(t, r.Conversations, "conv-1")
 			r.fanOutThread(context.Background(), rec, claimRuns(t, r.Runs, "conv-1"))
 
-			if op := r.Ops.Claim("slack"); op != nil {
+			if op := claimOp(r.Ops, "slack"); op != nil {
 				t.Fatalf("a delivered run must not be sent again: %+v", op)
 			}
 			if b := claimRec(t, r.Conversations, "conv-1").Thread("c1"); b == nil || b.UndeliveredReply != tc.wantNote {
@@ -289,12 +289,12 @@ func TestRunReplyIsEnqueuedBeforeAnInputReceivedAfterItFinished(t *testing.T) {
 	runs := claimRuns(t, r.Runs, "conv-1")
 	r.fanOutThread(context.Background(), rec, runs)
 
-	first := r.Ops.Claim("slack")
+	first := claimOp(r.Ops, "slack")
 	if first == nil || !strings.HasPrefix(first.ID, "send:") {
 		t.Fatalf("the run's reply must be claimed first, got %+v", first)
 	}
 	r.Ops.Complete(context.Background(), first.ID, chat.OpResult{})
-	second := r.Ops.Claim("slack")
+	second := claimOp(r.Ops, "slack")
 	if second == nil || !strings.HasPrefix(second.ID, "input:") {
 		t.Fatalf("the hand-back input must follow the reply, got %+v", second)
 	}

@@ -38,6 +38,14 @@ type Policy struct {
 	// may be Running at once, on this queue — the cap a bulk batch paces
 	// itself against. Zero means uncapped.
 	InFlightCapPerInvocation int
+	// DeliveryTTL, when positive, makes the queue a HAND-OVER queue (design
+	// D-17). A claim is the consumer's acknowledgement: from it the message is
+	// the consumer's and is never offered again, and the lease it holds runs
+	// DeliveryTTL, not the bus-wide lease. A message with no report when that
+	// passes is failed, and a failure is final: there are no attempts and no
+	// backoff, because the consumer retries against its own surface until the
+	// TTL. Zero keeps the lease-and-retry queue the other declarations are.
+	DeliveryTTL time.Duration
 }
 
 // Declaration is one row of the closed queue inventory (design D-5): a
@@ -88,8 +96,8 @@ func OutQueue(channel string) Queue {
 // the number — edits its own copy without racing every other caller or
 // test.
 //
-// Five entries, matching D-5's table exactly: "conv" and "in.signal" each
-// have one policy (KindDefault); the "out" family has three, one per kind,
+// Six entries: "conv" and "in.signal" each
+// have one policy (KindDefault); the "out" family has four, one per kind,
 // each a COMPLETE Declaration rather than a sparse override of attempts and
 // backoff alone — the table's own TTL column already varies across them
 // (none, 2 minutes, the finalizer's grace), so an override limited to
@@ -126,16 +134,17 @@ func DefaultInventory() []Declaration {
 			},
 		},
 		{
-			// Key: the conversation (the queue is the channel).
-			// ensure-topic, run reply, input card, close-topic.
+			// Key: the conversation (the queue is the channel). Run replies, input
+			// cards and notices that are re-derived on every pass. A hand-over
+			// queue (design D-17): the consumer acknowledges, delivers with its own
+			// retries within DeliveryTTL, then reports; a failure is final.
 			Queue: OutFamily,
 			Kind:  KindOutStable,
 			Policy: Policy{
-				Attempts:    8,
-				Backoff:     Backoff{Min: 5 * time.Second, Max: 5 * time.Minute, Jitter: true},
-				TTL:         0,
+				Attempts:    1,
 				DedupWindow: time.Minute,
 				ParkCoolOff: 5 * time.Minute,
+				DeliveryTTL: 10 * time.Minute,
 			},
 		},
 		{
@@ -145,11 +154,23 @@ func DefaultInventory() []Declaration {
 			Queue: OutFamily,
 			Kind:  KindOutEphemeral,
 			Policy: Policy{
-				Attempts:    2,
-				Backoff:     Backoff{Min: 5 * time.Second, Max: 5 * time.Second, Jitter: false},
+				Attempts:    1,
 				TTL:         2 * time.Minute,
 				DedupWindow: 30 * time.Second,
 				ParkCoolOff: time.Minute,
+				DeliveryTTL: 2 * time.Minute,
+			},
+		},
+		{
+			// Key: the conversation (the queue is the channel). ensure-topic and
+			// close-topic: the topic id travels back in the consumer's done report.
+			Queue: OutFamily,
+			Kind:  KindOutTopic,
+			Policy: Policy{
+				Attempts:    1,
+				DedupWindow: time.Minute,
+				ParkCoolOff: 5 * time.Minute,
+				DeliveryTTL: 5 * time.Minute,
 			},
 		},
 		{
@@ -162,11 +183,11 @@ func DefaultInventory() []Declaration {
 			Queue: OutFamily,
 			Kind:  KindOutDeleteConversation,
 			Policy: Policy{
-				Attempts:    3,
-				Backoff:     Backoff{Min: 5 * time.Second, Max: 5 * time.Second, Jitter: false},
+				Attempts:    1,
 				TTL:         5 * time.Minute,
 				DedupWindow: 0,
 				ParkCoolOff: 0, // D-5: never parked.
+				DeliveryTTL: 5 * time.Minute,
 			},
 		},
 	}

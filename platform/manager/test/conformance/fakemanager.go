@@ -52,11 +52,12 @@ type OpsRequest struct {
 	Contract string
 	Wait     int
 	Refused  bool // no or outdated contract= → 400
-	Stream   bool // GET /channel/ops/stream, the console's plain SSE feed
+	Stream   bool // GET /channel/ops/stream, a receipt adapter's SSE stream
 }
 
-// Completion is one POST /channel/ops/{id}/done, or, for the console's stream,
-// one op frame written to it (nothing is acknowledged there).
+// Completion is one POST /channel/ops/{id}/done: the adapter's report, done or
+// (with Error) failed. For a receipt adapter (the console) it is the
+// acknowledgement, which is all that adapter ever sends: the op is consumed there.
 type Completion struct {
 	ID       string
 	ThreadID string
@@ -123,8 +124,8 @@ type FakeManager struct {
 	stateWatch []chan []byte
 	channels   []ChannelInfo
 	sources    []SourceInfo
-	queue      []json.RawMessage // ops to serve, in order
-	opLog      []json.RawMessage // every op ever queued, retained: what /channel/ops/stream replays
+	queue      []json.RawMessage // ops offered and not yet acknowledged, in order
+	acks       []string          // the id of every op acknowledged, in order
 	workQueue  []json.RawMessage // work units to serve, in order — see QueueWork
 
 	opsRequests   []OpsRequest
@@ -149,12 +150,15 @@ type FakeManager struct {
 
 	rejectSignals int // HTTP status to answer /signal/inbound with; 0 = accept
 	rejectInbound int
-	// reclaimAfterSeconds is stamped on every delivered op, as the real
-	// manager's chat.ReclaimAfter does. Defaults to that same constant (300)
-	// and is overridable so the retry-budget conformance assertion (A1/A2)
-	// can run against a window small enough to finish in test time, rather
-	// than literally waiting out the real 5-minute default.
-	reclaimAfterSeconds int
+	// deliveryTTLSeconds is what every acknowledgement answers, as the real
+	// manager's per-kind delivery TTL does (design D-17). Defaults to the stable
+	// kind's 600 and is overridable so the retry-budget conformance assertion
+	// can run against a TTL small enough to finish in test time.
+	deliveryTTLSeconds int
+	// receiptAdapters are the adapters whose acknowledgement is only their
+	// receipt: the fake consumes the op there, as the real manager does for
+	// them. Every other adapter reports done or failed.
+	receiptAdapters map[string]bool
 	// rejectOpsAsNonLeader counts down the next /channel/ops polls answered
 	// with 503 before falling back to the ordinary 204/200 behavior —
 	// durable-chat-ops-broker's non-leader rejection, simulated without a
@@ -162,12 +166,19 @@ type FakeManager struct {
 	rejectOpsAsNonLeader int
 }
 
-// SetReclaimAfterSeconds changes the claim window stamped on every delivered
-// op from here on. See the field's own doc comment.
-func (f *FakeManager) SetReclaimAfterSeconds(n int) {
+// SetDeliveryTTLSeconds changes the delivery TTL every acknowledgement answers
+// from here on. See the field's own doc comment.
+func (f *FakeManager) SetDeliveryTTLSeconds(n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.reclaimAfterSeconds = n
+	f.deliveryTTLSeconds = n
+}
+
+// Acks returns the id of every op acknowledged so far, in order.
+func (f *FakeManager) Acks() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.acks...)
 }
 
 // RejectOpsAsNonLeader makes the fake answer the next n GET /channel/ops
@@ -186,7 +197,7 @@ func (f *FakeManager) RejectOpsAsNonLeader(n int) {
 // process still holds a long-poll blocks forever.
 func NewFakeManager(t *testing.T, token string) *FakeManager {
 	t.Helper()
-	f := &FakeManager{Token: token, ContractVersion: "2", state: map[string]string{}, listed: map[string]int{}, reclaimAfterSeconds: 300,
+	f := &FakeManager{Token: token, ContractVersion: "2", state: map[string]string{}, listed: map[string]int{}, deliveryTTLSeconds: 600, receiptAdapters: map[string]bool{"console": true},
 		workState: map[string]workLatest{}}
 	t.Cleanup(func() { f.Close() })
 	f.cond = sync.NewCond(&f.mu)
@@ -227,6 +238,7 @@ func NewFakeManager(t *testing.T, token string) *FakeManager {
 	}))
 	mux.HandleFunc("GET /channel/ops", auth(f.handleOps))
 	mux.HandleFunc("GET /channel/ops/stream", auth(f.handleOpsStream))
+	mux.HandleFunc("POST /channel/ops/{id}/ack", auth(f.handleAck))
 	mux.HandleFunc("POST /channel/ops/{id}/done", auth(f.handleDone))
 	mux.HandleFunc("POST /channel/inbound", auth(f.handleInbound))
 	mux.HandleFunc("GET /channel/channels", auth(func(w http.ResponseWriter, r *http.Request) {
@@ -322,7 +334,6 @@ func (f *FakeManager) QueueOp(op map[string]any) {
 	raw, _ := json.Marshal(op)
 	f.mu.Lock()
 	f.queue = append(f.queue, raw)
-	f.opLog = append(f.opLog, raw)
 	f.cond.Broadcast()
 	f.mu.Unlock()
 }
@@ -475,21 +486,58 @@ func (f *FakeManager) handleOps(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 		return
 	}
+	// A read changes nothing: the op stays offered until acknowledged.
 	raw := f.queue[0]
-	f.queue = f.queue[1:]
-	reclaim := f.reclaimAfterSeconds
 	f.mu.Unlock()
-	var op map[string]any
-	_ = json.Unmarshal(raw, &op)
-	op["reclaimAfterSeconds"] = reclaim
-	writeJSON(w, 200, op)
+	w.Header().Set(headerContentType, "application/json")
+	w.WriteHeader(200)
+	_, _ = w.Write(raw)
 }
 
-// handleOpsStream is the manager's GET /channel/ops/stream for the console: the
-// retained log of every queued op, replayed after the id Last-Event-ID names (all
-// of it for none or an unknown one), then each new op, as an SSE event whose id is
-// the op's command id. Nothing is claimed or acknowledged: a frame written is
-// recorded as a Completion so a scenario can wait for delivery.
+func opID(raw json.RawMessage) string {
+	var op struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(raw, &op)
+	return op.ID
+}
+
+// handleAck is POST /channel/ops/{id}/ack: the hand-over. The op is never offered
+// again; a receipt adapter's op is consumed here, anyone else's awaits a report.
+// An op that is not offered answers 404, as the real manager does.
+func (f *FakeManager) handleAck(w http.ResponseWriter, r *http.Request) {
+	id, adapter := r.PathValue("id"), r.URL.Query().Get("adapter")
+	f.mu.Lock()
+	idx := -1
+	for i, raw := range f.queue {
+		if opID(raw) == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		f.mu.Unlock()
+		writeJSON(w, 404, map[string]string{"error": "no such message on the adapter's queues"})
+		return
+	}
+	f.queue = append(f.queue[:idx:idx], f.queue[idx+1:]...)
+	f.acks = append(f.acks, id)
+	receipt, ttl := f.receiptAdapters[adapter], f.deliveryTTLSeconds
+	if receipt {
+		f.completions = append(f.completions, Completion{ID: id})
+	}
+	f.mu.Unlock()
+	reply := map[string]any{"ok": true, "consumed": receipt}
+	if !receipt {
+		reply["deliveryTtlSeconds"] = ttl
+	}
+	writeJSON(w, 200, reply)
+}
+
+// handleOpsStream is the manager's GET /channel/ops/stream for a receipt
+// adapter: every op offered and not yet acknowledged, once per connection, then
+// each new one, as an SSE event. Nothing is claimed: an op the adapter never
+// acknowledges is pushed again on the next connection.
 func (f *FakeManager) handleOpsStream(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	req := OpsRequest{Adapter: q.Get("adapter"), Contract: q.Get("contract"), Stream: true}
@@ -514,8 +562,7 @@ func (f *FakeManager) handleOpsStream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 	flusher := w.(http.Flusher)
 	flusher.Flush()
-	after := r.Header.Get("Last-Event-ID")
-	next := -1
+	pushed := map[string]bool{}
 	for r.Context().Err() == nil {
 		f.mu.Lock()
 		if f.rejectOpsAsNonLeader > 0 {
@@ -523,31 +570,22 @@ func (f *FakeManager) handleOpsStream(w http.ResponseWriter, r *http.Request) {
 			f.mu.Unlock()
 			return
 		}
-		if next < 0 {
-			next = 0
-			for i, raw := range f.opLog {
-				var op struct {
-					ID string `json:"id"`
-				}
-				_ = json.Unmarshal(raw, &op)
-				if after != "" && op.ID == after {
-					next = i + 1
-				}
+		var due []json.RawMessage
+		seen := map[string]int{}
+		for _, raw := range f.queue {
+			// An op queued twice (at-least-once) is two messages with one id.
+			id := opID(raw)
+			key := fmt.Sprintf("%s#%d", id, seen[id])
+			seen[id]++
+			if !pushed[key] {
+				pushed[key] = true
+				due = append(due, raw)
 			}
 		}
-		due := append([]json.RawMessage(nil), f.opLog[next:]...)
-		next = len(f.opLog)
 		f.mu.Unlock()
 		for _, raw := range due {
-			var op struct {
-				ID string `json:"id"`
-			}
-			_ = json.Unmarshal(raw, &op)
-			fmt.Fprintf(w, "event: op\nid: %s\ndata: %s\n\n", op.ID, raw)
+			fmt.Fprintf(w, "event: op\nid: %s\ndata: %s\n\n", opID(raw), raw)
 			flusher.Flush()
-			f.mu.Lock()
-			f.completions = append(f.completions, Completion{ID: op.ID})
-			f.mu.Unlock()
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -570,9 +608,7 @@ func (f *FakeManager) handleDone(w http.ResponseWriter, r *http.Request) {
 
 // handleWork mirrors handleOps: a long-poll that dequeues one work unit, or
 // answers 204 once wait (clamped to 30s, same as the real contract) elapses
-// with nothing queued. No reclaimAfterSeconds stamping here — that is an
-// ops-only concept (durable-chat-ops-broker's claim window), not part of the
-// work contract.
+// with nothing queued.
 func (f *FakeManager) handleWork(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	req := WorkRequest{Convo: q.Get("convo"), Pod: q.Get("pod")}

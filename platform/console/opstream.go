@@ -12,28 +12,29 @@ import (
 	"time"
 )
 
-// The manager's push feed for this adapter's ops, GET /channel/ops/stream
-// (async-command-bus design D-16): a plain SSE stream of events `op`, in log
-// order, whose id is the op's command id. The console applies each event to its
-// own state and acknowledges nothing: the manager claims, leases and deletes
-// nothing for a connection. A reconnect names the last event RECEIVED in
-// Last-Event-ID and the manager replays every later entry from its retained log.
+// The manager's push stream for this adapter's ops, GET /channel/ops/stream
+// (async-command-bus design D-17): SSE events `op`, oldest first. The stream only
+// reads. The console applies each event to its own state and then ACKNOWLEDGES it
+// with a plain call, POST /channel/ops/{id}/ack, which is its receipt of the
+// message: the manager consumes the message there and never sends it again. A
+// message pushed and not acknowledged (the console died, the connection
+// dropped) is offered again on the next connection, so a reconnect needs no
+// cursor.
 
 // streamIdleTimeout is how long the op stream may go without a byte before it
 // is treated as dead: a half-open connection no FIN will ever announce. The
 // manager's keep-alive comment arrives every 20s, so three missed ones.
 var streamIdleTimeout = 60 * time.Second
 
-// StreamOps opens the feed and calls handle for every `op` event, in order,
-// until the connection ends. lastEventID, when non-empty, is sent as
-// Last-Event-ID so the manager replays every entry after it. onVocabulary
-// receives the revision the response header and every `vocabulary` event carry.
+// StreamOps opens the stream and calls handle for every `op` event, in order,
+// until the connection ends. onVocabulary receives the revision the response
+// header and every `vocabulary` event carry.
 //
-// It returns handle's own error when handle fails (the connection is dropped,
-// and the reconnect resumes after the last event handle accepted), errStreamIdle
-// when the connection went silent, and nil on a clean end of stream.
-func (m *Manager) StreamOps(ctx context.Context, adapter, lastEventID string,
-	onVocabulary func(revision string), handle func(op *Op, id string) error) error {
+// It returns handle's own error when handle fails (the connection is dropped, and
+// the reconnect is offered whatever was not acknowledged), errStreamIdle when the
+// connection went silent, and nil on a clean end of stream.
+func (m *Manager) StreamOps(ctx context.Context, adapter string,
+	onVocabulary func(revision string), handle func(op *Op) error) error {
 	path := fmt.Sprintf("/channel/ops/stream?adapter=%s&contract=%s", url.QueryEscape(adapter), ContractVersion)
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -43,9 +44,6 @@ func (m *Manager) StreamOps(ctx context.Context, adapter, lastEventID string,
 	}
 	req.Header.Set("Authorization", "Bearer "+m.Token)
 	req.Header.Set("Accept", "text/event-stream")
-	if lastEventID != "" {
-		req.Header.Set("Last-Event-ID", lastEventID)
-	}
 	// The ordinary client's Timeout bounds the WHOLE exchange, body included,
 	// and would cut a stream built to stay open. Liveness is the idle watchdog's.
 	stream := *m.HTTP
@@ -80,7 +78,7 @@ func (m *Manager) StreamOps(ctx context.Context, adapter, lastEventID string,
 }
 
 // applyOpFrame dispatches one event of the op stream.
-func applyOpFrame(f sseFrame, onVocabulary func(string), handle func(*Op, string) error) error {
+func applyOpFrame(f sseFrame, onVocabulary func(string), handle func(*Op) error) error {
 	switch f.event {
 	case "vocabulary":
 		var v struct {
@@ -94,10 +92,22 @@ func applyOpFrame(f sseFrame, onVocabulary func(string), handle func(*Op, string
 		if err := json.Unmarshal(f.data, &op); err != nil {
 			return fmt.Errorf("decode op event %q: %w", f.id, err)
 		}
-		if f.id == "" {
-			return fmt.Errorf("op event %q carries no id", op.ID)
+		if op.ID == "" {
+			return fmt.Errorf("op event %q carries no id", f.id)
 		}
-		return handle(&op, f.id)
+		return handle(&op)
 	}
 	return nil
+}
+
+// AckOp acknowledges one op: the console's receipt of it. The manager consumes
+// the message at this call. A message already gone (404: consumed, or expired
+// out of the log) is a harmless duplicate and is not an error.
+func (m *Manager) AckOp(ctx context.Context, adapter, id string) error {
+	path := fmt.Sprintf("/channel/ops/%s/ack?adapter=%s", url.PathEscape(id), url.QueryEscape(adapter))
+	code, err := m.do(ctx, "POST", path, nil, nil)
+	if code == http.StatusNotFound {
+		return nil
+	}
+	return err
 }

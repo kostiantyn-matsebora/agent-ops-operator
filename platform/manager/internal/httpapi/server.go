@@ -12,9 +12,10 @@
 //
 // plus the channel adapter contract (bearer-token auth, see ADAPTER_TOKEN):
 //
-//	GET  /channel/ops?adapter=&wait=    outbound op long-poll (204 on timeout)
-//	GET  /channel/ops/stream?adapter=   a feed adapter's ops pushed over SSE, resumed by cursor (the console)
-//	POST /channel/ops/{id}/done         async op completion
+//	GET  /channel/ops?adapter=&wait=    read the next outbound op, changing nothing (204 on timeout)
+//	GET  /channel/ops/stream?adapter=   a receipt adapter's ops pushed over SSE (the console)
+//	POST /channel/ops/{id}/ack          the hand-over: the message is never sent again
+//	POST /channel/ops/{id}/done         the report: done, or failed with an error
 //	POST /channel/inbound               {"channel","threadId","text"} -> router
 //	GET  /channel/channels?adapter=     channels served by an adapter (+config)
 //	POST /channel/conversations/{name}/reopen         return a Closed one to Idle
@@ -202,6 +203,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /work/context", s.handleContextReport)
 	mux.HandleFunc("GET /channel/ops", s.adapterAuth(s.handleChannelOps))
 	mux.HandleFunc("GET /channel/ops/stream", s.adapterAuth(s.handleChannelOpsStream))
+	mux.HandleFunc("POST /channel/ops/{id}/ack", s.adapterAuth(s.handleChannelOpAck))
 	mux.HandleFunc("POST /channel/ops/{id}/done", s.adapterAuth(s.handleChannelOpDone))
 	mux.HandleFunc("POST /channel/inbound", s.adapterAuth(s.handleChannelInbound))
 	mux.HandleFunc("POST /channel/conversations/{name}/reopen", s.adapterAuth(s.handleConversationReopen))
@@ -279,7 +281,7 @@ func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
 		if r.URL.Path == "/healthz" ||
 			r.URL.Path == "/channel/ops" ||
 			r.URL.Path == "/channel/ops/stream" ||
-			isChannelOpDonePath(r.URL.Path) ||
+			isChannelOpReportPath(r.URL.Path) ||
 			strings.HasPrefix(r.URL.Path, "/state/") ||
 			s.isLeader(r.Context()) {
 			next.ServeHTTP(w, r)
@@ -299,14 +301,19 @@ func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// isChannelOpDonePath reports whether path is a POST /channel/ops/{id}/done
-// completion, the one other leader-exempt /channel/ops route (D-11). {id} is
-// an opaque bus-assigned identifier, never a further path segment, so a
-// prefix/suffix check is exact without needing the mux's own pattern match.
-func isChannelOpDonePath(path string) bool {
-	const prefix, suffix = "/channel/ops/", "/done"
-	return strings.HasPrefix(path, prefix) && strings.HasSuffix(path, suffix) &&
-		len(path) > len(prefix)+len(suffix)
+// isChannelOpReportPath reports whether path is a POST /channel/ops/{id}/ack or
+// /done, the other leader-exempt /channel/ops routes (D-11). {id} is an opaque
+// bus-assigned identifier, never a further path segment, so a prefix/suffix check
+// is exact without needing the mux's own pattern match.
+func isChannelOpReportPath(path string) bool {
+	const prefix = "/channel/ops/"
+	for _, suffix := range []string{"/ack", "/done"} {
+		if strings.HasPrefix(path, prefix) && strings.HasSuffix(path, suffix) &&
+			len(path) > len(prefix)+len(suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // maxHeldBody bounds the copy kept for a fall-through. A body past it cannot
@@ -1239,21 +1246,21 @@ func forbidScope(w http.ResponseWriter) {
 	writeJSON(w, 403, map[string]string{"error": "token is scoped to another channel type"})
 }
 
-// claimedOp is one claimed operation plus how long the adapter holds the claim.
-//
-// An adapter that rides out transport backpressure in-process — sleeping a
-// Telegram `retry_after`, say — must finish INSIDE the claim window, or the
-// manager reclaims the op, a second claimant takes it, and the message posts
-// twice. That makes the adapter's retry budget and this constant an inequality
-// spanning two dependency-free modules, which is a drift bug waiting for the
-// first person to tune ReclaimAfter down.
-//
-// So the manager states it rather than the adapter guessing. Additive and
-// optional: an older adapter ignores the field, and a newer one against an
-// older manager falls back to its own conservative default.
-type claimedOp struct {
-	*chat.Op
-	ReclaimAfterSeconds int `json:"reclaimAfterSeconds"`
+// opReadLimit is how many messages GET /channel/ops lists: the next one. An
+// adapter acknowledges it, delivers, reports, and reads again, so a longer list
+// would only be offered twice.
+const opReadLimit = 1
+
+// ackReply answers an acknowledgement (design D-17).
+type ackReply struct {
+	OK bool `json:"ok"`
+	// DeliveryTTLSeconds is how long the adapter has to report done or failed;
+	// with no report by then the manager fails the message and never resends it.
+	// Zero for an adapter whose acknowledgement is only its receipt.
+	DeliveryTTLSeconds int `json:"deliveryTtlSeconds"`
+	// Consumed is true when the manager consumed the message at the
+	// acknowledgement and nothing further is to be reported.
+	Consumed bool `json:"consumed"`
 }
 
 func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
@@ -1291,13 +1298,15 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	// not an in-memory structure only the leader ever populated, so ANY
 	// replica claims consistently from the same backing store — the old
 	// leader-only refusal here (and leaderProxyMiddleware's proxy attempt
-	// for this route) is retired along with it. s.Ops.Claim below reads the
+	// for this route) is retired along with it. s.Ops.Read below reads the
 	// bus directly; no leader check is needed before it.
 
 	deadline := time.Now().Add(time.Duration(wait) * time.Second)
 	for {
-		if op := s.Ops.Claim(channelType); op != nil {
-			writeJSON(w, 200, claimedOp{Op: op, ReclaimAfterSeconds: int(chat.ReclaimAfter.Seconds())})
+		// A read changes nothing: an op read here by an adapter that dies before
+		// acknowledging is simply offered again.
+		if ops := s.Ops.Read(r.Context(), channelType, opReadLimit); len(ops) > 0 {
+			writeJSON(w, 200, ops[0])
 			return
 		}
 		if time.Now().After(deadline) {
@@ -1343,6 +1352,41 @@ func (s *Server) proxyToLeader(w http.ResponseWriter, r *http.Request) bool {
 	}
 	proxy.ServeHTTP(w, r)
 	return proxied
+}
+
+// handleChannelOpAck is POST /channel/ops/{id}/ack, the hand-over (design D-17).
+// From it the manager never sends the message again. For a receipt adapter it is
+// also the consumption; for the rest the delivery TTL it answers starts now, and
+// the adapter reports done or failed within it. Idempotent: a repeat answers the
+// same reply. 404 when the message is gone (consumed, expired), 409 when it is
+// held but not being offered.
+func (s *Server) handleChannelOpAck(w http.ResponseWriter, r *http.Request) {
+	adapter, ok := adapterParam(w, r)
+	if !ok {
+		return
+	}
+	if !scopeAllows(r, adapter) {
+		forbidScope(w)
+		return
+	}
+	if !onlyParams(w, r, "adapter", "contract") {
+		return
+	}
+	receipt, err := s.Ops.Acknowledge(r.Context(), adapter, r.PathValue("id"))
+	switch {
+	case errors.Is(err, chat.ErrOpGone):
+		writeJSON(w, 404, map[string]string{"error": err.Error()})
+	case errors.Is(err, chat.ErrOpNotOffered):
+		writeJSON(w, 409, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(w, 503, map[string]string{"error": err.Error()})
+	default:
+		reply := ackReply{OK: true, Consumed: receipt.Consumed}
+		if !receipt.Consumed {
+			reply.DeliveryTTLSeconds = int(receipt.TTL.Round(time.Second).Seconds())
+		}
+		writeJSON(w, 200, reply)
+	}
 }
 
 func (s *Server) handleChannelOpDone(w http.ResponseWriter, r *http.Request) {

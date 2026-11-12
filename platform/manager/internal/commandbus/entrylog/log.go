@@ -343,7 +343,9 @@ const leaseLapsed = "lease lapsed"
 func lapse(t *commandbus.Task, p commandbus.Policy) {
 	until := t.Lease.Until
 	t.Code, t.Detail, t.Lease, t.UpdatedAt = commandbus.CodeUnavailable, leaseLapsed, nil, until
-	if t.Attempt < t.MaxAttempts {
+	// A hand-over queue never redelivers: a message with no report by its
+	// delivery TTL is failed, and failed is final (design D-17).
+	if t.Attempt < t.MaxAttempts && p.DeliveryTTL <= 0 {
 		t.State, t.NotBefore = commandbus.StateRetrying, until
 		return
 	}

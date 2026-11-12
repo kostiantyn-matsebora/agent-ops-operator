@@ -82,7 +82,7 @@ func TestEnsureTopicsDispatchesOnFirstPassWithNoClaimWritten(t *testing.T) {
 	if binding := after.Status.Thread("chan-claim-1"); binding != nil {
 		t.Fatalf("no binding (claim or otherwise) until the op completes, got %+v", binding)
 	}
-	if op := ops.Claim("tg-claim-1"); op == nil || op.Kind != chat.OpEnsureTopic {
+	if op := claimOp(ops, "tg-claim-1"); op == nil || op.Kind != chat.OpEnsureTopic {
 		t.Fatalf("ensure-topic op expected on the queue: %+v", op)
 	}
 }
@@ -106,10 +106,10 @@ func TestEnsureTopicsResubmissionDedupsOnTheBus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if ops.Claim("tg-claim-2") == nil {
+	if claimOp(ops, "tg-claim-2") == nil {
 		t.Fatal("the first pass's op must be claimable")
 	}
-	if op := ops.Claim("tg-claim-2"); op != nil {
+	if op := claimOp(ops, "tg-claim-2"); op != nil {
 		t.Fatalf("a second reconcile pass must not have dispatched a second op: %+v", op)
 	}
 }
@@ -138,10 +138,10 @@ func TestEnsureTopicsDispatchIsIndifferentToReplicaIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if ops.Claim("tg-claim-4") == nil {
+	if claimOp(ops, "tg-claim-4") == nil {
 		t.Fatal("one op must be claimable, from whichever replica dispatched it")
 	}
-	if op := ops.Claim("tg-claim-4"); op != nil {
+	if op := claimOp(ops, "tg-claim-4"); op != nil {
 		t.Fatalf("the second replica's pass must not have added a second op: %+v", op)
 	}
 }
@@ -159,7 +159,7 @@ func TestCompletingEnsureTopicLandsTheThreadIDWithNoClaimEverWritten(t *testing.
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: conv.Name}}); err != nil {
 		t.Fatal(err)
 	}
-	op := ops.Claim("tg-claim-5")
+	op := claimOp(ops, "tg-claim-5")
 	if op == nil {
 		t.Fatal("ensure-topic op expected")
 	}
@@ -211,7 +211,7 @@ func TestRunReplyFailureSurfacesUndeliveredReplyAndSuccessClearsIt(t *testing.T)
 	}
 	tid := "t-undelivered"
 	ops.EnqueueRunReply(ctx, &ch, recOf(t, conv.Name), "run-1", &tid, chat.AnswerMessage("the answer", ""))
-	op := ops.Claim("tg-undelivered")
+	op := claimOp(ops, "tg-undelivered")
 	if op == nil {
 		t.Fatal("run reply op expected")
 	}
@@ -227,7 +227,7 @@ func TestRunReplyFailureSurfacesUndeliveredReplyAndSuccessClearsIt(t *testing.T)
 	// re-derive and succeed this time, once the bus's own backoff elapses
 	backing.Advance(6 * time.Minute)
 	ops.EnqueueRunReply(ctx, &ch, recOf(t, conv.Name), "run-1", &tid, chat.AnswerMessage("the answer", ""))
-	op = ops.Claim("tg-undelivered")
+	op = claimOp(ops, "tg-undelivered")
 	if op == nil {
 		t.Fatal("re-derived run reply op expected")
 	}
@@ -311,7 +311,7 @@ func TestChannelOpsAnswersFromAnyReplicaSharingTheBus(t *testing.T) {
 	// The follower's OWN OpQueue local state now holds the claim entry, but
 	// it is the SAME bus task the leader's reconciler created — claiming
 	// again must find nothing left, proving there was only ever one op.
-	if followerSrv.Ops.Claim("tg-shared") != nil {
+	if claimOp(followerSrv.Ops, "tg-shared") != nil {
 		t.Fatal("the op was already claimed once; a second claim must find nothing left")
 	}
 }

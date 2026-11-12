@@ -425,12 +425,12 @@ func tgAssertDeleteConversationActsOrErrors(t *testing.T, mgr *FakeManager, bot 
 // claim window and the bot double's failure queue for the rest of the test.
 func tgAssertRetryBudgetStaysUnderReclaimWindow(t *testing.T, mgr *FakeManager, bot *Process) {
 	t.Helper()
-	// budget = reclaimSeconds/2 = 6s (Op.RetryBudget) — generous above the ~3s
-	// the two scripted absorbed failures actually cost (1s retry_after plus
-	// one transientBackoff), so ordinary scheduling jitter can never flip a
-	// should-succeed retry into a budget failure.
+	// budget = the delivery TTL less its report margin, 10.8s (Op.RetryBudget) —
+	// generous above the ~3s the two scripted absorbed failures actually cost (1s
+	// retry_after plus one transientBackoff), so ordinary scheduling jitter can
+	// never flip a should-succeed retry into a budget failure.
 	const reclaimSeconds = 12
-	mgr.SetReclaimAfterSeconds(reclaimSeconds)
+	mgr.SetDeliveryTTLSeconds(reclaimSeconds)
 
 	// A fresh topic, so this assertion's sendMessage calls are unambiguous.
 	mgr.QueueOp(map[string]any{"id": "op-topic-retry", "channel": "ops", "conversation": "c-retry", "kind": "ensure-topic",

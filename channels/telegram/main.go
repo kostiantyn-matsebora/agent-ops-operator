@@ -3,7 +3,7 @@
 // access, no operator changes needed to run more instances of this pattern
 // for other transports (Slack, Teams, …).
 //
-//	outbound: long-poll GET /channel/ops?adapter=telegram  ->  Bot API calls
+//	outbound: GET /channel/ops?adapter=telegram, POST .../ack, Bot API calls, POST .../done
 //	inbound:  POST /updates (from gateway-telegram)         ->  POST /channel/inbound
 //	offset:   GET/PUT /offset (for the router)             ->  adapter state API
 //
@@ -46,6 +46,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -370,11 +371,10 @@ func (a *adapter) opsLoop(ctx context.Context) {
 // directly with a mock manager rather than only through the infinite loop —
 // each of its error branches is otherwise unreachable from a test.
 func (a *adapter) pollOnce(ctx context.Context) {
-	// PACE BEFORE CLAIMING, not before sending. Work this adapter cannot
-	// yet deliver stays queued in the manager, where it is still derivable
-	// from CR state and survives an adapter restart. Gating the send
-	// instead would hold a claim while waiting, and a crash mid-wait would
-	// strand the op until ReclaimAfter.
+	// PACE BEFORE READING, not before sending. Work this adapter cannot yet
+	// deliver stays queued in the manager, where it is still derivable from CR
+	// state and survives an adapter restart. Acknowledging first would start the
+	// delivery TTL while the op waits on the pacer.
 	if !a.pace.wait(ctx, a.chatIDs()) {
 		return
 	}
@@ -394,24 +394,61 @@ func (a *adapter) pollOnce(ctx context.Context) {
 	if op == nil {
 		return
 	}
-	// The claim window is the manager's to state and ours to respect: every
-	// Bot API call this op makes shares one retry budget, bounded well
-	// inside it.
-	// A redelivered id is answered as it was answered before, and the
-	// transport is not touched again: the effect happened once.
-	if tid, done := a.completed.seen(op.ID); done {
-		log.Printf("op %s redelivered; acknowledging without repeating it", op.ID)
-		if err := a.mgr.CompleteOp(ctx, op.ID, tid, ""); err != nil && ctx.Err() == nil {
-			log.Printf("complete op %s: %s", op.ID, sanitizeLog(err))
+	a.deliver(ctx, op)
+}
+
+// deliver runs the three steps for one op read from the manager: ACK it, which
+// hands it over and starts its delivery TTL; deliver it to the surface, retrying
+// until that TTL; then report DONE or FAILED. The adapter reports; nothing about
+// the surface is ever inferred by the manager.
+func (a *adapter) deliver(ctx context.Context, op *Op) {
+	ttl, err := a.mgr.AckOp(ctx, a.channelType, op.ID)
+	switch {
+	case errors.Is(err, errOpNotOffered):
+		return // another replica of this adapter, or an earlier pass, has it
+	case err != nil:
+		// Not handed over: the manager still holds it and offers it again.
+		if ctx.Err() == nil {
+			log.Printf("acknowledge op %s: %s", op.ID, sanitizeLog(err))
+			sleepCtx(ctx, 5*time.Second)
 		}
+		return
+	}
+	op.deliveryTTL = ttl
+	// An op already delivered by this process (its done report was lost) is not
+	// delivered again: the effect happened once.
+	if tid, done := a.completed.seen(op.ID); done {
+		log.Printf("op %s already delivered; reporting it again without repeating it", op.ID)
+		a.report(ctx, op.ID, tid, "")
 		return
 	}
 	threadID, opErr := a.execute(WithRetryBudget(ctx, op.RetryBudget()), op)
 	if opErr == "" {
 		a.completed.add(op.ID, threadID)
 	}
-	if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
-		log.Printf("complete op %s: %s", op.ID, sanitizeLog(err))
+	a.report(ctx, op.ID, threadID, opErr)
+}
+
+// Report retry pacing. Variables so a test can shorten them.
+var (
+	reportAttempts = 3
+	reportPause    = time.Second
+)
+
+// report sends the outcome, trying a few times: a lost report would leave the
+// manager to fail an op that was in fact delivered once its TTL passes.
+func (a *adapter) report(ctx context.Context, opID, threadID, opErr string) {
+	var err error
+	for attempt := 0; attempt < reportAttempts && ctx.Err() == nil; attempt++ {
+		if attempt > 0 {
+			sleepCtx(ctx, reportPause)
+		}
+		if err = a.mgr.CompleteOp(ctx, opID, threadID, opErr); err == nil {
+			return
+		}
+	}
+	if err != nil && ctx.Err() == nil {
+		log.Printf("complete op %s: %s", opID, sanitizeLog(err))
 	}
 }
 

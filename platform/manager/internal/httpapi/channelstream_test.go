@@ -51,7 +51,8 @@ func enqueueStreamOps(t *testing.T, q *chat.OpQueue, prefix string, n int) []str
 // what a reconnect landing on another manager replica meets.
 func secondReplica(s *Server, bus commandbus.Bus) *Server {
 	q := &chat.OpQueue{
-		Registry: chat.NewRegistry(), Bus: bus, FeedAdapters: []string{streamAdapter},
+		Registry: chat.NewRegistry(), Bus: bus, ReceiptAdapters: []string{streamAdapter},
+		ChannelsFor:   func(context.Context, string) []string { return []string{"console-ui"} },
 		Conversations: s.Conversations, Runs: s.Runs,
 	}
 	return &Server{
@@ -74,14 +75,11 @@ type streamClient struct {
 	status int
 }
 
-func openStream(t *testing.T, base, query, lastEventID string) *streamClient {
+func openStream(t *testing.T, base, query string) *streamClient {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, "GET", base+"/channel/ops/stream?"+query, nil)
 	req.Header.Set("Authorization", "Bearer bus-test-master")
-	if lastEventID != "" {
-		req.Header.Set(lastEventIDHeader, lastEventID)
-	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		cancel()
@@ -156,30 +154,42 @@ func (c *streamClient) expectQuiet(d time.Duration) {
 	}
 }
 
-// feedServer is a Server whose console adapter reads a retained feed.
-func feedServer(t *testing.T, objs ...client.Object) (*Server, commandbus.Bus) {
+// receiptServer is a Server whose console adapter acknowledges by receipt.
+func receiptServer(t *testing.T, objs ...client.Object) (*Server, commandbus.Bus) {
 	t.Helper()
 	s, _, bus := busServer(t, objs...)
-	s.Ops.FeedAdapters = []string{streamAdapter}
+	s.Ops.ReceiptAdapters = []string{streamAdapter}
 	return s, bus
 }
 
 func streamQuery() string { return "adapter=" + streamAdapter + "&contract=" + chat.ContractVersion }
 
-func TestChannelOpsStreamDeliversInLogOrderWithTheCommandIDAsEventID(t *testing.T) {
-	s, _ := feedServer(t)
+// ack is the console's plain call: POST /channel/ops/{id}/ack.
+func ack(t *testing.T, base, adapter, id, token string) (int, ackReply) {
+	t.Helper()
+	req, _ := http.NewRequest("POST", base+"/channel/ops/"+url.PathEscape(id)+"/ack?adapter="+adapter, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var reply ackReply
+	_ = json.NewDecoder(resp.Body).Decode(&reply)
+	return resp.StatusCode, reply
+}
+
+func TestChannelOpsStreamPushesInOrderThenNewOnes(t *testing.T) {
+	s, _ := receiptServer(t)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	ids := enqueueStreamOps(t, s.Ops, "order", 3)
 
-	c := openStream(t, srv.URL, streamQuery(), "")
+	c := openStream(t, srv.URL, streamQuery())
 	for i, want := range ids {
 		ev, op := c.next()
 		if ev.event != "op" || op.ID != want {
 			t.Fatalf("event %d = %q %q, want op %q", i, ev.event, op.ID, want)
-		}
-		if ev.id != want {
-			t.Fatalf("event %d id = %q, want the op's command id %q", i, ev.id, want)
 		}
 		if op.Message == nil || op.Channel != "console-ui" {
 			t.Fatalf("the body is the op: %+v", op)
@@ -190,89 +200,78 @@ func TestChannelOpsStreamDeliversInLogOrderWithTheCommandIDAsEventID(t *testing.
 	if _, op := c.next(); op.ID != late[0] {
 		t.Fatalf("late op = %q, want %q", op.ID, late[0])
 	}
+	// Within one connection an unacknowledged message is pushed once.
+	c.expectQuiet(600 * time.Millisecond)
 }
 
-// A reconnect names the last event it RECEIVED, with no acknowledgement ever
-// sent: it gets every later entry, in order, and the ones produced while away.
-func TestChannelOpsStreamReconnectReplaysAfterTheLastReceivedID(t *testing.T) {
-	s, _ := feedServer(t)
+// The ack is a plain call: the manager consumes the message, and a reconnect is
+// offered only what was never acknowledged.
+func TestChannelOpsStreamReconnectReOffersOnlyUnacknowledged(t *testing.T) {
+	s, _ := receiptServer(t)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
-	ids := enqueueStreamOps(t, s.Ops, "resume", 4)
+	ids := enqueueStreamOps(t, s.Ops, "re", 4)
 
-	c := openStream(t, srv.URL, streamQuery(), "")
-	for range ids[:2] {
-		c.next()
-	}
-	c.cancel() // drops after ids[1]
-	late := enqueueStreamOps(t, s.Ops, "away", 1)
-
-	r := openStream(t, srv.URL, streamQuery(), ids[1])
-	for _, want := range []string{ids[2], ids[3], late[0]} {
-		if _, op := r.next(); op.ID != want {
-			t.Fatalf("replayed %q, want %q", op.ID, want)
+	first := openStream(t, srv.URL, streamQuery())
+	receiveAll(t, first, ids)
+	for _, id := range ids[:2] {
+		if code, reply := ack(t, srv.URL, streamAdapter, id, "bus-test-master"); code != 200 || !reply.Consumed {
+			t.Fatalf("ack %s = %d %+v", id, code, reply)
 		}
 	}
-	r.expectQuiet(300 * time.Millisecond)
-	r.cancel()
+	first.cancel() // the connection drops
 
-	// ?since= wins over the header.
-	q := openStream(t, srv.URL, streamQuery()+"&since="+url.QueryEscape(ids[2]), ids[0])
-	for _, want := range []string{ids[3], late[0]} {
-		if _, op := q.next(); op.ID != want {
-			t.Fatalf("since=%s replayed %q, want %q", ids[2], op.ID, want)
-		}
+	second := openStream(t, srv.URL, streamQuery())
+	receiveAll(t, second, ids[2:])
+	second.expectQuiet(600 * time.Millisecond)
+	if s.Ops.Pending(ids[0]) || !s.Ops.Settled(ids[0]) {
+		t.Fatal("an acknowledged message is consumed")
 	}
 }
 
-// An id the log does not hold is a cursor from a log that has since trimmed it,
-// or a forgery: the stream starts from the oldest retained entry. Nothing was
-// removed by the delivery before it, so the whole log is there.
-func TestChannelOpsStreamUnknownCursorReplaysTheRetainedLog(t *testing.T) {
-	s, _ := feedServer(t)
+func TestChannelOpsStreamReOffersOnAnotherReplica(t *testing.T) {
+	s, bus := receiptServer(t)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
-	ids := enqueueStreamOps(t, s.Ops, "unknown", 3)
-
-	first := openStream(t, srv.URL, streamQuery(), "")
-	for range ids {
-		first.next()
+	ids := enqueueStreamOps(t, s.Ops, "rep", 3)
+	if code, _ := ack(t, srv.URL, streamAdapter, ids[0], "bus-test-master"); code != 200 {
+		t.Fatalf("ack = %d", code)
 	}
-	first.cancel()
-	for _, cursor := range []string{"an-id-no-op-ever-had", ""} {
-		r := openStream(t, srv.URL, streamQuery(), cursor)
-		for _, want := range ids {
-			if _, op := r.next(); op.ID != want {
-				t.Fatalf("cursor %q replayed %q, want %q", cursor, op.ID, want)
-			}
-		}
-		r.cancel()
-	}
+	other := httptest.NewServer(secondReplica(s, bus).Handler())
+	t.Cleanup(other.Close)
+	c := openStream(t, other.URL, streamQuery())
+	receiveAll(t, c, ids[1:])
+	c.expectQuiet(600 * time.Millisecond)
 }
 
-func TestChannelOpsStreamResumesOnADifferentReplica(t *testing.T) {
-	a, bus := feedServer(t)
-	srvA := httptest.NewServer(a.Handler())
-	t.Cleanup(srvA.Close)
-	ids := enqueueStreamOps(t, a.Ops, "xrep", 3)
-	c := openStream(t, srvA.URL, streamQuery(), "")
-	c.next()
-	c.cancel() // replica A is gone as far as the consumer is concerned
+func TestChannelOpsAckRefusals(t *testing.T) {
+	other := &agentopsv1alpha1.ChannelAdapter{ObjectMeta: metav1.ObjectMeta{Name: "telegram", Namespace: "agent-ops"}}
+	s, _ := receiptServer(t, other)
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	ids := enqueueStreamOps(t, s.Ops, "ref", 1)
+	scoped := chat.DeriveAdapterToken("bus-test-master", "telegram")
 
-	b := secondReplica(a, bus)
-	srvB := httptest.NewServer(b.Handler())
-	t.Cleanup(srvB.Close)
-	r := openStream(t, srvB.URL, streamQuery(), ids[0])
-	for _, want := range ids[1:] {
-		if _, op := r.next(); op.ID != want {
-			t.Fatalf("replica B replayed %q, want %q", op.ID, want)
-		}
+	if code, _ := ack(t, srv.URL, streamAdapter, ids[0], ""); code != 401 {
+		t.Errorf("no token = %d, want 401", code)
+	}
+	if code, _ := ack(t, srv.URL, streamAdapter, ids[0], scoped); code != 403 {
+		t.Errorf("another adapter's scope = %d, want 403", code)
+	}
+	if code, _ := ack(t, srv.URL, streamAdapter, "no-such-op", "bus-test-master"); code != 404 {
+		t.Errorf("unknown message = %d, want 404", code)
+	}
+	if code, _ := ack(t, srv.URL, streamAdapter, ids[0], "bus-test-master"); code != 200 {
+		t.Fatalf("ack = %d", code)
+	}
+	if code, _ := ack(t, srv.URL, streamAdapter, ids[0], "bus-test-master"); code != 404 {
+		t.Errorf("a duplicate acknowledgement of a consumed message = %d, want 404", code)
 	}
 }
 
 func TestChannelOpsStreamRefusals(t *testing.T) {
 	other := &agentopsv1alpha1.ChannelAdapter{ObjectMeta: metav1.ObjectMeta{Name: "telegram", Namespace: "agent-ops"}}
-	s, _ := feedServer(t, other)
+	s, _ := receiptServer(t, other)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 
@@ -299,34 +298,20 @@ func TestChannelOpsStreamRefusals(t *testing.T) {
 		"no contract":             {"adapter=console", "bus-test-master", 400},
 		"another adapter's scope": {streamQuery(), scoped, 403},
 		"unknown parameter":       {streamQuery() + "&wait=5", "bus-test-master", 400},
-		"control character in id": {streamQuery() + "&since=a%0Ab", "bus-test-master", 400},
-		"over-long cursor":        {streamQuery() + "&since=" + strings.Repeat("x", 600), "bus-test-master", 400},
-		"any plain id":            {streamQuery() + "&since=abc", "bus-test-master", 200},
 	} {
 		if got := get(tc.query, tc.token); got != tc.want {
 			t.Errorf("%s: status %d, want %d", name, got, tc.want)
 		}
 	}
-	// Telegram keeps the long-poll with its claim and acknowledgement: its own
-	// scope passes authorization and is told the stream is not its surface.
+	// Telegram reads GET /channel/ops: its own scope passes authorization and is
+	// told the stream is not its surface.
 	if got := get("adapter=telegram&contract="+chat.ContractVersion, scoped); got != 404 {
-		t.Errorf("an adapter without a feed: status %d, want 404", got)
-	}
-	req, _ := http.NewRequest("GET", srv.URL+"/channel/ops/stream?"+streamQuery(), nil)
-	req.Header.Set("Authorization", "Bearer bus-test-master")
-	req.Header.Set(lastEventIDHeader, strings.Repeat("x", 600))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != 400 {
-		t.Errorf("bad Last-Event-ID: status %d, want 400", resp.StatusCode)
+		t.Errorf("an adapter that is not a receipt adapter: status %d, want 404", got)
 	}
 }
 
 func TestChannelOpsStreamEndsWhenTheClientDisconnects(t *testing.T) {
-	s, _ := feedServer(t)
+	s, _ := receiptServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest("GET", "/channel/ops/stream?"+streamQuery(), nil).WithContext(ctx)
 	req.Header.Set("Authorization", "Bearer bus-test-master")
@@ -367,59 +352,120 @@ func receiveAll(t *testing.T, c *streamClient, ids []string) {
 	}
 }
 
-// A dead connection holds no claim, so a live one receives everything at once,
-// with no lease to wait out.
+// A dead connection holds no claim, so a live one receives everything at once.
 func TestChannelOpsStreamADeadConnectionStrandsNothing(t *testing.T) {
-	s, _ := feedServer(t)
+	s, _ := receiptServer(t)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 
 	openZombieStream(t, srv.URL)
-	live := openStream(t, srv.URL, streamQuery(), "")
+	live := openStream(t, srv.URL, streamQuery())
 	ids := enqueueStreamOps(t, s.Ops, "zombie", 6)
 	receiveAll(t, live, ids)
 }
 
 func TestChannelOpsStreamTwoConnectionsBothReceiveEverything(t *testing.T) {
-	s, _ := feedServer(t)
+	s, _ := receiptServer(t)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
-	a := openStream(t, srv.URL, streamQuery(), "")
-	b := openStream(t, srv.URL, streamQuery(), "")
+	a := openStream(t, srv.URL, streamQuery())
+	b := openStream(t, srv.URL, streamQuery())
 	ids := enqueueStreamOps(t, s.Ops, "two", 5)
 	receiveAll(t, a, ids)
 	receiveAll(t, b, ids)
 }
 
-// Delivered means the frame was written to a live stream: the side effect an
-// acknowledgement used to trigger runs then, with no acknowledgement sent, and
-// the thread id is the one the manager assigned.
-func TestChannelOpsStreamRunsTheDeliverySideEffects(t *testing.T) {
+// The receipt, not the write, is the delivery: the side effects (the thread
+// binding) run at the acknowledgement, never at the push, and the thread id is
+// the one the manager assigned.
+func TestChannelOpsAckRunsTheDeliverySideEffects(t *testing.T) {
 	conv := &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Name: "conv-1", Namespace: "agent-ops", UID: "uid-1"}}
 	s, c, _ := busServer(t, conv)
-	s.Ops.FeedAdapters = []string{streamAdapter}
+	s.Ops.ReceiptAdapters = []string{streamAdapter}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	rec := &state.ConversationRecord{Name: "conv-1", ID: "uid-1"}
 	s.Ops.EnqueueEnsureTopic(context.Background(), streamChannel(), rec, chat.TopicDescriptor{})
 
-	stream := openStream(t, srv.URL, streamQuery(), "")
+	stream := openStream(t, srv.URL, streamQuery())
 	_, op := stream.next()
 	if op.ThreadID == nil || *op.ThreadID != "console-uid-1" {
 		t.Fatalf("ensure-topic carries the thread the manager assigned, got %+v", op.ThreadID)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var got agentopsv1alpha1.Conversation
-		if err := c.Get(context.Background(), client.ObjectKeyFromObject(conv), &got); err != nil {
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(conv), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Thread("console-ui") != nil {
+		t.Fatal("a push alone must not bind the thread")
+	}
+	if code, _ := ack(t, srv.URL, streamAdapter, op.ID, "bus-test-master"); code != 200 {
+		t.Fatalf("ack = %d", code)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(conv), &got); err != nil {
+		t.Fatal(err)
+	}
+	if b := got.Status.Thread("console-ui"); b == nil || b.ThreadID != "console-uid-1" || !s.Ops.Settled(op.ID) {
+		t.Fatalf("the acknowledgement did not bind the thread: %+v", got.Status.Threads)
+	}
+}
+
+// The three steps for an adapter that is not a receipt adapter: GET changes
+// nothing, ACK answers the delivery TTL, DONE (or FAILED) reports.
+func TestChannelOpsReadAckDoneForAnAdapterWithTheThreeSteps(t *testing.T) {
+	slack := &agentopsv1alpha1.ChannelAdapter{ObjectMeta: metav1.ObjectMeta{Name: "slack", Namespace: "agent-ops"}}
+	s, _, _ := busServer(t, slack)
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	scoped := chat.DeriveAdapterToken("bus-test-master", "slack")
+	ch := &agentopsv1alpha1.Channel{}
+	ch.Name, ch.Spec.Adapter = "tg", "slack"
+	conv := &state.ConversationRecord{Name: "conv-9"}
+	thread := "t1"
+	s.Ops.EnqueueInputDelivery(context.Background(), ch, conv, "in", &thread, chat.Notice("hello"))
+	id := chat.InputOpID("conv-9", "in", "tg")
+
+	read := func() (int, chat.Op) {
+		req, _ := http.NewRequest("GET", srv.URL+"/channel/ops?adapter=slack&contract="+chat.ContractVersion, nil)
+		req.Header.Set("Authorization", "Bearer "+scoped)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if b := got.Status.Thread("console-ui"); b != nil && b.ThreadID == "console-uid-1" && s.Ops.Settled(op.ID) {
-			return
+		defer resp.Body.Close()
+		var op chat.Op
+		_ = json.NewDecoder(resp.Body).Decode(&op)
+		return resp.StatusCode, op
+	}
+	for i := 0; i < 3; i++ {
+		if code, op := read(); code != 200 || op.ID != id {
+			t.Fatalf("read %d = %d %q, want the same message every time until acknowledged", i, code, op.ID)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("delivery did not bind the thread without an acknowledgement: %+v", got.Status.Threads)
+	}
+	code, reply := ack(t, srv.URL, "slack", id, scoped)
+	if code != 200 || reply.Consumed || reply.DeliveryTTLSeconds != 600 {
+		t.Fatalf("ack = %d %+v, want a 600s delivery TTL and no consumption", code, reply)
+	}
+	if code, _ := read(); code != 204 {
+		t.Fatalf("an acknowledged message was read again: %d", code)
+	}
+	post := func(body string) int {
+		req, _ := http.NewRequest("POST", srv.URL+"/channel/ops/"+url.PathEscape(id)+"/done", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+scoped)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(20 * time.Millisecond)
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if post(`{"error":"the surface refused"}`) != 200 {
+		t.Fatal("done report refused")
+	}
+	if s.Ops.Pending(id) || s.Ops.Settled(id) {
+		t.Fatal("a failed report is final: neither pending nor settled")
+	}
+	if code, _ := read(); code != 204 {
+		t.Fatalf("a failed message was offered again: %d", code)
 	}
 }

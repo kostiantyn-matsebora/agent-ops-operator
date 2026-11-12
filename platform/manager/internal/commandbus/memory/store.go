@@ -29,9 +29,6 @@ type store struct {
 	entries []entrylog.Entry       // every entry, as appended, for Backing.Entries
 	events  []commandbus.TaskEvent // one per entry, the gap-free history Feed replays
 	wake    chan struct{}          // closed and replaced on every append
-
-	feedInv []commandbus.FeedDeclaration
-	feeds   map[commandbus.Queue]*feedLog
 }
 
 func (s *store) now() time.Time {
@@ -203,4 +200,24 @@ func (s *store) entriesSnapshot() []entrylog.Entry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]entrylog.Entry(nil), s.entries...)
+}
+
+func (s *store) peek(queue commandbus.Queue, limit int) []commandbus.Task {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.log.Offered(queue, limit, s.now())
+}
+
+func (s *store) acknowledge(queue commandbus.Queue, id commandbus.CommandID, holder string) (commandbus.Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, existing, err := s.log.PlanAcknowledge(queue, id, holder, s.now())
+	if err != nil {
+		return commandbus.Task{}, err
+	}
+	if existing != nil {
+		return *existing, nil
+	}
+	s.appendLocked(c.Append)
+	return c.Task, nil
 }

@@ -383,11 +383,12 @@ The claim/lease/acknowledge feed for the console proved fragile (a dead connecti
 
 The same contract for every non-console channel adapter (design D-17). Starts after section 15.
 
-- [ ] 16.0 Move the console to the same contract: its ACK is receipt from the manager, no delivery TTL, no report, and the manager deletes the message at the ACK. Replace the retained feed of section 15 and drop its replay window.
-- [ ] 16.1 Add the three-step contract to the channel adapter API: read without change, acknowledge as hand-over (starts the delivery TTL, the manager never resends), report done or failed. Declare a delivery TTL per message kind.
-- [ ] 16.2 Remove the lease redelivery for acknowledged ops. The manager fails a message with no report at its TTL as a backstop.
-- [ ] 16.3 Move `channels/telegram` to it: retry against the gateway until the TTL, then report failed. The `ensure-topic` topic id travels back in the done report.
-- [ ] 16.4 Keep the manager's delivery markers and the close and delete gating driven by the done and failed reports.
+- [x] 16.0 Move the console to the same contract: its ACK is receipt from the manager, no delivery TTL, no report, and the manager deletes the message at the ACK. Replace the retained feed of section 15 and drop its replay window.
+- [x] 16.0a The mechanism is generic: no adapter-name branch or per-adapter inventory entry in the manager or the bus, TTLs per message kind, and the console exception is purely configuration. A test runs the full contract for a made-up adapter name with no code change.
+- [x] 16.1 Add the three-step contract to the channel adapter API: read without change, acknowledge as hand-over (starts the delivery TTL, the manager never resends), report done or failed. Declare a delivery TTL per message kind.
+- [x] 16.2 Remove the lease redelivery for acknowledged ops. The manager fails a message with no report at its TTL as a backstop.
+- [x] 16.3 Move `channels/telegram` to it: retry against the gateway until the TTL, then report failed. The `ensure-topic` topic id travels back in the done report.
+- [x] 16.4 Keep the manager's delivery markers and the close and delete gating driven by the done and failed reports.
 - [ ] 16.5 Redeploy and confirm Telegram delivery, a delivery failure ending as failed at its TTL, and an adapter restart not duplicating a message.
 
 ## 10. Unit tests

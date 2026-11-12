@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 	commandbusnats "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/nats"
 )
 
@@ -273,25 +274,41 @@ func TestMainExitsWhenMemoryIsSelectedAboveOneReplica(t *testing.T) {
 	}
 }
 
-func TestChannelFeedAdaptersDefaultToTheConsoleAndAnEmptyValueMeansNone(t *testing.T) {
-	t.Setenv(channelFeedAdaptersEnv, "")
-	if got := channelFeedAdapters(); len(got) != 0 {
-		t.Fatalf("an explicitly empty value means no feed adapter, got %v", got)
+func TestChannelReceiptAdaptersDefaultToTheConsoleAndAnEmptyValueMeansNone(t *testing.T) {
+	t.Setenv(channelReceiptAdaptersEnv, "")
+	if got := channelReceiptAdapters(); len(got) != 0 {
+		t.Fatalf("an empty value must mean none, got %v", got)
 	}
-	t.Setenv(channelFeedAdaptersEnv, "console, mobile ,")
-	if got := strings.Join(channelFeedAdapters(), "|"); got != "console|mobile" {
-		t.Fatalf("adapters = %q", got)
+	t.Setenv(channelReceiptAdaptersEnv, "console, mobile ,")
+	if got := strings.Join(channelReceiptAdapters(), "|"); got != "console|mobile" {
+		t.Fatalf("got %q", got)
 	}
 }
 
-func TestChannelFeedRetentionIsReadFromTheEnvironment(t *testing.T) {
-	inv := channelFeedInventory()
-	if p := inv[0].Policy; p.MaxAge != 30*time.Second || p.MaxEntries != 5000 {
-		t.Fatalf("default retention = %+v, want 30s and 5000 entries", p)
+func TestChannelDeliveryTTLsAreDeclaredAndReadFromTheEnvironment(t *testing.T) {
+	want := map[commandbus.Kind]time.Duration{
+		commandbus.KindOutStable: 10 * time.Minute, commandbus.KindOutEphemeral: 2 * time.Minute,
+		commandbus.KindOutTopic: 5 * time.Minute, commandbus.KindOutDeleteConversation: 5 * time.Minute,
 	}
-	t.Setenv(channelFeedRetentionEnv, "2h")
-	t.Setenv(channelFeedMaxEntriesEnv, "100")
-	if p := channelFeedInventory()[0].Policy; p.MaxAge != 2*time.Hour || p.MaxEntries != 100 {
-		t.Fatalf("retention = %+v, want 2h and 100 entries", p)
+	ttls := func() map[commandbus.Kind]time.Duration {
+		got := map[commandbus.Kind]time.Duration{}
+		for _, d := range channelInventory() {
+			if d.Queue == commandbus.OutFamily {
+				got[d.Kind] = d.Policy.DeliveryTTL
+			}
+		}
+		return got
+	}
+	for kind, d := range want {
+		if got := ttls()[kind]; got != d {
+			t.Errorf("%s delivery TTL = %s, want %s", kind, got, d)
+		}
+	}
+	t.Setenv("CHANNEL_DELIVERY_TTL_TOPIC", "90s")
+	if got := ttls()[commandbus.KindOutTopic]; got != 90*time.Second {
+		t.Errorf("an override must apply, got %s", got)
+	}
+	if got := ttls()[commandbus.KindOutStable]; got != 10*time.Minute {
+		t.Errorf("an override of one kind must not move another, got %s", got)
 	}
 }

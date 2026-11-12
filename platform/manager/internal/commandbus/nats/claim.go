@@ -71,3 +71,41 @@ func (b *Bus) tryClaim(ctx context.Context, queue commandbus.Queue, consumerID s
 	}
 	return commandbus.Task{}, false, nil
 }
+
+// Peek implements commandbus.Bus: the tasks a consumer may be handed next,
+// read from the mirror after fencing on the server's last sequence, so a peek
+// never offers what another replica just acknowledged. It appends nothing.
+func (b *Bus) Peek(ctx context.Context, queue commandbus.Queue, limit int) ([]commandbus.Task, error) {
+	if err := b.sync(ctx); err != nil {
+		return nil, fmt.Errorf("commandbus/nats: peek: %w", err)
+	}
+	return b.mirror.log.Offered(queue, limit, b.clock.now()), nil
+}
+
+// Acknowledge implements commandbus.Bus: a claim of the message of command id,
+// conditional on its key's last entry, so of two replicas acknowledging one
+// message exactly one appends and the other reads the winner's lease back.
+func (b *Bus) Acknowledge(ctx context.Context, queue commandbus.Queue, id commandbus.CommandID, holder string) (commandbus.Task, error) {
+	for attempt := 0; attempt < appendAttempts; attempt++ {
+		if err := b.sync(ctx); err != nil {
+			return commandbus.Task{}, fmt.Errorf("commandbus/nats: acknowledge %q: %w", id, err)
+		}
+		c, existing, err := b.mirror.log.PlanAcknowledge(queue, id, holder, b.clock.now())
+		if err != nil {
+			return commandbus.Task{}, err
+		}
+		if existing != nil {
+			return *existing, nil
+		}
+		if _, err = b.append(ctx, c.Append); err == nil {
+			return c.Task, nil
+		}
+		if !isWrongLastSeq(err) {
+			return commandbus.Task{}, fmt.Errorf("commandbus/nats: acknowledge %q: %w", id, err)
+		}
+		if err := pause(ctx, raceBackoff(attempt)); err != nil {
+			return commandbus.Task{}, fmt.Errorf("commandbus/nats: acknowledge %q: %w", id, err)
+		}
+	}
+	return commandbus.Task{}, fmt.Errorf("commandbus/nats: acknowledge %q: still losing the race after %d attempts", id, appendAttempts)
+}

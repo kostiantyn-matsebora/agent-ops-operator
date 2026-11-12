@@ -213,6 +213,7 @@ func TestThreadNotFoundIsNotAFailureForDelete(t *testing.T) {
 // Bot API a second time — riding the retry rule is for calls an operation is
 // still MAKING, not for one the adapter already finished.
 func TestCompletedCloseTopicIsNeverReplayed(t *testing.T) {
+	fastReports(t)
 	var calls []string
 	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/telegram/call/"))

@@ -395,36 +395,28 @@ func TestClaimIsNonBlockingOnAnEmptyQueue(t *testing.T) {
 	}
 }
 
-// The bus's own lease now owns reclaim-after-timeout (design D-2) — the old
-// in-memory queue hand-rolled a scan over its own claimedAt field, which
-// this rewrite deletes outright. A lapsed lease is simulated by fast-
-// forwarding the Backing's clock past its own LeaseDuration, never by
-// poking a local field that no longer has anything to do with reclaim.
-func TestReclaimAfterLeaseLapse(t *testing.T) {
+// A hand-over queue never redelivers (design D-17): an acknowledged message
+// whose delivery TTL passes with no report is failed by the bus, and nothing
+// claims it again. The clock stands in for the TTL.
+func TestAcknowledgedOpWithNoReportIsFailedNeverReclaimed(t *testing.T) {
 	backing := commandbusmemory.New()
 	q := &OpQueue{Registry: NewRegistry(), Bus: backing.Bus()}
 	ctx := context.Background()
-	// A STABLE op, not a plain EnqueueMessage: out.ephemeral's own 2-minute
-	// TTL (design D-5) is shorter than the default 5-minute lease, so an
-	// ephemeral op left claimed that long EXPIRES on the very reap that
-	// would otherwise read it as retryable (the fold applies both
-	// checks in sequence against the one "now"), rather than ever coming
-	// back for reclaim. out.stable declares no TTL, which is what this
-	// test needs to isolate the lease-lapse mechanism from TTL expiry.
 	q.EnqueueCloseTopic(ctx, testChannel("s", "slack"), "9876", crRec(testConv("conv-1")))
 	op := q.Claim("slack")
 	if op == nil {
 		t.Fatal("claim")
 	}
 	if again := q.Claim("slack"); again != nil {
-		t.Fatalf("claimed op must not be claimable: %+v", again)
+		t.Fatalf("acknowledged op must not be offered: %+v", again)
 	}
-	// A lapsed lease needs no write and no backoff (design D-2): once the lease
-	// has passed the folded state reads as retryable, and the very next claim
-	// appends the next attempt. The lease was already the wait.
-	backing.Advance(backing.LeaseDuration() + time.Second)
-	if again := q.Claim("slack"); again == nil || again.ID != op.ID {
-		t.Fatalf("lapsed lease not reclaimed at once: %+v", again)
+	backing.Advance(6 * time.Minute) // past a topic operation's 5 minutes
+	if again := q.Claim("slack"); again != nil {
+		t.Fatalf("a lapsed delivery TTL must not redeliver: %+v", again)
+	}
+	dead, err := q.Bus.DeadLetters(ctx, "out.s")
+	if err != nil || len(dead) != 1 {
+		t.Fatalf("the unreported op is a dead letter: %v %v", dead, err)
 	}
 }
 
@@ -537,16 +529,10 @@ func TestCloseTopicOpIsEnqueuedPerChannelAndSettlesOnce(t *testing.T) {
 	}
 }
 
-// A failed close-topic is now RETRIED BY THE BUS, with backoff (design D-5:
-// out.stable's 8 attempts, 5s→5m jittered) — the reverse of what this test
-// used to pin against the old queue's own one-shot "release the dedup entry
-// and hope the next reconcile pass re-derives it, right now" behaviour. The
-// reversal is the point of task 6: the bus's attempts+backoff is what
-// replaces that hand-rolled release (see Complete's own doc comment, and
-// the 2026-08-13 incident it names). Advancing the clock past the backoff
-// is what makes the SAME task claimable again — a re-enqueue alone would
-// not, since the bus itself is now the thing deciding when a retry is due.
-func TestFailedCloseTopicIsReDerivable(t *testing.T) {
+// A failed close-topic is FINAL (design D-17): the adapter retried against its
+// surface until the delivery TTL, so the bus does not retry it. The reconciler
+// re-derives what is still owed once the stable id's park cool-off has passed.
+func TestFailedCloseTopicIsFinalAndReDerivableAfterTheCoolOff(t *testing.T) {
 	backing := commandbusmemory.New()
 	q := &OpQueue{Registry: NewRegistry(), Bus: backing.Bus()}
 	ctx := context.Background()
@@ -554,18 +540,14 @@ func TestFailedCloseTopicIsReDerivable(t *testing.T) {
 	q.EnqueueCloseTopic(ctx, ch, "9876", crRec(testConv("conv-1")))
 	op := q.Claim("slack")
 	q.Complete(ctx, op.ID, OpResult{Error: "closeForumTopic: chat not found"})
-	if !q.Pending(op.ID) {
-		t.Fatal("a failed close-topic with attempts remaining must still be pending (retrying)")
+	if q.Pending(op.ID) || q.Settled(op.ID) {
+		t.Fatal("a failed close-topic is final: neither pending nor settled")
 	}
-	if q.Settled(op.ID) {
-		t.Fatal("a retrying close-topic must not report settled yet")
-	}
-
-	backing.Advance(6 * time.Minute)                                // past out.stable's own 5s-5m backoff ceiling
+	backing.Advance(6 * time.Minute)                                // past the park cool-off
 	q.EnqueueCloseTopic(ctx, ch, "9876", crRec(testConv("conv-1"))) // the reconciler's own re-derive
 	again := q.Claim("slack")
 	if again == nil {
-		t.Fatal("a failed close-topic must be re-derivable once its backoff elapses: the thread is still owed an archive")
+		t.Fatal("a failed close-topic must be re-derivable once the cool-off passes: the thread is still owed an archive")
 	}
 	if again.ID != CloseTopicOpID("conv-1", "c1") {
 		t.Fatalf("re-derived op must keep the stable id: %+v", again)
@@ -704,7 +686,7 @@ func drainOps(q *OpQueue, adapter string) []*Op {
 // answer in status.runs[].result is never stranded either way. Advancing
 // the clock is what stands in for "the backoff elapsed", the same way it
 // does for close-topic above.
-func TestFailedSendIsReDerivable(t *testing.T) {
+func TestFailedSendIsFinalAndReDerivableAfterTheCoolOff(t *testing.T) {
 	backing := commandbusmemory.New()
 	q := &OpQueue{Registry: NewRegistry(), Bus: backing.Bus()}
 	ctx := context.Background()
@@ -718,11 +700,11 @@ func TestFailedSendIsReDerivable(t *testing.T) {
 		t.Fatal("no reply queued")
 	}
 	q.Complete(ctx, op.ID, OpResult{Error: "sendMessage: Too Many Requests: retry after 30"})
-	if !q.Pending(op.ID) {
-		t.Fatal("a failed send with attempts remaining must still be pending (retrying), not dropped")
+	if q.Pending(op.ID) || q.Settled(op.ID) {
+		t.Fatal("a failed send is final (design D-17): neither pending nor settled")
 	}
 
-	backing.Advance(6 * time.Minute)
+	backing.Advance(6 * time.Minute)                                          // past the park cool-off
 	q.EnqueueRunReply(ctx, ch, crRec(testConv("conv-1")), "run-1", &tid, msg) // the reconciler backstop
 	again := q.Claim("slack")
 	if again == nil {
@@ -885,8 +867,8 @@ func TestCompleteFailsTheTaskWhenTheHandlerWriteFailsDespiteAdapterSuccess(t *te
 	}
 	q.Complete(ctx, op.ID, OpResult{ThreadID: "t1"}) // the adapter succeeded
 
-	if !q.Pending(op.ID) {
-		t.Fatal("a handler-write failure must Fail the task (still pending/retrying), not Settle it")
+	if q.Pending(op.ID) {
+		t.Fatal("a handler-write failure must Fail the task (final), not leave it pending")
 	}
 	if q.Settled(op.ID) {
 		t.Fatal("a handler-write failure must not report settled")

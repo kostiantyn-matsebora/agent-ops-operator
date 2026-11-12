@@ -47,6 +47,8 @@ type fakeManager struct {
 	// ADA-6, the only way an otherwise-idle adapter learns of a change.
 	vocabRevisions []string
 	sent           int // op frames written to the stream
+	acked          []string
+	ackedSet       map[string]bool
 }
 
 func (f *fakeManager) setVocabRevisions(revs ...string) {
@@ -57,11 +59,18 @@ func (f *fakeManager) setVocabRevisions(revs ...string) {
 
 func newFakeManager(t *testing.T, channels ...ChannelInfo) *fakeManager {
 	t.Helper()
-	f := &fakeManager{channels: channels, failInbound: map[string]bool{}, skipReads: map[string]bool{}}
+	f := &fakeManager{channels: channels, failInbound: map[string]bool{}, skipReads: map[string]bool{}, ackedSet: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /channel/ops/stream", f.serveStream)
-	// The console acknowledges nothing: any call here is recorded, and a test
-	// asserts there is none.
+	// The console's acknowledgement is its receipt of the op. It reports no done:
+	// any call to /done is recorded, and a test asserts there is none.
+	mux.HandleFunc("POST /channel/ops/{id}/ack", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.acked = append(f.acked, r.PathValue("id"))
+		f.ackedSet[r.PathValue("id")] = true
+		f.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "consumed": true})
+	})
 	mux.HandleFunc("POST /channel/ops/{id}/done", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.done = append(f.done, map[string]string{"id": r.PathValue("id")})
@@ -152,15 +161,22 @@ func (f *fakeManager) sentCount() int {
 	return f.sent
 }
 
-// acknowledgements is every /done call received: always none, for the console.
-func (f *fakeManager) acknowledgements() []map[string]string {
+// dones is every /done call received: always none, for the console.
+func (f *fakeManager) dones() []map[string]string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]map[string]string(nil), f.done...)
 }
 
-// serveStream is the manager's /channel/ops/stream: every op queued so far in
-// order, then each new one, as an SSE event whose id is the op's command id.
+// acknowledged is the id of every op the console acknowledged, in order.
+func (f *fakeManager) acknowledged() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.acked...)
+}
+
+// serveStream is the manager's /channel/ops/stream: every op queued so far that
+// is not yet acknowledged, in order, then each new one, as an SSE event.
 func (f *fakeManager) serveStream(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	revs := f.vocabRevisions
@@ -177,12 +193,19 @@ func (f *fakeManager) serveStream(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 	next := 0
+	f.mu.Lock()
+	acknowledgedAtConnect := map[string]bool{}
+	for id := range f.ackedSet {
+		acknowledgedAtConnect[id] = true
+	}
+	f.mu.Unlock()
 	for r.Context().Err() == nil {
 		f.mu.Lock()
 		var due []Op
-		if next < len(f.ops) {
-			due = append(due, f.ops[next:]...)
-			next = len(f.ops)
+		for ; next < len(f.ops); next++ {
+			if !acknowledgedAtConnect[f.ops[next].ID] {
+				due = append(due, f.ops[next])
+			}
 		}
 		f.mu.Unlock()
 		for _, op := range due {
@@ -251,7 +274,7 @@ func runUntil(t *testing.T, a *Adapter, cond func() bool) {
 	t.Fatal("adapter did not reach the expected state")
 }
 
-func TestEnsureTopicUsesTheThreadTheManagerAssignedAndReportsNothingBack(t *testing.T) {
+func TestEnsureTopicUsesTheThreadTheManagerAssignedAcknowledgesAndReportsNothingBack(t *testing.T) {
 	f := newFakeManager(t, ChannelInfo{Name: "console"})
 	a, tr, _ := consoleUnderTest(t, f)
 
@@ -259,8 +282,11 @@ func TestEnsureTopicUsesTheThreadTheManagerAssignedAndReportsNothingBack(t *test
 	f.queue(Op{ID: "topic:task-abc:console", Channel: "console", Conversation: "task-abc", Kind: "ensure-topic", ThreadID: &tid, Topic: &TopicDescriptor{Conversation: "task-abc", Title: "t"}})
 	runUntil(t, a, func() bool { return f.sentCount() == 1 })
 	time.Sleep(50 * time.Millisecond)
-	if acks := f.acknowledgements(); len(acks) != 0 {
-		t.Fatalf("the console acknowledges nothing, got %+v", acks)
+	if got := f.acknowledged(); len(got) != 1 || got[0] != "topic:task-abc:console" {
+		t.Fatalf("the console acknowledges the op it received, got %v", got)
+	}
+	if reports := f.dones(); len(reports) != 0 {
+		t.Fatalf("the console reports no done, got %+v", reports)
 	}
 	_ = tr
 }

@@ -112,7 +112,12 @@ func testDedupAcrossEveryState(t *testing.T, open func() Backing, d commandbus.D
 		{"expired", dedupExpired},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) { c.run(t, ctx, env) })
+		t.Run(c.name, func(t *testing.T) {
+			if c.name == "retrying" && d.Policy.DeliveryTTL > 0 {
+				t.Skip("a hand-over queue has no retrying state: a failure is final")
+			}
+			c.run(t, ctx, env)
+		})
 	}
 }
 

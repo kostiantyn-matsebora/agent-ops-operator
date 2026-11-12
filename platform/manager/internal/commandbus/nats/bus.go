@@ -36,7 +36,6 @@ type busConfig struct {
 	deadLetterMaxAge   time.Duration
 	deadLetterMaxCount int
 	clock              *clock
-	feedInv            []commandbus.FeedDeclaration
 }
 
 // defaultLeaseDuration matches commandbus/memory's own default (and
@@ -81,7 +80,6 @@ func newBusConfig(opts []Option) busConfig {
 		settledGrace:       DefaultSettledGrace,
 		deadLetterMaxAge:   DefaultDeadLetterMaxAge,
 		deadLetterMaxCount: DefaultDeadLetterMaxCount,
-		feedInv:            commandbus.DefaultFeedInventory(),
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -101,11 +99,6 @@ func WithLeaseDuration(d time.Duration) Option { return func(c *busConfig) { c.l
 // resolve against.
 func WithInventory(inv []commandbus.Declaration) Option {
 	return func(c *busConfig) { c.inventory = inv }
-}
-
-// WithFeedInventory overrides the retained-feed declarations (retained.go).
-func WithFeedInventory(inv []commandbus.FeedDeclaration) Option {
-	return func(c *busConfig) { c.feedInv = inv }
 }
 
 // WithSweepInterval overrides the background sweep's period.
@@ -139,12 +132,8 @@ func withClock(c *clock) Option { return func(cfg *busConfig) { cfg.clock = c } 
 // doc) bootstrapped under one scope, plus the in-memory mirror (mirror.go)
 // Claim and Stats read instead of the server.
 type Bus struct {
-	js       jetstream.JetStream
-	logName  string
-	scope    string
-	replicas int
-	feedInv  []commandbus.FeedDeclaration
-	feeds    feeds
+	js      jetstream.JetStream
+	logName string
 	// logs is the queue log stream handle, used only for calls that keep no
 	// state on it (GetLastMsgForSubject, DeleteMsg): a handle caches its info
 	// unguarded, so Info is always read through a fresh one (logInfo).
@@ -223,7 +212,7 @@ func Open(ctx context.Context, conn *Conn, scope string, opts ...Option) (*Bus, 
 		c = newClock(time.Now)
 	}
 	b := &Bus{
-		js: conn.js, scope: scope, replicas: replicas, feedInv: cfg.feedInv, logs: logStream, logName: logName, subj: subj, inv: cfg.inventory, dead: deadName,
+		js: conn.js, logs: logStream, logName: logName, subj: subj, inv: cfg.inventory, dead: deadName,
 		leaseDuration: cfg.leaseDuration, sweepInterval: cfg.sweepInterval, logMaxAge: cfg.logMaxAge, settledGrace: cfg.settledGrace,
 		deadLetterMaxAge: cfg.deadLetterMaxAge, deadLetterMaxCount: cfg.deadLetterMaxCount,
 		clock: c, closed: make(chan struct{}),

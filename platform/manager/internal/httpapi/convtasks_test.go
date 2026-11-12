@@ -176,7 +176,7 @@ func TestTaskResetContextClearsTheHandleAndAnnounces(t *testing.T) {
 	if got.Status.RuntimeContextID != "" {
 		t.Fatalf("want the context handle cleared, got %q", got.Status.RuntimeContextID)
 	}
-	if s.Ops.Claim("slack") == nil {
+	if claimOp(s.Ops, "slack") == nil {
 		t.Fatal("want the reset announced on the bound thread")
 	}
 }
@@ -186,7 +186,7 @@ func TestTaskResetContextOfAConversationWithNoHandleIsANoOp(t *testing.T) {
 	if err := s.taskResetContext(context.Background(), &convtask.Payload{Verb: convtask.VerbResetContext, Conversation: "conv-1"}); err != nil {
 		t.Fatal(err)
 	}
-	if s.Ops.Claim("slack") != nil {
+	if claimOp(s.Ops, "slack") != nil {
 		t.Fatal("nothing to clear means nothing to announce")
 	}
 }

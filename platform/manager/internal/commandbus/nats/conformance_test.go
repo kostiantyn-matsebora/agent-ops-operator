@@ -30,7 +30,6 @@ type backing struct {
 	leaseDuration time.Duration
 	mu            sync.Mutex // guards buses: a scenario opens handles from several goroutines
 	buses         []*Bus
-	feedInv       []commandbus.FeedDeclaration
 }
 
 func newBacking(t testing.TB) *backing {
@@ -39,7 +38,7 @@ func newBacking(t testing.TB) *backing {
 }
 
 func (b *backing) Bus() commandbus.Bus {
-	bus, err := Open(context.Background(), testConn, b.scope, withClock(b.clock), WithLeaseDuration(b.leaseDuration), withFeedOption(b.feedInv))
+	bus, err := Open(context.Background(), testConn, b.scope, withClock(b.clock), WithLeaseDuration(b.leaseDuration))
 	if err != nil {
 		b.t.Fatalf("Open: %v", err)
 	}
@@ -94,25 +93,6 @@ func (b *backing) Compact() {
 		}
 		bus.removeConsumed(ctx, 0)
 	}
-}
-
-func withFeedOption(inv []commandbus.FeedDeclaration) Option {
-	return func(c *busConfig) {
-		if inv != nil {
-			c.feedInv = inv
-		}
-	}
-}
-
-func (b *backing) SetFeedPolicy(p commandbus.FeedPolicy) {
-	b.feedInv = []commandbus.FeedDeclaration{{Queue: commandbus.FeedFamily, Policy: p}}
-}
-
-// AgeFeed advances the virtual clock (the dedup window reads it) and then waits
-// out the server's own clock, which is what trims a stream by age.
-func (b *backing) AgeFeed(d time.Duration) {
-	b.clock.advance(d)
-	time.Sleep(d)
 }
 
 func (b *backing) Advance(d time.Duration)      { b.clock.advance(d) }

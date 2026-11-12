@@ -249,27 +249,25 @@ func TestCloseTopicHonoursRetryAfter(t *testing.T) {
 	}
 }
 
-// The budget comes from the manager's advertised claim window, halved — the op
-// still has to be sent and completed after the last retry.
-func TestRetryBudgetIsHalfTheAdvertisedClaim(t *testing.T) {
+// The budget is the delivery TTL the acknowledgement started, less a margin that
+// still leaves room to report the outcome.
+func TestRetryBudgetIsTheDeliveryTTLLessAReportMargin(t *testing.T) {
 	cases := []struct {
-		advertised int
-		want       time.Duration
+		ttl  time.Duration
+		want time.Duration
 	}{
-		{300, 150 * time.Second}, // the shipped ReclaimAfter
-		{60, 30 * time.Second},
-		{0, defaultRetryBudget}, // an older manager advertises nothing
+		{10 * time.Minute, 10*time.Minute - maxReportMargin}, // stable
+		{2 * time.Minute, 2*time.Minute - 12*time.Second},    // ephemeral
+		{5 * time.Minute, 5*time.Minute - maxReportMargin},   // topic operation
+		{0, defaultRetryBudget},                              // an older manager states none
 	}
 	for _, tc := range cases {
-		op := &Op{ReclaimAfterSeconds: tc.advertised}
+		op := &Op{deliveryTTL: tc.ttl}
 		if got := op.RetryBudget(); got != tc.want {
-			t.Fatalf("reclaimAfterSeconds=%d: budget %v, want %v", tc.advertised, got, tc.want)
+			t.Fatalf("deliveryTTL=%v: budget %v, want %v", tc.ttl, got, tc.want)
 		}
-	}
-	// and it must stay STRICTLY below the window, or a second claimant
-	// duplicates the message
-	op := &Op{ReclaimAfterSeconds: 300}
-	if op.RetryBudget() >= 300*time.Second {
-		t.Fatal("the retry budget must stay strictly inside the claim window")
+		if tc.ttl > 0 && op.RetryBudget() >= tc.ttl {
+			t.Fatalf("the budget %v must stay strictly inside the delivery TTL %v", op.RetryBudget(), tc.ttl)
+		}
 	}
 }

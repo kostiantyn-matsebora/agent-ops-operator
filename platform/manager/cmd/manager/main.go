@@ -248,7 +248,7 @@ func main() {
 	// already shares.
 	ops := &chat.OpQueue{
 		Conversations: stores.Conversations, Runs: stores.Runs, Registry: registry, Activity: acts,
-		Bus: bus, Concurrency: commandBusConsumerConcurrency(), FeedAdapters: channelFeedAdapters(),
+		Bus: bus, Concurrency: commandBusConsumerConcurrency(), ReceiptAdapters: channelReceiptAdapters(),
 	}
 	// One queue per Channel resource (design D-10): an adapter's poll drains the
 	// queue of every Channel naming it. The informer cache answers which, so a

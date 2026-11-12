@@ -81,6 +81,22 @@ type Claim struct {
 func (l *Log) PlanClaim(queue commandbus.Queue, holder string, now time.Time, lease time.Duration) []Claim {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
+	var out []Claim
+	for _, c := range l.eligible(queue, now, MaxClaimCandidates) {
+		out = append(out, l.planClaim(c.rec, c.t, holder, now, lease))
+	}
+	return out
+}
+
+// candidate is an eligible task and its record.
+type candidate struct {
+	rec *record
+	t   commandbus.Task
+}
+
+// eligible lists up to limit tasks of queue that may be handed out now, oldest
+// first. The caller holds the read lock.
+func (l *Log) eligible(queue commandbus.Queue, now time.Time, limit int) []candidate {
 	live := l.live[queue]
 	folded := make(map[*record]commandbus.Task, len(live))
 	running := map[string]int{}
@@ -91,18 +107,59 @@ func (l *Log) PlanClaim(queue commandbus.Queue, holder string, now time.Time, le
 			running[t.InvocationID]++
 		}
 	}
-	var out []Claim
+	var out []candidate
 	for _, rec := range live {
 		t := folded[rec]
 		if !claimable(t, now) || l.blockedByKey(rec, folded) || l.atCap(t, running) {
 			continue
 		}
-		out = append(out, l.planClaim(rec, t, holder, now, lease))
-		if len(out) == MaxClaimCandidates {
+		out = append(out, candidate{rec, t})
+		if len(out) == limit {
 			break
 		}
 	}
 	return out
+}
+
+// Offered lists up to limit tasks of queue a consumer may be handed next,
+// oldest first, as they read now: a read, never an entry.
+func (l *Log) Offered(queue commandbus.Queue, limit int, now time.Time) []commandbus.Task {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	var out []commandbus.Task
+	for _, c := range l.eligible(queue, now, limit) {
+		out = append(out, c.t)
+	}
+	return out
+}
+
+// PlanAcknowledge decides the hand-over of the message of command id on queue
+// to holder. Exactly one of the results is meaningful: Existing when the message
+// is already acknowledged and its lease holds (idempotent), a Claim to append
+// otherwise. ErrNotFound when the queue holds no such message, ErrNotOffered when
+// it is not currently offered, ErrInvalidRequest on a queue with no DeliveryTTL.
+func (l *Log) PlanAcknowledge(queue commandbus.Queue, id commandbus.CommandID, holder string, now time.Time) (Claim, *commandbus.Task, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	recs := l.byCmd[cmdRef{queue, id}]
+	if len(recs) == 0 {
+		return Claim{}, nil, commandbus.ErrNotFound
+	}
+	rec := recs[len(recs)-1]
+	decl, ok := commandbus.Resolve(l.inventory, rec.msg.Queue, rec.msg.Kind)
+	if !ok || decl.Policy.DeliveryTTL <= 0 {
+		return Claim{}, nil, fmt.Errorf("%w: queue %q kind %q is not a hand-over queue", commandbus.ErrInvalidRequest, queue, rec.msg.Kind)
+	}
+	t := l.fold(rec, now)
+	if t.State == commandbus.StateRunning && t.Lease != nil {
+		return Claim{}, &t, nil
+	}
+	for _, c := range l.eligible(queue, now, int(^uint(0)>>1)) {
+		if c.rec == rec {
+			return l.planClaim(rec, t, holder, now, 0), nil, nil
+		}
+	}
+	return Claim{}, nil, fmt.Errorf("%w: %q on %q is %s", commandbus.ErrNotOffered, id, queue, t.State)
 }
 
 func claimable(t commandbus.Task, now time.Time) bool {
@@ -137,6 +194,9 @@ func (l *Log) atCap(t commandbus.Task, running map[string]int) bool {
 }
 
 func (l *Log) planClaim(rec *record, t commandbus.Task, holder string, now time.Time, lease time.Duration) Claim {
+	if decl, ok := commandbus.Resolve(l.inventory, rec.msg.Queue, rec.msg.Kind); ok && decl.Policy.DeliveryTTL > 0 {
+		lease = decl.Policy.DeliveryTTL // a claim here is an acknowledgement (design D-17)
+	}
 	e := l.descriptor(rec, TypeClaimed, now)
 	e.Attempt, e.Token, e.Holder, e.Until = t.Attempt+1, NewLeaseToken(), holder, now.Add(lease)
 	claimed := t
@@ -191,7 +251,7 @@ func (l *Log) failure(rec *record, t commandbus.Task, code commandbus.ErrorCode,
 	decl, _ := commandbus.Resolve(l.inventory, t.Queue, t.Kind)
 	e := l.descriptor(rec, TypeFailed, now)
 	e.Attempt, e.Code, e.Detail = t.Attempt, code, detail
-	if code.Retryable() && t.Attempt < t.MaxAttempts {
+	if code.Retryable() && t.Attempt < t.MaxAttempts && decl.Policy.DeliveryTTL <= 0 {
 		e.NotBefore = now.Add(Backoff(decl.Policy.Backoff, t.Attempt))
 	} else {
 		e.Dead, e.ParkedUntil = true, now.Add(decl.Policy.ParkCoolOff)

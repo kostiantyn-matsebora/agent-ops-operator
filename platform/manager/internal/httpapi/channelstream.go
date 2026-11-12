@@ -8,42 +8,35 @@ import (
 	"time"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// channelStreamPoll is how often the stream looks for a changed vocabulary
-// revision.
-const channelStreamPoll = time.Second
+// channelStreamPoll is how often the stream looks for a message it has not yet
+// pushed: a read of the bus, never a write.
+const channelStreamPoll = 200 * time.Millisecond
+
+// vocabularyPoll is how often the stream looks for a changed vocabulary revision.
+const vocabularyPoll = time.Second
+
+// streamBatch bounds how many unacknowledged messages one read lists.
+const streamBatch = 16
 
 // streamWriteTimeout bounds one frame's write: a client that is gone without a
 // FIN stops draining its socket, and the write fails instead of blocking the
 // handler for as long as TCP takes to notice.
 var streamWriteTimeout = 15 * time.Second
 
-// deliveredTimeout bounds the side effects a written frame triggers. They run
-// detached from the request, so a client that drops right after the write does
-// not cancel the bookkeeping that frame earned.
-const deliveredTimeout = 15 * time.Second
-
-// lastEventIDHeader is the SSE reconnect header a browser-style client sends.
-const lastEventIDHeader = "Last-Event-ID"
-
-// handleChannelOpsStream is GET /channel/ops/stream, an adapter's ops as a
-// plain SSE stream (async-command-bus design D-16). It serves an adapter the
-// manager keeps a retained feed for (OpQueue.FeedAdapters: the console). Every
-// other adapter, Telegram among them, keeps /channel/ops with its claim and
-// acknowledgement, and is told so with a 404.
+// handleChannelOpsStream is GET /channel/ops/stream, the transport a receipt
+// adapter (OpQueue.ReceiptAdapters: the console) reads its messages on (design
+// D-17). Every other adapter, Telegram among them, reads GET /channel/ops and is
+// told so with a 404.
 //
-// One SSE event `op` per op, in log order, `id:` = the op's command id, `data:`
-// = the op as JSON. The cursor is the id of the last event the client received,
-// sent back as Last-Event-ID or ?since=: the stream replays every later entry,
-// an unknown id replays from the start of the retained log, and then it pushes
-// new ones. The connection claims, leases and deletes nothing, so a dead or a
-// second connection strands nothing. The server learns a client is gone from a
-// failed write or the closed request, and simply returns.
-//
-// An op is DELIVERED when its frame was written: the manager then runs the side
-// effects an acknowledgement used to trigger (OpQueue.Delivered), once per op id.
+// One SSE event `op` per message, oldest first, `data:` = the op as JSON. The
+// stream only reads: it claims, leases and deletes nothing. A message is the
+// adapter's once it POSTs /channel/ops/{id}/ack, at which point the manager
+// consumes it. A message pushed and never acknowledged (the adapter died, the
+// connection dropped) is still unacknowledged, so the next connection is pushed
+// it again; within one connection it is pushed once. The server learns a client
+// is gone from a failed write or the closed request, and simply returns.
 func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) {
 	adapter, ok := adapterParam(w, r)
 	if !ok {
@@ -53,14 +46,10 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 		forbidScope(w)
 		return
 	}
-	if !contractOK(w, r) {
+	if !contractOK(w, r) || !onlyParams(w, r, "adapter", "contract") {
 		return
 	}
-	cursor, ok := resumeCursor(w, r)
-	if !ok {
-		return
-	}
-	if !s.Ops.IsFeed(adapter) {
+	if !s.Ops.IsReceipt(adapter) {
 		writeJSON(w, 404, map[string]string{"error": "adapter " + adapter + " reads its ops from GET /channel/ops, not a stream"})
 		return
 	}
@@ -69,13 +58,7 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 500, map[string]string{"error": "streaming unsupported"})
 		return
 	}
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-	ops, err := s.Ops.OpenFeed(ctx, adapter, cursor)
-	if err != nil {
-		writeJSON(w, 503, map[string]string{"error": "the ops feed is unavailable: " + err.Error()})
-		return
-	}
+	ctx := r.Context()
 	s.setVocabularyRevision(ctx, w)
 	lastRevision := s.vocabularyRevision(ctx)
 	h := w.Header()
@@ -92,28 +75,23 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 		_ = rc.SetWriteDeadline(time.Now().Add(streamWriteTimeout))
 		return f() == nil
 	}
+	pushed := map[string]bool{}
 	poll := time.NewTicker(channelStreamPoll)
 	defer poll.Stop()
+	vocabulary := time.NewTicker(vocabularyPoll)
+	defer vocabulary.Stop()
 	keepAlive := time.NewTicker(streamKeepAlive)
 	defer keepAlive.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case op, ok := <-ops:
-			if !ok {
+		case <-poll.C:
+			if !s.pushUnseen(ctx, adapter, pushed, func(op *chat.Op) bool {
+				return write(func() error { return writeOpFrame(w, flusher, op) })
+			}) {
 				return
 			}
-			if !validCursor(op.ID) {
-				log.FromContext(ctx).Error(fmt.Errorf("op id %q cannot be an SSE event id", op.ID), "skip a feed entry", "adapter", adapter)
-				continue
-			}
-			if !write(func() error { return writeOpFrame(w, flusher, op) }) {
-				return
-			}
-			dctx, stop := context.WithTimeout(context.WithoutCancel(ctx), deliveredTimeout)
-			s.Ops.Delivered(dctx, op)
-			stop()
 		case <-keepAlive.C:
 			if !write(func() error {
 				if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
@@ -124,7 +102,7 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 			}) {
 				return
 			}
-		case <-poll.C:
+		case <-vocabulary.C:
 			// The long-poll stamps the revision on every response; a stream has
 			// one response, so a change after connect is its own event.
 			if rev := s.vocabularyRevision(ctx); rev != lastRevision {
@@ -137,37 +115,25 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// maxCursorLen bounds a resume cursor: a command id is a short derived string,
-// and the value is client input.
-const maxCursorLen = 512
-
-// resumeCursor reads the consumer's resume point: ?since= wins over
-// Last-Event-ID, absent means "" (the whole retained log). The cursor is a
-// command id and so opaque, but it is client input: a value that is too long or
-// holds a control character cannot be an id the stream ever sent, and is
-// refused rather than looked up.
-func resumeCursor(w http.ResponseWriter, r *http.Request) (string, bool) {
-	if !onlyParams(w, r, "adapter", "contract", "since") {
-		return "", false
-	}
-	raw := r.URL.Query().Get("since")
-	if raw == "" {
-		raw = r.Header.Get(lastEventIDHeader)
-	}
-	if !validCursor(raw) {
-		writeJSON(w, 400, map[string]string{"error": "resume point is not a command id: send the id of the last op event, unchanged"})
-		return "", false
-	}
-	return raw, true
-}
-
-func validCursor(raw string) bool {
-	if len(raw) > maxCursorLen {
-		return false
-	}
-	for _, r := range raw {
-		if r < 0x20 || r == 0x7f {
+// pushUnseen writes every offered message not yet pushed on this connection, and
+// forgets the ones no longer offered (acknowledged, so there is nothing left to
+// suppress). False when a write failed and the connection is done.
+func (s *Server) pushUnseen(ctx context.Context, adapter string, pushed map[string]bool, push func(*chat.Op) bool) bool {
+	offered := s.Ops.Read(ctx, adapter, streamBatch)
+	still := make(map[string]bool, len(offered))
+	for _, op := range offered {
+		still[op.ID] = true
+		if pushed[op.ID] {
+			continue
+		}
+		if !push(op) {
 			return false
+		}
+		pushed[op.ID] = true
+	}
+	for id := range pushed {
+		if !still[id] {
+			delete(pushed, id)
 		}
 	}
 	return true
@@ -186,8 +152,7 @@ func writeOpFrame(w http.ResponseWriter, flusher http.Flusher, op *chat.Op) erro
 	return nil
 }
 
-// writeVocabularyFrame announces a vocabulary revision change. It carries no
-// id, so it never moves the consumer's resume point.
+// writeVocabularyFrame announces a vocabulary revision change.
 func writeVocabularyFrame(w http.ResponseWriter, flusher http.Flusher, revision string) error {
 	data, _ := json.Marshal(map[string]string{"revision": revision})
 	if _, err := fmt.Fprintf(w, "event: vocabulary\ndata: %s\n\n", data); err != nil {

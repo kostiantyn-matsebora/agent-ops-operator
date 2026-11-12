@@ -357,7 +357,7 @@ func TestPublishChatCommandsThatOnlyAnswerStoreNoSignal(t *testing.T) {
 			if n := len(listSignals(t, c)); n != 0 {
 				t.Fatalf("%s answers in place and stores no Signal, got %d", text, n)
 			}
-			if op := s.Ops.Claim("cmdtype"); op == nil || op.Message == nil {
+			if op := claimOp(s.Ops, "cmdtype"); op == nil || op.Message == nil {
 				t.Fatalf("%s must be answered on the surface", text)
 			}
 		})
@@ -392,7 +392,7 @@ func TestPublishAddressedAndPlainChatAreStoredVerbatim(t *testing.T) {
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil || len(convs.Items) != 0 {
 		t.Fatalf("no conversation exists until a consumer processes it: %v %d", err, len(convs.Items))
 	}
-	if op := s.Ops.Claim("chattype"); op != nil {
+	if op := claimOp(s.Ops, "chattype"); op != nil {
 		t.Fatalf("publication tells no surface anything: %+v", op)
 	}
 }
