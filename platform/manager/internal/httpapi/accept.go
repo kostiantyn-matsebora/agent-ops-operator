@@ -24,14 +24,20 @@
 //
 // A conversation is its own cascade's root for every close-shaped verb
 // this package or internal/controller enqueues (design D-7, task 5.3):
-// the idle timer's auto-close, a budget-exceeded close+escalate and
-// /coordinate/close each walk their own target's causedBy subtree
-// (closeCascadeRequests, closecascade.go) and submit one CascadeMember
-// task per LIVE descendant, members before the parent, ahead of that
-// verb's OWN final request — the exact Router call that already recursed
-// live over causedBy before this change (chat.Router.CloseConversation/
-// AutoCloseConversation/CloseBudgetExceeded/CloseCoordinated, unchanged),
-// now reused as the ancestor's own run-time re-check.
+// the idle timer's auto-close and a budget-exceeded close+escalate each
+// walk their own target's causedBy subtree (closeCascadeRequests,
+// closecascade.go) and submit one CascadeMember task per LIVE descendant,
+// members before the parent, ahead of that verb's OWN final request — the
+// exact Router call that already recursed live over causedBy before this
+// change (chat.Router.CloseConversation/AutoCloseConversation/
+// CloseBudgetExceeded, unchanged), now reused as the ancestor's own
+// run-time re-check.
+//
+// /coordinate/close does NOT pre-build a member cascade this way — its
+// scope check is deferred into the one task it submits and gates the
+// whole subtree, so Router.CloseCoordinated performs its own cascade
+// internally, only once it has confirmed the caller may act. See
+// handleCoordinateClose's and closecascade.go's own doc comments.
 //
 // A plain chat `/close` (and the console's bulk close, N individual chat
 // closes) is the one close-shaped verb this does NOT reach: it is

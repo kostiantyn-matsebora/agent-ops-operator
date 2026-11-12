@@ -222,11 +222,16 @@ type closeReq struct {
 // carrying invocationId/taskIds too, never 202 — the one way this verb's
 // wire shape differs from reopen/delete/reset-context/channel-inbound.
 //
-// The cascade (design D-7, task 5.3): closeCascadeRequests walks the
-// TARGET's own causedBy subtree and submits one task per LIVE member ahead
-// of the final VerbCloseCoordinated task (taskCloseCoordinated,
-// convtasks.go), which performs the unchanged Router.CloseCoordinated call
-// — scope check, self-close and run-time re-check, all together.
+// The cascade (design D-7, task 5.3): UNLIKE every other close-shaped
+// entry point, this one submits ONLY the single VerbCloseCoordinated task
+// (taskCloseCoordinated, convtasks.go) — never a pre-built member cascade.
+// The scope check CloseCoordinated performs gates the whole subtree, not
+// just the target, so decomposing it into CascadeMember tasks ahead of
+// that check would close live descendants before an unauthorized
+// request's own task ever got a chance to fail it. Router.CloseCoordinated
+// already performs its own cascade internally once it confirms the
+// caller may act — scope check, self-close and run-time re-check, all
+// together, exactly as it did before this change.
 func (s *Server) handleCoordinateClose(w http.ResponseWriter, r *http.Request) {
 	var in closeReq
 	if err := readJSON(r, &in); err != nil || in.Reason == "" {
@@ -247,6 +252,17 @@ func (s *Server) handleCoordinateClose(w http.ResponseWriter, r *http.Request) {
 	if target == "" {
 		target = caller.Name
 	}
+	// NO pre-built member cascade here, unlike every other close-shaped
+	// entry point in closecascade.go: CloseCoordinated's widened-scope
+	// check (membership, sibling-root widening, isHumanInitiated) is
+	// deferred into taskCloseCoordinated and gates the WHOLE cascade, not
+	// just the target itself — enqueueing CascadeMember tasks ahead of that
+	// check would close the target's live descendants before an
+	// unauthorized request's own task ever got a chance to fail. Router.
+	// CloseCoordinated already performs its own cascade internally
+	// (closeWithCascade) once it confirms the caller may act, exactly as it
+	// did before this change — one task, not a decomposed one, is correct
+	// here.
 	rootReq := commandbus.SubmitRequest{
 		Queue:     ConvQueue,
 		CommandID: commandbus.CommandID("coordinate-close:" + target),
@@ -256,12 +272,7 @@ func (s *Server) handleCoordinateClose(w http.ResponseWriter, r *http.Request) {
 			Caller: caller.Name, Reason: in.Reason,
 		}.Encode(),
 	}
-	reqs, err := s.closeCascadeRequests(ctx, target, in.Reason, rootReq)
-	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
-		return
-	}
-	resp, err := s.acceptAndEnqueue(ctx, reqs...)
+	resp, err := s.acceptAndEnqueue(ctx, rootReq)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return

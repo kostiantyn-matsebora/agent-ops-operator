@@ -1,10 +1,17 @@
 // The close cascade's shared accept-time decomposition (async-command-bus
 // design D-7, task 5.3): every close-shaped entry point this package or
-// internal/controller owns — plain /close, the idle timer's auto-close,
-// CloseBudgetExceeded (both call sites) and /coordinate/close — walks its
-// own target's causedBy subtree and builds one CascadeMember task per LIVE
-// descendant, members before the parent, all sharing the target's own name
-// as Key, ending with that top-level verb's OWN unchanged final request.
+// internal/controller owns that is NOT gated by a deferred per-call
+// authorization check — the idle timer's auto-close and CloseBudgetExceeded
+// (both call sites) — walks its own target's causedBy subtree and builds
+// one CascadeMember task per LIVE descendant, members before the parent,
+// all sharing the target's own name as Key, ending with that top-level
+// verb's OWN unchanged final request.
+//
+// /coordinate/close is deliberately NOT one of these callers (see
+// handleCoordinateClose's own doc comment, coordinate.go): its scope check
+// is deferred into the final task and gates the whole subtree, so
+// pre-building a member cascade ahead of that check would close live
+// descendants before an unauthorized request's own task ever failed it.
 //
 // Deliberately not every close-shaped entry point: a plain chat `/close`
 // (and the console's bulk close, already established as N individual chat

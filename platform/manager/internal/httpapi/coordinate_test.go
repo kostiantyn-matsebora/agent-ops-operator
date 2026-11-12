@@ -765,13 +765,15 @@ func TestHandleCoordinateCloseWidenedBoundRefusesTheCallersOwnAncestorRoot(t *te
 	}
 }
 
-// design D-7, task 5.3: the accept-time cascade walk builds one task per
-// member it can SEE at accept time. A member invoked AFTER accept, before
-// the root's own task has actually run, is still found and closed — not by
-// anything this decomposition writes, but because taskCloseCoordinated's
-// own call to Router.CloseCoordinated (unchanged) re-lists root-1's live
-// causedBy members FRESH when it runs, never from the accept-time
-// snapshot that built the member tasks ahead of it.
+// design D-7/handleCoordinateClose's own doc comment: unlike the other
+// close-shaped entry points, /coordinate/close builds NO accept-time
+// member cascade at all — its scope check is deferred into the one task
+// it submits, and gates the whole subtree, so pre-building member tasks
+// ahead of that check would close live descendants before an unauthorized
+// request's own task ever got to fail it. A member invoked AFTER accept,
+// before the root's own task has actually run, is still found and closed
+// because taskCloseCoordinated's own call to Router.CloseCoordinated
+// (unchanged) re-lists root-1's live causedBy members FRESH when it runs.
 func TestHandleCoordinateCloseAncestorReChecksAMemberInvokedAfterAccept(t *testing.T) {
 	root := coordRoot("root-1", "co-a")
 	// An alert, not a person's own request — isHumanInitiated must report
@@ -787,8 +789,8 @@ func TestHandleCoordinateCloseAncestorReChecksAMemberInvokedAfterAccept(t *testi
 		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	ids := acceptedIDs(t, rec)
-	if len(ids) != 2 {
-		t.Fatalf("want member-1's own CascadeMember task plus the root's own task (2), got %v", ids)
+	if len(ids) != 1 {
+		t.Fatalf("want ONLY the root's own task (1) — no pre-built member cascade for this verb, got %v", ids)
 	}
 
 	// A member invoked AFTER accept — the accept-time walk never saw it, so
