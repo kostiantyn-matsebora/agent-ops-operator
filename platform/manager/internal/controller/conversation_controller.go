@@ -389,28 +389,17 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			logger.Error(err, "ensureTopics enqueue (continuing chat-less)")
 		}
 		topicPending = waiting
-		// A reopened conversation announces itself on every bound thread. After
-		// ensureTopics on purpose: ops are FIFO per adapter, so the un-archive
-		// is claimed before this notice and it lands somewhere that can take
-		// it. The op id is stable per reopen, so re-deriving it every pass is
-		// what makes it survive a restart mid-reopen without saying it twice.
-		if conv.Reopens > 0 && r.Router != nil {
-			r.Router.FanOutReopenNotice(ctx, &conv)
-		}
-		// The escalation digest (design D-D): the ensure-topic enqueue above and
-		// the topic actually existing are two different moments, so this waits
-		// for a thread before posting — same ordering reason as the reopen
-		// notice, and the op id is stable so re-deriving it every pass posts the
-		// digest once.
-		r.deliverEscalation(ctx, &conv)
-		// Input delivery, PARALLEL to dispatch rather than sequenced with it:
-		// the human reads the event while the agent is already working, and a
-		// run that hangs or dies still leaves the thread saying what happened.
-		r.deliverInputsAndReplies(ctx, &conv, runs)
-		// The BACKSTOP that makes a reply derivable rather than queue-resident.
-		if err := r.deliverRunReplies(ctx, &conv, runs); err != nil {
-			logger.Error(err, "re-deriving undelivered run replies")
-		}
+		// Every thread entry — the reopen notice, the escalation digest, each
+		// input and each run's reply — goes through ONE function, in the order
+		// it happened (design D-15). After ensureTopics on purpose: the
+		// un-archive is claimed before a notice, so it lands somewhere that can
+		// take it. Input delivery is PARALLEL to dispatch rather than sequenced
+		// with it: the human reads the event while the agent is already
+		// working, and a run that hangs or dies still leaves the thread saying
+		// what happened. The op ids are stable, so re-deriving everything on
+		// every pass is the BACKSTOP that makes a delivery derivable rather
+		// than queue-resident.
+		r.fanOutThread(ctx, &conv, runs)
 	}
 	// The BACKSTOP for a member's result reaching its parent
 	// (coordination-loop): the FAST PATH in `/work/done` marks a run
@@ -1237,44 +1226,6 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *state.C
 // in status.threads[].claim on upgrade (or written by a pre-upgrade
 // replica) is never read for a decision again.
 
-// deliverEscalation posts the digest an `escalate` call snapshotted
-// (status.escalationMessage) into every bound channel's already-open thread
-// (coordinator-unconditional-channels: a coordinator root's channels are
-// bound at creation, so this is no longer a thread's opening post, merely
-// the decision made visible on one already running). A conversation that
-// never escalated, or whose threads are not established yet, gets nothing —
-// Ops itself is what makes a second delivery a no-op.
-func (r *ConversationReconciler) deliverEscalation(ctx context.Context, conv *state.ConversationRecord) {
-	if conv.EscalatedAt == nil || r.Ops == nil {
-		return
-	}
-	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
-		r.Ops.EnqueueEscalationMessage(ctx, ch, conv, tid, chat.Notice(conv.EscalationMessage))
-	})
-}
-
-// eachBoundThread mirrors chat.Router's own helper of the same shape: every
-// bound channel that already has a thread, so a send to one that does not
-// exist yet is never queued.
-func (r *ConversationReconciler) eachBoundThread(ctx context.Context, conv *state.ConversationRecord,
-	skip string, fn func(ch *agentopsv1alpha1.Channel, threadID *string)) {
-
-	for _, ref := range conv.ChannelRefs {
-		if ref == skip {
-			continue
-		}
-		tid := conv.ThreadFor(ref)
-		if tid == nil {
-			continue
-		}
-		var ch agentopsv1alpha1.Channel
-		if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &ch); err != nil {
-			continue
-		}
-		fn(&ch, tid)
-	}
-}
-
 // topicDescriptor describes a conversation's thread for the adapter to NAME.
 // The manager supplies facts — route, source, title, labels, lane — and no
 // formatting: Telegram caps forum topics at 128 characters and takes no markup,
@@ -1310,101 +1261,37 @@ func (r *ConversationReconciler) inferredPipeline(ctx context.Context, conv *sta
 	return ""
 }
 
-// deliverInputsAndReplies enqueues every input's delivery, ordered against the
-// run replies: a channel's ops are claimed in the order they were enqueued, so
-// a run that finished before an input arrived (the hand-back its own turn
-// caused) has its reply enqueued first, never after it.
-func (r *ConversationReconciler) deliverInputsAndReplies(ctx context.Context, conv *state.ConversationRecord, runs []state.Run) {
-	flushed := map[string]bool{}
-	chat.DeliverInputsInOrder(ctx, chat.Env{Reader: r.Client, Blobs: r.Blobs, Namespace: r.Namespace}, r.Ops, conv,
-		func(t time.Time) {
-			for i := range runs {
-				run := &runs[i]
-				if flushed[run.RunID] || !run.DeliveryTracked || run.FinishedAt == nil || !run.FinishedAt.Before(t) {
-					continue
-				}
-				flushed[run.RunID] = true
-				r.enqueueRunReply(ctx, conv, run, map[string]bool{})
-			}
-		})
-}
-
-// deliverRunReplies re-derives the answer for every completed run that a bound
-// thread has not received. It is the backstop that makes `send` derivable:
-// `POST /work/done` enqueues the reply on the fast path, but the queue is
-// in-memory, so without this a manager restart in the window between recording
-// the result and an adapter claiming the op would lose the answer permanently —
-// durably written to status.runs[].result and delivered to nobody.
+// fanOutThread is the reconciler's call into the one thread fan-out point
+// (chat.FanOutThread), plus the two pieces of bookkeeping only it owns: the
+// DeliveryPending condition naming the channels still owed an answer, and the
+// backfill of runs a pre-tracking manager wrote.
 //
 // Two facts keep it safe to run on EVERY reconcile:
 //
-//   - the op id is stable per conversation×channel×run, so re-enqueues dedup
-//     against the pending map and the completed window, and the CR's markers
-//     cover the window after a restart, when both are empty;
+//   - the op id is stable per conversation, input or run, and channel, so
+//     re-enqueues dedup against the bus's pending and settled window, and the
+//     CR's markers cover the window after a restart, when both are empty;
 //   - a run written by a manager that did NOT track delivery is BACKFILLED as
 //     delivered rather than sent (see RunStatus.DeliveryTracked). That is the
 //     one migration hazard: without it, upgrading would re-post every recent
 //     answer to every bound thread.
-func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *state.ConversationRecord,
-	runs []state.Run) error {
-
+func (r *ConversationReconciler) fanOutThread(ctx context.Context, conv *state.ConversationRecord, runs []state.Run) {
+	owed := chat.FanOutThread(ctx, chat.Env{Reader: r.Client, Blobs: r.Blobs, Conversations: r.Conversations, Namespace: r.Namespace}, r.Ops, conv, runs)
 	if len(conv.ChannelRefs) == 0 || len(runs) == 0 {
-		return nil
-	}
-	// Threads, not channelRefs: a channel whose topic does not exist yet has
-	// nowhere to receive the reply, and the reconcile its binding triggers will
-	// come back here.
-	var backfill []string
-	owed := map[string]bool{}
-	for i := range runs {
-		run := &runs[i]
-		if !run.DeliveryTracked {
-			backfill = append(backfill, run.RunID)
-			continue
-		}
-		r.enqueueRunReply(ctx, conv, run, owed)
+		return
 	}
 	r.setDeliveryPendingCondition(ctx, conv, owed)
-	if len(backfill) == 0 {
-		return nil
+	var backfill []string
+	for i := range runs {
+		if !runs[i].DeliveryTracked {
+			backfill = append(backfill, runs[i].RunID)
+		}
 	}
-	return r.backfillDelivered(ctx, conv, backfill, runs)
-}
-
-// enqueueRunReply enqueues one tracked run's reply to every bound thread that
-// has not received it, and records in owed each channel still owing it.
-func (r *ConversationReconciler) enqueueRunReply(ctx context.Context, conv *state.ConversationRecord, run *state.Run, owed map[string]bool) {
-	msg := chat.RunReplyMessage(run)
-	for _, t := range conv.Threads {
-		if !conv.BoundTo(t.Channel) {
-			continue
-		}
-		if run.DeliveredTo(t.Channel) {
-			// A crash between markDelivered's run write and its note
-			// write leaves the note naming a delivered run; this
-			// backstop is the only pass that visits it.
-			chat.SettleDeliveredNote(ctx, r.Conversations, conv, t.Channel, run.RunID)
-			continue
-		}
-		owed[t.Channel] = true
-		// durable-chat-ops-broker: a binding carrying only a claim — no
-		// ThreadID yet — is bookkeeping about a dispatch in flight, not a
-		// topic. EnqueueRunReply would still accept the empty id and the
-		// adapter would park the reply on a channel-level pseudo-thread,
-		// marking it delivered there PERMANENTLY: once DeliveredTo is
-		// true this run is never re-enqueued, so the real thread
-		// ensureTopics creates moments later would never receive the
-		// answer the person is waiting for. Leaving it owed (above) is
-		// what brings this reconcile back once the thread exists.
-		if t.ThreadID == "" {
-			continue
-		}
-		ch := r.servingChannel(ctx, t.Channel)
-		if ch == nil {
-			continue
-		}
-		tid := t.ThreadID
-		r.Ops.EnqueueRunReply(ctx, ch, conv, run.RunID, &tid, msg)
+	if len(backfill) == 0 {
+		return
+	}
+	if err := r.backfillDelivered(ctx, conv, backfill, runs); err != nil {
+		log.FromContext(ctx).Error(err, "re-deriving undelivered run replies")
 	}
 }
 

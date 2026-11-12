@@ -316,7 +316,7 @@ func TestReopenNoticeReachesEveryBoundThread(t *testing.T) {
 	conv.Status.Reopens = 1
 	r, q, _ := closeFixture(t, nsChannel("c1", "slack"), nsChannel("c2", "teams"), conv)
 
-	r.FanOutReopenNotice(context.Background(), crRec(conv))
+	r.FanOutThread(context.Background(), crRec(conv))
 
 	// drainCompleting: each reopen notice shares its own conversation×
 	// channel Key with whatever the SAME reopen count re-derives later in
@@ -339,12 +339,12 @@ func TestReopenNoticeReachesEveryBoundThread(t *testing.T) {
 
 	// Re-derived on every reconcile, so it must dedup — and a SECOND reopen
 	// must get its own.
-	r.FanOutReopenNotice(context.Background(), crRec(conv))
+	r.FanOutThread(context.Background(), crRec(conv))
 	if again := drain(q, "slack"); len(again) != 0 {
 		t.Fatalf("a re-derived notice must dedup: %d", len(again))
 	}
 	conv.Status.Reopens = 2
-	r.FanOutReopenNotice(context.Background(), crRec(conv))
+	r.FanOutThread(context.Background(), crRec(conv))
 	if second := drainCompleting(q, "slack"); len(second) != 1 {
 		t.Fatalf("a second reopen is owed its own notice, got %d", len(second))
 	}

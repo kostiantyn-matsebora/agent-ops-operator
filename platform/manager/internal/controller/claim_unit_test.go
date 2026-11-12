@@ -172,11 +172,11 @@ func TestEnsureTopicsCarriesThePreviousThreadIDOnReopen(t *testing.T) {
 // pre-upgrade replica could still have written before async-command-bus
 // design D-11 retired it (this reconciler itself never writes one any
 // more; the field here models leftover state, and is otherwise ignored).
-// deliverRunReplies must not treat it as a topic to deliver into: doing so
+// the fan-out must not treat it as a topic to deliver into: doing so
 // would hand the adapter an empty thread id, which parks the reply on a
 // channel-level pseudo-thread and marks it delivered PERMANENTLY — the real
 // thread ensureTopics creates moments later would never receive the answer.
-func TestDeliverRunRepliesSkipsAClaimOnlyPlaceholder(t *testing.T) {
+func TestFanOutThreadRunReplySkipsAClaimOnlyPlaceholder(t *testing.T) {
 	conv := claimTestConv("conv-1")
 	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "c1"}}
 	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{
@@ -192,9 +192,7 @@ func TestDeliverRunRepliesSkipsAClaimOnlyPlaceholder(t *testing.T) {
 	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, Ops: &chat.OpQueue{Registry: chat.NewRegistry(), Bus: memory.Open()}}
 
 	rec := claimRec(t, r.Conversations, "conv-1")
-	if err := r.deliverRunReplies(context.Background(), rec, claimRuns(t, r.Runs, "conv-1")); err != nil {
-		t.Fatal(err)
-	}
+	r.fanOutThread(context.Background(), rec, claimRuns(t, r.Runs, "conv-1"))
 
 	if op := r.Ops.Claim("slack"); op != nil {
 		t.Fatalf("a claim-only binding must not be delivered into: %+v", op)
@@ -206,7 +204,7 @@ func TestDeliverRunRepliesSkipsAClaimOnlyPlaceholder(t *testing.T) {
 }
 
 // Once the thread is real, the same run delivers normally.
-func TestDeliverRunRepliesDeliversOnceTheThreadIsReal(t *testing.T) {
+func TestFanOutThreadRunReplyDeliversOnceTheThreadIsReal(t *testing.T) {
 	conv := claimTestConv("conv-1")
 	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "c1"}}
 	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "c1", ThreadID: "t1"}}
@@ -219,9 +217,7 @@ func TestDeliverRunRepliesDeliversOnceTheThreadIsReal(t *testing.T) {
 	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, Ops: &chat.OpQueue{Registry: chat.NewRegistry(), Bus: memory.Open()}}
 
 	rec := claimRec(t, r.Conversations, "conv-1")
-	if err := r.deliverRunReplies(context.Background(), rec, claimRuns(t, r.Runs, "conv-1")); err != nil {
-		t.Fatal(err)
-	}
+	r.fanOutThread(context.Background(), rec, claimRuns(t, r.Runs, "conv-1"))
 
 	if r.Ops.Claim("slack") == nil {
 		t.Fatal("a bound real thread must get the reply enqueued")
@@ -233,7 +229,7 @@ func TestDeliverRunRepliesDeliversOnceTheThreadIsReal(t *testing.T) {
 // reconciler backstop — the only pass that visits an already-delivered run —
 // must settle that note, without sending again, and must leave a note naming a
 // different (genuinely owed) run alone.
-func TestDeliverRunRepliesSettlesANoteLeftByACrashAfterTheRunMarker(t *testing.T) {
+func TestFanOutThreadRunReplySettlesANoteLeftByACrashAfterTheRunMarker(t *testing.T) {
 	for _, tc := range []struct {
 		name, note, wantNote string
 	}{
@@ -254,9 +250,7 @@ func TestDeliverRunRepliesSettlesANoteLeftByACrashAfterTheRunMarker(t *testing.T
 			r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, Ops: &chat.OpQueue{Registry: chat.NewRegistry(), Bus: memory.Open()}}
 
 			rec := claimRec(t, r.Conversations, "conv-1")
-			if err := r.deliverRunReplies(context.Background(), rec, claimRuns(t, r.Runs, "conv-1")); err != nil {
-				t.Fatal(err)
-			}
+			r.fanOutThread(context.Background(), rec, claimRuns(t, r.Runs, "conv-1"))
 
 			if op := r.Ops.Claim("slack"); op != nil {
 				t.Fatalf("a delivered run must not be sent again: %+v", op)
@@ -269,7 +263,7 @@ func TestDeliverRunRepliesSettlesANoteLeftByACrashAfterTheRunMarker(t *testing.T
 }
 
 // A run's reply is enqueued ahead of an input that arrived after the run
-// finished, even though the input sits earlier in the reconcile pass: a
+// finished, even though the input sits earlier in the record: a
 // channel's ops are claimed in enqueue order, so the thread reads the answer
 // before the hand-back its own turn caused.
 func TestRunReplyIsEnqueuedBeforeAnInputReceivedAfterItFinished(t *testing.T) {
@@ -293,10 +287,7 @@ func TestRunReplyIsEnqueuedBeforeAnInputReceivedAfterItFinished(t *testing.T) {
 
 	rec := claimRec(t, r.Conversations, "conv-1")
 	runs := claimRuns(t, r.Runs, "conv-1")
-	r.deliverInputsAndReplies(context.Background(), rec, runs)
-	if err := r.deliverRunReplies(context.Background(), rec, runs); err != nil {
-		t.Fatal(err)
-	}
+	r.fanOutThread(context.Background(), rec, runs)
 
 	first := r.Ops.Claim("slack")
 	if first == nil || !strings.HasPrefix(first.ID, "send:") {

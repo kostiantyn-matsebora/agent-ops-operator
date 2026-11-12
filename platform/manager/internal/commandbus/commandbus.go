@@ -21,9 +21,9 @@ package commandbus
 import "context"
 
 // Queue names one FIFO lane. "conv" and "in.signal" are used literally;
-// "out.<channelType>" is a family — DefaultInventory declares its policy
-// once, under the family name, and every concrete channel type's queue
-// (out.telegram, out.console, ...) resolves to it (see Resolve).
+// "out.<channel>" is a family — DefaultInventory declares its policy
+// once, under the family name, and every Channel resource's queue
+// (out.home-telegram, out.console, ...) resolves to it (see Resolve).
 type Queue string
 
 // Key is the ordering key a producer derives for one task (D-5's "Key"

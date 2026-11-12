@@ -190,8 +190,13 @@ type OpQueue struct {
 	// Bus value here that every other producer and consumer in the process
 	// shares.
 	Bus commandbus.Bus
+	// ChannelsFor lists the names of every Channel whose spec.adapter names the
+	// adapter. Optional: a replica that restarted knows no channel queue until
+	// the feed or an enqueue shows it one, and this closes that window from the
+	// Kubernetes cache. Nil leaves Claim to what it has learned.
+	ChannelsFor func(ctx context.Context, adapter string) []string
 	// Concurrency sizes the in-process consumer.Pool Run builds per
-	// Registry-registered channel type (design D-10's "in-process providers
+	// Registry-registered channel queue (design D-10's "in-process providers
 	// become a consumer"). Defaults to 1 when zero or negative.
 	Concurrency int
 
@@ -219,11 +224,18 @@ type OpQueue struct {
 	pending     map[string]bool
 	settled     map[string]bool
 	settledRing []string
-	// channelTypes is every out.<type> this process has seen, from its own
-	// enqueues/claims or from watchMirror's Feed consumption — Stats() needs
-	// it because the bus has no "list every queue in use" call (see this
-	// package's hand-back report for why that gap is not closed here).
-	channelTypes map[string]bool
+	// channelAdapter maps every out.<channel> queue this process has seen to
+	// the adapter that serves it (Channel.spec.adapter), learned from its own
+	// enqueues and from watchMirror's Feed consumption. Claim(adapter) drains
+	// every channel queue of that adapter and Stats() reports per adapter, and
+	// the bus has no "list every queue in use" call, so this is the one place
+	// the channel->adapter fact lives (design D-10: one queue per Channel).
+	channelAdapter map[string]string
+	// claimRotor rotates which of an adapter's channel queues Claim tries
+	// first, so a channel with a deep backlog cannot starve its siblings.
+	claimRotor map[string]int
+	// poolWake nudges Run to start a consumer for a newly learned channel.
+	poolWake chan struct{}
 }
 
 // claimEntry is one externally-claimed op's bus-side credentials, keyed by
@@ -241,7 +253,9 @@ func (q *OpQueue) init() {
 		q.claimed = map[string]claimEntry{}
 		q.pending = map[string]bool{}
 		q.settled = map[string]bool{}
-		q.channelTypes = map[string]bool{}
+		q.channelAdapter = map[string]string{}
+		q.claimRotor = map[string]int{}
+		q.poolWake = make(chan struct{}, 1)
 	}
 }
 
@@ -503,31 +517,34 @@ func outKindFor(op *Op) commandbus.Kind {
 	return commandbus.KindOutEphemeral
 }
 
-// outKeySep separates the two halves of an "out" queue Key (design D-5:
-// "conversation × channel") — NUL rather than ':' because a channel or
-// conversation name is a Kubernetes object name and so can never contain
-// one, while ':' already appears inside some published op ids and would be
-// a a needless assumption to also bar from a name.
-const outKeySep = "\x00"
+// generalKey is the ordering key of an op bound to no conversation (a
+// general-surface notice). Bus keys must be non-empty, and a Kubernetes
+// object name cannot start with an underscore, so it never collides with a
+// conversation.
+const generalKey = "_general"
 
-// outKey derives the ordering key design D-5 declares for every "out" queue:
-// conversation × channel. conversation may be empty (a general-surface
-// notice bound to no conversation) — the key is still unique per channel,
-// which is what the contract (SubmitRequest.Key non-empty) needs.
-func outKey(conversation, channel string) commandbus.Key {
-	return commandbus.Key(conversation + outKeySep + channel)
-}
-
-// conversationFromKey recovers outKey's conversation half for Stats() — the
-// bus treats Key as opaque, but this package minted it, so only this
-// package may parse it back.
-func conversationFromKey(key commandbus.Key) string {
-	s := string(key)
-	if i := strings.IndexByte(s, outKeySep[0]); i >= 0 {
-		return s[:i]
+// outKey derives the ordering key design D-5 declares for every "out.<channel>"
+// queue: the conversation. The channel is the queue itself, so a key names
+// only what is left to order within it.
+func outKey(conversation string) commandbus.Key {
+	if conversation == "" {
+		return generalKey
 	}
-	return ""
+	return commandbus.Key(conversation)
 }
+
+// conversationFromKey recovers outKey's conversation for Stats() — the bus
+// treats Key as opaque, but this package minted it, so only this package may
+// read it back.
+func conversationFromKey(key commandbus.Key) string {
+	if key == generalKey {
+		return ""
+	}
+	return string(key)
+}
+
+// queue is the out.<channel> queue this op travels on.
+func (o *Op) queue() commandbus.Queue { return commandbus.OutQueue(o.Channel) }
 
 // opWire is the "out" family's one wire shape — never a separate package
 // the way "conv"'s convtask is, because both producer (this file's own
@@ -572,7 +589,7 @@ func decodeOp(id string, raw []byte) (*Op, error) {
 	}, nil
 }
 
-// enqueue submits op onto its own out.<channelType> queue (design D-5),
+// enqueue submits op onto its own out.<channel> queue (design D-5),
 // updates the local mirror from the task the bus handed back, and emits the
 // "enqueued" activity hop exactly once per actually-new submission —
 // never for one the bus suppressed as a dedup (design D-4), matching the
@@ -607,17 +624,17 @@ func (q *OpQueue) enqueue(ctx context.Context, op *Op) {
 
 	before := time.Now()
 	task, err := q.Bus.Submit(ctx, commandbus.SubmitRequest{
-		Queue:     commandbus.OutQueue(op.channelType),
+		Queue:     op.queue(),
 		Kind:      outKindFor(op),
 		CommandID: commandbus.CommandID(op.ID),
-		Key:       outKey(op.Conversation, op.Channel),
+		Key:       outKey(op.Conversation),
 		Payload:   op.encode(),
 	})
 	if err != nil {
 		log.FromContext(ctx).Error(err, "enqueue channel op", "op", op.ID, "kind", op.Kind, "channel", op.Channel)
 		return
 	}
-	q.noteChannelType(op.channelType)
+	q.noteChannel(op.Channel, op.channelType)
 	q.markFromState(op.ID, task.State)
 	if task.SubmittedAt.Before(before) {
 		return // deduped by the bus -- see this method's own doc comment
@@ -633,11 +650,57 @@ func (q *OpQueue) enqueue(ctx context.Context, op *Op) {
 	})
 }
 
-func (q *OpQueue) noteChannelType(channelType string) {
+// noteChannel records which adapter serves a channel's queue and, when the
+// channel is new, wakes Run so an in-process provider gets its consumer.
+func (q *OpQueue) noteChannel(channel, adapter string) {
+	if channel == "" || adapter == "" {
+		return
+	}
+	q.mu.Lock()
+	q.init()
+	_, known := q.channelAdapter[channel]
+	q.channelAdapter[channel] = adapter
+	wake := q.poolWake
+	q.mu.Unlock()
+	if !known {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (q *OpQueue) knowsChannel(channel string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.init()
-	q.channelTypes[channelType] = true
+	_, ok := q.channelAdapter[channel]
+	return ok
+}
+
+// channelsOf lists the channels serving adapter, sorted, from what this
+// process has learned plus ChannelsFor's answer.
+func (q *OpQueue) channelsOf(adapter string) []string {
+	q.mu.Lock()
+	q.init()
+	set := map[string]bool{}
+	for ch, a := range q.channelAdapter {
+		if a == adapter {
+			set[ch] = true
+		}
+	}
+	q.mu.Unlock()
+	if q.ChannelsFor != nil {
+		for _, ch := range q.ChannelsFor(context.Background(), adapter) {
+			set[ch] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for ch := range set {
+		out = append(out, ch)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // markFromState applies one task's current state to the local pending/
@@ -694,11 +757,17 @@ func resultingStateAfterFail(code commandbus.ErrorCode, attempt, maxAttempts int
 	return commandbus.StateDead
 }
 
-// Claim pops the oldest claimable op for a channel type over the command
-// bus, or nil when nothing is — NON-BLOCKING, unlike Bus.Claim's own block-
-// until-available contract (design D-2): handleChannelOps (server.go)
-// already owns the long-poll wait, calling this once a second, and blocking
-// a second time inside it would double that wait.
+// Claim pops the oldest claimable op of an adapter over the command bus, or
+// nil when nothing is — NON-BLOCKING, unlike Bus.Claim's own block-until-
+// available contract (design D-2): handleChannelOps (server.go) already owns
+// the long-poll wait, calling this once a second, and blocking a second time
+// inside it would double that wait.
+//
+// An adapter drains the queue of EVERY Channel that names it (design D-10),
+// so GET /channel/ops?adapter= is unchanged by the queue being per channel.
+// The queues are tried in a rotating order, so one channel's backlog never
+// starves another's, and a channel whose ops nobody acknowledges holds only
+// its own queue.
 //
 // claimPollTimeout, not a literal zero deadline: the nats backend's own
 // Claim opens by waiting on its mirror's readiness, a select between "the
@@ -710,13 +779,31 @@ func resultingStateAfterFail(code commandbus.ErrorCode, attempt, maxAttempts int
 // deterministic winner (the already-ready mirror) before ctx's own
 // cancellation can tie it — see this package's own non-blocking-claim test
 // for both backends.
-func (q *OpQueue) Claim(channelType string) *Op {
+func (q *OpQueue) Claim(adapter string) *Op {
+	channels := q.channelsOf(adapter)
+	if len(channels) == 0 {
+		return nil
+	}
+	q.mu.Lock()
+	start := q.claimRotor[adapter] % len(channels)
+	q.claimRotor[adapter] = start + 1
+	q.mu.Unlock()
+	for i := range channels {
+		if op := q.claimFrom(channels[(start+i)%len(channels)], adapter); op != nil {
+			return op
+		}
+	}
+	return nil
+}
+
+// claimFrom claims one task off one channel's queue, or nil.
+func (q *OpQueue) claimFrom(channel, adapter string) *Op {
 	ctx, cancel := context.WithTimeout(context.Background(), claimPollTimeout)
 	defer cancel()
-	task, err := q.Bus.Claim(ctx, commandbus.OutQueue(channelType), channelOpsConsumerID)
+	task, err := q.Bus.Claim(ctx, commandbus.OutQueue(channel), channelOpsConsumerID)
 	if err != nil {
 		if !errors.Is(err, context.DeadlineExceeded) {
-			log.FromContext(context.Background()).Error(err, "claim channel op", "channelType", channelType)
+			log.FromContext(context.Background()).Error(err, "claim channel op", "adapter", adapter, "channel", channel)
 		}
 		return nil
 	}
@@ -731,14 +818,14 @@ func (q *OpQueue) Claim(channelType string) *Op {
 		q.markFromState(string(task.CommandID), resultingStateAfterFail(commandbus.CodeInvalidCommand, task.Attempt, task.MaxAttempts))
 		return nil
 	}
-	op.channelType = channelType
+	op.channelType = adapter
 	op.enqueuedAt = task.SubmittedAt
 	op.claimedAt = time.Now()
 
+	q.noteChannel(channel, adapter)
 	q.mu.Lock()
 	q.init()
 	q.claimed[op.ID] = claimEntry{uid: task.UID, token: leaseTokenOf(task), attempt: task.Attempt, maxAttempts: task.MaxAttempts, op: op}
-	q.channelTypes[channelType] = true
 	q.mu.Unlock()
 	q.markFromState(op.ID, task.State)
 
@@ -1175,11 +1262,13 @@ func opOriginNode(op *Op) *activity.NodeRef {
 //   - the watch-fed mirror Pending/Settled/Stats read, kept current for
 //     transitions this process did not itself make (another replica's
 //     Settle/Fail, the bus's own lease-lapse or TTL reaping);
-//   - one consumer.Pool per Registry-registered in-process channel type
-//     ("in-process providers become a consumer consuming out.<type>") —
-//     today's Registry carries no production registration (platform/console
-//     is an EXTERNAL adapter), so this is exercised only by whatever a
-//     future in-process type or a test registers, but the mechanism is real.
+//   - one consumer.Pool per channel queue whose adapter is registered with the
+//     Registry as an in-process implementation ("in-process providers become a
+//     consumer consuming out.<channel>"). Channels appear at run time, so a
+//     pool starts when its channel is first learned. Today's Registry carries
+//     no production registration (platform/console is an EXTERNAL adapter), so
+//     this is exercised only by whatever a future in-process type or a test
+//     registers, but the mechanism is real.
 //
 // Registered once from cmd/manager as a manager.RunnableFunc, on EVERY
 // replica — never gated on leader election, the same posture every other
@@ -1195,43 +1284,75 @@ func (q *OpQueue) Run(ctx context.Context) error {
 		defer wg.Done()
 		q.watchMirror(ctx)
 	}()
+	defer wg.Wait()
+	if q.Registry == nil {
+		return nil
+	}
 
-	if q.Registry != nil {
-		concurrency := q.Concurrency
-		if concurrency <= 0 {
-			concurrency = 1
+	q.mu.Lock()
+	q.init()
+	wake := q.poolWake
+	q.mu.Unlock()
+	started := map[string]bool{}
+	for {
+		if err := q.startInProcessPools(ctx, &wg, started); err != nil {
+			return err
 		}
-		for _, channelType := range q.Registry.Types() {
-			factory := q.Registry.Resolve(channelType)
-			if factory == nil {
-				continue
-			}
-			pool, err := consumer.New(consumer.Config{
-				Bus: q.Bus, Queue: commandbus.OutQueue(channelType),
-				Handler:     q.inProcessHandler(channelType, factory),
-				Concurrency: concurrency,
-				ConsumerID:  "in-process-" + channelType,
-			})
-			if err != nil {
-				return fmt.Errorf("in-process consumer for channel type %q: %w", channelType, err)
-			}
-			q.noteChannelType(channelType)
-			wg.Add(1)
-			go func(p *consumer.Pool) {
-				defer wg.Done()
-				_ = p.Run(ctx)
-			}(pool)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-wake:
 		}
 	}
-	wg.Wait()
+}
+
+// startInProcessPools starts a consumer for every learned channel whose
+// adapter has a registered in-process factory and that has none yet.
+func (q *OpQueue) startInProcessPools(ctx context.Context, wg *sync.WaitGroup, started map[string]bool) error {
+	concurrency := q.Concurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	q.mu.Lock()
+	snapshot := make(map[string]string, len(q.channelAdapter))
+	for ch, adapter := range q.channelAdapter {
+		snapshot[ch] = adapter
+	}
+	q.mu.Unlock()
+	for channel, adapter := range snapshot {
+		if started[channel] {
+			continue
+		}
+		factory := q.Registry.Resolve(adapter)
+		if factory == nil {
+			continue
+		}
+		pool, err := consumer.New(consumer.Config{
+			Bus: q.Bus, Queue: commandbus.OutQueue(channel),
+			Handler:     q.inProcessHandler(adapter, factory),
+			Concurrency: concurrency,
+			ConsumerID:  "in-process-" + channel,
+		})
+		if err != nil {
+			return fmt.Errorf("in-process consumer for channel %q (adapter %q): %w", channel, adapter, err)
+		}
+		started[channel] = true
+		wg.Add(1)
+		go func(p *consumer.Pool) {
+			defer wg.Done()
+			_ = p.Run(ctx)
+		}(pool)
+	}
 	return nil
 }
 
 // watchMirror consumes Bus.Feed for the lifetime of ctx, applying every
-// transition to the local pending/settled mirror and recording the channel
-// type of every "out.<type>" queue it sees — the cross-replica half of
-// Stats()'s own channelTypes discovery (this process's own Enqueue/Claim
-// calls are the single-process half, noteChannelType).
+// transition to the local pending/settled mirror and learning every
+// "out.<channel>" queue it sees — the cross-replica half of the channel->
+// adapter map (this process's own Enqueue/Claim calls are the single-process
+// half, noteChannel). The feed names the queue, not its adapter, so the first
+// event of an unknown channel reads the task once for the adapter its payload
+// carries.
 func (q *OpQueue) watchMirror(ctx context.Context) {
 	events, err := q.Bus.Feed(ctx, 0)
 	if err != nil {
@@ -1240,10 +1361,23 @@ func (q *OpQueue) watchMirror(ctx context.Context) {
 	}
 	for ev := range events {
 		q.markFromState(string(ev.CommandID), ev.State)
-		if ct, ok := strings.CutPrefix(string(ev.Queue), outFamilyQueuePrefix); ok {
-			q.noteChannelType(ct)
+		if channel, ok := strings.CutPrefix(string(ev.Queue), outFamilyQueuePrefix); ok && !q.knowsChannel(channel) {
+			q.learnChannel(ctx, channel, ev.UID)
 		}
 	}
+}
+
+// learnChannel resolves a channel's adapter from one of its tasks' payloads.
+func (q *OpQueue) learnChannel(ctx context.Context, channel, taskUID string) {
+	task, err := q.Bus.GetTask(ctx, taskUID)
+	if err != nil {
+		return // the next event of this channel tries again
+	}
+	op, err := decodeOp(string(task.CommandID), task.Payload)
+	if err != nil {
+		return
+	}
+	q.noteChannel(channel, op.channelType)
 }
 
 // outFamilyQueuePrefix mirrors commandbus.OutQueue's own "out." prefix —
@@ -1256,20 +1390,20 @@ const outFamilyQueuePrefix = "out."
 // would from the SAME payload, then run the SAME side effects Complete runs
 // for an externally-claimed op — an in-process provider is a second
 // renderer, never a second completion path.
-func (q *OpQueue) inProcessHandler(channelType string, factory ProviderFactory) consumer.HandlerFunc {
+func (q *OpQueue) inProcessHandler(adapter string, factory ProviderFactory) consumer.HandlerFunc {
 	return func(ctx context.Context, task commandbus.Task) error {
 		op, err := decodeOp(string(task.CommandID), task.Payload)
 		if err != nil {
 			return consumer.WithCode(commandbus.CodeInvalidCommand, err)
 		}
-		op.channelType = channelType
+		op.channelType = adapter
 
 		res := executeInProcess(ctx, factory, op)
 
 		done := activity.Event{
-			Kind: activity.KindChannelOpCompleted,
-			From: activity.Node(activity.NodeChannelAdapter, op.channelType),
-			To:   activity.Node(activity.NodeChannel, op.Channel),
+			Kind:         activity.KindChannelOpCompleted,
+			From:         activity.Node(activity.NodeChannelAdapter, op.channelType),
+			To:           activity.Node(activity.NodeChannel, op.Channel),
 			Conversation: op.Conversation, OpID: op.ID, Code: string(op.Kind), Detail: op.Channel,
 		}
 		if res.Error != "" {
@@ -1337,31 +1471,34 @@ type QueueStat struct {
 	OldestClaimedConv    string  `json:"oldestClaimedConversation,omitempty"`
 }
 
-// Stats snapshots the queue per adapter, aggregating over the three
-// commandbus.Kind values the "out" family declares (design D-5) —
-// commandbus.Bus.Stats answers one (queue, kind) pair at a time, so this is
-// three calls per channel type rather than one.
+// Stats snapshots the queue per adapter, aggregating over every channel queue
+// the adapter serves and over the three commandbus.Kind values the "out"
+// family declares (design D-5) — commandbus.Bus.Stats answers one (queue,
+// kind) pair at a time, so this is three calls per channel queue. The console's
+// queue view stays per adapter, whatever the queue's own granularity.
 //
-// channelTypes (noteChannelType/watchMirror) is this method's own answer to
-// a real gap: commandbus.Bus has no "list every out.<type> queue in use"
-// call (D-5's inventory is closed over KIND, never over the open set of
-// channel types a deployment may ever route through) — see this package's
-// hand-back report. An adapter this process has never enqueued onto or
-// claimed from, and whose Feed events this process's watchMirror has not
-// yet seen, is simply absent here, exactly as the old in-memory map was
-// empty for an adapter it had never heard from.
+// channelAdapter (noteChannel/watchMirror) is this method's own answer to a
+// real gap: commandbus.Bus has no "list every out.<channel> queue in use" call
+// (D-5's inventory is closed over KIND, never over the open set of channels a
+// deployment may ever route through). A channel this process has never
+// enqueued onto or claimed from, and whose Feed events this process's
+// watchMirror has not yet seen, is simply absent here, exactly as the old
+// in-memory map was empty for an adapter it had never heard from.
 func (q *OpQueue) Stats() []QueueStat {
 	q.mu.Lock()
-	types := make([]string, 0, len(q.channelTypes))
-	for ct := range q.channelTypes {
-		types = append(types, ct)
+	byAdapter := map[string][]string{}
+	for channel, adapter := range q.channelAdapter {
+		byAdapter[adapter] = append(byAdapter[adapter], channel)
 	}
 	q.mu.Unlock()
 
 	ctx := context.Background()
-	out := make([]QueueStat, 0, len(types))
-	for _, ct := range types {
-		st := q.statsFor(ctx, ct)
+	out := make([]QueueStat, 0, len(byAdapter))
+	for adapter, channels := range byAdapter {
+		st := QueueStat{Adapter: adapter}
+		for _, channel := range channels {
+			q.addChannelStats(ctx, &st, channel)
+		}
 		if st.Queued == 0 && st.Claimed == 0 {
 			continue // pruned -- nothing outstanding reads as absent, as it always has
 		}
@@ -1371,30 +1508,27 @@ func (q *OpQueue) Stats() []QueueStat {
 	return out
 }
 
-func (q *OpQueue) statsFor(ctx context.Context, channelType string) QueueStat {
-	queue := commandbus.OutQueue(channelType)
-	st := QueueStat{Adapter: channelType}
-	var oldestQueuedAge, oldestClaimedAge time.Duration
+// addChannelStats folds one channel queue's counts into its adapter's stat,
+// keeping the oldest queued and the oldest claimed op across all of them.
+func (q *OpQueue) addChannelStats(ctx context.Context, st *QueueStat, channel string) {
+	queue := commandbus.OutQueue(channel)
 	for _, kind := range outKinds {
 		bs, err := q.Bus.Stats(ctx, queue, kind)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "channel op stats", "channelType", channelType, "kind", kind)
+			log.FromContext(ctx).Error(err, "channel op stats", "channel", channel, "kind", kind)
 			continue
 		}
 		st.Queued += bs.Pending + bs.Scheduled
 		st.Claimed += bs.Running
-		if bs.Pending > 0 && bs.OldestPendingAge >= oldestQueuedAge {
-			oldestQueuedAge = bs.OldestPendingAge
+		if bs.Pending > 0 && bs.OldestPendingAge.Seconds() >= st.OldestQueuedAgeSecs {
 			st.OldestQueuedOpID = string(bs.OldestPendingID)
 			st.OldestQueuedConv = conversationFromKey(bs.OldestPendingKey)
 			st.OldestQueuedAgeSecs = bs.OldestPendingAge.Seconds()
 		}
-		if bs.Running > 0 && bs.OldestRunningAge >= oldestClaimedAge {
-			oldestClaimedAge = bs.OldestRunningAge
+		if bs.Running > 0 && bs.OldestRunningAge.Seconds() >= st.OldestClaimedAgeSecs {
 			st.OldestClaimedOpID = string(bs.OldestRunningID)
 			st.OldestClaimedConv = conversationFromKey(bs.OldestRunningKey)
 			st.OldestClaimedAgeSecs = bs.OldestRunningAge.Seconds()
 		}
 	}
-	return st
 }

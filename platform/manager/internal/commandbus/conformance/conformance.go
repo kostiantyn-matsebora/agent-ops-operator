@@ -66,7 +66,7 @@ func Run(t *testing.T, open func() Backing) {
 
 // sampleQueue names the concrete runtime Queue the suite submits to for
 // Declaration d. "out" is commandbus's own sentinel for the parametrized
-// out.<channelType> family (see commandbus.OutQueue); every other queue
+// out.<channel> family, one queue per Channel resource (see commandbus.OutQueue); every other queue
 // name is used literally. A Declaration this switch does not recognize is
 // a queue genuinely left unwired — named in the failure, not skipped.
 func sampleQueue(t *testing.T, d commandbus.Declaration) commandbus.Queue {

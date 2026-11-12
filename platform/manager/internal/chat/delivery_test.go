@@ -19,7 +19,7 @@ import (
 // exists before any `escalate` call, and nothing queued before that call is
 // a "backlog" any more — both a pre- and a post-escalation input reach it,
 // exactly as any other bound channel's would.
-func TestDeliverInputsNeverFencesOnEscalatedAt(t *testing.T) {
+func TestFanOutThreadNeverFencesOnEscalatedAt(t *testing.T) {
 	escalatedAt := metav1.NewTime(time.Now())
 	before := metav1.NewTime(escalatedAt.Add(-time.Minute))
 	after := metav1.NewTime(escalatedAt.Add(time.Minute))
@@ -45,7 +45,7 @@ func TestDeliverInputsNeverFencesOnEscalatedAt(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch).Build()
 	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 
-	DeliverInputs(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv))
+	FanOutThread(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv), nil)
 
 	// Both inputs share one Key (conversation × channel, design D-2) — the
 	// second is not claimable until the first settles.
@@ -63,7 +63,7 @@ func TestDeliverInputsNeverFencesOnEscalatedAt(t *testing.T) {
 // fenced even under the old design, and still is not — delivery never reads
 // EscalatedAt at all any more, so this stays green on the same grounds the
 // test above now does.
-func TestDeliverInputsNeverFencesAChannelThatIsNotAnEscalationChannel(t *testing.T) {
+func TestFanOutThreadNeverFencesAChannelThatIsNotAnEscalationChannel(t *testing.T) {
 	escalatedAt := metav1.NewTime(time.Now())
 	before := metav1.NewTime(escalatedAt.Add(-time.Minute))
 
@@ -83,7 +83,7 @@ func TestDeliverInputsNeverFencesAChannelThatIsNotAnEscalationChannel(t *testing
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch).Build()
 	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 
-	DeliverInputs(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv))
+	FanOutThread(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv), nil)
 
 	ops := drain(q, "some-ta")
 	if len(ops) != 1 {
@@ -93,14 +93,14 @@ func TestDeliverInputsNeverFencesAChannelThatIsNotAnEscalationChannel(t *testing
 
 // A member's result reaching its parent (coordination-loop) is delivered to
 // every bound channel exactly like any other input — coordinator-
-// unconditional-channels established that, and TestDeliverInputsNeverFencesOnEscalatedAt
+// unconditional-channels established that, and TestFanOutThreadNeverFencesOnEscalatedAt
 // above already pins it for the escalation fence specifically. What this test
 // pins is the ADDITIONAL fact item #15 QA's bug 2 needed: the composed signal
 // card carries its OriginKind, which is what lets ONE adapter — the console,
 // which ALSO builds a richer invoke-card view of the same exchange — choose
 // not to render a second, generic copy of it, without changing what any other
 // adapter (which has no such view) receives or shows.
-func TestDeliverInputsCarriesOriginKindOnTheComposedSignal(t *testing.T) {
+func TestFanOutThreadCarriesOriginKindOnTheComposedSignal(t *testing.T) {
 	conv := testConv("coord-root")
 	conv.Namespace = testNS
 	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "console"}}
@@ -117,7 +117,7 @@ func TestDeliverInputsCarriesOriginKindOnTheComposedSignal(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch).Build()
 	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 
-	DeliverInputs(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv))
+	FanOutThread(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv), nil)
 
 	ops := drain(q, "console-ta")
 	if len(ops) != 1 {
@@ -132,7 +132,7 @@ func TestDeliverInputsCarriesOriginKindOnTheComposedSignal(t *testing.T) {
 // does — read off the input's out-of-line ConversationInput — and is a
 // structured field, not folded into the body or the labels map
 // (signal-severity scenario "Severity rides with the card as a field").
-func TestDeliverInputsCarriesSeverityFromTheConversationInput(t *testing.T) {
+func TestFanOutThreadCarriesSeverityFromTheConversationInput(t *testing.T) {
 	conv := testConv("sev-conv")
 	conv.Namespace = testNS
 	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "console"}}
@@ -158,7 +158,7 @@ func TestDeliverInputsCarriesSeverityFromTheConversationInput(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch, ci).Build()
 	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 
-	DeliverInputs(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv))
+	FanOutThread(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv), nil)
 
 	ops := drain(q, "console-ta")
 	if len(ops) != 1 || ops[0].Message == nil {
@@ -180,7 +180,7 @@ func TestDeliverInputsCarriesSeverityFromTheConversationInput(t *testing.T) {
 // the field yet — omits severity entirely from the wire message rather than
 // serializing it as `""` (signal-severity scenario "An unrated signal
 // carries no severity field").
-func TestDeliverInputsOmitsSeverityWhenTheInputCarriesNone(t *testing.T) {
+func TestFanOutThreadOmitsSeverityWhenTheInputCarriesNone(t *testing.T) {
 	conv := testConv("unrated-conv")
 	conv.Namespace = testNS
 	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "console"}}
@@ -206,7 +206,7 @@ func TestDeliverInputsOmitsSeverityWhenTheInputCarriesNone(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch, ci).Build()
 	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 
-	DeliverInputs(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv))
+	FanOutThread(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv), nil)
 
 	ops := drain(q, "console-ta")
 	if len(ops) != 1 || ops[0].Message == nil {
@@ -221,36 +221,5 @@ func TestDeliverInputsOmitsSeverityWhenTheInputCarriesNone(t *testing.T) {
 	}
 	if strings.Contains(string(raw), `"severity"`) {
 		t.Fatalf("an unrated signal must omit severity from the wire, got %s", raw)
-	}
-}
-
-// A run's reply is enqueued ahead of an input that arrived after the run
-// finished, because the flush hook runs before each input: ops are claimed in
-// the order they were enqueued, so this is the order the thread reads in.
-func TestDeliverInputsInOrderFlushesEarlierWorkBeforeEachInput(t *testing.T) {
-	t0 := time.Now()
-	early := metav1.NewTime(t0.Add(-time.Minute))
-	late := metav1.NewTime(t0.Add(time.Minute))
-
-	conv := testConv("ordered-conv")
-	conv.Namespace = testNS
-	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "plain-desk"}}
-	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "plain-desk", ThreadID: "t-1"}}
-	origin := &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: "member-1", Entry: "worker"}
-	conv.Spec.Inputs = []agentopsv1alpha1.InputItem{
-		{ID: "first", Type: agentopsv1alpha1.InputTask, Payload: "first", ReceivedAt: early, Origin: origin},
-		{ID: "second", Type: agentopsv1alpha1.InputTask, Payload: "second", ReceivedAt: late, Origin: origin},
-	}
-
-	ch := nsChannel("plain-desk", "plain-ta")
-	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch).Build()
-	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
-
-	var flushed []time.Time
-	DeliverInputsInOrder(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv),
-		func(at time.Time) { flushed = append(flushed, at) })
-
-	if len(flushed) != 2 || !flushed[0].Equal(early.Time) || !flushed[1].Equal(late.Time) {
-		t.Fatalf("flush must run once before each input, in input order, got %v", flushed)
 	}
 }

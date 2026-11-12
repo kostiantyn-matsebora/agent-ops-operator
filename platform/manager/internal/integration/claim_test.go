@@ -277,6 +277,22 @@ func TestChannelOpsAnswersFromAnyReplicaSharingTheBus(t *testing.T) {
 	followerSrv.Ops = &chat.OpQueue{
 		Conversations: stores.Conversations, Runs: stores.Runs,
 		Registry: chat.NewRegistry(), Bus: leaderSrv.Ops.Bus,
+		// One queue per Channel: the follower never enqueued onto this one, so it
+		// finds the adapter's channels the way a restarted replica does — from the
+		// Kubernetes cache (cmd/manager wires the same lookup).
+		ChannelsFor: func(ctx context.Context, adapter string) []string {
+			var list agentopsv1alpha1.ChannelList
+			if err := k8sClient.List(ctx, &list, client.InNamespace(ns)); err != nil {
+				return nil
+			}
+			var names []string
+			for i := range list.Items {
+				if list.Items[i].Spec.Adapter == adapter {
+					names = append(names, list.Items[i].Name)
+				}
+			}
+			return names
+		},
 	}
 
 	rc := reconcilerAs(leaderSrv.Ops, "leader-a")

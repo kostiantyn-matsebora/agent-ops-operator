@@ -325,8 +325,8 @@ func TestEnsureTopicDoesNotDedupAcrossDifferentConversationsSharingAName(t *test
 		t.Fatal("first conversation's ensure-topic never queued")
 	}
 	// Settle the UNDERLYING bus task, not just the local mirror: the first
-	// and second conversation share the SAME Key (conversation NAME ×
-	// channel — outKey does not know about conv.ID), so a task left
+	// and second conversation share the SAME Key (conversation NAME,
+	// in the channel's one queue — outKey does not know about conv.ID), so a task left
 	// Running here would block the second one's claim regardless of its
 	// own, structurally distinct CommandID (design D-2's per-key
 	// serialization, same queue).
@@ -568,7 +568,7 @@ func TestFailedCloseTopicIsReDerivable(t *testing.T) {
 		t.Fatal("a retrying close-topic must not report settled yet")
 	}
 
-	backing.Advance(6 * time.Minute) // past out.stable's own 5s-5m backoff ceiling
+	backing.Advance(6 * time.Minute)                                // past out.stable's own 5s-5m backoff ceiling
 	q.EnqueueCloseTopic(ctx, ch, "9876", crRec(testConv("conv-1"))) // the reconciler's own re-derive
 	again := q.Claim("slack")
 	if again == nil {

@@ -28,7 +28,7 @@ func TestDeliveryPassToleratesACrashBetweenTheRunMarkerAndTheNote(t *testing.T) 
 	q := &OpQueue{Conversations: store, Runs: testRuns, Registry: NewRegistry(), Bus: testBus()}
 	r := &Router{Client: c, Reader: c, Conversations: store, Runs: testRuns, Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}
 
-	if err := testRuns.Append(ctx, "conv-1", state.Run{RunID: "run-1", Status: "ok"}); err != nil {
+	if err := testRuns.Append(ctx, "conv-1", state.Run{RunID: "run-1", Status: "ok", DeliveryTracked: true}); err != nil {
 		t.Fatal(err)
 	}
 	// The first write lands; the process dies before the second.
@@ -36,7 +36,7 @@ func TestDeliveryPassToleratesACrashBetweenTheRunMarkerAndTheNote(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	r.FanOutRunReply(ctx, recOf(t, store, "conv-1"), "run-1", AnswerMessage("a", "s"))
+	r.FanOutThread(ctx, recOf(t, store, "conv-1"))
 
 	if ops := drain(q, "slack"); len(ops) != 0 {
 		t.Fatalf("a reply recorded delivered must not be sent again, got %+v", ops)
@@ -66,11 +66,11 @@ func TestDeliveryPassResendsAReplyWhoseRunMarkerNeverLanded(t *testing.T) {
 	testRuns := newTestRuns(c)
 	q := &OpQueue{Conversations: store, Runs: testRuns, Registry: NewRegistry(), Bus: testBus()}
 	r := &Router{Client: c, Reader: c, Conversations: store, Runs: testRuns, Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}
-	if err := testRuns.Append(ctx, "conv-1", state.Run{RunID: "run-1", Status: "ok"}); err != nil {
+	if err := testRuns.Append(ctx, "conv-1", state.Run{RunID: "run-1", Status: "ok", DeliveryTracked: true}); err != nil {
 		t.Fatal(err)
 	}
 
-	r.FanOutRunReply(ctx, recOf(t, store, "conv-1"), "run-1", AnswerMessage("a", "s"))
+	r.FanOutThread(ctx, recOf(t, store, "conv-1"))
 
 	if ops := drain(q, "slack"); len(ops) != 1 {
 		t.Fatalf("an undelivered reply must be re-derived, got %+v", ops)

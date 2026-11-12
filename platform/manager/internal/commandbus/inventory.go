@@ -49,19 +49,20 @@ type Declaration struct {
 	Policy Policy
 }
 
-// OutFamily is the Queue DefaultInventory declares the "out.<channelType>"
-// queues' policies under (design D-5). A concrete queue like out.telegram
-// never appears in the inventory itself — see familyOf.
+// OutFamily is the Queue DefaultInventory declares the "out.<channel>"
+// queues' policies under (design D-5): one queue per Channel resource, named
+// for the Channel (out.console, out.home-telegram). A concrete queue never
+// appears in the inventory itself — see familyOf.
 const OutFamily Queue = "out"
 
 const outFamilyPrefix = "out."
 
 // familyOf maps a concrete runtime Queue to the Queue its Declaration is
-// filed under: every "out.<channelType>" queue shares the "out" family's
-// three kinds, because the channel types the manager will ever route
-// through are not a closed set the inventory can enumerate, while the
-// kinds of outbound send ARE (design D-5's three out.<type> rows). Every
-// other queue is its own family.
+// filed under: every "out.<channel>" queue shares the "out" family's
+// three kinds, because the Channels the manager will ever route through are
+// not a closed set the inventory can enumerate, while the kinds of outbound
+// send ARE (design D-5's three out.<channel> rows). Every other queue is its
+// own family.
 func familyOf(q Queue) Queue {
 	if strings.HasPrefix(string(q), outFamilyPrefix) {
 		return OutFamily
@@ -69,9 +70,11 @@ func familyOf(q Queue) Queue {
 	return q
 }
 
-// OutQueue names the queue one channel type's sends travel on.
-func OutQueue(channelType string) Queue {
-	return Queue(outFamilyPrefix + channelType)
+// OutQueue names the queue one Channel resource's sends travel on. The
+// argument is the Channel's name, not its adapter: an adapter serving several
+// Channels drains all of their queues.
+func OutQueue(channel string) Queue {
+	return Queue(outFamilyPrefix + channel)
 }
 
 // DefaultInventory is the closed queue inventory (design D-5), with its
@@ -123,8 +126,8 @@ func DefaultInventory() []Declaration {
 			},
 		},
 		{
-			// Key: conversation x channel. ensure-topic, run reply, input
-			// card, close-topic.
+			// Key: the conversation (the queue is the channel).
+			// ensure-topic, run reply, input card, close-topic.
 			Queue: OutFamily,
 			Kind:  KindOutStable,
 			Policy: Policy{
@@ -136,7 +139,7 @@ func DefaultInventory() []Declaration {
 			},
 		},
 		{
-			// Key: conversation x channel. Acks and notices — fire and
+			// Key: the conversation (the queue is the channel). Acks and notices — fire and
 			// forget, so a short TTL keeps a restart from delivering a
 			// stale one.
 			Queue: OutFamily,
@@ -150,7 +153,7 @@ func DefaultInventory() []Declaration {
 			},
 		},
 		{
-			// Key: conversation x channel. TTL approximates the
+			// Key: the conversation (the queue is the channel). TTL approximates the
 			// finalizer's own grace period — the two must be kept equal
 			// operationally. The constant here is a starting value;
 			// whatever constructs a Bus for the manager should override

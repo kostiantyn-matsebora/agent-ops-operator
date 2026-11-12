@@ -883,7 +883,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// re-derives the answer from reconciliation instead of losing it. The message
 	// is composed from the RECORDED run so both paths say the same thing.
 	if len(conv.ChannelRefs) > 0 && s.Router != nil {
-		s.Router.FanOutRunReply(ctx, &conv, d.RunID, chat.RunReplyMessage(&run))
+		s.Router.FanOutThread(ctx, &conv)
 	}
 	// A member's result becomes an input on its PARENT, one hop
 	// (coordination-loop) — the FAST PATH; a conversation with no causedBy has

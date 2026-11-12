@@ -348,9 +348,9 @@ role did not run. Left for whoever dispatches the cluster tier.
 
 ## 13. Per-channel queues, one fan-out point, console feed — backend-developer
 
-- [ ] 13.1 Key the `out` family per Channel resource, `out.<channel>`, keyed by conversation. An adapter drains the queues of every Channel that names it, so `/channel/ops?adapter=` is unchanged.
-- [ ] 13.2 Add one fan-out function recording a thread entry and enqueueing it to each bound channel's queue in causal order, less the surface that displayed it.
-- [ ] 13.3 Route inputs, run replies, escalations and notices through it. Remove the separate producers in the reconcile pass and the stopgap flush of run replies before later inputs. The reconciler stays the backstop and calls the same function.
+- [x] 13.1 Key the `out` family per Channel resource, `out.<channel>`, keyed by conversation. An adapter drains the queues of every Channel that names it, so `/channel/ops?adapter=` is unchanged.
+- [x] 13.2 Add one fan-out function recording a thread entry and enqueueing it to each bound channel's queue in causal order, less the surface that displayed it.
+- [x] 13.3 Route inputs, run replies, escalations and notices through it. Remove the separate producers in the reconcile pass and the stopgap flush of run replies before later inputs. The reconciler stays the backstop and calls the same function.
 - [ ] 13.4 Give each entry a per-channel sequence, and serve the console channel's queue over its one SSE stream in queue order.
 - [ ] 13.5 Resume: a reconnect naming the last acknowledged sequence replays every later entry. Acknowledgement is the existing `/channel/ops/{id}/done`, and an unacknowledged entry stays queued.
 - [ ] 13.6 Move the console to the stream. Telegram keeps its long-poll over the same per-channel queue.
@@ -374,8 +374,8 @@ was already real, already passing, and left alone. Three gaps closed:
 - [x] 10.4 The static import test, the error-code derivation table test and the leader-proxy exemption test.
 - [x] 10.5 The chart's render and guard tests for every permutation: default, URL, `memory`, each contradiction, credential precedence, `--is-upgrade`.
 - [x] 10.6 `go test` in every other module still passes, and `python3 .github/scripts/publication-guard.py` is clean.
-- [ ] 10.7 Unit-test the single fan-out point: an entry reaches each bound channel once less the displaying surface, and a run reply is enqueued before the corrective input its turn caused.
-- [ ] 10.8 Unit-test the per-channel queues: one channel not acknowledging never delays another channel of the same adapter type.
+- [x] 10.7 Unit-test the single fan-out point: an entry reaches each bound channel once less the displaying surface, and a run reply is enqueued before the corrective input its turn caused.
+- [x] 10.8 Unit-test the per-channel queues: one channel not acknowledging never delays another channel of the same adapter type.
 - [ ] 10.9 Unit-test the console feed: entries arrive in queue order with their sequence, a reconnect replays after the last acknowledged sequence, and an acknowledged entry is not delivered again.
 
 ## 11. System tests

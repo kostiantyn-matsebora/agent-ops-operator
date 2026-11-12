@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strconv"
@@ -14,9 +15,10 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
@@ -247,6 +249,24 @@ func main() {
 	ops := &chat.OpQueue{
 		Conversations: stores.Conversations, Runs: stores.Runs, Registry: registry, Activity: acts,
 		Bus: bus, Concurrency: commandBusConsumerConcurrency(),
+	}
+	// One queue per Channel resource (design D-10): an adapter's poll drains the
+	// queue of every Channel naming it. The informer cache answers which, so a
+	// replica that has just restarted claims at once instead of waiting for the
+	// bus feed to show it a channel.
+	ops.ChannelsFor = func(ctx context.Context, adapter string) []string {
+		var list agentopsv1alpha1.ChannelList
+		if err := mgr.GetClient().List(ctx, &list, client.InNamespace(namespace)); err != nil {
+			setupLog.Error(err, "list channels for the adapter's queues", "adapter", adapter)
+			return nil
+		}
+		var names []string
+		for i := range list.Items {
+			if list.Items[i].Spec.Adapter == adapter {
+				names = append(names, list.Items[i].Name)
+			}
+		}
+		return names
 	}
 	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: namespace, Ops: ops, Activity: acts}
 	controlURL := env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080")
