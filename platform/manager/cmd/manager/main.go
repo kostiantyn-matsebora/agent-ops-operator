@@ -15,12 +15,14 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/consumer"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
@@ -212,12 +214,15 @@ func main() {
 
 	// Opening the command bus itself needs mgr, for the nats backend's
 	// readiness check (task 4.3) — the backend name and the replica refusal
-	// were already settled above, before mgr even existed. No real
-	// consumer.Pool is registered against the returned Bus yet — a later
-	// change wires the ensure-topic/send/close-topic/delete-conversation/
-	// signal-intake handlers in and registers one pool per queue (tasks
-	// 5/6), the only remaining step this Bus value needs.
-	if _, err := newCommandBus(mgr, namespace, commandBusBackend); err != nil {
+	// were already settled above, before mgr even existed. The returned Bus
+	// is captured and handed to both the HTTP API (its accept handlers'
+	// Submit side) and the "conv" queue's consumer.Pool (its own Claim/
+	// Settle/Fail side, registered once api.HandleConvTask exists below) —
+	// task 5's wiring. The "in.signal" queue carries no producer or
+	// consumer yet: no accept handler in this change enqueues onto it — see
+	// this change's hand-back report for why.
+	bus, err := newCommandBus(mgr, namespace, commandBusBackend)
+	if err != nil {
 		setupLog.Error(err, "command bus", "backend", commandBusBackend)
 		os.Exit(1)
 	}
@@ -356,6 +361,12 @@ func main() {
 		// The timer closes through the SAME path /close does, which is why the
 		// reconciler holds the router at all.
 		Router: router,
+		// async-command-bus (task 5.4): the idle timer's auto-close and the
+		// deadline budget edge enqueue a "conv" task instead of calling the
+		// Router directly when this is set — nil here only for a reconciler
+		// a test builds without one, which keeps calling the Router inline
+		// exactly as it always has.
+		Bus: bus,
 		// durable-chat-ops-broker: this reconciler runs only while this process
 		// holds the leader-election Lease, so any claim written under a
 		// DIFFERENT identity is, by construction, a former leader's — there is
@@ -513,9 +524,33 @@ func main() {
 		// channel-ops poll (503) instead of answering from an OpQueue the
 		// leader-gated reconciler never populated on this process.
 		ReplicaIdentity: replicaIdentity,
+		// async-command-bus (task 5.1): every accept handler's Submit side,
+		// and HandleConvTask below is the "conv" queue's own consumer.Pool
+		// Handler.
+		Bus: bus,
 	}
 	if err := mgr.Add(api); err != nil {
 		setupLog.Error(err, "http api")
+		os.Exit(1)
+	}
+
+	// The "conv" queue's consumer.Pool (async-command-bus task 5.1-5.3/5.5/
+	// 5.6): runs on EVERY replica, never gated on the leader-election Lease
+	// the chat/signal reconcilers still use — that is the whole point of
+	// moving this work off a leader-only path. Concurrency is the one knob
+	// commandBusConsumerConcurrency already resolves for every pool this
+	// process runs (cmd/manager/commandbus.go, task 4.2's own wiring,
+	// unused until now).
+	convPool, err := consumer.New(consumer.Config{
+		Bus: bus, Queue: httpapi.ConvQueue, Handler: api.HandleConvTask,
+		Concurrency: commandBusConsumerConcurrency(),
+	})
+	if err != nil {
+		setupLog.Error(err, "conv task consumer")
+		os.Exit(1)
+	}
+	if err := mgr.Add(manager.RunnableFunc(convPool.Run)); err != nil {
+		setupLog.Error(err, "conv task consumer")
 		os.Exit(1)
 	}
 

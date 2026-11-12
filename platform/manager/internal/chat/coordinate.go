@@ -11,7 +11,6 @@ package chat
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -801,8 +800,17 @@ func (r *Router) Escalate(ctx context.Context, conv *state.ConversationRecord, m
 		if err := r.closeWithCascade(ctx, conv, message); err != nil {
 			return err
 		}
-		return r.AppendMemberResult(ctx, conv.CausedBy, conv.Name,
-			"escalate:"+conv.Name+":"+strconv.FormatInt(time.Now().UnixNano(), 36), message)
+		// STABLE, not clock-based (async-command-bus design D-8): a member
+		// escalates at most once in its lifetime — closeWithCascade above
+		// makes it inert the moment this runs — so the append id needs
+		// nothing finer than the member's own name to stay unique, and
+		// unlike time.Now().UnixNano() it is IDENTICAL on a redelivery of
+		// this same call (a retried /work/done report, a re-claimed
+		// commandbus task), which is what makes appendInputIdempotent's
+		// dedup actually dedup rather than append the result twice. The bug
+		// this replaces: the old id embedded time.Now(), so every redelivery
+		// minted a fresh id and the dedup check never matched anything.
+		return r.AppendMemberResult(ctx, conv.CausedBy, conv.Name, "escalate:"+conv.Name, message)
 	}
 	if conv.EscalatedAt != nil {
 		return nil // already escalated: no replayed digest

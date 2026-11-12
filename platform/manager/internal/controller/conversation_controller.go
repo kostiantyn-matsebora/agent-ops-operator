@@ -33,6 +33,8 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/convtask"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
@@ -184,6 +186,13 @@ type ConversationReconciler struct {
 	// re-dispatches — the SAME leader's own claim running legitimately slow,
 	// never a second writer. Zero means DefaultClaimStalenessSeconds.
 	ClaimStaleness time.Duration
+	// Bus is the command bus (async-command-bus task 5.4): when set, the
+	// idle timer's auto-close and the deadline budget edge ENQUEUE a "conv"
+	// task instead of calling Router.AutoCloseConversation/
+	// CloseBudgetExceeded inline. Nil (tests, a reconciler built without
+	// one) keeps today's exact inline behaviour — this field only adds a
+	// path, it never removes the old one.
+	Bus commandbus.Bus
 }
 
 // DefaultClaimStalenessSeconds is the fallback claim staleness bound when the
@@ -247,7 +256,7 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if budget := conv.Budget; budget != nil && budget.Deadline != nil && r.Router != nil {
 		if !budget.Deadline.After(time.Now()) {
 			digest := fmt.Sprintf("budget-exceeded: deadline (%s) passed", budget.Deadline.Format(time.RFC3339))
-			return ctrl.Result{}, r.Router.CloseBudgetExceeded(ctx, &conv, digest)
+			return ctrl.Result{}, r.closeBudgetExceeded(ctx, &conv, digest)
 		}
 		deadlineRequeue = time.Until(*budget.Deadline)
 	}
@@ -481,7 +490,47 @@ func (r *ConversationReconciler) autoClose(ctx context.Context, conv *state.Conv
 	}
 	log.FromContext(ctx).Info("auto-closing an idle finished conversation",
 		"conversation", conv.Name, "idleFor", idle.Round(time.Minute), "window", r.AutoCloseIdleAge)
-	return ctrl.Result{}, r.Router.AutoCloseConversation(ctx, conv, idle)
+	return ctrl.Result{}, r.autoCloseConversation(ctx, conv, idle)
+}
+
+// closeBudgetExceeded and autoCloseConversation (async-command-bus task
+// 5.4): ENQUEUE a "conv" task when r.Bus is set, falling back to calling
+// chat.Router directly, inline, exactly as this reconciler always has, when
+// it is not (nil: every existing test, and any install that has not wired
+// one). Both close kinds carry the EXACT same cascade chat.Router.
+// CloseBudgetExceeded/AutoCloseConversation already perform — this only
+// moves WHEN they run, on the conversation's own name as Key, consistent
+// with every other "conv" verb (internal/httpapi/accept.go's own table).
+func (r *ConversationReconciler) closeBudgetExceeded(ctx context.Context, conv *state.ConversationRecord, digest string) error {
+	if r.Bus == nil {
+		return r.Router.CloseBudgetExceeded(ctx, conv, digest)
+	}
+	_, err := r.Bus.Submit(ctx, commandbus.SubmitRequest{
+		Queue:     convtask.Queue,
+		CommandID: commandbus.CommandID("budget-exceeded:" + conv.Name),
+		Key:       commandbus.Key(conv.Name),
+		Payload: convtask.Payload{
+			Verb: convtask.VerbClose, Conversation: conv.Name,
+			CloseKind: convtask.CloseBudgetExceeded, Reason: digest,
+		}.Encode(),
+	})
+	return err
+}
+
+func (r *ConversationReconciler) autoCloseConversation(ctx context.Context, conv *state.ConversationRecord, idle time.Duration) error {
+	if r.Bus == nil {
+		return r.Router.AutoCloseConversation(ctx, conv, idle)
+	}
+	_, err := r.Bus.Submit(ctx, commandbus.SubmitRequest{
+		Queue:     convtask.Queue,
+		CommandID: commandbus.CommandID("auto-close:" + conv.Name),
+		Key:       commandbus.Key(conv.Name),
+		Payload: convtask.Payload{
+			Verb: convtask.VerbClose, Conversation: conv.Name,
+			CloseKind: convtask.CloseAuto, IdleForMS: idle.Milliseconds(),
+		}.Encode(),
+	})
+	return err
 }
 
 // finished reports whether a conversation has nothing left to do. It gates

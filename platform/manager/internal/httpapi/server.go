@@ -65,8 +65,10 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 	controlplane "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/control-plane"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/convtask"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
@@ -107,6 +109,14 @@ type Server struct {
 	Ops          *chat.OpQueue
 	Router       *chat.Router
 	AdapterToken string
+
+	// Bus is the command bus (async-command-bus design D-9) every accept
+	// handler durably enqueues onto instead of doing the work inline, and
+	// the registered consumer.Pool(s) (cmd/manager) claim from to run
+	// HandleConvTask. Required by every handler in accept.go/convtasks.go —
+	// a zero-valued Server built for a test that does not exercise one of
+	// them never dereferences it.
+	Bus commandbus.Bus
 
 	// ControlPlaneToken guards /control-plane/* (internal/control-plane). A
 	// single flat shared secret, its OWN env var (CONTROL_PLANE_TOKEN) —
@@ -211,6 +221,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /state/conversations/{name}", s.stateAuth(s.handleStateConversationGet))
 	mux.HandleFunc("GET /state/signals", s.stateAuth(s.handleStateSignalsList))
 	mux.HandleFunc("GET /state/signals/stream", s.stateAuth(s.handleStateSignalsStream))
+	// async-command-bus task 5.8: read-only, same /state/* token scheme.
+	mux.HandleFunc("GET /state/tasks", s.stateAuth(s.handleStateTasksList))
+	mux.HandleFunc("GET /state/tasks/stream", s.stateAuth(s.handleStateTasksStream))
+	mux.HandleFunc("GET /state/tasks/{id}", s.stateAuth(s.handleStateTaskGet))
+	mux.HandleFunc("GET /state/dead-letters", s.stateAuth(s.handleStateDeadLetters))
 	mux.HandleFunc("GET /activity", s.anyAdapterAuth(s.handleActivity))
 	mux.HandleFunc("GET /activity/stream", s.anyAdapterAuth(s.handleActivityStream))
 	mux.HandleFunc("POST /activity", s.anyAdapterAuth(s.handleActivityReport))
@@ -866,9 +881,18 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// Budget edges are evaluated PER COORDINATOR LEVEL (design D-E): only a
 	// conversation that is itself a Coordinator's root carries a Budget, and
 	// only ITS OWN maxTurns bounds ITS OWN turns.
-	if maxTurnsExceeded && s.Router != nil {
+	//
+	// async-command-bus task 5.4: this call lands AFTER s.recordRun above —
+	// confirmed, not just assumed, by reading the lines between them — so
+	// enqueuing it as a "conv" task here (when s.Bus is set) never races the
+	// run being recorded; a retried /work/done redelivery re-enters this
+	// same block, recordRun's own de-duplication already makes THAT
+	// idempotent, and the close task is submitted under a CommandID stable
+	// per conversation, so a redelivery resubmits the SAME suppressed id
+	// rather than a second one.
+	if maxTurnsExceeded {
 		digest := fmt.Sprintf("budget-exceeded: maxTurns (%d) reached", conv.Budget.MaxTurns)
-		if err := s.Router.CloseBudgetExceeded(ctx, &conv, digest); err != nil {
+		if err := s.closeBudgetExceeded(ctx, &conv, digest); err != nil {
 			log.FromContext(ctx).Info("closing conversation on maxTurns",
 				"conversation", conv.Name, "error", err.Error())
 		}
@@ -1391,16 +1415,28 @@ func (s *Server) reachConversation(w http.ResponseWriter, r *http.Request) (*sta
 	return nil, false
 }
 
+// handleConversationReopen accepts and enqueues (async-command-bus design
+// D-9): the binding check (reachConversation) is the one cheap read accept
+// keeps. "Not Closed", "a successor is already open" and "a dangling ref"
+// all used to answer 409 here; they are all PRECONDITION_FAILED now (design
+// D-6: terminal, never retried) and surface on /state/tasks rather than in
+// this response, which is the breaking change task 5.1/proposal.md names.
 func (s *Server) handleConversationReopen(w http.ResponseWriter, r *http.Request) {
 	conv, ok := s.reachConversation(w, r)
 	if !ok {
 		return
 	}
-	if err := s.Router.ReopenConversation(r.Context(), conv); err != nil {
-		writeJSON(w, 409, map[string]string{"error": err.Error()})
+	resp, err := s.acceptAndEnqueue(r.Context(), commandbus.SubmitRequest{
+		Queue:     ConvQueue,
+		CommandID: commandbus.CommandID("reopen:" + conv.Name),
+		Key:       commandbus.Key(conv.Name),
+		Payload:   convtask.Payload{Verb: convtask.VerbReopen, Conversation: conv.Name}.Encode(),
+	})
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, 202, map[string]bool{"ok": true})
+	writeJSON(w, 202, map[string]any{"ok": true, "invocationId": resp.InvocationID, "taskIds": resp.TaskIDs})
 }
 
 // handleConversationDelete reclaims a CLOSED conversation for good.
@@ -1408,13 +1444,30 @@ func (s *Server) handleConversationReopen(w http.ResponseWriter, r *http.Request
 // It refuses anything not already closed rather than closing it first: a
 // close-then-delete verb would let one call do the irreversible thing to a
 // conversation that was still working, with the confirmation naming only the
-// delete. Refusing makes the destructive step something ordered twice.
+// delete. Refusing makes the destructive step something ordered twice — and
+// per design D-9 this refusal "depends only on a cheap read", so it STAYS
+// IMMEDIATE (409), unlike every other outcome below it.
 //
-// Deleting now cascades to every conversation reachable from it by
-// causedBy, mirroring the close cascade (conversation-close): a
-// coordination's members must never be left orphaned, unreachable and
-// occupying the API after their root is gone.
+// async-command-bus task 5.7/D-6: a conversation already gone is the outcome
+// a delete wanted, so an ABSENT target succeeds too — checked before the
+// binding lookup, which has nothing to authorise a delete against once the
+// record itself is gone.
+//
+// async-command-bus task 5.10/D-7: deleting now ENQUEUES a cascade over
+// every already-closed descendant reachable by causedBy, one task per
+// conversation, DEEPEST-FIRST, ending with the target itself — all sharing
+// the target's own name as Key, so the bus serialises them and the target
+// is never claimed before its own descendants have settled.
 func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if _, _, err := s.Conversations.Get(r.Context(), state.Key(name)); err != nil {
+		if errors.Is(err, state.ErrNotFound) {
+			writeJSON(w, 202, map[string]any{"ok": true, "invocationId": "", "taskIds": []string{}})
+			return
+		}
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
 	conv, ok := s.reachConversation(w, r)
 	if !ok {
 		return
@@ -1425,45 +1478,68 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 				"which are the only durable copy of what the agent answered", conv.Name, phaseOrOpen(conv))})
 		return
 	}
-	if err := s.cascadeDeleteMembers(r.Context(), conv.Name); err != nil {
+	reqs, err := s.deleteCascadeRequests(r.Context(), conv.Name)
+	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := s.Conversations.Delete(r.Context(), state.Key(conv.Name)); err != nil {
+	resp, err := s.acceptAndEnqueue(r.Context(), reqs...)
+	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, 202, map[string]bool{"ok": true})
+	writeJSON(w, 202, map[string]any{"ok": true, "invocationId": resp.InvocationID, "taskIds": resp.TaskIDs})
 }
 
-// cascadeDeleteMembers recursively deletes every conversation reachable from
-// parentName by causedBy, BEFORE parentName itself is deleted — the same
-// label the close cascade filters on (`chat.cascadeCloseMembers`), confirmed
-// against causedBy.parent rather than trusted: the label is a HINT, the
-// field is the FACT.
-//
-// Every descendant this reaches is already Closed by the time its ancestor
-// is, because the close cascade closes a whole subtree before any of it can
-// be deleted — so there is no "not yet closed" case to refuse here, and
-// NotFound is tolerated: some other path may already have deleted it.
-func (s *Server) cascadeDeleteMembers(ctx context.Context, parentName string) error {
-	members, err := s.Conversations.List(ctx, state.ByCausedBy, parentName)
+// deleteCascadeRequests lists rootName's own causedBy subtree (chat.Router.
+// Descendants: current state, any depth) and turns it into one
+// commandbus.SubmitRequest per conversation, DEEPEST-FIRST post-order,
+// rootName itself last — task 5.10's exact ordering. Every descendant this
+// reaches is already Closed by the time its ancestor is (the close cascade
+// closes a whole subtree before any of it can be deleted), so there is no
+// "not yet closed" case to refuse here.
+func (s *Server) deleteCascadeRequests(ctx context.Context, rootName string) ([]commandbus.SubmitRequest, error) {
+	descendants, err := s.Router.Descendants(ctx, rootName)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for i := range members {
-		member := &members[i]
-		if member.CausedBy == nil || member.CausedBy.Parent != parentName {
-			continue // the index is a hint; the field is the fact
-		}
-		if err := s.cascadeDeleteMembers(ctx, member.Name); err != nil {
-			return err
-		}
-		if err := s.Conversations.Delete(ctx, state.Key(member.Name)); err != nil {
-			return err
+	names := deleteCascadeOrder(rootName, descendants)
+	reqs := make([]commandbus.SubmitRequest, 0, len(names))
+	for _, name := range names {
+		reqs = append(reqs, commandbus.SubmitRequest{
+			Queue:     ConvQueue,
+			CommandID: commandbus.CommandID("delete:" + name),
+			Key:       commandbus.Key(rootName),
+			Payload:   convtask.Payload{Verb: convtask.VerbDelete, Conversation: name}.Encode(),
+		})
+	}
+	return reqs, nil
+}
+
+// deleteCascadeOrder turns a flat descendant list into deepest-first
+// post-order, rootName last — a child's own children are visited (and so
+// ordered) before it, and rootName is visited only once every other name
+// has been. Built from causedBy.Parent alone (the index chat.Router.
+// Descendants already resolved it against is a hint, never trusted twice
+// here).
+func deleteCascadeOrder(rootName string, descendants []state.ConversationRecord) []string {
+	children := map[string][]string{}
+	for i := range descendants {
+		d := &descendants[i]
+		if d.CausedBy != nil {
+			children[d.CausedBy.Parent] = append(children[d.CausedBy.Parent], d.Name)
 		}
 	}
-	return nil
+	var out []string
+	var visit func(name string)
+	visit = func(name string) {
+		for _, child := range children[name] {
+			visit(child)
+		}
+		out = append(out, name)
+	}
+	visit(rootName)
+	return out
 }
 
 func phaseOrOpen(conv *state.ConversationRecord) string {
@@ -1473,6 +1549,23 @@ func phaseOrOpen(conv *state.ConversationRecord) string {
 	return conv.Phase
 }
 
+// handleChannelInbound is the accept half of an inbound chat reply
+// (async-command-bus design D-9): the thread-to-conversation lookup step 6
+// names is chat.Router.ConversationByThread, run HERE rather than inside
+// the eventual task, because it IS the task's own Key. Three outcomes need
+// no task at all — a cheap read already answers them completely:
+//
+//   - empty text, or an unbound thread: dropped, exactly as before, 202.
+//   - the self-input loop guard (coordination-loop): refused immediately,
+//     400 — unchanged from the synchronous error this endpoint always gave.
+//   - a CLOSED conversation: the read-only notice is enqueued right here
+//     (chat.ClosedConversationNotice, the same text HandleMessage's own
+//     closed branch would send on a race), 202, no task — nothing about the
+//     conversation changes, so there is nothing to defer.
+//
+// Anything else enqueues ONE "conv" task (taskInboundMessage,
+// convtasks.go), which replays chat.Router.HandleMessage wholesale — see
+// that function's own doc comment for why it is not split further.
 func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var in inboundReq
@@ -1496,15 +1589,43 @@ func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
 		forbidScope(w)
 		return
 	}
-	if err := s.Router.HandleMessage(ctx, &ch, chat.InboundMessage{ThreadID: in.ThreadID, Text: in.Text, Sender: in.Sender}); err != nil {
-		if errors.Is(err, chat.ErrSelfInput) {
-			writeJSON(w, 400, map[string]string{"error": err.Error()})
-			return
-		}
+	text := strings.TrimSpace(in.Text)
+	if text == "" {
+		writeJSON(w, 202, map[string]bool{"ok": true}) // nothing to act on — same silent no-op as before
+		return
+	}
+	conv, err := s.Router.ConversationByThread(ctx, &ch, *in.ThreadID)
+	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, 202, map[string]bool{"ok": true})
+	if conv == nil {
+		writeJSON(w, 202, map[string]bool{"ok": true}) // dropped by contract (IN-2): no conversation bound to this thread
+		return
+	}
+	if ch.Name == conv.Name {
+		writeJSON(w, 400, map[string]string{"error": chat.ErrSelfInput.Error()})
+		return
+	}
+	if conv.Phase == state.PhaseClosed {
+		s.Ops.EnqueueMessage(ctx, &ch, conv, in.ThreadID, chat.ClosedConversationNotice())
+		writeJSON(w, 202, map[string]bool{"ok": true})
+		return
+	}
+	resp, err := s.acceptAndEnqueue(ctx, commandbus.SubmitRequest{
+		Queue:     ConvQueue,
+		CommandID: inboundMessageCommandID(r.Header.Get("Idempotency-Key"), ch.Name, *in.ThreadID, text, in.Sender),
+		Key:       commandbus.Key(conv.Name),
+		Payload: convtask.Payload{
+			Verb: convtask.VerbInboundMessage, Conversation: conv.Name,
+			Channel: ch.Name, ThreadID: in.ThreadID, Text: in.Text, Sender: in.Sender,
+		}.Encode(),
+	})
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 202, map[string]any{"ok": true, "invocationId": resp.InvocationID, "taskIds": resp.TaskIDs})
 }
 
 func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {

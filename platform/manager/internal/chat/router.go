@@ -128,9 +128,7 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	// every bound channel, which is a decision, not something a stray "thanks"
 	// in an archived topic should trigger.
 	if conv.Phase == state.PhaseClosed {
-		r.Ops.EnqueueMessage(ctx, ch, conv, msg.ThreadID, Notice(
-			"This conversation is closed, so nothing here reaches the agent. "+
-				"Reopen it from the console to continue with its history."))
+		r.Ops.EnqueueMessage(ctx, ch, conv, msg.ThreadID, ClosedConversationNotice())
 		return nil
 	}
 	// /exit releases the runtime and keeps the conversation. Intercepted for the
@@ -751,6 +749,24 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		InputID: conv.Inputs[0].ID, Detail: title,
 	})
 	return conv, nil
+}
+
+// ClosedConversationNotice is the fixed reply a message into a Closed
+// conversation's thread gets — read-only, no state change, which is what
+// lets httpapi's accept step (async-command-bus design D-9) answer it
+// immediately, with no task, exactly as HandleMessage's own closed branch
+// does when it reaches the same state on a race.
+func ClosedConversationNotice() Message {
+	return Notice("This conversation is closed, so nothing here reaches the agent. " +
+		"Reopen it from the console to continue with its history.")
+}
+
+// ConversationByThread is convByThread's public entry: the thread-to-
+// conversation lookup an async accept step (design D-9 step 6) needs BEFORE
+// enqueuing, to learn the task's own Key and to make the cheap refusals
+// (self-input, a closed thread) immediate rather than deferred.
+func (r *Router) ConversationByThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string) (*state.ConversationRecord, error) {
+	return r.convByThread(ctx, ch, threadID)
 }
 
 // convByThread resolves a (channel, thread) pair to its conversation. Thread
