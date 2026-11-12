@@ -32,7 +32,7 @@ you gave it. **Treat the agent container as untrusted code with a shell.**
 | **4** agent → Secrets | reads any Secret by creating or entering a pod | [pod execution disabled](#secret-exposure) — **on** |
 | **5** agent → context volume | reads another conversation's context | [no mount of the volume](#context-isolation) — **on** |
 | **6** agent → pod logs | conversation content readable with `pods/log` | **none** — [residual risk](#residual-risk) |
-| **7** any pod → state server | reads or writes conversation state directly, bypassing the manager's own authorization | [state store isolation](#state-store-isolation) — **on** (credential), **off** (network policy) |
+| **7** any pod → state or bus server | reads or writes conversation state, or a task, directly, bypassing the manager's own authorization | [state store isolation](#state-store-isolation) / [command bus isolation](#command-bus-isolation) — **on** (credential), **off** (network policy) |
 
 **Nothing in the cluster is granted by default.** A route naming no identity runs
 as an account bound to nothing. Acting power is something a route opts into, by
@@ -197,6 +197,28 @@ route to the server at all.
 
 **Under `kube`** this crossing does not exist. State is the Kubernetes API,
 and crossing 3's authorization is what bounds it instead.
+
+### Command bus isolation
+
+Under the default `nats` backend, accepted work sits on a clustered server
+of its own, structurally the same shape as the state store above and
+sharing its crossing in the threat table and diagram.
+
+| | |
+|---|---|
+| **Threat** | crossing 7 — any pod that reaches the bus server reads or submits a task directly, bypassing the manager's own accept step |
+| **Control** | the client port always requires its own chart-managed credential, distinct from the state store's. Where network policy is enabled, it admits the manager's pods alone |
+| **Cost** | none beyond the install's existing network-policy decision |
+| **Residual risk** | the same as the state store's: one shared credential, and a policy that applies where nothing enforces it |
+
+Every other component reaches accepted work through the manager's
+`/state/tasks*`/`/state/dead-letters` surface instead, never the bus
+server directly.
+
+**Setting `commandBus.backend: memory`** removes this crossing entirely —
+the ledger then lives in the manager's own process, reachable by nothing
+outside it. It is refused above one replica (see
+[Configuration](configuration.md#commandbus)).
 
 ---
 

@@ -455,21 +455,87 @@ did not run. Left for whoever dispatches the cluster tier (11.7).
 
 ## 12. Documentation
 
+Written against the ACTUAL shipped state of sections 1-11, not the design
+doc's aspirational target.
+
+The named deviations are stated plainly in `contracts.md`,
+`configuration.md`, `concepts.md`, the guide and the changelog, never
+glossed over:
+
+- `/signal/inbound` stays synchronous.
+- A plain `/close` and a caused `escalate` stay wholesale inside one task.
+- Per-queue tuning has no chart value.
+- `claimStalenessSeconds` is inert.
+
+Two already-stale spots unrelated to this task's own prose were fixed along
+the way. `contracts.md`'s "`/channel/ops` still requires the leader proxy"
+line and `invariants.md`'s matching row were both wrong once section 7
+landed. `concepts.md`'s state-restart table still described
+`status.threads[].claim` as live.
+
 ### 12.1 Reference docs
 
-- [ ] 12.1.1 `docs/concepts.md`: where work and state live, and what a reply means.
-- [ ] 12.1.2 `docs/contracts.md`: the accept semantics of each endpoint, `/state/tasks` and `/state/dead-letters`.
-- [ ] 12.1.3 `docs/configuration.md`: `commandBus.*`.
-- [ ] 12.1.4 `docs/security.md`: the new trust boundary and its control, then re-run `threat-model.py`.
-- [ ] 12.1.5 `docs/testing.md`: the bus conformance suite, the new lanes and the end-to-end flows.
-- [ ] 12.1.6 `docs/CHANGELOG.md`: the semantic change and upgrade notes, newest first.
-- [ ] 12.1.7 A `docs/guides/` page for the bundle.
-- [ ] 12.1.8 `.claude/rules/structure.md`, `invariants.md`, `gotchas.md`, `terminology.md`.
-- [ ] 12.1.9 Re-run `python3 .github/scripts/docs-generate.py`, because chart values changed.
+- [x] 12.1.1 `docs/concepts.md`: where work and state live, and what a reply means.
+  Added the command bus ledger as a third declared bounded/lossy state home,
+  retired the `claim` sub-bullet and table row, added the accepted-work
+  table row, and a pointer from "Ending a conversation" to the new
+  accept/process split.
+- [x] 12.1.2 `docs/contracts.md`: the accept semantics of each endpoint, `/state/tasks` and `/state/dead-letters`.
+  New "Accept and process" section with the full per-endpoint table, the
+  new `/state/tasks*`/`/state/dead-letters` rows, and the leader-proxy
+  exemption fix above.
+- [x] 12.1.3 `docs/configuration.md`: `commandBus.*`.
+  New "Command bus" subsection mirroring "State store"'s own shape, plus
+  fixes to the now-stale `replicas` and `claimStalenessSeconds` rows under
+  Capacity.
+- [x] 12.1.4 `docs/security.md`: the new trust boundary and its control, then re-run `threat-model.py`.
+  New "Command bus isolation" subsection, folded into crossing 7 (same
+  shape as the state store's own) rather than minting a new numbered
+  crossing. Diagram regenerated and screenshotted to confirm the relabeled
+  "state & bus servers" node still fits its box.
+- [x] 12.1.5 `docs/testing.md`: the bus conformance suite, the new lanes and the end-to-end flows.
+  Two new sections mirroring the state store's own "conformance suite" /
+  "system lanes" pair, naming both test files from sections 9 and 11 and
+  stating plainly that neither has run against a real cluster yet.
+- [x] 12.1.6 `docs/CHANGELOG.md`: the semantic change and upgrade notes, newest first.
+  Added to the existing `[Unreleased]` entry's `Added`/`Changed`/`Upgrade`
+  sections — this change ships alongside others already accumulated there,
+  not as its own version.
+- [x] 12.1.7 A `docs/guides/` page for the bundle.
+  `docs/guides/command-bus.md`, new (no existing guide was bundle-shaped to
+  mirror — every other guide page is about a CRD kind). Added to
+  `_data/nav.yml`. Its own `next` points at the configuration reference,
+  not into the guide sequence, since this is an operational topic rather
+  than a learning-order step.
+- [x] 12.1.8 `.claude/rules/structure.md`, `invariants.md`, `gotchas.md`, `terminology.md`.
+  Added `internal/commandbus/` to `structure.md`'s package table. Fixed
+  `invariants.md`'s stale leader-proxy row and added two new invariant rows
+  (the ledger as a third state home, accept-means-accepted). Added five new
+  rows to `gotchas.md` (the `selfSeq` mirror race, the Watermill spike
+  finding, the dot-named-queue restriction, the nil-Bus harness panic, the
+  coordinate-close authorization-ordering bug). **`terminology.md` left
+  untouched, deliberately**: its table is retirements-with-replacements,
+  and task/invocation/ledger/dead-letter are new vocabulary, not a renamed
+  old term — they belong in the files that define them, which they already
+  are.
+- [x] 12.1.9 Re-run `python3 .github/scripts/docs-generate.py`, because chart values changed.
+  Clean both before and after — the new guide's `renders bundle=commandbus`
+  block generated correctly on the first pass.
 
 ### 12.2 Adopter site
 
-- [ ] 12.2.1 `docs/installation.md`: the new workload and volumes, and uninstall residue.
-- [ ] 12.2.2 `docs/getting-started.md`, `docs/introduction.md` and the landing page, wherever they say a close or delete returns when the work is done.
-- [ ] 12.2.3 `README.md`: the component list, within its line budget.
-- [ ] 12.2.4 The console UI is not touched, so `npm run screenshots` and `npm run demo` do not apply.
+- [x] 12.2.1 `docs/installation.md`: the new workload and volumes, and uninstall residue.
+  Added the bus bundle to the same "next release" paragraph describing the
+  state-store bundle's own arrival, a storage-class row, and the bundle's
+  volumes to the `helm uninstall` residue paragraph.
+- [x] 12.2.2 `docs/getting-started.md`, `docs/introduction.md` and the landing page, wherever they say a close or delete returns when the work is done.
+  Searched all three directly. None describes a close/delete/reset-context
+  call's reply as meaning the work finished — nothing to change.
+- [x] 12.2.3 `README.md`: the component list, within its line budget.
+  README's component list never goes past top-level directories
+  (`platform/manager/` etc.). No new top-level directory was added —
+  nothing to change.
+- [x] 12.2.4 The console UI is not touched, so `npm run screenshots` and `npm run demo` do not apply.
+  Confirmed with `git diff --stat` from this change's own branch point —
+  zero files under `platform/console/ui/` touched by any of this change's
+  own commits.

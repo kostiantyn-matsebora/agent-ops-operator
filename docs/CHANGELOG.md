@@ -74,6 +74,19 @@ for the source and the reference material beside this file.
   credential guarding `/state/*` for a caller that is not an adapter —
   today, housekeeping. Generated the same way as `adapterAuth` and
   `controlPlaneAuth`, and refused at render if it equals either.
+- A new command bus, `platform/manager/internal/commandbus/`, independent of
+  the state store: accepts work durably, runs it later on any replica, and
+  records what became of it. Two backends, `nats` and `memory`, pass one
+  conformance suite and bench.
+- A new `commandBus.backend` values key (default `nats`), its own
+  three-server bundle (`commandBus.nats.*`), chart-managed credential and
+  NetworkPolicy rule, independent of `stateStore.backend`. `memory` is for
+  tests and local development, refused above one manager replica.
+- A new read-only surface: `GET /state/tasks` (per-queue statistics),
+  `GET /state/tasks/{id}`, `GET /state/tasks/stream` and
+  `GET /state/dead-letters`, on the existing `/state/*` token scheme.
+- `GET /channel/ops` and `POST /channel/ops/{id}/done` are now answered by
+  any manager replica. Both used to proxy to the leader.
 
 ### Changed
 
@@ -146,6 +159,23 @@ for the source and the reference material beside this file.
   A route granting none sees none. Per-call enforcement is unchanged.
 - The `aops` tool descriptions say which tools are moves and which are reads.
 - A cascading close closes descendants before the ancestor.
+- **BREAKING (semantic): `close`, `exit`, `reopen`, `delete`, `reset-context`
+  and `escalate` now mean accepted, not performed.** `POST
+  /channel/conversations/{name}/reset-context` moves from `200` to `202`.
+  Every other converted endpoint keeps its existing status and gains
+  `invocationId`/`taskIds` in its body. A caller that needs the outcome
+  reads `/state/tasks/{id}`.
+- `delete` now cascades deepest-first as one task per conversation, instead
+  of one request walking the whole subtree inline.
+- A reopen naming a conversation with a missing profile, and a
+  `/coordinate/close` outside its caller's widened bound, used to answer
+  `409`/`403` immediately. Both now accept and the task dies with
+  `precondition_failed` or `forbidden`.
+- `status.threads[].claim` is no longer written. The command bus's own
+  dedup makes the reconciler-level dispatch claim unnecessary. A value a
+  pre-upgrade record still carries is ignored, never trusted.
+- `POST /signal/inbound` is unchanged by this release — it still validates,
+  stores and replies synchronously, despite the command bus's arrival.
 
 ### Fixed
 
@@ -194,9 +224,10 @@ Secret and no explicit value fails the render. The error names the Secret and `n
 
 The new manager starts and finds the empty `nats` buckets and the `kube`
 records. The replica that wins the leader lease imports them and reports
-ready once the import finishes. Verify through the console or `/state/conversations` before trusting it, then
-delete the old custom resources yourself once you have — the import never
-does:
+ready once the import finishes.
+
+Verify through the console or `/state/conversations` before trusting it.
+Then delete the old custom resources yourself — the import never does:
 
 ```sh
 kubectl -n agent-ops delete conversations,conversationinputs,signals --all
@@ -214,6 +245,25 @@ on reading conversations through the Kubernetes API.
 anything written to `nats` since the first upgrade — every conversation
 opened or continued after it is lost. Snapshot (`nats stream snapshot`)
 first if that matters.
+
+**BREAKING: `close`, `exit`, `reopen`, `delete`, `reset-context` and
+`escalate` now mean accepted, not performed.** A caller that read a `200`
+or a `202` body as confirmation the work finished must instead read
+`/state/tasks/{id}` for the outcome, using the `taskIds` the same response
+now also carries.
+
+The command bus renders its own three-server bundle by default
+(`commandBus.backend: nats`), three more pods and volumes beyond the state
+store's own. Pin `commandBus.backend: memory` on a single manager replica
+to avoid them, at the cost of losing every accepted task across a restart.
+
+**Rollback** is the same shape as the state store's own: set
+`commandBus.backend: memory` on one replica, or roll back the chart.
+Accepted but unprocessed tasks are lost either way.
+
+The ledger starts empty on first install. Work owed at the moment of
+upgrade is re-derived by the reconciler, exactly as after any restart
+today.
 
 ## [18.0.1] — 2026-10-25
 

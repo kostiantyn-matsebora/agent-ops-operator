@@ -42,8 +42,9 @@ Own Go module, the only one with dependencies.
 | `internal/addressing/` | `/<pipeline> <task>` parsing, one segment, no `:<agent>` override |
 | `internal/controller/` | Conversation/ChannelAdapter/SignalAdapter/Channel/SignalSource/Pipeline reconcilers, admission gate (FIFO, idle eviction), close-topics finalizer |
 | `internal/httpapi/` | `/work`, `/channel/*`, `/signal/*`. NO origination endpoint (`POST /task` deleted) |
-| `internal/chat/` | Provider/Registry, OpQueue (`ensure-topic`\|`send`\|`close-topic`\|`delete-conversation`), Router |
+| `internal/chat/` | Provider/Registry, OpQueue (`ensure-topic`\|`send`\|`close-topic`\|`delete-conversation`), Router. `OpQueue` is bus-backed over `out.<channelType>`, never its own in-memory queue |
 | `internal/dispatch/` | input → work-unit, `templates/format.md` is the mandatory output format |
+| `internal/commandbus/` | accept-and-run-later contract, independent of `internal/state` — `conv`/`in.signal`/`out.<type>` queues, closed error-code vocabulary. `nats` and `memory` backends, `conformance/` the suite both pass. Only `commandbus/nats` and `internal/state/nats` may import `nats.go`. `consumer/` the generic claim-handle-settle pool `conv`/`in.signal` run on |
 | `internal/mcpcompile/` | bound MCPConfigs → `mcp.json`. Raw hand-written `mcp.json` is EXCLUSIVE |
 | `internal/state/` | the GENERIC state contract — `Collection[T]`/`Expiring[T]`/`Appended[P,T]`/`Blobs`, one closed inventory `Stores` (conversations, runs, signals, cooldowns, receipts, adapter state, blobs). `kube/` the one shipped backend, one generic constructor (`kube.Open[T]`/`OpenStores`) over per-kind layouts. `conformance/` the suite every backend passes to exist (and the bench), walked once per field of `Stores`. The manager reaches every kind of state through it, never the Kubernetes client directly |
 | `internal/integration/` | envtest suite, real API server, no kubelet |

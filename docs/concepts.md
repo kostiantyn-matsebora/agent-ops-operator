@@ -1940,19 +1940,30 @@ payload is not copied into the conversation object.
     the message record. The record holds what people sent and what the agent
     answered.
   - It survives any restart and any rescheduling.
-  - **A thread binding's `claim` (holder, claimedAt) and `undeliveredReply`
-    ride the same home.** The claim records which manager replica is
-    dispatching that channel's `ensure-topic` op, so a crashed leader's
-    in-flight work is recoverable rather than lost to a dead process's
-    memory — a claim held by a replica other than the current leader is
-    cleared on the next reconcile. `undeliveredReply` names a run whose
-    reply failed delivery, cleared once delivery succeeds.
+  - **A thread binding's `undeliveredReply` rides the same home**, naming a
+    run whose reply failed delivery, cleared once delivery succeeds.
+  - **`claim` (holder, claimedAt) is retired.** It used to record which
+    manager replica was dispatching a channel's `ensure-topic` op. The
+    command bus's own dedup makes that unnecessary — a value a pre-upgrade
+    record still carries is ignored, never trusted.
   - **Coordination state rides the same home.** `causedBy`, `coordinatorRef`,
     `status.budget` (per-level counts against the snapshotted limits),
     `escalatedAt`, `closeReason` and `brief` are all ordinary Conversation
     spec and status fields. A restart between a member's run being recorded
     and its result landing on the parent is closed by the reconciler
     re-deriving the missing append, exactly as a missing delivery is.
+- **The command bus ledger** — accepted work, independent of the state
+  store. The chart selects a backend with `commandBus.backend` (see
+  [configuration](configuration.md#command-bus)). `nats`, the default, is a
+  second clustered server. `memory`, one process's heap, is for tests only.
+  - **Declared bounded and lossy telemetry**, same as the activity ring
+    below. The Conversation record stays the only durable truth — a lost
+    ledger record never loses a conversation, and the reconciler re-derives
+    owed work exactly as after any restart.
+  - A `202` or `200` from `close`, `exit`, `reopen`, `delete`,
+    `reset-context` or `escalate` means the task was accepted onto this
+    ledger, not that it ran. Read it back at
+    [`/state/tasks/{id}`](contracts.md#accept-and-process).
 - **A PersistentVolume** — state that genuinely *is* a filesystem: a
   conversation's accumulated context, and optionally its repository checkout.
 - **Deliberately lossy** — bounded telemetry whose loss costs history, never
@@ -1967,8 +1978,9 @@ create a second source of truth beside the backend it already has.
 | Component | State it holds | Home | State store backend | A restart costs |
 |---|---|---|---|---|
 | Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | `kube`: the Kubernetes API's own guarantee | nothing |
-| Manager — op queue | outbound channel ops | derived from conversation state | `kube`: the Kubernetes API's own guarantee. `nats`: the clustered KV's own guarantee, quorum-committed to two of three servers | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
-| Manager — thread claim and undelivered reply | `status.threads[].claim` (holder, claimedAt) and `status.threads[].undeliveredReply` | the state store, on the `Conversation` record | `kube`: the Kubernetes API's own guarantee. `nats`: the same quorum-committed guarantee, on the `conversations` bucket's entry | nothing: a claim held by a replica other than the leader is cleared on the next reconcile, and an undelivered reply is re-derived until delivery succeeds |
+| Manager — op queue | outbound channel ops | the command bus's `out.<channelType>` queues | `commandBus.backend: nats`: the bus's own clustered ledger, quorum-committed. `memory`: one process's heap | nothing: a claim completed on one replica is visible to another, and a failed send retries with backoff before a dead letter. `ensure-topic`/input cards/run replies/`close-topic` additionally re-derive from conversation state missing their own marker, as before ([below](#ending-a-conversation)) |
+| Manager — accepted work (`close`, `exit`, `reopen`, `delete`, `reset-context`, `escalate`, inbound chat, `/coordinate/close`, `/coordinate/escalate`) | one task per accepted request, on the `conv` queue | the command bus's ledger | `commandBus.backend: nats`: quorum-committed. `memory`: one process's heap | nothing authoritative: the ledger is declared bounded and lossy, and the reconciler re-derives owed work exactly as after any restart. `/signal/inbound` is NOT in this row — it stays synchronous |
+| Manager — thread undelivered reply | `status.threads[].undeliveredReply` | the state store, on the `Conversation` record | `kube`: the Kubernetes API's own guarantee. `nats`: the same quorum-committed guarantee, on the `conversations` bucket's entry | nothing: re-derived until delivery succeeds |
 | Manager — ingest cooldown | `initiationId` suppression | the state store | `kube`: `SignalSource.status.cooldown[]`, the Kubernetes API's own guarantee. `nats`: the `cooldowns` bucket, quorum-committed | nothing inside the window |
 | Manager — source receipt counters | `receivedTotal` and `lastReceived` per source | the state store | `kube`: `SignalSource.status`, the Kubernetes API's own guarantee. `nats`: the `receipts` bucket, quorum-committed | nothing: each count is serialized by the backend, so no increment is lost |
 | Manager — signal publish and consume | every accepted signal, and its per-claimant routing state | the state store, surviving every restart and leader change | `kube`: `Signal` CRs, the Kubernetes API's own guarantee. `nats`: the `signals` bucket, quorum-committed | no acknowledged signal: the new leader resumes every non-terminal `Signal`, and routing is idempotent |
@@ -2445,8 +2457,13 @@ Kubernetes.
 ## Ending a conversation
 
 **`/close` in a conversation's thread ends it.** The manager intercepts the
-command on the reply path, before it could become an input for the agent, posts
-a farewell to **every** bound thread, and deletes the `Conversation`.
+command on the reply path, before it could become an input for the agent,
+posts a farewell to **every** bound thread, and closes the `Conversation`.
+
+**The HTTP call accepts. The manager performs it afterward**, on the command
+bus (see [Restart resilience](#restart-resilience) and
+[Accept and process](contracts.md#accept-and-process)). The model below is
+what eventually happens, not what happens inside the request.
 
 - **Any sender who can post in the thread may use it.** No surface in this
   system authorizes individual senders, and inventing that here would be the

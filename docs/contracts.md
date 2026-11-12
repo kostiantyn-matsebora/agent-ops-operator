@@ -460,10 +460,22 @@ this surface instead, and carry no RBAC on either kind.
 | `GET /state/conversations/stream?since=` | SSE: `put` / `delete` / `bookmark` / `resync`, each frame's `id:` the revision to resume from |
 | `GET /state/signals` | the whole set, each record with `expiresAt`, and the revision to resume the feed from |
 | `GET /state/signals/stream?since=` | the signal half of the stream above |
+| `GET /state/tasks` | the command bus's per-`(queue, kind)` statistics — pending, scheduled, running and dead counts, the oldest pending task's age — never a flat listing of every task |
+| `GET /state/tasks/{id}` | one task by its bus-minted UID, 404 if unknown or already swept out of retention |
+| `GET /state/tasks/stream?since=` | SSE: one frame per task state transition, ordered by the bus's own `Sequence`, resumable |
+| `GET /state/dead-letters` | every task the bus has given up on, oldest first |
 
 Signals have no single-record route and carry no items: nothing reads one
 signal on its own, or a signal's history. Conversation listings and feed
 events do carry a record's `runs[].inputs[]`.
+
+**`GET /state/tasks` reports counts, not identities.** The command bus
+contract has no call to list every current task. It can only read one back
+by UID, watch the feed forward, or list dead letters.
+
+`/state/tasks/stream` is how a caller discovers which UIDs exist going
+forward. A task accepted before the caller started watching is visible only
+through the `invocationId`/`taskIds` its own accept reply already returned.
 
 **The wire record** carries a kind's published field names only — `name`,
 `id`, `revision`, `createdAt`, `deletionRequestedAt`, `spec`, `status` — never
@@ -500,9 +512,74 @@ An adapter token that derives correctly but whose CR does not declare
 `spec.stateAccess` is refused with 403, naming the adapter and the field. A
 token that does not derive at all is 401.
 
-`/state/` is served by **every replica**, leader or not — a store read needs
-no leader, so it joins `/healthz` in bypassing the leader-proxy a stateful
-surface like `/channel/ops` still requires.
+**Every replica serves `/state/`**, leader or not. A store read needs no
+leader.
+
+`GET /channel/ops` and `POST /channel/ops/{id}/done` join `/healthz` and
+`/state/` in bypassing the leader-proxy, alongside them. The command bus
+(below) makes that queue bus-backed rather than leader-held, so any replica
+answers a poll or a completion directly.
+
+Every other endpoint still proxies to the leader.
+
+## Accept and process
+
+**A `202` or `200` from one of these endpoints means accepted, not
+performed.** The manager validates the request, durably enqueues it on the
+command bus, and replies. The work itself runs later, on whichever replica
+next claims it.
+
+A caller that needs the outcome reads it back from [the state read
+surface](#the-state-read-surface)'s `/state/tasks/{id}`.
+
+| Endpoint | Status | Gains |
+|---|---|---|
+| `POST /channel/conversations/{name}/reopen` | `202` (unchanged) | `invocationId`, `taskIds` |
+| `POST /channel/conversations/{name}/delete` | `202` (unchanged) | `invocationId`, `taskIds`. Cascades deepest-first, one task per conversation |
+| `POST /channel/conversations/{name}/reset-context` | `202` (was `200`) | `invocationId`, `taskIds` |
+| `POST /channel/inbound` | `202` (unchanged) | `invocationId`, `taskIds` |
+| `POST /coordinate/close` | `200` (unchanged) | `invocationId`, `taskIds` |
+| `POST /coordinate/escalate` | `200` (unchanged) | `invocationId`, `taskIds` |
+
+**`reset-context` is the one endpoint whose status code changed.** Every
+other row's code was already `202` or `200`. Only the body and the timing of
+the underlying work changed.
+
+**`POST /signal/inbound` is NOT in this table.** It still validates, stores
+one `Signal` CR per admitted signal, and replies `200 {"queued": n}`
+synchronously, exactly as [the HTTP API section](#http-api) below describes.
+
+A refusal that depends only on a cheap read against the request itself still
+answers immediately: `delete` of a conversation that is not yet `Closed`,
+the self-input check on `/channel/inbound`. Nothing about either can change
+between accept and a later claim.
+
+A refusal that needs more than that is now deferred into the task.
+`reopen` naming a conversation with a missing profile, and a
+`/coordinate/close` outside its caller's widened bound, both used to answer
+`409`/`403` at once.
+
+Both now accept instead, and the task later dies. The code —
+`precondition_failed` or `forbidden` — is read back from `/state/tasks/{id}`.
+
+**What still runs wholesale, inside one task.** A plain chat `/close`
+closes its whole `causedBy` subtree in one call, not one task per
+descendant.
+
+`delete`, the idle timer's auto-close, a budget-exceeded close and
+`/coordinate/close` each submit one task per live descendant instead.
+Deepest or members first, all on the root conversation's own key.
+
+The end result is the same either way. `/state/tasks` shows one entry for
+a plain close and several for the others.
+
+`escalate` on a caused member also stays one task, one call — the
+cascade-close and the result append happen together, not as two separate,
+independently visible tasks.
+
+**Per-queue tuning has no chart exposure.** Attempts, backoff, TTL, the
+dedup window and the park cool-off are compiled-in starting values, one set
+per queue. See [Configuration](configuration.md#commandbus).
 
 ## Manager introspection
 
@@ -642,7 +719,7 @@ This pattern applies to whatever resident lands here next.
 | `GET/POST /activity*` | per-hop telemetry (bearer token, see activity contract) |
 | `POST /coordinate/*` | the aops MCP server's verbs and read tools (per-conversation or channel-reader bearer token, see aops MCP server contract) |
 | `PUT/GET /control-plane/*` | operational-configuration surface (dedicated bearer token, see control-plane contract) |
-| `GET /state/*` | Conversations and Signals, read-only (`ADAPTER_TOKEN`, an adapter's derived token or `STATE_READ_TOKEN` as bearer, see the state read surface) |
+| `GET /state/*` | Conversations, Signals, command-bus tasks and dead letters, read-only (`ADAPTER_TOKEN`, an adapter's derived token or `STATE_READ_TOKEN` as bearer, see the state read surface) |
 | `GET /status`, `GET /pipelines/{name}/resolved` | manager introspection (bearer token) |
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics + the `agentops_*` set above |

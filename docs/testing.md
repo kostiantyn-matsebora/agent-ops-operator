@@ -215,6 +215,65 @@ deletion and across that same `kube`-to-`nats` upgrade.
 **Both tiers run against the default install.** The default is the thing
 tested, not an opt-in configuration a lane reaches for once.
 
+## The command bus conformance suite
+
+The manager accepts work durably and runs it later through its own generic
+contract (`internal/commandbus`), independent of the state store above.
+
+A conformance suite and bench (`internal/commandbus/conformance`) walk the
+closed queue inventory once each, exactly as the state store's own suite
+walks `Stores` — failing, and naming the queue, if one is declared with no
+matching coverage.
+
+| Decides | Cannot decide |
+|---|---|
+| durable accept, idempotent submit, dedup across every task state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-lapse redelivery, bounded retry into dead, TTL expiry counting as settled, a gap-free resumable feed, dead-letter listing, per-queue statistics | latency or throughput under load, or anything only a real server decides |
+
+- **Both backends run the same suite.** `commandbus/memory` runs it in its
+  own package. `commandbus/nats` runs it against an in-process JetStream
+  server. Both are part of the ordinary `go test ./...`.
+- **The bench prints real round-trip numbers for each**, same convention as
+  the state store's own: `go test -bench=. ./internal/commandbus/...`.
+
+## The command bus's system lanes
+
+What a real cluster decides about the bus is the system tier's job
+(`test/system/async_system_test.go`), never unit tests: credential
+projection, network policy, a claim completed on a different replica,
+ordering under parallel consumers, restart durability, a genuine channel
+failure backing off into a dead letter.
+
+| Lane | Decides |
+|---|---|
+| The bundle comes up | the credential is kubelet-projected and the NetworkPolicy admits only the manager |
+| A replica is force-deleted mid-accept | the claim it held completes on a surviving replica once the lease lapses |
+| Two replicas, one conversation | ordering holds — settlement order matches submission order on that key |
+| A manager restart, and a rolling bus-server restart | neither loses an accepted task or duplicates its side effect |
+| A channel surface that genuinely fails (DNS-unreachable, not mocked) | backoff runs its course into a dead letter, listed on `/state/dead-letters` |
+
+**Full-tier end-to-end flows** (`test/system/async_e2e_test.go`) cover the
+same ground from the HTTP surface inward rather than the cluster outward.
+
+- A signal opens a conversation through its close and delete, every task
+  observed reaching `succeeded` in order.
+- A cascade delete settles members before the parent.
+- Inbound chat arrives through both the Telegram fake Bot API and the
+  console channel.
+- The restart-survival and backoff-to-dead-letter shapes the system lanes
+  decide are proven end to end too.
+
+Both files were written against this change's own working copy. They
+compile under the `system` build tag.
+
+**Verify their actual pass/fail by dispatching the cluster tier**, rather
+than trusting a local run with no cluster to run them against:
+
+```sh
+gh workflow run system-smoke.yml --ref change/async-command-bus
+```
+
+Or the full tier, for the lanes above.
+
 ## The oracle split
 
 **The real agent runtime is the primary oracle.** The questions worth asking
