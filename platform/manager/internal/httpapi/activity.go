@@ -26,7 +26,7 @@ import (
 // streamKeepAlive bounds how long an idle SSE connection goes without bytes.
 // Proxies and load balancers reap silent connections; a comment frame is the
 // standard way to stay under that.
-const streamKeepAlive = 20 * time.Second
+var streamKeepAlive = 20 * time.Second
 
 const errActivityDisabled = "activity telemetry is disabled"
 

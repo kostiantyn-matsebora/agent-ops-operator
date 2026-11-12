@@ -76,3 +76,12 @@ dependencies:
     version: 0.1.0
     repository: ""
     condition: claude-cli.enabled
+  # embedded subchart (chart/charts/nats) — the `nats` state-store backend's
+  # server (design nats-state-store-default D-8). NO condition: whether it
+  # renders follows `stateStore.backend` (D-9), a value this subchart cannot
+  # see on its own, so every object it ships is rendered from the PARENT's
+  # own templates/nats.yaml instead of natively from here — same reason the
+  # `kubernetes` bundle carries none.
+  - name: nats
+    version: 0.1.0
+    repository: ""

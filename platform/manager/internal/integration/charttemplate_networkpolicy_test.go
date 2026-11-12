@@ -79,6 +79,57 @@ func TestEveryWiredFlowIsAllowed(t *testing.T) {
 	if !strings.Contains(mcp, "agentops-runtime") {
 		t.Error("runtime pods must still reach the MCP server, or agents lose every tool")
 	}
+
+	// nats-state-store-default D-12: the manager dials the state server on
+	// its client port. `nats` is the default backend, so this is already
+	// in scope with no extra `--set`.
+	nats, ok := policies["agentops-nats"]
+	if !ok {
+		t.Fatal("the state server has no policy, so any pod could steal or forge state")
+	}
+	if !strings.Contains(nats, "agentops-manager") {
+		t.Error("the state server policy does not admit the manager; that lane breaks when policy is enforced")
+	}
+}
+
+// nats-state-store-default D-12/task 3.3: every other component reads state
+// through the manager's /state/* surface and must be refused on the state
+// server's own ports directly — a runtime pod, the console, a channel
+// adapter, a signal adapter and a housekeeping job on the client port, and
+// anything that is not the server itself on the peer (cluster) port.
+func TestStateServerAdmitsOnlyTheManager(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "global.agentops.networkPolicy.enabled=true",
+		"--set", "console.enabled=true",
+		"--set", "telegram.enabled=true",
+		"--set", "housekeeping.enabled=true")
+
+	nats, ok := splitPolicies(out)["agentops-nats"]
+	if !ok {
+		t.Fatal("the state server has no policy")
+	}
+	if !strings.Contains(nats, "agentops-manager") {
+		t.Fatal("the state server must admit the manager on its client port")
+	}
+	// The peer (cluster) port admits only the server's own label — and
+	// since that label is `agentops-nats` too, this also confirms no OTHER
+	// caller's label (runtime, adapter, signal adapter, housekeeping,
+	// console) appears anywhere in the policy at all: the client-port rule
+	// names the manager alone, and the peer-port rule names the server
+	// alone.
+	for _, refused := range []string{
+		"agentops-runtime",
+		"agentops-adapter",
+		"agentops-signal-adapter",
+		"agentops-housekeeping",
+	} {
+		if strings.Contains(nats, refused) {
+			t.Errorf("the state server policy admits %q; only the manager may reach its client port, and only its own pods may reach its peer port:\n%s", refused, nats)
+		}
+	}
+	if strings.Contains(nats, "agentops.dev/adapter:") {
+		t.Errorf("the state server policy admits an adapter by its console-style label; the console reads state through /state/*, never this server directly:\n%s", nats)
+	}
 }
 
 // Runtime pods serve nobody. An empty ingress list is the whole policy, and it

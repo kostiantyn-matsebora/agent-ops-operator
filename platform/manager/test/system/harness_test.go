@@ -18,6 +18,9 @@
 //	SYSTEM_ARTIFACT_DIR   where failure diagnostics are written (default $TMPDIR/agentops-e2e)
 //	SYSTEM_TIER           smoke (default) or full — full adds the real-runtime lane
 //	SYSTEM_BUDGET         wall-clock budget of the gating tier (default 20m)
+//	SYSTEM_STATE_BACKEND  pins stateStore.backend for the WHOLE pack (task 5.7's
+//	                      kube-fallback smoke run); empty leaves the chart's own
+//	                      default (nats) untouched
 //	CLAUDE_CODE_OAUTH_TOKEN  the real-runtime lane's credential; absent, the lane is SKIPPED
 package system
 
@@ -230,6 +233,8 @@ func openHarnessEnv(cluster *Cluster, k *Kube, values *InstallValues, artifact s
 	if e.Manager, err = cluster.Forward(Namespace, "svc/agentops-manager", 8080); err != nil {
 		return nil, fmt.Errorf("forward manager: %w", err)
 	}
+	// Conversations are read through /state, which both backends serve.
+	k.StateURL, k.StateToken = e.Manager.URL(), values.AdapterToken
 	if e.Console, err = cluster.Forward(Namespace, "svc/agentops-adapter-console", 8080); err != nil {
 		return nil, fmt.Errorf("forward console: %w", err)
 	}
@@ -283,6 +288,27 @@ func requireEnv(t *testing.T) *Env {
 		}
 	})
 	return env
+}
+
+// requireNats skips a test that exercises the nats state server when the run
+// pins the whole pack to the kube fallback (SYSTEM_STATE_BACKEND=kube, task
+// 5.7): there is no state server to delete, no budget to read and no import
+// to wait for, so asserting one would fail a run that is correct.
+func requireNats(t *testing.T) {
+	t.Helper()
+	if os.Getenv("SYSTEM_STATE_BACKEND") == "kube" {
+		t.Skip("the run is pinned to the kube backend (SYSTEM_STATE_BACKEND=kube)")
+	}
+}
+
+// requireKube skips a test that reaches into the kube backend's own storage,
+// a SignalSource's status for instance, when the run is on the chart's default
+// (nats). The behaviour such a lane proves is asserted for nats by a sibling.
+func requireKube(t *testing.T) {
+	t.Helper()
+	if os.Getenv("SYSTEM_STATE_BACKEND") != "kube" {
+		t.Skip("reaches into the kube backend's storage, run with SYSTEM_STATE_BACKEND=kube")
+	}
 }
 
 // fullTier skips a test that belongs to the full pack when the gating tier

@@ -26,5 +26,8 @@ dependencies:
 - name: claude-cli
   repository: ""
   version: 0.1.0
-digest: sha256:c9a7757b3acd80bd6d090e055b12d6b365f54ed3a07d2032db1a9a53ffe49f3c
-generated: "2026-10-25T19:53:23.804509611+02:00"
+- name: nats
+  repository: ""
+  version: 0.1.0
+digest: sha256:c777927ec9730b719d41a78ae53641578fd579908513734383b6e4e2222025c5
+generated: "2026-11-09T20:36:53.496767601+02:00"

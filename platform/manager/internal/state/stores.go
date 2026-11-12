@@ -130,6 +130,13 @@ var (
 	})
 )
 
+// RunHistoryLimit is how many runs a conversation keeps. When one more is
+// appended, the oldest falls off, in every backend: a long-lived conversation
+// must not grow without limit, and a caller whose run aged out learns it from
+// Grow's ErrNotFound. The kube backend always applied this bound to
+// status.runs[]; the constant is here so no backend can differ.
+const RunHistoryLimit = 10
+
 // StoreDeclarations is the one Declarations value, the inventory's facts.
 var StoreDeclarations = Declarations{
 	Conversations: Decl[ConversationRecord]{

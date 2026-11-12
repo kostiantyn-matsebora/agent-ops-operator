@@ -187,8 +187,7 @@ render SHALL name the loss of the guarantee in the chart notes.
 #### Scenario: Changing the replica count after install is warned and left unapplied
 - **WHEN** `nats.replicas` is changed after the buckets exist
 - **THEN** the manager keeps the existing buckets unchanged, logs a warning
-  naming both counts, and records a drop in the activity log, and the docs
-  give the rebuild path
+  naming the bucket and both counts, and the docs give the rebuild path
 
 #### Scenario: One replica is explicit
 - **WHEN** the adopter sets `nats.replicas` to 1
@@ -198,8 +197,8 @@ render SHALL name the loss of the guarantee in the chart notes.
 ### Requirement: The backend is proven on a real cluster and in a real browser
 The `nats` backend SHALL be covered by the system tier and the console browser
 tier, not only by the in-process conformance suite. What a cluster decides
-(pod loss, quorum, a drain, a volume, the network policy, the import against
-real custom resources) SHALL be a system lane. What a user sees through the
+(pod loss, quorum, a drain, a rolling image upgrade, a volume, the network
+policy, the import against real custom resources) SHALL be a system lane. What a user sees through the
 console across those events SHALL be an `e2e-live` spec.
 
 Both tiers SHALL run against the default install, so the default is the thing
@@ -217,8 +216,9 @@ tested. The `kube` pin SHALL be exercised by a system run of its own.
 
 #### Scenario: Quorum loss is an outage, not a loss
 - **WHEN** two of three state servers are down and then restored
-- **THEN** work is held while they are down, and every record written before
-  the loss is readable after
+- **THEN** work is held while they are down and `/state/*` reports the outage
+  instead of answering stale, and every record written before the loss is
+  readable after
 
 #### Scenario: A drain is bounded by the budget
 - **WHEN** a node drain would evict a second state server
@@ -230,6 +230,15 @@ tested. The `kube` pin SHALL be exercised by a system run of its own.
 - **THEN** all three are readable through `/state/*` and the console after the
   first start, and the custom resources are unchanged
 
+#### Scenario: A rolling server image upgrade keeps writes working
+- **WHEN** the state servers are rolled to a new image one at a time
+- **THEN** two servers stay up throughout and no write fails
+
+#### Scenario: The console renders across an upgrade from kube
+- **WHEN** an install on `kube` is upgraded to the default while the console
+  shows a conversation
+- **THEN** the page keeps rendering and the thread's unread state survives
+
 #### Scenario: The console renders across a server loss
 - **WHEN** a state server is deleted while the console shows a conversation
 - **THEN** the page keeps rendering and the thread, its unread state and its
@@ -238,3 +247,10 @@ tested. The `kube` pin SHALL be exercised by a system run of its own.
 #### Scenario: The kube pin passes the smoke
 - **WHEN** the smoke tier runs with `stateStore.backend` set to `kube`
 - **THEN** it passes and the install renders no state server
+
+### Requirement: The state servers' volumes outlive an uninstall
+The state servers' volumes SHALL outlive an uninstall of the chart, so a reinstall finds its data where it was.
+
+#### Scenario: An uninstall keeps the state servers' volumes
+- **WHEN** the chart is uninstalled on the default backend
+- **THEN** the state servers' volumes remain, so a reinstall finds its data where it was

@@ -63,6 +63,26 @@ spec:
             # already refused a value no enabled bundle answers.
             - name: STATE_BACKEND
               value: {{ include "agentops.stateBackend" . | quote }}
+            {{- if eq (include "agentops.stateBackend" .) "nats" }}
+            # The nats bundle's own connection facts. NATS_URL names no
+            # credential, so it is a plain value; NATS_USER/NATS_PASSWORD
+            # are `valueFrom`, so the manager never reads the Secret
+            # itself (invariants.md: "Manager reads NO secrets").
+            - name: NATS_URL
+              value: {{ printf "nats://agentops-nats-client.%s.svc:4222" .Release.Namespace | quote }}
+            - name: NATS_REPLICAS
+              value: {{ .Values.nats.replicas | quote }}
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nats.credentialSecretName" (dict "nats" .Values.nats) }}
+                  key: user
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nats.credentialSecretName" (dict "nats" .Values.nats) }}
+                  key: password
+            {{- end }}
             - name: MAX_ACTIVE_CONVERSATIONS
               value: {{ .Values.maxActiveConversations | quote }}
             - name: MAX_QUEUED_CONVERSATIONS
@@ -205,6 +225,18 @@ spec:
               path: /readyz
               port: 8081
             initialDelaySeconds: 5
+          # The probe port answers only once the state store has opened, and
+          # on nats that waits for the cluster to elect a leader. Liveness
+          # and readiness both start after this passes, so a slow election is
+          # waited out (5m) instead of killing the pod mid-wait.
+          {{- if ne (include "agentops.stateBackend" .) "kube" }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            periodSeconds: 10
+            failureThreshold: 30
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

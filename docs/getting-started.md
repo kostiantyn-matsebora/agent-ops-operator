@@ -160,21 +160,34 @@ The answer lands in the thread. Follow-ups in the same thread keep their context
 **It opens with the conclusion**, then a few named sections, with the long
 detail behind a control you can expand.
 
-From the outside:
+From the outside, the pod is always a real Kubernetes object, whichever
+state backend the install uses:
 
 ```sh
-kubectl -n agent-ops get conversations -w              # names are generated
+kubectl -n agent-ops get pods -l app.kubernetes.io/name=agentops-runtime -w
 kubectl -n agent-ops logs -f agentops-conv-<name>      # live transcript
-kubectl -n agent-ops get conversation <name> \
-  -o jsonpath='{.status.runs[0].result}'               # the answer, durably
 ```
 
 ```powershell
-kubectl -n agent-ops get conversations -w              # names are generated
+kubectl -n agent-ops get pods -l app.kubernetes.io/name=agentops-runtime -w
 kubectl -n agent-ops logs -f agentops-conv-<name>      # live transcript
-kubectl -n agent-ops get conversation <name> `
-  -o jsonpath='{.status.runs[0].result}'               # the answer, durably
 ```
+
+{: .ao-callout}
+> **Reading the answer back through `kubectl` needs the `kube` backend.**
+> On the default, `nats`, the Conversation record lives in the state store,
+> not as an object `kubectl` lists. Read the answer in the console instead, or install with
+> `--set stateStore.backend=kube` and:
+>
+> ```sh
+> kubectl -n agent-ops get conversation <name> \
+>   -o jsonpath='{.status.runs[0].result}'
+> ```
+>
+> ```powershell
+> kubectl -n agent-ops get conversation <name> `
+>   -o jsonpath='{.status.runs[0].result}'
+> ```
 
 The transcript names the tools the route granted, then every call:
 

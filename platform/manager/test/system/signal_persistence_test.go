@@ -18,12 +18,14 @@ package system
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -127,6 +129,37 @@ func assertExactlyOneConversationPerClaimant(t *testing.T, ctx context.Context, 
 	}
 }
 
+// assertSignalOwnership checks the owner reference only where the backend keeps
+// one. The kube backend ties a Signal to its source. The nats backend keeps no
+// object to own, and the manager releases a deleted source's signals itself.
+func assertSignalOwnership(t *testing.T, sig *agentopsv1alpha1.Signal, src *agentopsv1alpha1.SignalSource) {
+	t.Helper()
+	if os.Getenv("SYSTEM_STATE_BACKEND") != "kube" {
+		return
+	}
+	for _, ref := range sig.OwnerReferences {
+		if ref.Kind == "SignalSource" && ref.Name == src.Name {
+			return
+		}
+	}
+	t.Fatalf("under the kube backend the Signal must be owned by its SignalSource, got owners %+v", sig.OwnerReferences)
+}
+
+// assertSignalTerminal checks a finished Signal: who consumed it, the id it
+// carries and its one Routed claimant.
+func assertSignalTerminal(t *testing.T, sig *agentopsv1alpha1.Signal, id string) {
+	t.Helper()
+	if sig.Status.CompletedAt == nil || sig.Status.ConsumedBy == "" || sig.Status.ConsumedAt == nil {
+		t.Fatalf("a terminal Signal records when and by whom it was consumed: %+v", sig.Status)
+	}
+	if sig.Spec.InitiationID != id {
+		t.Fatalf("the Signal must carry the posted initiationId, got %q want %q", sig.Spec.InitiationID, id)
+	}
+	if len(sig.Status.Claimants) != 1 || sig.Status.Claimants[0].State != agentopsv1alpha1.ClaimantRouted {
+		t.Fatalf("exactly one Routed claimant is expected, got %+v", sig.Status.Claimants)
+	}
+}
+
 // 6.1.a The happy-path lane: a posted signal persists as an owned Signal CR
 // before the manager answers, is routed by the leader's consumer, and reaches
 // Routed naming the real conversation it opened and the replica that did it.
@@ -142,24 +175,11 @@ func TestSignalPersistenceReachesRoutedPhase(t *testing.T) {
 
 	sig := waitSignalPhase(t, ctx, e, name, id, 2*time.Minute, agentopsv1alpha1.SignalRouted)
 
-	owned := false
-	for _, ref := range sig.OwnerReferences {
-		if ref.Kind == "SignalSource" && ref.Name == src.Name {
-			owned = true
-		}
+	if sig.Spec.SourceRef.Name != src.Name {
+		t.Fatalf("the Signal must name its SignalSource %q, got %q", src.Name, sig.Spec.SourceRef.Name)
 	}
-	if !owned {
-		t.Fatalf("the Signal must be owned by its SignalSource, got owners %+v", sig.OwnerReferences)
-	}
-	if sig.Status.CompletedAt == nil || sig.Status.ConsumedBy == "" || sig.Status.ConsumedAt == nil {
-		t.Fatalf("a terminal Signal records when and by whom it was consumed: %+v", sig.Status)
-	}
-	if sig.Spec.InitiationID != id {
-		t.Fatalf("the Signal must carry the posted initiationId, got %q want %q", sig.Spec.InitiationID, id)
-	}
-	if len(sig.Status.Claimants) != 1 || sig.Status.Claimants[0].State != agentopsv1alpha1.ClaimantRouted {
-		t.Fatalf("exactly one Routed claimant is expected, got %+v", sig.Status.Claimants)
-	}
+	assertSignalOwnership(t, sig, src)
+	assertSignalTerminal(t, sig, id)
 	convRef := sig.Status.Claimants[0].ConversationRef
 	if convRef == nil || convRef.Name == "" {
 		t.Fatalf("a Routed claimant must name the conversation it opened: %+v", sig.Status.Claimants[0])
@@ -174,9 +194,16 @@ func TestSignalPersistenceReachesRoutedPhase(t *testing.T) {
 	t.Cleanup(func() {
 		_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
 	})
-	// The owning SignalSource's own cleanup (setupDedicatedSignalSource's
-	// mustCreate) deletes it on teardown, which cascades the owned Signal
-	// away too (design D-6's ownerRef) — nothing here deletes sig directly.
+	if err := e.K.Delete(ctx, src); err != nil && !apierrors.IsNotFound(err) {
+		t.Fatalf("delete the SignalSource: %v", err)
+	}
+	waitFor(t, "the deleted source's Signal to be released", 2*time.Minute, func() (bool, error) {
+		_, err := e.K.Signal(ctx, sig.Name)
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, err
+	})
 }
 
 // 6.1.b Manager-restart resume: a Signal left PartiallyRouted — one

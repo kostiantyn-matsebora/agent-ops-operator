@@ -20,12 +20,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -99,6 +101,9 @@ type stateSource struct {
 	// reported as one.
 	mu    sync.Mutex
 	known map[string]map[string]bool
+
+	// idleTimeout is how long a watch may be silent before it is dropped.
+	idleTimeout time.Duration
 }
 
 // newStateSource builds the client from the console's own config: the
@@ -110,7 +115,34 @@ func newStateSource(cfg *Config) *stateSource {
 		token:   cfg.AdapterToken,
 		http:    &http.Client{},
 		known:   map[string]map[string]bool{},
+
+		idleTimeout: defaultStreamIdle,
 	}
+}
+
+// defaultStreamIdle is how long a stream may say nothing, keep-alives
+// included, before it is taken for dead. The manager writes one every 20s, so
+// this spans several lost ones.
+const defaultStreamIdle = 90 * time.Second
+
+// errStreamIdle ends a Watch whose connection went silent. The cache treats it
+// like any dropped stream: reconnect, and relist.
+var errStreamIdle = errors.New("state stream went silent")
+
+// idleReader resets a timer on every read that returns bytes, and cancels the
+// stream when the timer fires before the next.
+type idleReader struct {
+	r     io.Reader
+	timer *time.Timer
+	limit time.Duration
+}
+
+func (i *idleReader) Read(p []byte) (int, error) {
+	n, err := i.r.Read(p)
+	if n > 0 {
+		i.timer.Reset(i.limit)
+	}
+	return n, err
 }
 
 // seen records name as known for kind and reports whether it already was.
@@ -259,9 +291,26 @@ func (s *stateSource) Watch(ctx context.Context, kind, revision string, fn func(
 		return err
 	}
 	defer resp.Body.Close()
-	return scanSSE(ctx, resp.Body, func(f sseFrame) error {
+
+	// A connection that dies without closing leaves Read blocked for ever.
+	// Silence past the limit cancels the read, and is reported as such.
+	idleCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	limit := s.idleTimeout
+	if limit <= 0 {
+		limit = defaultStreamIdle
+	}
+	var idled atomic.Bool
+	timer := time.AfterFunc(limit, func() { idled.Store(true); cancel() })
+	defer timer.Stop()
+	go func() { <-idleCtx.Done(); _ = resp.Body.Close() }() // unblocks the pending Read
+	err = scanSSE(idleCtx, &idleReader{r: resp.Body, timer: timer, limit: limit}, func(f sseFrame) error {
 		return applySSEFrame(kind, f, s, fn)
 	})
+	if idled.Load() && ctx.Err() == nil {
+		return errStreamIdle
+	}
+	return err
 }
 
 // applySSEFrame decodes one dispatched SSE event and calls fn in the

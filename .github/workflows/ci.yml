@@ -191,6 +191,12 @@ jobs:
       # none of them and the operator reported 27%. The flag names the packages
       # whose coverage is RECORDED, whichever binary reached them.
       - run: go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...
+      # A coverage FLOOR for the nats state backend. Its failure paths are only
+      # reachable by tests written for them, so a drop means a branch lost its
+      # test. The script counts each block once: -coverpkg makes every test
+      # binary list every block, so summing lines read 96% as 7%.
+      - name: Hold the nats state backend's coverage floor
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/coverage-floor.sh" coverage.out internal/state/nats/ 90
       # The suite FAILS without assets rather than skipping (verified: envtest
       # start returns an error and the package reports FAIL), so `go test ./...`
       # above already proves it ran. This only catches provisioning that

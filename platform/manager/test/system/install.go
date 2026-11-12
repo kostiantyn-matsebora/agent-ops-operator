@@ -27,11 +27,20 @@ type InstallValues struct {
 	// else, same pattern as claude/k8sMCP below — a nightly-only lane, not
 	// the gating tier's).
 	Housekeeping bool
+	// ExtraSet carries additional `--set` overrides layered on top of
+	// valuesYAML, applied in Install (nats-state-store-default's own
+	// state_nats_test.go/state_nats_upgrade_test.go lanes use it to pin the
+	// install to `kube`, bump the nats image tag, and move back). Never
+	// read by valuesYAML itself — helm applies `--set` after `-f`, so these
+	// always win.
+	ExtraSet []string
 }
 
-// DefaultValues is the install the pack runs against.
+// DefaultValues is the install the pack runs against. SYSTEM_STATE_BACKEND
+// pins the state store backend for CI's kube-fallback smoke run (task 5.7);
+// empty leaves the chart's own default (nats) untouched.
 func DefaultValues(tier string) *InstallValues {
-	return &InstallValues{
+	v := &InstallValues{
 		Tier:              tier,
 		AdapterToken:      "e2e-adapter-token-not-a-secret",
 		ControlPlaneToken: "e2e-control-plane-token-not-a-secret",
@@ -41,6 +50,10 @@ func DefaultValues(tier string) *InstallValues {
 		Runtime:           "stub",
 		Housekeeping:      tier == "full",
 	}
+	if backend := os.Getenv("SYSTEM_STATE_BACKEND"); backend != "" {
+		v.ExtraSet = append(v.ExtraSet, "stateStore.backend="+backend)
+	}
+	return v
 }
 
 // valuesYAML renders the values file. Images are the ones the pack built and
@@ -180,12 +193,49 @@ func Install(ctx context.Context, c *Cluster, v *InstallValues) error {
 	// local-path class, so it stays Pending until a runtime pod mounts it and
 	// helm's waiter would call that a failed install. Readiness is asserted
 	// per Deployment instead, by WaitReady.
-	out, err := c.Helm(ctx, "upgrade", "--install", Release, filepath.Join(root, "chart"),
-		"-n", Namespace, "-f", values, "--timeout", "10m")
+	args := []string{"upgrade", "--install", Release, filepath.Join(root, "chart"),
+		"-n", Namespace, "-f", values, "--timeout", "10m"}
+	for _, kv := range v.ExtraSet {
+		args = append(args, "--set", kv)
+	}
+	out, err := c.Helm(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("helm install: %v\n%s", err, out)
 	}
 	return nil
+}
+
+// Upgrade re-applies this Env's own install with extraSet layered on top of
+// the values it was originally opened with, and waits for every Deployment
+// WaitReady already checks (the nats readiness gate, store.go's
+// natsReadinessCheck, included — a caller upgrading onto `nats` waits out
+// the one-time import here, not in its own poll loop). e.Values itself is
+// left exactly as the harness opened it; a caller that needs the override
+// again calls this again rather than reading it back off e.Values.
+func (e *Env) Upgrade(ctx context.Context, extraSet ...string) error {
+	v := *e.Values
+	v.ExtraSet = extraSet
+	if err := Install(ctx, e.Cluster, &v); err != nil {
+		return err
+	}
+	return WaitReady(ctx, e.K, &v)
+}
+
+// UpgradeManager is Upgrade for a change that rolls the manager. Its hard pod
+// anti-affinity leaves the new ReplicaSet Pending behind the old pods on this
+// pack's one-node cluster, so the rollout is driven through
+// restartManagerSchedulable, which clears the affinity and removes what blocks
+// the new pods, before readiness is awaited.
+func (e *Env) UpgradeManager(ctx context.Context, extraSet ...string) error {
+	v := *e.Values
+	v.ExtraSet = extraSet
+	if err := Install(ctx, e.Cluster, &v); err != nil {
+		return err
+	}
+	if err := restartManagerSchedulable(ctx, e.Cluster); err != nil {
+		return err
+	}
+	return WaitReady(ctx, e.K, &v)
 }
 
 // WaitReady waits for the manager and every enabled adapter Deployment.

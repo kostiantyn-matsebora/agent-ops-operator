@@ -446,9 +446,8 @@ TOKEN, so an adapter naming another in `adapter` is refused with 403.
 ## The state read surface
 
 **One door onto Conversations and Signals, for every reader that is not a
-reconciler.** `/state/*`, read-only, serving the same records the `kube`
-backend keeps on those two kinds — never a Kubernetes watch, and never the
-reader's own RBAC.
+reconciler.** `/state/*`, read-only, serving the same records the selected
+state-store backend keeps on those two kinds, never a Kubernetes watch, and never the reader's own RBAC.
 
 The console and the housekeeping job both used to watch Conversations (and,
 for the console, Signals) directly against the Kubernetes API. Both now read
@@ -468,20 +467,24 @@ events do carry a record's `runs[].inputs[]`.
 
 **The wire record** carries a kind's published field names only — `name`,
 `id`, `revision`, `createdAt`, `deletionRequestedAt`, `spec`, `status` — never
-Kubernetes metadata, labels or annotations. Under `kube`, `spec` and `status`
-are the object's own bytes.
+Kubernetes metadata, labels or annotations.
+
+`spec` and `status` have the same shape whichever backend is selected: the
+object's own bytes, or the backend's own envelope decoded to it.
 
 **`since` is a resume token handed back by a listing or an earlier frame,
 never something a caller constructs.** An unrecognized or stale one is not an
 error.
 
 A `resync` frame opens the stream when the resume point is unknown or too
-old, and closes it when the manager's backend ends the feed on its own (a
-watch that timed out or was refused its resume point). It tells the caller to
-re-read the listing before trusting anything delivered after it. The caller
-does the same either way, whichever end of the stream the frame came at, so it
-carries no field saying which. A stream that simply ends, with no `resync`,
-means the caller itself left.
+old. It also closes the stream when the manager's backend ends the feed on
+its own — a watch that timed out, or was refused its resume point.
+
+Either way it tells the caller to re-read the listing before trusting
+anything delivered after it. The caller does the same regardless of which end
+of the stream sent the frame, so the frame carries no field saying which.
+
+A stream that simply ends, with no `resync`, means the caller itself left.
 
 A caller naming any other query parameter is refused by name.
 

@@ -232,7 +232,20 @@ func (r *SignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if p.rec.Terminal() {
 		return r.reconcileTerminal(ctx, p)
 	}
-	return r.reconcileLive(ctx, p)
+	res, err := r.reconcileLive(ctx, p)
+	// One line per live pass: a signal that stalls shows up as the last pass
+	// it had, with what it waited on, instead of as silence.
+	logger := log.FromContext(ctx).WithName("signal")
+	logger.Info("signal pass", "signal", string(key), "source", p.rec.SourceRef, "phase", string(p.rec.Phase),
+		"attempts", p.rec.Attempts, "requeueAfter", res.RequeueAfter.String(), "error", errText(err))
+	return res, err
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // reconcileTerminal is the expiry housekeeping: a terminal Signal carries the
@@ -308,7 +321,7 @@ func (r *SignalReconciler) reconcileLive(ctx context.Context, p *signalPass) (ct
 // successor that took the name meanwhile keeps its own signals and window.
 func (r *SignalReconciler) releaseOrphans(ctx context.Context, source string) error {
 	log.FromContext(ctx).Info("releasing the signals of a source that no longer exists", "source", source)
-	releaser := &SourceReleaser{Signals: r.Signals, Cooldowns: r.CooldownWindows, Live: liveSignalSource(r.reader(), r.Namespace)}
+	releaser := &SourceReleaser{Signals: r.Signals, Cooldowns: r.CooldownWindows, Receipts: r.Receipts, Live: liveSignalSource(r.reader(), r.Namespace)}
 	return releaser.Release(ctx, source)
 }
 

@@ -252,6 +252,7 @@ func main() {
 		Client:       mgr.GetClient(),
 		Signals:      stores.Signals,
 		Cooldowns:    stores.Cooldowns,
+		Receipts:     stores.Receipts,
 		AdapterState: stores.AdapterState,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "signalsource controller")
@@ -305,6 +306,10 @@ func main() {
 		Namespace:              namespace,
 		Scheme:                 mgr.GetScheme(),
 		MaxActiveConversations: maxActive,
+		// Under nats a conversation is a record, not a Kubernetes object: an
+		// owner reference to it points at nothing and the garbage collector
+		// deletes the pod and ConfigMap the moment they are created.
+		NoOwnerReference: backend == backendNats,
 		// A runtime pod that never STARTS holds its slot until it is reaped.
 		// Generous by default: it must clear a cold pull of a large runtime
 		// image, because reaping a pod that was merely still pulling turns a
@@ -396,6 +401,18 @@ func main() {
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "conversation controller")
 		os.Exit(1)
+	}
+	// With no owner reference for the garbage collector to follow, a runtime
+	// pod or MCP ConfigMap whose record is gone is removed by this sweep.
+	if backend == backendNats {
+		if err := mgr.Add(&controller.OrphanSweeper{
+			Client:        mgr.GetClient(),
+			Conversations: stores.Conversations,
+			Namespace:     namespace,
+		}); err != nil {
+			setupLog.Error(err, "orphan sweeper")
+			os.Exit(1)
+		}
 	}
 
 	// Signal consumer pool and housekeeping (signal-persistence D-3, D-11): one

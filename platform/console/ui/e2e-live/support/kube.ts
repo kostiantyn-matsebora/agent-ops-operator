@@ -94,7 +94,26 @@ interface ConversationObject {
  * fixture this suite just created (a generated name, a causedBy member), not
  * for asserting on. Assertions read the console's own rendering. */
 export function listConversations(): ConversationObject[] {
-  return getJSON<{ items: ConversationObject[] }>('conversations.agentops.dev').items
+  // Through the manager's /state surface, which BOTH state backends serve. Under
+  // the default `nats` backend there is no Conversation object in the
+  // Kubernetes API, so `kubectl get conversations` would find nothing. The
+  // manager forward is opened by global-setup, which exports its address.
+  const base = process.env.E2E_LIVE_MANAGER_URL
+  if (!base) return getJSON<{ items: ConversationObject[] }>('conversations.agentops.dev').items
+  const token =
+    getSecretValue('agentops-adapter-token', 'token') ?? process.env.E2E_LIVE_ADAPTER_TOKEN ?? 'e2e-adapter-token-not-a-secret'
+  const out = execFileSync('curl', ['-fsS', '-H', `Authorization: Bearer ${token}`, `${base}/state/conversations`], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
+  const wire = JSON.parse(out) as {
+    items: { name: string; createdAt: string; spec: ConversationObject['spec']; status?: ConversationObject['status'] }[]
+  }
+  return wire.items.map((w) => ({
+    metadata: { name: w.name, creationTimestamp: w.createdAt },
+    spec: w.spec,
+    status: w.status,
+  }))
 }
 
 /** Polls until `find` returns a match, or throws after `timeoutMs`. */

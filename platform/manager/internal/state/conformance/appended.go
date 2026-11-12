@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
+
+// watchWithItemsFailed is the failure format the WatchWithItems cases share.
+const watchWithItemsFailed = "WatchWithItems: %v"
 
 // AppendedOpen pairs one fresh, isolated instance of the parent's Collection
 // with the Appended handle over the very same backend, so a scenario can
@@ -43,6 +47,22 @@ type AppendedFixture[P, T any] struct {
 	// KeyOf reads the key a listed parent belongs under, needed only by that
 	// same scenario.
 	KeyOf func(rec P) state.Key
+	// EditParent changes the parent in a way ParentChanged can read back,
+	// without touching any item. Needed only by the parent-only-write
+	// scenario; nil skips it.
+	EditParent func(rec *P)
+	// ParentChanged reports whether rec carries the change EditParent made.
+	ParentChanged func(rec P) bool
+
+	// HistoryLimit is how many items a parent keeps, the oldest falling off.
+	// Zero means unbounded and skips the scenario.
+	HistoryLimit int
+
+	// ParentIndex, IndexBefore and IndexAfter name an index whose value
+	// EditParent moves the parent from one entry of to another. Needed only by
+	// the index-after-a-parent-write scenario; a zero ParentIndex skips it.
+	ParentIndex             state.Index[P]
+	IndexBefore, IndexAfter string
 }
 
 // RunAppended executes every state.Appended[P, T] scenario against a fresh
@@ -73,7 +93,22 @@ func RunAppended[P, T any](t *testing.T, open func() AppendedOpen[P, T], fx Appe
 		t.Run("ListingWithItemsEqualsTheCombinedRead", func(t *testing.T) { testListWithItems(t, open(), fx) })
 	}
 
+	t.Run("DeletingTheParentTakesItsItemsWithIt", func(t *testing.T) { testDeleteTakesItems(t, open(), fx) })
+	if fx.HistoryLimit > 0 {
+		t.Run("HistoryKeepsTheNewestItemsUpToItsLimit", func(t *testing.T) { testHistoryLimit(t, open(), fx) })
+	}
+	if fx.ParentIndex.Name() != "" && fx.EditParent != nil && fx.ParentChanged != nil {
+		t.Run("ListingWithItemsFollowsAParentOnlyWrite", func(t *testing.T) { testListWithItemsAfterParentWrite(t, open(), fx) })
+	}
+
 	t.Run("WatchWithItemsCarriesTheItemsOfEveryPut", func(t *testing.T) { testWatchWithItems(t, open(), fx) })
+	if fx.AllIndex.Name() != "" {
+		t.Run("WatchWithItemsResumesFromAListedRevision", func(t *testing.T) { testWatchWithItemsResumesFromList(t, open(), fx) })
+	}
+	if fx.EditParent != nil && fx.ParentChanged != nil {
+		t.Run("WatchWithItemsCarriesAParentWriteThatTouchesNoItem", func(t *testing.T) { testWatchWithItemsParentOnly(t, open(), fx) })
+		t.Run("WatchWithItemsResumesStrictlyAfterAnEvent", func(t *testing.T) { testWatchWithItemsResume(t, open(), fx) })
+	}
 }
 
 func createParent[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T], name string) state.Key {
@@ -108,7 +143,7 @@ func testAppendNeverConflicts[P, T any](t *testing.T, o AppendedOpen[P, T], fx A
 
 	items, err := o.Items.List(ctx, key)
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
 	if len(items) != 2 {
 		t.Fatalf("List = %d items, want exactly item-a and item-b", len(items))
@@ -126,7 +161,7 @@ func testListOrder[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixt
 	}
 	items, err := o.Items.List(ctx, key)
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
 	if len(items) != n {
 		t.Fatalf("got %d items, want %d", len(items), n)
@@ -339,7 +374,7 @@ func testWatchWithItems[P, T any](t *testing.T, o AppendedOpen[P, T], fx Appende
 	key := createParent(t, o, fx, "watch-with-items")
 	events, err := o.Items.WatchWithItems(ctx, "")
 	if err != nil {
-		t.Fatalf("WatchWithItems: %v", err)
+		t.Fatalf(watchWithItemsFailed, err)
 	}
 	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
 		t.Fatal(err)
@@ -359,4 +394,249 @@ func testWatchWithItems[P, T any](t *testing.T, o AppendedOpen[P, T], fx Appende
 			t.Fatal("never observed a put carrying the appended item")
 		}
 	}
+}
+
+// WatchWithItems is the parent's feed (store.go): a change to the parent alone
+// — a close, a read mark, a phase — must reach it, not only a change to an
+// item. A backend watching only the items missed exactly these, and a consumer
+// showed a conversation closed in the store as still open for ever.
+func testWatchWithItemsParentOnly[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	key := createParent(t, o, fx, "watch-parent-only")
+	events, err := o.Items.WatchWithItems(ctx, "")
+	if err != nil {
+		t.Fatalf(watchWithItemsFailed, err)
+	}
+	editParent(t, o, fx, key)
+
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatal("WatchWithItems closed before carrying the parent write")
+			}
+			if ev.Type == state.EventPut && ev.Key == key && fx.ParentChanged(ev.Record.Record) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("never observed a put for a write that changed the parent and no item")
+		}
+	}
+}
+
+// A feed resumed from an event's own Resume continues strictly after it: the
+// event it was resumed from is not delivered again, and a write made after
+// the disconnect is. The resume is whatever the backend minted, opaque here.
+func testWatchWithItemsResume[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	key := createParent(t, o, fx, "watch-resume")
+	first, err := o.Items.WatchWithItems(ctx, "")
+	if err != nil {
+		t.Fatalf(watchWithItemsFailed, err)
+	}
+	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
+		t.Fatal(err)
+	}
+	var resume state.Revision
+	deadline := time.After(10 * time.Second)
+	for resume == "" {
+		select {
+		case ev, ok := <-first:
+			if !ok {
+				t.Fatal("feed closed before delivering the append")
+			}
+			if ev.Type == state.EventPut && ev.Key == key {
+				resume = ev.Resume
+			}
+		case <-deadline:
+			t.Fatal("never observed the append")
+		}
+	}
+	cancel()
+
+	// The parent changes while no feed is open; a resumed feed must carry it.
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	editParent(t, o, fx, key)
+	second, err := o.Items.WatchWithItems(ctx2, resume)
+	if err != nil {
+		t.Fatalf("resume from %q: %v", resume, err)
+	}
+	deadline = time.After(10 * time.Second)
+	for {
+		select {
+		case ev, ok := <-second:
+			if !ok {
+				t.Fatal("resumed feed closed before delivering the write made while disconnected")
+			}
+			if ev.Type == state.EventPut && ev.Key == key && fx.ParentChanged(ev.Record.Record) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("a resumed feed never delivered the parent write made after the resume point")
+		}
+	}
+}
+
+func editParent[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T], key state.Key) {
+	t.Helper()
+	if _, err := state.Mutate(context.Background(), o.Parent, key, func(p *P) error {
+		fx.EditParent(p)
+		return nil
+	}); err != nil {
+		t.Fatalf("edit the parent: %v", err)
+	}
+}
+
+// testHistoryLimit appends past the limit and checks the oldest fell off, the
+// newest stayed in append order, and an item that aged out is ErrNotFound to
+// Grow, so a caller can tell it from success.
+func testHistoryLimit[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx := context.Background()
+	key := createParent(t, o, fx, "history-limit")
+	total := fx.HistoryLimit + 3
+	id := func(i int) string { return fmt.Sprintf("hist-%03d", i) }
+	for i := 0; i < total; i++ {
+		if err := o.Items.Append(ctx, key, fx.NewItem(id(i))); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+		// Append order is by time on some backends: keep appends distinct.
+		time.Sleep(2 * time.Millisecond)
+	}
+	got, err := o.Items.List(ctx, key)
+	if err != nil {
+		t.Fatalf(fmtList, err)
+	}
+	if len(got) != fx.HistoryLimit {
+		t.Fatalf("kept %d items, want the newest %d", len(got), fx.HistoryLimit)
+	}
+	want := fx.NewItem(id(total - fx.HistoryLimit))
+	if !reflect.DeepEqual(got[0], want) {
+		t.Fatalf("oldest kept = %+v, want %+v", got[0], want)
+	}
+	if err := o.Items.Grow(ctx, key, id(0), fx.Edit("late")); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("Grow of an item that aged out = %v, want ErrNotFound", err)
+	}
+}
+
+// testListWithItemsAfterParentWrite checks that an index over the parent
+// follows a write that touches no item: the record is listed under its new
+// value with its items, and no longer under the old.
+func testListWithItemsAfterParentWrite[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx := context.Background()
+	key := createParent(t, o, fx, "index-follows")
+	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
+		t.Fatal(err)
+	}
+	has := func(value string) (found bool, items int) {
+		t.Helper()
+		listed, err := o.Items.ListWithItems(ctx, fx.ParentIndex, value)
+		if err != nil {
+			t.Fatalf("ListWithItems(%q): %v", value, err)
+		}
+		for _, w := range listed {
+			if fx.KeyOf(w.Record) == key {
+				return true, len(w.Items)
+			}
+		}
+		return false, 0
+	}
+	if found, _ := has(fx.IndexBefore); !found {
+		t.Fatalf("the parent is not listed under %q before the write", fx.IndexBefore)
+	}
+	editParent(t, o, fx, key)
+	eventually(t, "the parent is listed under its new value with its item", func() bool {
+		found, n := has(fx.IndexAfter)
+		return found && n == 1
+	})
+	if found, _ := has(fx.IndexBefore); found {
+		t.Fatalf("the parent is still listed under %q after the write", fx.IndexBefore)
+	}
+}
+
+func eventually(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("never: %s", what)
+}
+
+// testWatchWithItemsResumesFromAListedRevision is the reader's whole recovery
+// path: list, keep the revision the listing gave, open a feed from it. A
+// backend that mints a different token for a feed than for a listing refuses
+// every resume, and the reader relists for ever.
+func testWatchWithItemsResumesFromList[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	key := createParent(t, o, fx, "resume-from-list")
+	if err := o.Items.Append(ctx, key, fx.NewItem(itemOne)); err != nil {
+		t.Fatal(err)
+	}
+	var listed state.Revision
+	eventually(t, "the listing carries the parent", func() bool {
+		all, err := o.Items.ListWithItems(ctx, fx.AllIndex, fx.AllValue)
+		if err != nil || len(all) == 0 {
+			return false
+		}
+		listed = all[0].Revision
+		return true
+	})
+	feed, err := o.Items.WatchWithItems(ctx, listed)
+	if err != nil {
+		t.Fatalf("a feed opened from the revision a listing returned (%q) was refused: %v", listed, err)
+	}
+	if err := o.Items.Append(ctx, key, fx.NewItem("after-list")); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		select {
+		case ev, ok := <-feed:
+			if !ok {
+				t.Fatal("the feed closed instead of delivering the change made after the listing")
+			}
+			if ev.Type == state.EventPut && ev.Key == key && len(ev.Record.Items) == 2 {
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("the change made after the listing never arrived")
+		}
+	}
+}
+
+// testDeleteTakesItems deletes a parent that has items, then recreates the
+// same key. A backend that keeps items apart from the parent must not let the
+// old ones reappear under the new record.
+func testDeleteTakesItems[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T]) {
+	ctx := context.Background()
+	key := createParent(t, o, fx, "delete-cascade")
+	for _, id := range []string{"gone-1", "gone-2"} {
+		if err := o.Items.Append(ctx, key, fx.NewItem(id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := o.Parent.Delete(ctx, key); err != nil {
+		t.Fatalf("Delete the parent: %v", err)
+	}
+	if _, err := o.Items.List(ctx, key); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("List of a deleted parent's items = %v, want ErrNotFound", err)
+	}
+	if err := o.Items.Append(ctx, key, fx.NewItem("orphan")); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("Append to a deleted parent = %v, want ErrNotFound", err)
+	}
+
+	if _, err := o.Parent.Create(ctx, key, fx.NewParent()); err != nil {
+		t.Fatalf("recreate the parent: %v", err)
+	}
+	eventually(t, "the recreated parent has none of the old items", func() bool {
+		got, err := o.Items.List(ctx, key)
+		return err == nil && len(got) == 0
+	})
 }

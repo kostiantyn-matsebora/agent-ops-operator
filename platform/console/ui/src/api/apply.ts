@@ -158,8 +158,12 @@ function writeConversation(
       })
       continue
     }
-    if (type !== 'ADDED') continue
     const params = String(key[1] ?? '')
+    // A change to a row this page does not hold can still move it onto the
+    // page: closing a conversation puts it under the Archive filter. On the
+    // unfiltered first page a modified row that is absent is simply older than
+    // the page, so only an addition belongs there.
+    if (type !== 'ADDED' && unfilteredFirstPage(params)) continue
     if (!unfilteredFirstPage(params)) {
       // It may or may not belong on this page. The server decides, and a
       // stable key means the re-read swaps the rows under an unchanged table.

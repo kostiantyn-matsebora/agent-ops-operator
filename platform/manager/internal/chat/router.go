@@ -39,6 +39,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
@@ -91,8 +92,19 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if text == "" || msg.ThreadID == nil {
 		return nil
 	}
-	conv := r.convByThread(ctx, ch, *msg.ThreadID)
+	conv, err := r.convByThread(ctx, ch, *msg.ThreadID)
+	if err != nil {
+		// Not "no conversation here": the store could not be read, so whether
+		// there is one is unknown. Say so, so the caller retries instead of
+		// being told its message was accepted.
+		return fmt.Errorf("find the conversation for thread %q: %w", *msg.ThreadID, err)
+	}
 	if conv == nil {
+		// Dropped by contract (IN-2), but never silently: a reply that goes
+		// nowhere has to leave a trace, or it is indistinguishable from one
+		// that worked.
+		log.FromContext(ctx).Info("inbound message dropped, no conversation is bound to the thread",
+			"channel", ch.Name, "thread", *msg.ThreadID)
 		return nil // no conversation in this thread — nothing to continue
 	}
 	// A conversation must never receive its own output as an input
@@ -386,6 +398,7 @@ func (r *Router) closeConversation(ctx context.Context, conv *state.Conversation
 		})); err != nil {
 			return err
 		}
+		log.FromContext(ctx).Info("conversation closed", "conversation", conv.Name)
 	}
 	return r.cascadeCloseMembers(ctx, conv.Name, "")
 }
@@ -742,10 +755,10 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 
 // convByThread resolves a (channel, thread) pair to its conversation. Thread
 // ids are opaque strings scoped per channel — no cross-channel collisions.
-func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string) *state.ConversationRecord {
+func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string) (*state.ConversationRecord, error) {
 	list, err := r.Conversations.List(ctx, state.ByAll, "")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	for i := range list {
 		c := &list[i]
@@ -754,10 +767,10 @@ func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel,
 			continue
 		}
 		if len(c.ChannelRefs) == 0 || c.BoundTo(ch.Name) {
-			return c
+			return c, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // FanOutSend posts ONE SEMANTIC MESSAGE to every bound channel of a

@@ -21,6 +21,7 @@ func RunExpiring[T any](t *testing.T, open func() state.Expiring[T], decl state.
 	t.Run("RecordMayCarryExpiry", func(t *testing.T) {
 		t.Run("ExpiredRecordInvisibleBeforeRemoved", func(t *testing.T) { testExpiryInvisible(t, open(), decl, fx) })
 		t.Run("ExpiryObservableOnFeedAsDelete", func(t *testing.T) { testExpiryObservableOnFeed(t, open(), fx) })
+		t.Run("ExpiryWhileDisconnectedArrivesOnTheResumedFeed", func(t *testing.T) { testExpiryAcrossResume(t, open(), fx) })
 	})
 }
 
@@ -34,7 +35,7 @@ func testExpiryInvisible[T any](t *testing.T, s state.Expiring[T], decl state.De
 	rec := fx.New()
 	rec = fx.Edit(rec, -1) // fixtures.go: a negative marker on an expiring kind sets a past expiry
 	if _, err := s.Create(ctx, key, rec); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	if _, _, err := s.Get(ctx, key); !errors.Is(err, state.ErrNotFound) {
@@ -69,7 +70,7 @@ func testExpiryObservableOnFeed[T any](t *testing.T, s state.Expiring[T], fx Fix
 	key := fx.Key("expiry-feed")
 	rec := fx.Edit(fx.New(), -1)
 	if _, err := s.Create(ctx, key, rec); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	putEvt := mustRecvEvent(t, events, 5*time.Second)
@@ -84,6 +85,46 @@ func testExpiryObservableOnFeed[T any](t *testing.T, s state.Expiring[T], fx Fix
 	}
 
 	mustRecvEventMatching(t, events, 8*time.Second, func(e state.Event[T]) bool {
+		return e.Type == state.EventDelete && e.Key == key
+	})
+}
+
+// testExpiryAcrossResume lets a record expire while no feed is open. A feed
+// resumed from before it must deliver the removal, or a consumer that cached
+// the record keeps serving it for good.
+func testExpiryAcrossResume[T any](t *testing.T, s state.Expiring[T], fx Fixture[T]) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	first, firstCancel := context.WithCancel(ctx)
+	events, err := s.Watch(first, "")
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	key := fx.Key("expiry-resume")
+	if _, err := s.Create(ctx, key, fx.New()); err != nil {
+		t.Fatalf(fmtCreate, err)
+	}
+	put := mustRecvEvent(t, events, 5*time.Second)
+	if put.Type != state.EventPut || put.Resume == "" {
+		t.Fatalf("first event = %+v, want a put carrying a resume point", put)
+	}
+	firstCancel() // the consumer disconnects here
+
+	if _, err := state.Mutate(ctx, s, key, func(r *T) error {
+		*r = fx.Edit(*r, -1)
+		return nil
+	}); err != nil {
+		t.Fatalf("expire the record: %v", err)
+	}
+	if _, _, err := s.Get(ctx, key); !errors.Is(err, state.ErrNotFound) { // a lookup lets a lazy backend remove it
+		t.Fatalf("Get after expiry = %v, want ErrNotFound", err)
+	}
+
+	resumed, err := s.Watch(ctx, put.Resume)
+	if err != nil {
+		t.Fatalf("resume from %q: %v", put.Resume, err)
+	}
+	mustRecvEventMatching(t, resumed, 10*time.Second, func(e state.Event[T]) bool {
 		return e.Type == state.EventDelete && e.Key == key
 	})
 }

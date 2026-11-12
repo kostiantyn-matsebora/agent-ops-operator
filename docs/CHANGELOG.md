@@ -12,11 +12,38 @@ for the source and the reference material beside this file.
 
 ### Added
 
-- A new values key, `stateStore.backend`, default `kube`. It selects where the
-  manager keeps conversation state, and exactly one backend may be selected.
-  `kube` is the Kubernetes API, as before, and it is the only backend this
-  release ships. The render refuses an unknown value. The key covers
-  `Signal`s and each source's cooldown window as well as conversations.
+- A new values key, `stateStore.backend`, selecting where the manager keeps
+  conversation state. Exactly one backend may be selected, and the render
+  refuses an unknown value. The key covers `Signal`s and each source's
+  cooldown window and receipt counters as well as conversations.
+- A new `nats` state backend, a clustered JetStream KV and Object Store the
+  chart runs as its own three-server bundle. It passes the same conformance
+  suite and bench as `kube`.
+- **BREAKING: the default backend is now `nats`, not `kube`.** State lives on
+  the bundle's own clustered volumes, not the Kubernetes API —
+  `kubectl get conv` and `kubectl get sig` no longer show anything live on a
+  fresh install. Pin the old behaviour with `stateStore.backend: kube`.
+- **BREAKING: a default install now runs three more pods and three more
+  volumes**, for the `nats` bundle.
+- Retention behaves the same on both backends. Deleting a conversation now
+  also releases the bodies of its queued inputs, deleting a source clears its
+  receipt counters as well as its cooldown window, and under `nats` a
+  conversation's runs are removed with it and a periodic sweep catches what a
+  crash left behind. A conversation keeps its newest ten runs either way.
+- The state streams write a keep-alive, and the console drops a stream that
+  stays silent and relists, so a manager that dies without closing its socket
+  no longer freezes the console's view.
+- The manager waits for the state server to accept its buckets instead of
+  exiting while the cluster forms its quorum.
+- An upgrade from `kube` imports every conversation with its runs and queued inputs,
+  every signal, cooldown window, receipt counter and adapter state into `nats` on the manager's first start, before it
+  reports ready, and leaves the custom resources in place.
+- A new NetworkPolicy admits the state server's client port from the manager
+  alone, and its peer port from its own pods alone, where network
+  restriction is enabled.
+- A new chart-managed credential, the Secret `agentops-nats-credentials`,
+  resolved explicit value, then existing Secret, then generation on install
+  only — the same order as `adapterAuth`/`controlPlaneAuth`.
 - A new `Signal` CRD and a publish/consume split on `POST /signal/inbound`.
   The endpoint validates, stores one `Signal` per admitted message and
   acknowledges. A separate consumer pool on the leader then claims it, spends
@@ -120,15 +147,73 @@ for the source and the reference material beside this file.
 - The `aops` tool descriptions say which tools are moves and which are reads.
 - A cascading close closes descendants before the ancestor.
 
+### Fixed
+
+- A change the state feed reported could be skipped for good on a three-server
+  state store, because a follower that had not applied a write yet could
+  answer the read of its record. Reads now go to the stream leader.
+- The manager's liveness probe no longer kills it while a slow state server
+  elects a leader. The pod now has a startup probe of up to five minutes.
+- A non-leader replica that cannot reach the leader keeps the request body for
+  its own handler.
+- A chat message whose conversation cannot be read is refused for retry
+  instead of dropped.
+- The console waits out a refused connection to the manager for a few seconds
+  instead of failing the call, so a message or a close typed while the manager
+  rolls is no longer lost.
+- A state-store feed opened without a resume point no longer skips what is
+  written after the server resets its consumer. The reconciler could miss new
+  conversations for good, leaving them with no status and no pod.
+- The manager's start-up against a state server that is still forming its
+  cluster no longer spends the whole two-minute wait on one request the server
+  never answers. Each attempt is bounded and retried.
+- A changed `nats.replicas` leaves the existing buckets as they are and logs
+  the difference. It no longer re-replicates a live bucket.
+
 ### Upgrade
 
-Not breaking. Helm never upgrades an existing CRD, so apply the new and changed ones with the chart before `helm upgrade`:
+**BREAKING: the default state backend changes to `nats`.** Helm never
+upgrades an existing CRD, so apply the new and changed ones with the chart
+before `helm upgrade`:
 
 ```sh
 kubectl apply -f chart/crds/
 ```
 
-This adds the `Signal` CRD, one Conversation field and one enum value. Adapter and manager upgrade in either order: an older manager ignores `signalId`. An adapter that reads `conversations` from the response, if you wrote one, must stop.
+```powershell
+kubectl apply -f chart/crds/
+```
+
+This adds the `Signal` CRD, one Conversation field and one enum value.
+Adapter and manager upgrade in either order: an older manager ignores
+`signalId`. An adapter that reads `conversations` from the response, if you
+wrote one, must stop.
+
+An upgrade that can read the cluster and finds no `agentops-nats-credentials`
+Secret and no explicit value fails the render. The error names the Secret and `nats.auth.existingSecret`.
+
+The new manager starts and finds the empty `nats` buckets and the `kube`
+records. The replica that wins the leader lease imports them and reports
+ready once the import finishes. Verify through the console or `/state/conversations` before trusting it, then
+delete the old custom resources yourself once you have — the import never
+does:
+
+```sh
+kubectl -n agent-ops delete conversations,conversationinputs,signals --all
+```
+
+```powershell
+kubectl -n agent-ops delete conversations,conversationinputs,signals --all
+```
+
+**Pin the old behaviour instead** with `stateStore.backend: kube` if you rely
+on reading conversations through the Kubernetes API.
+
+**Rollback loses what `nats` received after the upgrade.** Setting
+`stateStore.backend` back to `kube` and upgrading again does not copy
+anything written to `nats` since the first upgrade — every conversation
+opened or continued after it is lost. Snapshot (`nats stream snapshot`)
+first if that matters.
 
 ## [18.0.1] — 2026-10-25
 

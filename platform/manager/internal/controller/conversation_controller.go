@@ -103,6 +103,15 @@ type ConversationReconciler struct {
 	Runs          state.Appended[state.ConversationRecord, state.Run]
 	Blobs         state.Blobs
 	Namespace     string
+	// NoOwnerReference stops the reconciler putting an owner reference on the
+	// runtime pod and the MCP ConfigMap. Set it when conversations are NOT
+	// Kubernetes objects (the nats backend): the garbage collector reads an
+	// owner reference as a claim that a live object of that kind, name and UID
+	// exists, finds none, and deletes the dependent at once — the pod is
+	// created and collected in a loop. The zero value keeps the reference,
+	// which is right wherever a Conversation object stands behind the record.
+	// An OrphanSweeper stands in for the collector when this is set.
+	NoOwnerReference bool
 	// MaxActiveConversations caps simultaneously ACTIVE conversations — a
 	// conversation is active while a runtime pod exists for it. Counted from
 	// live pods, never from status: a pod stuck Pending on an unschedulable
@@ -667,6 +676,16 @@ func (r *ConversationReconciler) ownerOf(conv *state.ConversationRecord) *metav1
 	}
 }
 
+// own makes the conversation the controller of obj — the second net under
+// explicit release — unless NoOwnerReference says no Kubernetes object stands
+// behind the record, in which case a reference could only point at nothing.
+func (r *ConversationReconciler) own(conv *state.ConversationRecord, obj client.Object) error {
+	if r.NoOwnerReference {
+		return nil
+	}
+	return controllerutil.SetControllerReference(r.ownerOf(conv), obj, r.Scheme)
+}
+
 // clearRuntimeStartFailure records that a runtime pod finally started, resetting
 // the backoff. Writes only on an actual change, so a healthy conversation does
 // not spend a status patch per reconcile.
@@ -862,10 +881,33 @@ func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *state.
 		logger.Info("close-topic grace expired; releasing the conversation with threads still open",
 			"conversation", conv.Name)
 	}
+	// The conversation is about to go. What it owns outside its record goes
+	// with it, by the manager's own act: nothing may depend on a garbage
+	// collector, which envtest does not run and a state store need not have.
+	if err := r.releaseInputBlobs(ctx, conv); err != nil {
+		return ctrl.Result{}, err
+	}
 	err := state.Patch(ctx, r.Conversations, conv, func(c *state.ConversationRecord) {
 		c.Finalizers = slices.DeleteFunc(c.Finalizers, func(f string) bool { return f == FinalizerCloseTopics })
 	})
 	return ctrl.Result{}, state.IgnoreNotFound(err)
+}
+
+// releaseInputBlobs deletes the out-of-line body of every input still queued
+// on conv. An input already consumed had its blob removed when it was pruned
+// (pruneProcessed), so what the queue still names is exactly what a
+// deleted conversation would otherwise leave behind. Deleting a blob that is
+// already gone is not an error, so a retry after a partial pass is safe.
+func (r *ConversationReconciler) releaseInputBlobs(ctx context.Context, conv *state.ConversationRecord) error {
+	for _, in := range conv.Inputs {
+		if in.PayloadRef == "" {
+			continue
+		}
+		if err := r.Blobs.Delete(ctx, in.PayloadRef); err != nil {
+			return fmt.Errorf("release the blob of input %q of %q: %w", in.ID, conv.Name, err)
+		}
+	}
+	return nil
 }
 
 // liveRuntimePods lists the runtime pods that consume capacity: Running or
@@ -1567,7 +1609,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *sta
 
 	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, resolved, r.MasterToken)
 	pod.Namespace = r.Namespace
-	if err := controllerutil.SetControllerReference(r.ownerOf(conv), pod, r.Scheme); err != nil {
+	if err := r.own(conv, pod); err != nil {
 		return false, err
 	}
 	if err := r.Create(ctx, pod); err != nil {
@@ -1670,7 +1712,7 @@ func (r *ConversationReconciler) ensureMCPConfigMap(ctx context.Context,
 	}}
 	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
 		cm.Data = map[string]string{"mcp.json": res.JSON}
-		return controllerutil.SetControllerReference(r.ownerOf(conv), cm, r.Scheme)
+		return r.own(conv, cm)
 	})
 	return res, cm.Name, err
 }

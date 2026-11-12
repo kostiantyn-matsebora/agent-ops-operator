@@ -124,6 +124,8 @@ export default async function globalSetup(config: FullConfig): Promise<() => Pro
 
   console.log('[global-setup] port-forwarding the manager service')
   const managerForward = await portForward('agentops-manager', 8080)
+  // Read by support/kube.ts (listConversations) in this process and in the workers.
+  process.env.E2E_LIVE_MANAGER_URL = `http://127.0.0.1:${managerForward.localPort}`
   // Everything below can throw partway through (a slow admission, a bad
   // fixture) — without this try/catch an early throw would skip the
   // `return` below entirely, and with it the teardown Playwright calls to

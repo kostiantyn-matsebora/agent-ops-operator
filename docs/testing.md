@@ -8,7 +8,7 @@ that chain — see below.
 |---|---|---|---|
 | **Unit and envtest** | every module's `go test`, and the operator's suite against a real API server | rendering, parsing, scheduling, and what a reconciler writes to a CR | anything the kubelet, the scheduler, a CSI driver or a live authorizer decides — envtest runs none of them |
 | **Contract conformance** | every adapter's and runtime's **built binary**, black-box, against a fake manager | that an adapter speaks the adapter contracts — long-poll, `contract=`, ack-once, inbound push, listing, status, no relay loop, a visible-or-error thread-less send, an act-or-error `delete-conversation`, and a retry budget bounded by the reclaim window for a channel adapter, and normalized emission, bearer auth and a surfaced rejected post for a signal adapter — plus, for a runtime, allowlist composition, `turns[]`/`toolCalls[]` bounds trimming, and the idle-TTL exit | anything about the cluster |
-| **System** | the chart from the working tree on a real single-node cluster (k3s under k3d), images built from the same commit | the substrate: credential projection by the kubelet, RBAC as the authorizer enforces it, informer liveness, context continuity across a pod restart, admission FIFO on a real pod DELETE, the signal loop breaker under a runtime that really cannot start | answer *quality* — that is an eval harness, a different project |
+| **System** | the chart from the working tree on a real single-node cluster (k3s under k3d), images built from the same commit | the substrate: credential projection by the kubelet, RBAC as the authorizer enforces it, informer liveness, context continuity across a pod restart, admission FIFO on a real pod DELETE, the signal loop breaker under a runtime that really cannot start, and — for the default `nats` state backend — a server pod loss, and quorum loss, and the import from `kube` racing an old replica | answer *quality* — that is an eval harness, a different project |
 | **Console browser e2e** (`e2e-live`, nightly) | Playwright driving a real browser against the full tier's own cluster and console — or any already-running install, by hand | real K8s API behavior none of the three above actually exercises (see below), and what a real browser renders for a real signal through the real console | anything the tiers above already gate — it is read-only verification, never a substitute for them |
 
 The mocked-API browser smoke, `platform/console/ui/e2e/`, gates every console
@@ -20,6 +20,18 @@ contract conformance. The system tier does not gate pull requests.
 
 It is a different suite from `e2e-live` below. A rendering check against a
 mocked backend, not a behavior proof against a real one.
+
+| Tier | Required |
+|---|---|
+| Unit | ALWAYS, every function and error branch a change touches |
+| Conformance | WHERE APPLICABLE, behaviour a contract promises to more than one implementation |
+| System | ALWAYS ADDRESSED (a section, or one ticked line saying why not), critical paths a cluster decides (`platform/manager/test/system/`) |
+| Console browser e2e | OPTIONAL, UI paths in a browser (`e2e-live`) |
+| Documentation | ALWAYS, its own last task, reference docs and the adopter site |
+
+A test that cannot fail against the old code proves nothing, so show it
+failing first. Skipping a required tier is the user's call, never the
+author's, and the pull request says so.
 
 **Every change declares its first and third tiers in its own task list.**
 `docs-task` in CI refuses to finish a change missing any of the three — see
@@ -133,7 +145,7 @@ boundary, not a limitation to work around.
 ## The state store conformance suite
 
 The manager reaches conversation state, `Signal`s, each source's cooldown
-window and receipt counters, and adapter cursors through one GENERIC
+window and receipt counters, and adapter state through one GENERIC
 contract (`internal/state`): `Collection[T]`, `Expiring[T]`, `Appended[P,
 T]` and `Blobs`, composed into one closed inventory, `Stores`, naming every
 kind the manager keeps.
@@ -153,8 +165,9 @@ fails, naming the field, if one is left unwired.
 | the whole inventory: a kind removed from `Stores` without a matching fixture fails `RunStores`, naming it | — |
 
 - **Every backend runs the same suite.** The `kube` backend runs it in its
-  own package against envtest (`TestStores`), so it is part of the ordinary
-  `go test ./...`.
+  own package against envtest (`TestStores`), and the `nats` backend runs it
+  in its own package against an in-process JetStream server. Both are part
+  of the ordinary `go test ./...`.
 - **A new backend adds one test calling `conformance.RunStores`** against
   its own `Stores`, never a copy of a scenario. A scenario a backend cannot
   meet is a contract change, not an exception.
@@ -178,6 +191,29 @@ cd platform/manager && go test -run '^$' -bench . -benchmem ./internal/state/...
 
 Compare two backends by running the same bench against each. Do not compare
 `ns/op` across machines.
+
+## The default backend's system lanes
+
+The conformance suite proves the `nats` backend meets the contract with no
+cluster. What a real cluster decides about it — pod loss, quorum loss, a drain,
+the import racing an old replica — is the system tier's job, never unit
+tests.
+
+| Lane | Decides |
+|---|---|
+| A state server pod deleted mid-conversation | the conversation completes, no input is lost, the manager stays ready |
+| Two of three servers stopped | work is held and `/state/*` reports the outage, not a loss — every record written before is readable once they return |
+| A drain of the state servers | the budget allows one eviction and refuses a second while the first server is down. The Eviction API is what a drain issues per pod, and the single-node pack cluster serves it |
+| A rolling server image upgrade | two servers stay up throughout and no write fails |
+| An install on `kube` upgraded to the default | the conversation, signal and cooldown window opened before the upgrade read back through `/state/*` afterward, and the custom resources stay untouched |
+| `stateStore.backend: kube` | the smoke tier passes and the install renders no state server, so the pin is exercised, not only rendered |
+
+The console browser tier (`e2e-live`) adds its own two: the page keeps
+rendering, and a thread's unread state survives, across a state server pod
+deletion and across that same `kube`-to-`nats` upgrade.
+
+**Both tiers run against the default install.** The default is the thing
+tested, not an opt-in configuration a lane reaches for once.
 
 ## The oracle split
 

@@ -534,10 +534,15 @@ func (s *Server) streamSSE(w http.ResponseWriter, r *http.Request, open func(con
 		writeSSEFrame(w, sseFrame{event: "resync", data: []byte("{}")})
 		flusher.Flush()
 	}
+	keepAlive := time.NewTicker(streamKeepAlive)
+	defer keepAlive.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-keepAlive.C:
+			_, _ = fmt.Fprint(w, ": keep-alive\n\n")
+			flusher.Flush()
 		case f, ok := <-frames:
 			if !ok {
 				// The backend ended the feed: an apiserver watch that timed out,

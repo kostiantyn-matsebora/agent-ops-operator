@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,6 +97,11 @@ func (w *windowFake) Get(_ context.Context, k state.Key) (state.CooldownWindow, 
 	return r, "1", nil
 }
 
+func (w *windowFake) Delete(_ context.Context, k state.Key) error {
+	delete(w.win, k)
+	return nil
+}
+
 func (w *windowFake) Update(_ context.Context, k state.Key, _ state.Revision, r state.CooldownWindow) (state.Revision, error) {
 	w.win[k] = r
 	return "2", nil
@@ -130,8 +136,8 @@ func TestReleaseRemovesOneSourceAndNoOtherTwice(t *testing.T) {
 	if len(f.recs) != 1 || f.recs["c"].Name != "c" {
 		t.Fatalf("signals left = %v, want only the other source's", f.recs)
 	}
-	if len(w.win["src"].Entries) != 0 || len(w.win["other"].Entries) != 1 {
-		t.Fatalf("windows = %v, want src cleared and other untouched", w.win)
+	if _, kept := w.win["src"]; kept || len(w.win["other"].Entries) != 1 {
+		t.Fatalf("windows = %v, want src removed and other untouched", w.win)
 	}
 }
 
@@ -223,5 +229,70 @@ func TestReleaseTreatsASignalGoneAtDeleteAsDone(t *testing.T) {
 	f.atDelete = func() { delete(f.recs, "a") }
 	if err := r.Release(context.Background(), "src"); err != nil {
 		t.Fatalf("release: %v, want nil", err)
+	}
+}
+
+// receiptFake is the counters collection of a releaser: it records what was
+// asked to be removed, and holds one source's counters per key.
+type receiptFake struct {
+	state.Collection[state.Received]
+	rec map[state.Key]state.Received
+}
+
+func (f *receiptFake) Delete(_ context.Context, k state.Key) error {
+	delete(f.rec, k)
+	return nil
+}
+
+func TestReleaseRemovesTheCountersOfASourceNothingHolds(t *testing.T) {
+	r, _, _, live := newRelease()
+	f := &receiptFake{rec: map[state.Key]state.Received{"src": {Total: 7}, "other": {Total: 3}}}
+	r.Receipts = f
+
+	*live = "successor" // a source holds the name: its counters stay
+	if err := r.Release(context.Background(), "src"); err != nil {
+		t.Fatalf("release while held: %v", err)
+	}
+	if _, ok := f.rec["src"]; !ok {
+		t.Fatal("the counters of a source still held were removed")
+	}
+
+	*live = "" // nothing holds it
+	if err := r.Release(context.Background(), "src"); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if _, ok := f.rec["src"]; ok {
+		t.Fatal("the counters of a deleted source remain")
+	}
+	if f.rec["other"].Total != 3 {
+		t.Fatal("another source's counters changed")
+	}
+}
+
+type failingDelete struct {
+	state.Collection[state.CooldownWindow]
+}
+
+func (failingDelete) Delete(context.Context, state.Key) error { return errors.New("boom") }
+
+func TestReleaseReportsAFailedRemovalOfTheWindow(t *testing.T) {
+	r, _, _, _ := newRelease()
+	r.Cooldowns = failingDelete{}
+	if err := r.Release(context.Background(), "src"); err == nil || !strings.Contains(err.Error(), "cooldown window") {
+		t.Fatalf("Release = %v, want the window removal failure", err)
+	}
+}
+
+type failingReceipts struct {
+	state.Collection[state.Received]
+}
+
+func (failingReceipts) Delete(context.Context, state.Key) error { return errors.New("boom") }
+
+func TestReleaseReportsAFailedRemovalOfTheCounters(t *testing.T) {
+	r, _, _, _ := newRelease()
+	r.Receipts = failingReceipts{}
+	if err := r.Release(context.Background(), "src"); err == nil || !strings.Contains(err.Error(), "receipt counters") {
+		t.Fatalf("Release = %v, want the counters removal failure", err)
 	}
 }

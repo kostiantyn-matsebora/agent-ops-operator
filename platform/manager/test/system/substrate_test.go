@@ -278,7 +278,7 @@ func pauseCronLaneAndClearLeftovers(t *testing.T, ctx context.Context, e *Env) {
 		fresh := pipeline(PipelineCron, ProfileStub, []string{SourceCron}, []string{ChannelConsole})
 		_ = ensure(context.Background(), e.K, fresh)
 	})
-	if _, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "delete", "conversations", "--all", "--wait=false"); err != nil {
+	if err := e.K.DeleteAllConversations(ctx); err != nil {
 		t.Fatal(err)
 	}
 }

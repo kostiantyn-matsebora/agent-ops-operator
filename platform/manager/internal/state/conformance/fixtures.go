@@ -184,6 +184,13 @@ var runFixture = AppendedFixture[state.ConversationRecord, state.Run]{
 	AllIndex: state.ByAll,
 	AllValue: "",
 	KeyOf:    func(rec state.ConversationRecord) state.Key { return state.Key(rec.Name) },
+	// A close touches the record alone: no run is appended.
+	EditParent:    func(rec *state.ConversationRecord) { rec.Phase = state.PhaseClosed },
+	ParentChanged: func(rec state.ConversationRecord) bool { return rec.Phase == state.PhaseClosed },
+	HistoryLimit:  state.RunHistoryLimit,
+	ParentIndex:   state.ByPhase,
+	IndexBefore:   "",
+	IndexAfter:    state.PhaseClosed,
 }
 
 // cooldownFixture drives Run over Stores.Cooldowns. The whole window is

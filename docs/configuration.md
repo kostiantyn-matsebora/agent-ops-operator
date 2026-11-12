@@ -600,17 +600,30 @@ names what is not covered.
 
 ### State store
 
-This key sets where the manager keeps conversation state, `Signal`s, and each source's cooldown window (the ingest cooldown) and receipt counters. **You need to do nothing.** The default
-is the Kubernetes API, as before.
+This key sets where the manager keeps conversation state, `Signal`s, and each
+source's cooldown window (the ingest cooldown) and receipt counters.
 
 | Key | Default | Consequence |
 |---|---|---|
-| `stateStore.backend` | `kube` | the one backend the manager uses. `kube` keeps state in the custom resources, unchanged |
+| `stateStore.backend` | `nats` | the one backend the manager uses. `nats` keeps state on its own clustered volumes. `kube` keeps it in the custom resources instead |
+
+**`nats` becoming the default is BREAKING.** A fresh install runs three more
+pods and three more volumes for it. `kubectl get conv` / `kubectl get sig`
+no longer show anything live — the console does, on either backend.
+
+See [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
+for the version this shipped in. Pin the old behaviour:
+
+```yaml
+stateStore:
+  backend: kube
+```
 
 `kube` keeps the `Conversation`, `ConversationInput` and `Signal` custom
 resources, the window in `SignalSource.status.cooldown` and the receipt
-counters beside it in `SignalSource.status`. They are byte-identical, so
-`kubectl get conv` and `kubectl get sig` are unchanged.
+counters beside it in `SignalSource.status`. They are byte-identical under
+it, so `kubectl get conv` and `kubectl get sig` work exactly as before this
+backend existed.
 
 **Exactly one backend is selected.** The render refuses anything else:
 
@@ -618,12 +631,45 @@ counters beside it in `SignalSource.status`. They are byte-identical, so
 - a selected backend whose bundle is off
 - two backend bundles on at once
 
-`kube` renders no bundle, and no other backend ships yet, so there is no bundle toggle to set. The manager reads the choice as `STATE_BACKEND`, and a
-value its binary does not carry stops it at start, naming the value.
+The default enables the `nats` bundle with no second value touched. Pinning
+`kube` needs only the one value above and renders no bundle. The manager
+reads the choice as `STATE_BACKEND`, and a value its binary does not carry
+stops it at start, naming the value.
 
-Switching an existing install between backends is not a supported upgrade path
-today, since `kube` is the only value. A later backend's page states how state
-moves.
+**An upgrade from `kube` imports automatically.** The first start on `nats`
+copies every conversation, run, queued input, signal, cooldown window,
+receipt counter and adapter state out of the custom resources before the manager reports ready.
+
+It leaves the custom resources in place. See
+[the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
+for the rollback caveat before you upgrade a production install.
+
+#### The `nats` bundle
+
+The clustered JetStream server the default backend runs on three replicas
+of, from `chart/charts/nats/values.yaml`:
+
+| Key | Default | Consequence |
+|---|---|---|
+| `nats.replicas` | `3` | servers in the cluster. `1` is a conscious single point of failure, and the chart notes say so. Set at install: buckets that exist keep their count and the manager logs the difference. A different count needs a fresh install on new volumes, which starts with empty buckets and carries no live state over |
+| `nats.persistence.size` | `10Gi` | each server's own store directory |
+| `nats.persistence.storageClassName` | `""` | the cluster's default provisioner — same convention as `persistence.context` above |
+| `nats.auth.user` | `""` | an explicit username. Left empty, it is the literal `nats`, never generated |
+| `nats.auth.password` | `""` | an explicit password. Left empty, the chart generates one |
+| `nats.auth.existingSecret` | `""` | a Secret you already made, read before the chart generates anything. It must carry the keys `user` and `password` |
+| `nats.podDisruptionBudget.maxUnavailable` | `1` | servers the budget allows down at once. Losing a second loses quorum, not data |
+
+The password resolves in the same order as `adapterAuth`/`controlPlaneAuth`:
+an explicit value, then the existing Secret, then generation on install
+only. The username is never generated.
+
+An upgrade that finds no Secret fails the render, naming
+`agentops-nats-credentials` and `nats.auth.existingSecret`. The manager receives `NATS_URL`, `NATS_USER` and `NATS_PASSWORD` by
+`valueFrom`, so it reads no Secret of its own.
+
+Every value here, and the rest the dependency takes, is in
+[`chart/charts/nats/values.yaml`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/chart/charts/nats/values.yaml)
+— this section names only what you are likely to set.
 
 ### Capacity
 

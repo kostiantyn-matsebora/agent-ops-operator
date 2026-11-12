@@ -1,0 +1,71 @@
+# The `nats` state-store backend's server bundle (design
+# nats-state-store-default D-8). Rendered by the PARENT chart's
+# templates/nats.yaml, gated on `stateStore.backend` — never by a
+# Chart.yaml dependency `condition:`, because a subchart cannot see that
+# parent-scope value (chart.md: "A SUBCHART READS NO PARENT SCOPE BUT
+# `global.`"). So there is no `enabled` key with a literal default here:
+# whether this bundle renders follows the selector on its own, and setting
+# `enabled` by hand is read ONLY by `agentops.stateStoreGuard` as a
+# consistency check against that selector, failing a contradiction rather
+# than silently overriding it either way.
+#
+# enabled: true   # or false — uncomment only to assert the selector's
+#                 # choice and have the guard catch a mismatch; absent, no
+#                 # check runs and the selector alone decides.
+
+replicas: 3
+
+image:
+  repository: nats
+  tag: 2.10-alpine
+  # The official `nats` image's manifest-LIST digest (linux/amd64 AND
+  # linux/arm64 both present — verified with `docker buildx imagetools
+  # inspect nats:2.10-alpine`), pinned per build-test.md: "EVERY IMAGE IS
+  # MULTI-ARCH. NO EXCEPTION." Re-pin on a deliberate bump, never silently.
+  digest: sha256:b83efabe3e7def1e0a4a31ec6e078999bb17c80363f881df35edc70fcb6bb927
+
+persistence:
+  # Per-replica store directory (jetstream file store). ALWAYS
+  # ReadWriteOnce: a StatefulSet volumeClaimTemplate is one claim per pod,
+  # never shared, so the parent chart's RWX-by-default accessModes helper
+  # does not apply here.
+  size: 10Gi
+  # "" = the cluster's default provisioner, "-" = no class (bind a
+  # pre-created PV), a name = that class. Same convention as
+  # persistence.context (agentops.storageClassName).
+  storageClassName: ""
+
+resources: {}
+
+# The chart-generated credential (Secret agentops-nats-credentials),
+# resolved in the SAME order as adapterAuth/controlPlaneAuth/stateReadAuth:
+# an explicit value, then an existing Secret, then generation on install
+# only (design D-8, spec chart-managed-secrets). `user` defaults to `nats`
+# when nothing supplies one — only the password is ever generated.
+auth:
+  user: ""
+  password: ""
+  # An existingSecret must carry the keys `user` and `password`.
+  existingSecret: ""
+  secretName: agentops-nats-credentials
+
+# Probed on the monitoring port (8222), which nats-server opens through the fixed
+# `monitor` port in templates/_helpers.tpl (not configurable here) — an exec probe would need a shell tool the
+# alpine image's nats-server binary alone does not carry, and a tcpSocket
+# probe on the client port risks the same crash-loop the kubernetes/
+# prometheus MCP servers' own comments warn about (a probe that cannot
+# open an unauthenticated connection looks identical to the server being
+# down). httpGet needs no credential: /healthz answers before
+# authorization is checked.
+probes:
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+# A PodDisruptionBudget allowing exactly one replica down at a time — two
+# down loses quorum (D-8). Meaningless under replicas: 1, where the chart
+# still renders it (maxUnavailable: 1 on a single replica is a no-op, never
+# a reason to special-case the template).
+podDisruptionBudget:
+  maxUnavailable: 1
+
+nodeSelector: {}

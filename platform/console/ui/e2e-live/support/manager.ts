@@ -53,7 +53,7 @@ export class ManagerClient {
    * caller (cron, a webhook) uses, and the one that lets a fixture pin an
    * exact row title to test prefix-stripping against. */
   async postTask(source: string, fingerprint: string, title: string, payload: string): Promise<void> {
-    await this.postSignal(source, { fingerprint, kind: 'task', title, payload })
+    await this.postSignal(source, { initiationId: fingerprint, kind: 'task', title, payload })
   }
 
   /** Posts a chat-lane signal addressing a Pipeline or Coordinator by name —
@@ -61,7 +61,7 @@ export class ManagerClient {
    * reaches the target whether or not it claims this source. */
   async postChatCommand(source: string, channel: string, fingerprint: string, addressed: string): Promise<Record<string, unknown>> {
     return this.postSignal(source, {
-      fingerprint,
+      initiationId: fingerprint,
       kind: 'chat',
       payload: addressed,
       labels: { 'agentops.dev/channel': channel, 'agentops.dev/sender': 'e2e-ui' },

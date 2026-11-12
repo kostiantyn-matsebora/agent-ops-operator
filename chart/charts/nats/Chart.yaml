@@ -1,0 +1,15 @@
+apiVersion: v2
+name: nats
+description: >-
+  The `nats` state-store backend's server: a clustered, three-replica
+  JetStream nats-server with a volume per replica, a PodDisruptionBudget and
+  the chart-managed credential. Design nats-state-store-default D-8.
+  Carries NO Chart.yaml dependency condition — whether it renders is derived
+  from `stateStore.backend` (D-9), which a subchart cannot see on its own
+  (only `global.*` is visible to one), so every object it ships is rendered
+  from the PARENT's own templates/nats.yaml, which can see both. This
+  directory holds the definitions (values.yaml, templates/_helpers.tpl)
+  only, never bare top-level YAML a subchart-native render would emit
+  regardless of the selector.
+type: application
+version: 0.1.0

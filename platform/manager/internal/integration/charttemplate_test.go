@@ -3694,27 +3694,27 @@ func namesKey(vs []configschema.Violation, key string) bool {
 }
 
 // STATE_BACKEND is rendered from stateStore.backend, and the manager reads
-// exactly this name (cmd/manager/store.go, stateBackendEnv). The default is kube.
+// exactly this name (cmd/manager/store.go, stateBackendEnv). The default is
+// nats (nats-state-store-default D-9).
 func TestStateBackendEnvIsRenderedFromTheSelector(t *testing.T) {
 	deploy := findDocByKindAndMetaName(helmTemplate(t), "Deployment", "agentops-manager")
-	if !strings.Contains(deploy, "name: STATE_BACKEND\n              value: \"kube\"") {
-		t.Fatalf("manager Deployment must carry STATE_BACKEND=kube by default:\n%s", deploy)
+	if !strings.Contains(deploy, "name: STATE_BACKEND\n              value: \"nats\"") {
+		t.Fatalf("manager Deployment must carry STATE_BACKEND=nats by default:\n%s", deploy)
 	}
 }
 
 // `--set stateStore=null` removes the whole block; the guard and the env line
-// fall back to the kube default rather than failing on a nil pointer.
+// fall back to the nats default rather than failing on a nil pointer.
 func TestStateStoreNullFallsBackToTheKubeDefault(t *testing.T) {
 	deploy := findDocByKindAndMetaName(helmTemplate(t, "--set", "stateStore=null"), "Deployment", "agentops-manager")
-	if !strings.Contains(deploy, "name: STATE_BACKEND\n              value: \"kube\"") {
-		t.Fatalf("a null stateStore must render STATE_BACKEND=kube:\n%s", deploy)
+	if !strings.Contains(deploy, "name: STATE_BACKEND\n              value: \"nats\"") {
+		t.Fatalf("a null stateStore must render STATE_BACKEND=nats:\n%s", deploy)
 	}
 }
 
-// The guard's table has no backend bundle today (kube renders none), so the
-// only refusal a render can reach is an unknown backend. The selected-bundle-off
-// and two-bundles-on refusals are exercised by the first backend bundle that adds
-// its row to agentops.stateStoreBackends.
+// `nats` (nats-state-store-default) is the one backend bundle in
+// agentops.stateStoreBackends today, so this only reaches the unknown-backend
+// refusal. The hand-set-contradiction refusals are TestStateStoreGuardRefusesAHandSetContradiction.
 func TestStateStoreGuard(t *testing.T) {
 	msg := helmTemplateErr(t, "--set", "stateStore.backend=nope")
 	for _, w := range []string{"stateStore.backend=\"nope\"", "not a known state backend"} {
@@ -3724,4 +3724,157 @@ func TestStateStoreGuard(t *testing.T) {
 	}
 	// The default passes.
 	helmTemplate(t)
+}
+
+// nats-state-store-default D-9: a bundle's `enabled` carries no literal
+// default, so "left alone" and "explicitly agrees with the selector" render
+// identically — only a HAND-SET value that contradicts the selector fails.
+func TestStateStoreGuardRefusesAHandSetContradiction(t *testing.T) {
+	if msg := helmTemplateErr(t, "--set", "stateStore.backend=kube", "--set", "nats.enabled=true"); !strings.Contains(msg, `stateStore.backend="kube" conflicts with nats.enabled=true`) {
+		t.Fatalf("kube selected with nats.enabled hand-set true must fail naming both:\n%s", msg)
+	}
+	if msg := helmTemplateErr(t, "--set", "nats.enabled=false"); !strings.Contains(msg, `stateStore.backend="nats" conflicts with nats.enabled=false`) {
+		t.Fatalf("nats selected (the default) with nats.enabled hand-set false must fail naming both:\n%s", msg)
+	}
+	// Agreeing with the selector, by hand, renders cleanly either way.
+	helmTemplate(t, "--set", "nats.enabled=true")
+	helmTemplate(t, "--set", "stateStore.backend=kube", "--set", "nats.enabled=false")
+}
+
+// ---- the nats bundle ---------------------------------------------------
+
+// The default install's state store: a 3-replica StatefulSet, both
+// Services, a PodDisruptionBudget and the generated credential — every
+// object nats.yaml's one gate owns, together.
+func TestNatsBundleRendersByDefault(t *testing.T) {
+	out := helmTemplate(t)
+	sts := findDocByKindAndMetaName(out, "StatefulSet", "agentops-nats")
+	if sts == "" {
+		t.Fatal("agentops-nats StatefulSet not rendered by default")
+	}
+	if !strings.Contains(sts, "replicas: 3") {
+		t.Fatalf("default install must run 3 replicas:\n%s", sts)
+	}
+	if !strings.Contains(sts, "serviceName: agentops-nats-headless") {
+		t.Fatalf("StatefulSet must bind the headless Service:\n%s", sts)
+	}
+	// nats-server exits 1 ("jetstream cluster requires `server_name` to be
+	// set") without a per-replica name; the pod name is the stable one.
+	if !strings.Contains(sts, "--server_name") || !strings.Contains(sts, "$(POD_NAME)") ||
+		!strings.Contains(sts, "fieldPath: metadata.name") {
+		t.Fatalf("every replica must start with --server_name set from its own pod name:\n%s", sts)
+	}
+	for _, name := range []string{"agentops-nats-headless", "agentops-nats-client"} {
+		if findDocByKindAndMetaName(out, "Service", name) == "" {
+			t.Fatalf("Service %s not rendered", name)
+		}
+	}
+	if findDocByKindAndMetaName(out, "PodDisruptionBudget", "agentops-nats") == "" {
+		t.Fatal("PodDisruptionBudget not rendered")
+	}
+	if secretDoc(out, "agentops-nats-credentials") == "" {
+		t.Fatal("agentops-nats-credentials Secret not generated on install")
+	}
+	// Liveness must not fail with quorum: the full health check does, and a
+	// restart of the one server still up would lengthen a survivable outage.
+	if !strings.Contains(sts, "/healthz?js-enabled-only=true") {
+		t.Fatalf("the liveness probe must check only that JetStream is enabled:\n%s", sts)
+	}
+	// An uninstall keeps the volumes: the StatefulSet must not ask Kubernetes
+	// to delete its claims, which is what the default (retain) policy avoids.
+	if strings.Contains(sts, "persistentVolumeClaimRetentionPolicy") {
+		t.Fatalf("the state StatefulSet must keep its claims on delete and scale-down:\n%s", sts)
+	}
+	// kube renders none of it.
+	outKube := helmTemplate(t, "--set", "stateStore.backend=kube")
+	for _, kind := range []string{"StatefulSet", "PodDisruptionBudget"} {
+		if findDocByKindAndMetaName(outKube, kind, "agentops-nats") != "" {
+			t.Fatalf("stateStore.backend=kube must render no %s named agentops-nats", kind)
+		}
+	}
+	if secretDoc(outKube, "agentops-nats-credentials") != "" {
+		t.Fatal("stateStore.backend=kube must generate no nats credential")
+	}
+}
+
+// nats.replicas is the one explicit alternative to the 3-replica default
+// (design D-8); the PodDisruptionBudget still renders, a no-op at one.
+func TestNatsReplicaCountIsConfigurable(t *testing.T) {
+	out := helmTemplate(t, "--set", "nats.replicas=1")
+	sts := findDocByKindAndMetaName(out, "StatefulSet", "agentops-nats")
+	if !strings.Contains(sts, "replicas: 1") {
+		t.Fatalf("nats.replicas=1 must render replicas: 1:\n%s", sts)
+	}
+	if findDocByKindAndMetaName(out, "PodDisruptionBudget", "agentops-nats") == "" {
+		t.Fatal("the PodDisruptionBudget must still render at one replica")
+	}
+}
+
+// The nats credential (Secret agentops-nats-credentials) follows the same
+// explicit → existingSecret → generate-on-install-only rule every other
+// chart-generated credential does (chart-managed-secrets).
+func TestNatsCredentialPrecedence(t *testing.T) {
+	explicit := secretDoc(helmTemplate(t, "--set", "nats.auth.user=pinned-user", "--set", "nats.auth.password=pinned-pass"), "agentops-nats-credentials")
+	if explicit == "" {
+		t.Fatal("agentops-nats-credentials not rendered")
+	}
+	if want := "user: " + base64.StdEncoding.EncodeToString([]byte("pinned-user")); !strings.Contains(explicit, want) {
+		t.Fatalf("explicit nats.auth.user must be rendered:\n%s", explicit)
+	}
+	if want := "password: " + base64.StdEncoding.EncodeToString([]byte("pinned-pass")); !strings.Contains(explicit, want) {
+		t.Fatalf("explicit nats.auth.password must be rendered:\n%s", explicit)
+	}
+
+	out := helmTemplate(t, "--set", "nats.auth.existingSecret=my-nats-secret")
+	if secretDoc(out, "agentops-nats-credentials") != "" {
+		t.Fatal("no Secret may be generated when an existing one is supplied")
+	}
+
+	install := secretDoc(helmTemplate(t), "agentops-nats-credentials")
+	if install == "" {
+		t.Fatal("the default credential must be generated on install")
+	}
+	if !strings.Contains(install, "helm.sh/resource-policy: keep") {
+		t.Fatalf("the generated credential must carry the keep policy:\n%s", install)
+	}
+
+	if doc := secretDoc(helmTemplate(t, "--is-upgrade"), "agentops-nats-credentials"); doc != "" {
+		t.Fatalf("a cluster-less upgrade with no explicit value must mint no credential, got:\n%s", doc)
+	}
+	if secretDoc(helmTemplate(t, "--is-upgrade", "--set", "nats.auth.password=rotated"), "agentops-nats-credentials") == "" {
+		t.Fatal("an explicit value must still render on upgrade")
+	}
+}
+
+// The manager never reads the nats credential's Secret itself
+// (invariants.md: "Manager reads NO secrets") — NATS_USER/NATS_PASSWORD
+// reach it only via valueFrom, following nats.auth.secretName/existingSecret
+// exactly as STATE_READ_TOKEN follows stateReadAuth's.
+func TestNatsEnvWiresToItsOwnSecret(t *testing.T) {
+	wantRef := func(secret, key string) string {
+		return "name: NATS_" + strings.ToUpper(key) + "\n              valueFrom:\n                secretKeyRef:\n                  name: " + secret + "\n                  key: " + key
+	}
+	deploy := findDocByKindAndMetaName(helmTemplate(t), "Deployment", "agentops-manager")
+	if deploy == "" {
+		t.Fatal("manager Deployment not rendered")
+	}
+	if !strings.Contains(deploy, "name: NATS_URL\n              value: \"nats://agentops-nats-client.") {
+		t.Fatalf("NATS_URL must be a plain value naming the client Service:\n%s", deploy)
+	}
+	if !strings.Contains(deploy, wantRef("agentops-nats-credentials", "user")) || !strings.Contains(deploy, wantRef("agentops-nats-credentials", "password")) {
+		t.Fatalf("NATS_USER/NATS_PASSWORD must wire to the default Secret's keys:\n%s", deploy)
+	}
+
+	existing := findDocByKindAndMetaName(helmTemplate(t, "--set", "nats.auth.existingSecret=my-nats-secret"), "Deployment", "agentops-manager")
+	if !strings.Contains(existing, wantRef("my-nats-secret", "user")) {
+		t.Fatalf("NATS_USER/NATS_PASSWORD must follow nats.auth.existingSecret:\n%s", existing)
+	}
+
+	// kube renders neither the variables nor the credential.
+	kubeDeploy := findDocByKindAndMetaName(helmTemplate(t, "--set", "stateStore.backend=kube"), "Deployment", "agentops-manager")
+	for _, name := range []string{"NATS_URL", "NATS_USER", "NATS_PASSWORD"} {
+		if strings.Contains(kubeDeploy, "name: "+name+"\n") {
+			t.Fatalf("stateStore.backend=kube must render no %s:\n%s", name, kubeDeploy)
+		}
+	}
 }

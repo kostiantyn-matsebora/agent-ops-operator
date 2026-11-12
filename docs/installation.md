@@ -174,6 +174,7 @@ checkouts, and is off by default because agents re-clone instead.
 |---|---|---|
 | `persistence.context.accessModes` | `[]` — the chart picks | `ReadWriteMany`, or `ReadWriteOnce` in demo mode where `local-path` refuses RWX. Set it yourself and your value wins |
 | `persistence.context.storageClassName` | `""` | empty uses the cluster's default provisioner. To bind a volume you made yourself, see [pointing a volume at existing storage](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#pointing-a-volume-at-storage-the-chart-did-not-create) |
+| `nats.persistence.storageClassName` | `""` | the storage class of the state servers' volumes. Empty uses the cluster's default provisioner. Fixed once the claims exist |
 
 Set the access mode before you install. A claim cannot be edited once it
 exists, so changing your mind means deleting it and starting again.
@@ -238,12 +239,35 @@ in-process instead of spawning the `claude` CLI, and the Pulse signal
 adapter's default `correlationStrategy` changes what counts as a repeat
 alert. See the changelog entry before you upgrade a production install.
 
-`helm uninstall` removes the workloads but leaves the CRDs, every Conversation
-and the context claim, so reinstalling finds your data where it was.
+The next release, listed under `[Unreleased]` in the changelog, is **BREAKING
+too: the default state backend changes to `nats`**.
+
+A fresh install now also runs three more pods and three more volumes.
+They are a clustered state server.
+
+It replaces the `Conversation` and `Signal` custom resources as the live
+record. It also holds what lived on `SignalSource` status, the cooldown window
+and the receipt counters, and each adapter's own state.
+
+The state servers' volumes are claims too, so their storage class is set
+before install. See [Storage](#storage).
+
+`kubectl get conversations` stops showing anything on a default install. Pin
+the old behaviour with `stateStore.backend: kube` — see
+[configuration](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#state-store).
+
+An existing install upgrading from `kube` imports its records into `nats` on
+the manager's first start. The steps are in the
+[changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
+
+`helm uninstall` removes the workloads but leaves the CRDs, the context claim
+and — under the default `nats` backend — the state server's three volumes, so
+reinstalling finds your data where it was. Under the `kube` backend it also
+leaves every Conversation custom resource.
 
 Helm never deletes CRDs that came from a chart's `crds/` directory, so this is
 not something the chart decides. Removing them means deleting them yourself,
-which takes every Conversation with them:
+which takes every Conversation custom resource (`kube` backend only) with them:
 
 ```sh
 kubectl delete crd $(kubectl get crd -o name | grep '\.agentops\.dev$')

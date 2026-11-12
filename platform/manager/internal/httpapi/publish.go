@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
@@ -177,6 +178,7 @@ func (s *Server) publishOne(ctx context.Context, source *agentopsv1alpha1.Signal
 	})
 	switch {
 	case err == nil:
+		log.FromContext(ctx).Info("signal stored", "signal", name, "source", source.Name)
 		return nil
 	case in.SignalID != "" && errors.Is(err, state.ErrAlreadyExists):
 		s.Activity.Emit(activity.Event{

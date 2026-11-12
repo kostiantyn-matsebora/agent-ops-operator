@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -204,7 +205,18 @@ func (e *Env) WaitRun(t *testing.T, name string, n int, timeout time.Duration) *
 func (e *Env) ConsoleSend(t *testing.T, name, text string) (int, string) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"text": text})
-	return e.do(t, "POST", e.Console.URL()+"/api/conversations/"+name+"/messages", body, bearerPrefix+e.Values.UIToken)
+	// A conversation can be answered only once the console holds its thread, and
+	// the topic is made after the conversation, not with it. A person typing
+	// meets the same moment and tries again, so this waits out that one refusal
+	// for a bounded time and nothing else.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/"+name+"/messages", body, bearerPrefix+e.Values.UIToken)
+		if code != http.StatusConflict || !strings.Contains(out, "no console thread") || time.Now().After(deadline) {
+			return code, out
+		}
+		time.Sleep(time.Second)
+	}
 }
 
 // ConsoleStart starts a conversation through the console.
