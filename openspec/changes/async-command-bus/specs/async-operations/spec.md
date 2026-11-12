@@ -189,6 +189,11 @@ messages resolve through:
 - **WHEN** a fire-and-forget `send` outlives its time to live while the manager was down
 - **THEN** it is expired and no adapter receives it
 
+#### Scenario: claimStalenessSeconds no longer sets the lease
+
+- **WHEN** an install sets the chart value `claimStalenessSeconds` to a non-default number
+- **THEN** the chart still renders and the lease stays five minutes
+
 #### Scenario: A deletion is never wedged
 - **WHEN** no adapter claims a `delete-conversation` task within its time to live
 - **THEN** it expires, the finalizer releases, and the task is never parked

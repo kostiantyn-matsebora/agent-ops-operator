@@ -84,6 +84,11 @@ expires on its own schedule while every other op keeps flowing.
   yet completed it
 - **THEN** the op is not redelivered
 
+#### Scenario: A stale claimStalenessSeconds value has no effect
+
+- **WHEN** an existing install's values still set `claimStalenessSeconds`
+- **THEN** the value renders without error and an op's lease is still five minutes
+
 #### Scenario: A stale claim is retried
 
 - **WHEN** a lease has passed and the adapter never completed the op

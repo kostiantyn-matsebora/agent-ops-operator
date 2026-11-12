@@ -469,6 +469,7 @@ glossed over:
 - A plain `/close` and a caused `escalate` stay wholesale inside one task.
 - Per-queue tuning has no chart value.
 - `claimStalenessSeconds` is inert.
+- `GET /state/tasks` serves the per-(queue,kind) `Stats`, not a flat list of the ledger's tasks, because `commandbus.Bus` exposes no such method.
 
 Two already-stale spots unrelated to this task's own prose were fixed along
 the way. `contracts.md`'s "`/channel/ops` still requires the leader proxy"
