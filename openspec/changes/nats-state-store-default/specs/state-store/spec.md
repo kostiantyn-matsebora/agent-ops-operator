@@ -90,7 +90,9 @@ Release is a helper, not an operation of the contract. The any-phase source inde
 
 A name can be reused by a successor source, so the release SHALL decide from the source that holds the name at the moment of each delete.
 
-After listing the signals, the release SHALL read the source by that name from the authoritative store of configuration, never from a cache. That store is the Kubernetes API server under every backend, since a source's configuration is a Kubernetes object whichever backend keeps its signals.
+After listing the signals, the release SHALL read the source by that name from the authoritative store of configuration, never from a cache.
+
+That store is the Kubernetes API server under every backend. A source's configuration is a Kubernetes object whichever backend keeps its signals.
 
 A signal recorded under the identity of the source that holds the name now SHALL be kept. Every other signal of the name SHALL be deleted under the revision it was listed at.
 

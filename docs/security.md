@@ -20,7 +20,7 @@ you gave it. **Treat the agent container as untrusted code with a shell.**
 
 ## Threat model
 
-![Trust boundaries and the six flows that cross them. The agent container runs untrusted model output inside the runtime pod, and each crossing carries a control or is named as residual risk.]({{ '/assets/img/security/threat-model-light.svg' | relative_url }}){: .ao-diagram}
+![Trust boundaries and the seven flows that cross them. The agent container runs untrusted model output inside the runtime pod, and each crossing carries a control or is named as residual risk.]({{ '/assets/img/security/threat-model-light.svg' | relative_url }}){: .ao-diagram}
 
 **Six flows cross a trust boundary.** Five carry a control. One does not.
 

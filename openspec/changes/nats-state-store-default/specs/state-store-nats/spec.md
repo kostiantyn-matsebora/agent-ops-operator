@@ -216,8 +216,9 @@ tested. The `kube` pin SHALL be exercised by a system run of its own.
 
 #### Scenario: Quorum loss is an outage, not a loss
 - **WHEN** two of three state servers are down and then restored
-- **THEN** work is held while they are down, and every record written before
-  the loss is readable after
+- **THEN** work is held while they are down and `/state/*` reports the outage
+  instead of answering stale, and every record written before the loss is
+  readable after
 
 #### Scenario: A drain is bounded by the budget
 - **WHEN** a node drain would evict a second state server

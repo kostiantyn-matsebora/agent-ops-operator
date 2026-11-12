@@ -132,6 +132,8 @@ def render(p):
     # picture because crossing 1 is about what ANY pod can reach.
     s.append(boundary(12, 84, 736, 364, "your cluster", p))
     s.append(node(520, 100, 214, "any other pod", "in the cluster", p))
+    # The state servers, because crossing 7 is the same neighbour reaching them.
+    s.append(node(28, 100, 250, "state servers", "credential required", p, kind="control"))
 
     # The runtime pod — where model output actually executes — beside the
     # operator's own namespace, because crossing 2 goes between them.
@@ -170,6 +172,9 @@ def render(p):
     s.append(badge(494, 369, 5, p, tone="brand"))
     s.append(arrow(648, 358, 648, 380, p, tone="danger"))    # 6 -> logs, UNMITIGATED
     s.append(badge(672, 369, 6, p, tone="danger"))
+
+    s.append(arrow(516, 124, 282, 124, p, tone="brand"))     # 7 neighbour -> state servers
+    s.append(badge(399, 124, 7, p, tone="brand"))
 
     s.append(text(20, H - 16,
                   "Green crossings carry a control. Red carries none.",

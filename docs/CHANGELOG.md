@@ -189,8 +189,8 @@ Adapter and manager upgrade in either order: an older manager ignores
 `signalId`. An adapter that reads `conversations` from the response, if you
 wrote one, must stop.
 
-An upgrade that finds no `agentops-nats-credentials` Secret fails the render.
-The error names the Secret and `nats.auth.existingSecret`.
+An upgrade that can read the cluster and finds no `agentops-nats-credentials` Secret
+fails the render. The error names the Secret and `nats.auth.existingSecret`.
 
 The new manager starts and finds the empty `nats` buckets and the `kube`
 records. The replica that wins the leader lease imports them and reports
