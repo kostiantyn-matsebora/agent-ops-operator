@@ -181,7 +181,7 @@ Each channel SHALL have its own ordered queue. An adapter SHALL receive the entr
 ### Requirement: The console is a plain SSE consumer of its log and resumes from a cursor
 The manager SHALL push the console channel's log entries over the console's single SSE stream, in log order, each carrying its command id as the event id. The console SHALL need no acknowledgement. A reconnect that names the last event received SHALL replay every later entry, and an unknown id SHALL replay from the start of the retained log. A connection SHALL claim, lease and delete nothing, so a dead or second connection strands no entry.
 
-The console channel's log SHALL be retained for its declared window (24 hours by default) and trimmed by age and count, not by delivery. The manager SHALL assign the console thread's id itself. The console SHALL render an entry once per command id.
+The console channel's log SHALL be retained for its declared window (30 seconds by default) and trimmed by age and count, not by delivery. The manager SHALL assign the console thread's id itself. The console SHALL render an entry once per command id.
 
 #### Scenario: A dropped connection loses nothing
 - **WHEN** the stream drops while entries are produced and the console reconnects with the last event it received
@@ -194,4 +194,19 @@ The console channel's log SHALL be retained for its declared window (24 hours by
 #### Scenario: A replay does not duplicate a rendered entry
 - **WHEN** the console reconnects with a cursor older than entries it already rendered
 - **THEN** each entry is rendered once
+
+### Requirement: An adapter takes a message in three steps and owns its delivery
+A channel adapter other than the console SHALL read a message without changing it, acknowledge it to hand it over, and later report it done or failed. A message that has been read and not acknowledged SHALL be offered again. A message acknowledged SHALL NOT be sent by the manager again. The delivery TTL SHALL start at the acknowledgement, and a message with no report when it passes SHALL be failed, by the adapter and, if the adapter is gone, by the manager. A failed message SHALL be final.
+
+#### Scenario: A read message is not lost
+- **WHEN** an adapter reads a message and stops before acknowledging it
+- **THEN** the message is offered again and no delivery had begun
+
+#### Scenario: An acknowledged message is never sent again
+- **WHEN** an adapter acknowledged a message and is slow to report
+- **THEN** the manager does not send it again, however long it takes within the TTL
+
+#### Scenario: A message with no report fails at its TTL
+- **WHEN** the TTL of an acknowledged message passes with no report
+- **THEN** the message is failed and is not redelivered
 

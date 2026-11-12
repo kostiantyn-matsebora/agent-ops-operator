@@ -195,7 +195,7 @@ func TestVerbsRequireTheWriteGate(t *testing.T) {
 func TestReopenMakesTheConsoleThreadLiveAgain(t *testing.T) {
 	f := newFakeManager(t)
 	adapter, transcripts, _ := consoleUnderTest(t, f, closedConversation("conv-1"))
-	tid := mustThreadID(t, adapter, "conv-1")
+	tid := "console-uid-conv-1"
 
 	// close: the thread is archived and says so
 	adapter.execute(context.Background(), &Op{Kind: "close-topic", Conversation: "conv-1", ThreadID: &tid})
@@ -204,7 +204,7 @@ func TestReopenMakesTheConsoleThreadLiveAgain(t *testing.T) {
 	}
 
 	// reopen arrives as an ordinary ensure-topic
-	got, opErr := adapter.execute(context.Background(), &Op{Kind: "ensure-topic", Conversation: "conv-1"})
+	got, opErr := adapter.execute(context.Background(), &Op{Kind: "ensure-topic", Conversation: "conv-1", ThreadID: &tid})
 	if opErr != "" || got != tid {
 		t.Fatalf("reopen must return the same thread: %q %q", got, opErr)
 	}
@@ -218,10 +218,10 @@ func TestReopenMakesTheConsoleThreadLiveAgain(t *testing.T) {
 func TestEnsureTopicOnALiveThreadSaysNothing(t *testing.T) {
 	f := newFakeManager(t)
 	adapter, transcripts, _ := consoleUnderTest(t, f, joinedConversation("conv-2"))
-	tid := mustThreadID(t, adapter, "conv-2")
+	tid := "console-uid-conv-2"
 
-	adapter.execute(context.Background(), &Op{Kind: "ensure-topic", Conversation: "conv-2"})
-	adapter.execute(context.Background(), &Op{Kind: "ensure-topic", Conversation: "conv-2"})
+	adapter.execute(context.Background(), &Op{Kind: "ensure-topic", Conversation: "conv-2", ThreadID: &tid})
+	adapter.execute(context.Background(), &Op{Kind: "ensure-topic", Conversation: "conv-2", ThreadID: &tid})
 	if transcripts.Archived(tid) {
 		t.Fatal("a live thread must stay live")
 	}
@@ -274,7 +274,7 @@ func TestALiveConversationStaysTypeable(t *testing.T) {
 func TestDeleteConversationLeavesAReadableArchivedTranscript(t *testing.T) {
 	f := newFakeManager(t)
 	adapter, transcripts, _ := consoleUnderTest(t, f, closedConversation("conv-1"))
-	tid := mustThreadID(t, adapter, "conv-1")
+	tid := "console-uid-conv-1"
 
 	msg := OpMessage{Kind: "notice", Body: "This conversation has been deleted."}
 	if _, opErr := adapter.execute(context.Background(), &Op{

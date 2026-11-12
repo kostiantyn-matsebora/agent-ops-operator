@@ -49,6 +49,24 @@ func WithInventory(inv []commandbus.Declaration) Option {
 	return func(s *store) { s.inventory = inv }
 }
 
+// WithFeedInventory overrides the retained-feed declarations. Default
+// commandbus.DefaultFeedInventory().
+func WithFeedInventory(inv []commandbus.FeedDeclaration) Option {
+	return func(s *store) { s.feedInv = inv }
+}
+
+// SetFeedPolicy declares policy for every feed, from now on: how the conformance
+// suite exercises retention with a small window.
+func (b *Backing) SetFeedPolicy(p commandbus.FeedPolicy) {
+	b.s.mu.Lock()
+	defer b.s.mu.Unlock()
+	b.s.feedInv = []commandbus.FeedDeclaration{{Queue: commandbus.FeedFamily, Policy: p}}
+}
+
+// AgeFeed makes every retained feed entry d older: this backend's clock
+// advances, so retention by age is exercised without waiting.
+func (b *Backing) AgeFeed(d time.Duration) { b.s.advance(d) }
+
 // WithLeaseDuration overrides how long a Claim's lease runs before the
 // store treats it as lapsed.
 func WithLeaseDuration(d time.Duration) Option {
@@ -71,6 +89,7 @@ func New(opts ...Option) *Backing {
 		inventory:     commandbus.DefaultInventory(),
 		leaseDuration: defaultLeaseDuration,
 		wake:          make(chan struct{}),
+		feedInv:       commandbus.DefaultFeedInventory(),
 	}
 	for _, opt := range opts {
 		opt(s)

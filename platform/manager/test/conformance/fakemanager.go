@@ -33,7 +33,7 @@ import (
 const (
 	headerContentType = "Content-Type"
 	mimeEventStream   = "text/event-stream"
-	errRejected       ="rejected by the conformance fake"
+	errRejected       = "rejected by the conformance fake"
 )
 
 // ChannelInfo is one served channel, as GET /channel/channels lists it.
@@ -52,9 +52,11 @@ type OpsRequest struct {
 	Contract string
 	Wait     int
 	Refused  bool // no or outdated contract= → 400
+	Stream   bool // GET /channel/ops/stream, the console's plain SSE feed
 }
 
-// Completion is one POST /channel/ops/{id}/done.
+// Completion is one POST /channel/ops/{id}/done, or, for the console's stream,
+// one op frame written to it (nothing is acknowledged there).
 type Completion struct {
 	ID       string
 	ThreadID string
@@ -122,6 +124,7 @@ type FakeManager struct {
 	channels   []ChannelInfo
 	sources    []SourceInfo
 	queue      []json.RawMessage // ops to serve, in order
+	opLog      []json.RawMessage // every op ever queued, retained: what /channel/ops/stream replays
 	workQueue  []json.RawMessage // work units to serve, in order — see QueueWork
 
 	opsRequests   []OpsRequest
@@ -223,6 +226,7 @@ func NewFakeManager(t *testing.T, token string) *FakeManager {
 		<-r.Context().Done()
 	}))
 	mux.HandleFunc("GET /channel/ops", auth(f.handleOps))
+	mux.HandleFunc("GET /channel/ops/stream", auth(f.handleOpsStream))
 	mux.HandleFunc("POST /channel/ops/{id}/done", auth(f.handleDone))
 	mux.HandleFunc("POST /channel/inbound", auth(f.handleInbound))
 	mux.HandleFunc("GET /channel/channels", auth(func(w http.ResponseWriter, r *http.Request) {
@@ -318,6 +322,7 @@ func (f *FakeManager) QueueOp(op map[string]any) {
 	raw, _ := json.Marshal(op)
 	f.mu.Lock()
 	f.queue = append(f.queue, raw)
+	f.opLog = append(f.opLog, raw)
 	f.cond.Broadcast()
 	f.mu.Unlock()
 }
@@ -478,6 +483,74 @@ func (f *FakeManager) handleOps(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(raw, &op)
 	op["reclaimAfterSeconds"] = reclaim
 	writeJSON(w, 200, op)
+}
+
+// handleOpsStream is the manager's GET /channel/ops/stream for the console: the
+// retained log of every queued op, replayed after the id Last-Event-ID names (all
+// of it for none or an unknown one), then each new op, as an SSE event whose id is
+// the op's command id. Nothing is claimed or acknowledged: a frame written is
+// recorded as a Completion so a scenario can wait for delivery.
+func (f *FakeManager) handleOpsStream(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	req := OpsRequest{Adapter: q.Get("adapter"), Contract: q.Get("contract"), Stream: true}
+	f.mu.Lock()
+	f.opsRequests = append(f.opsRequests, req)
+	reject := f.rejectOpsAsNonLeader > 0
+	if reject {
+		f.rejectOpsAsNonLeader--
+	}
+	f.mu.Unlock()
+	if req.Contract != f.ContractVersion {
+		writeJSON(w, 400, map[string]string{"error": "contract=" + f.ContractVersion + " is required"})
+		return
+	}
+	if reject {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(503)
+		return
+	}
+	w.Header().Set("X-Agentops-Vocabulary-Revision", "r1")
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(200)
+	flusher := w.(http.Flusher)
+	flusher.Flush()
+	after := r.Header.Get("Last-Event-ID")
+	next := -1
+	for r.Context().Err() == nil {
+		f.mu.Lock()
+		if f.rejectOpsAsNonLeader > 0 {
+			// A leader change drops the connection a non-leader was proxying.
+			f.mu.Unlock()
+			return
+		}
+		if next < 0 {
+			next = 0
+			for i, raw := range f.opLog {
+				var op struct {
+					ID string `json:"id"`
+				}
+				_ = json.Unmarshal(raw, &op)
+				if after != "" && op.ID == after {
+					next = i + 1
+				}
+			}
+		}
+		due := append([]json.RawMessage(nil), f.opLog[next:]...)
+		next = len(f.opLog)
+		f.mu.Unlock()
+		for _, raw := range due {
+			var op struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(raw, &op)
+			fmt.Fprintf(w, "event: op\nid: %s\ndata: %s\n\n", op.ID, raw)
+			flusher.Flush()
+			f.mu.Lock()
+			f.completions = append(f.completions, Completion{ID: op.ID})
+			f.mu.Unlock()
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func (f *FakeManager) handleDone(w http.ResponseWriter, r *http.Request) {

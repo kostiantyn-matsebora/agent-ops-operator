@@ -199,6 +199,10 @@ type OpQueue struct {
 	// Registry-registered channel queue (design D-10's "in-process providers
 	// become a consumer"). Defaults to 1 when zero or negative.
 	Concurrency int
+	// FeedAdapters names the adapters whose ops are read from a retained feed
+	// (feed.go) instead of claimed and acknowledged: the console. Telegram and
+	// every other adapter keep the claim and acknowledgement of /channel/ops.
+	FeedAdapters []string
 
 	mu sync.Mutex
 	// claimed indexes a currently-claimed op's PUBLISHED id (the id an
@@ -236,6 +240,8 @@ type OpQueue struct {
 	claimRotor map[string]int
 	// poolWake nudges Run to start a consumer for a newly learned channel.
 	poolWake chan struct{}
+	// delivering holds the feed ops whose side effects are running now.
+	delivering map[string]bool
 }
 
 // claimEntry is one externally-claimed op's bus-side credentials, keyed by
@@ -256,6 +262,7 @@ func (q *OpQueue) init() {
 		q.channelAdapter = map[string]string{}
 		q.claimRotor = map[string]int{}
 		q.poolWake = make(chan struct{}, 1)
+		q.delivering = map[string]bool{}
 	}
 }
 
@@ -294,10 +301,21 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 	if conv.Reopens > 0 {
 		id += ":r" + strconv.Itoa(int(conv.Reopens))
 	}
-	q.enqueue(ctx, &Op{
+	op := &Op{
 		ID: id, Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.ConversationID,
 		Kind: OpEnsureTopic, Topic: &topic, channelType: ch.Spec.Adapter, stable: true,
-	})
+	}
+	if q.IsFeed(ch.Spec.Adapter) {
+		// A feed adapter is told its thread, never asked for one: nothing comes
+		// back from a stream.
+		if conv.ID == "" {
+			log.FromContext(ctx).Error(errors.New("conversation has no UID"), "enqueue ensure-topic on a feed channel", "conversation", conv.Name, "channel", ch.Name)
+			return
+		}
+		tid := FeedThreadID(conv)
+		op.ThreadID = &tid
+	}
+	q.enqueue(ctx, op)
 }
 
 // EnqueueCloseTopic queues archiving of one conversation thread. The id is
@@ -615,6 +633,10 @@ func decodeOp(id string, raw []byte) (*Op, error) {
 // hidden behind a local cache the design went to some trouble to make the
 // BUS own instead (the 2026-08-13 incident, Complete's own doc comment).
 func (q *OpQueue) enqueue(ctx context.Context, op *Op) {
+	if q.IsFeed(op.channelType) {
+		q.publishFeed(ctx, op)
+		return
+	}
 	q.mu.Lock()
 	alreadySucceeded := q.settled[op.ID]
 	q.mu.Unlock()
@@ -780,33 +802,9 @@ func resultingStateAfterFail(code commandbus.ErrorCode, attempt, maxAttempts int
 // cancellation can tie it — see this package's own non-blocking-claim test
 // for both backends.
 func (q *OpQueue) Claim(adapter string) *Op {
-	if so, ok := q.ClaimSequenced(adapter); ok {
-		return so.Op
-	}
-	return nil
-}
-
-// SequencedOp is one claimed op as the console feed (GET /channel/ops/stream)
-// pushes it: the op, and how long this claim still holds.
-//
-// The stream's cursor is the op's own command id (Op.ID), sent as the SSE
-// `id:` and named back by a reconnect (design D-16). It is never an order:
-// order is the position the queue's log gave the op, and Resume reads it back
-// from the bus. Within one channel queue the stream delivers in log order;
-// across an adapter's channels a retried op keeps its old place, which is why a
-// resume replays every STILL-UNACKNOWLEDGED op after the cursor rather than
-// trusting delivery order.
-type SequencedOp struct {
-	Op           *Op
-	ReclaimAfter time.Duration
-}
-
-// ClaimSequenced is Claim returning the claim for the console feed, with the
-// same non-blocking, rotating, lease-taking behaviour.
-func (q *OpQueue) ClaimSequenced(adapter string) (SequencedOp, bool) {
 	channels := q.channelsOf(adapter)
 	if len(channels) == 0 {
-		return SequencedOp{}, false
+		return nil
 	}
 	q.mu.Lock()
 	q.init()
@@ -814,48 +812,11 @@ func (q *OpQueue) ClaimSequenced(adapter string) (SequencedOp, bool) {
 	q.claimRotor[adapter] = start + 1
 	q.mu.Unlock()
 	for i := range channels {
-		if so, ok := q.claimFrom(channels[(start+i)%len(channels)], adapter); ok {
-			return so, true
+		if op, ok := q.claimFrom(channels[(start+i)%len(channels)], adapter); ok {
+			return op
 		}
 	}
-	return SequencedOp{}, false
-}
-
-// Resume returns every op of adapter that is claimed under a lease still in
-// force, in log order, and makes THIS replica able to acknowledge each: the
-// claim (uid and lease token) is read back from the bus, so a reconnect that
-// lands on a replica which never made the claim still completes it. Nothing is
-// claimed afresh, so the lease the op already holds is the only one, and the op
-// cannot be handed to anyone else while the consumer has it. ReclaimAfter is
-// what that lease has left, not a fresh window.
-//
-// There is NO cursor. A consumer's last acknowledged op says nothing about an
-// op claimed before it whose frame never arrived (a claim made by a handler
-// whose connection was dead), and such an op sits earlier in the log than the
-// cursor: filtering on it left the op leased until the lease lapsed. An
-// acknowledged op is Succeeded and never Running, so listing every Running op
-// re-sends nothing the consumer has finished; one it executed but could not
-// acknowledge is re-acknowledged from its own cache.
-func (q *OpQueue) Resume(ctx context.Context, adapter string) []SequencedOp {
-	channels := q.channelsOf(adapter)
-	queues := make([]commandbus.Queue, len(channels))
-	for i, channel := range channels {
-		queues[i] = commandbus.OutQueue(channel)
-	}
-	tasks, err := q.Bus.Running(ctx, queues, "")
-	if err != nil {
-		log.FromContext(ctx).Error(err, "list running channel ops for a stream resume", "adapter", adapter)
-		return nil
-	}
-	var out []SequencedOp
-	for _, task := range tasks {
-		op, ok := q.adopt(task, adapter)
-		if !ok {
-			continue
-		}
-		out = append(out, SequencedOp{Op: op, ReclaimAfter: time.Until(task.Lease.Until)})
-	}
-	return out
+	return nil
 }
 
 // adopt records a Running task's claim in this process, as claimFrom does for
@@ -913,7 +874,7 @@ func (q *OpQueue) adoptRunning(ctx context.Context, id string) (claimEntry, bool
 }
 
 // claimFrom claims one task off one channel's queue.
-func (q *OpQueue) claimFrom(channel, adapter string) (SequencedOp, bool) {
+func (q *OpQueue) claimFrom(channel, adapter string) (*Op, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), claimPollTimeout)
 	defer cancel()
 	task, err := q.Bus.Claim(ctx, commandbus.OutQueue(channel), channelOpsConsumerID)
@@ -921,7 +882,7 @@ func (q *OpQueue) claimFrom(channel, adapter string) (SequencedOp, bool) {
 		if !errors.Is(err, context.DeadlineExceeded) {
 			log.FromContext(context.Background()).Error(err, "claim channel op", "adapter", adapter, "channel", channel)
 		}
-		return SequencedOp{}, false
+		return nil, false
 	}
 	op, err := decodeOp(string(task.CommandID), task.Payload)
 	if err != nil {
@@ -932,7 +893,7 @@ func (q *OpQueue) claimFrom(channel, adapter string) (SequencedOp, bool) {
 		log.FromContext(context.Background()).Error(err, "decode claimed channel op; failing the task", "task", task.UID)
 		_ = q.Bus.Fail(context.Background(), task.UID, leaseTokenOf(task), commandbus.CodeInvalidCommand, err.Error())
 		q.markFromState(string(task.CommandID), resultingStateAfterFail(commandbus.CodeInvalidCommand, task.Attempt, task.MaxAttempts))
-		return SequencedOp{}, false
+		return nil, false
 	}
 	op.channelType = adapter
 	op.enqueuedAt = task.SubmittedAt
@@ -946,7 +907,7 @@ func (q *OpQueue) claimFrom(channel, adapter string) (SequencedOp, bool) {
 	q.markFromState(op.ID, task.State)
 
 	cp := *op
-	return SequencedOp{Op: &cp, ReclaimAfter: ReclaimAfter}, true
+	return &cp, true
 }
 
 // claimPollTimeout is the deadline Claim gives Bus.Claim — see Claim's own
@@ -1150,6 +1111,11 @@ func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
 		return nil
 	}
 	_, err := state.Mutate(ctx, q.Conversations, state.Key(op.Conversation), func(rec *state.ConversationRecord) error {
+		if rec.Phase != state.PhaseClosed && rec.ClosedAt == nil {
+			// A close-topic replayed from a feed after the conversation was
+			// reopened must not archive a live thread.
+			return nil
+		}
 		if !rec.ThreadArchived(channel) {
 			rec.ThreadsArchived = append(rec.ThreadsArchived, channel)
 		}

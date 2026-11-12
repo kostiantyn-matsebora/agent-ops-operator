@@ -31,7 +31,7 @@ func assertContractHandshake(t *testing.T, mgr *FakeManager, adapter string) {
 		if r.Adapter != adapter {
 			t.Fatalf("%s polled as adapter=%q", adapter, r.Adapter)
 		}
-		if r.Wait > 0 {
+		if r.Wait > 0 || r.Stream {
 			longPolled = true
 		}
 	}
@@ -506,13 +506,13 @@ func TestConsoleConformance(t *testing.T) {
 	waitFor(t, "the console to list its channels", 15*time.Second, func() bool { return mgr.Listed("channel", "console") > 0 })
 
 	// 1–3. ensure-topic yields a thread id; a send lands in the transcript.
+	// The manager assigns the console thread's id (console-<uid>) and the console
+	// uses it: nothing is reported back, delivery is the frame being written.
+	topic := Completion{ID: "op-topic", ThreadID: "console-uid-c1"}
 	mgr.QueueOp(map[string]any{"id": "op-topic", "channel": "console", "conversation": "c1", "kind": "ensure-topic",
-		"topic": map[string]any{"conversation": "c1", "title": "disk is full", "kind": "alert"}})
-	waitFor(t, "ensure-topic completion", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-topic"); return n > 0 })
-	_, topic := completionsFor(mgr, "op-topic")
-	if topic.Error != "" || topic.ThreadID == "" {
-		t.Fatalf("ensure-topic: %+v", topic)
-	}
+		"threadId": topic.ThreadID,
+		"topic":    map[string]any{"conversation": "c1", "title": "disk is full", "kind": "alert"}})
+	waitFor(t, "ensure-topic delivery", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-topic"); return n > 0 })
 	assertContractHandshake(t, mgr, "console")
 	// Bind the thread on the conversation, as the manager would.
 	mgr.SetConversation("c1", "uid-c1",
@@ -524,10 +524,7 @@ func TestConsoleConformance(t *testing.T) {
 		"message": map[string]any{"kind": "answer", "body": "**found it** — the disk is full", "status": "succeeded"}}
 	mgr.QueueOp(send)
 	mgr.QueueOp(send) // 4. at-least-once
-	waitFor(t, "both send completions", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-send"); return n >= 2 })
-	if _, c := completionsFor(mgr, "op-send"); c.Error != "" {
-		t.Fatalf("send: %+v", c)
-	}
+	waitFor(t, "both send deliveries", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-send"); return n >= 2 })
 	transcript := func() string {
 		req, _ := http.NewRequest("GET", p.URL()+"/api/conversations/c1", nil)
 		req.Header.Set("Authorization", "Bearer ui-secret")
@@ -571,7 +568,7 @@ func TestConsoleConformance(t *testing.T) {
 	}
 	consoleAssertThreadlessSendVisibleOrError(t, mgr, p)
 	consoleAssertDeleteConversationActsOrErrors(t, mgr, p, topic.ThreadID)
-	consoleAssertOperationNeverExceedsReclaimWindow(t, mgr)
+	consoleAssertEnsureTopicNeedsNoRead(t, mgr)
 	assertRetriesAtOnceAfterNonLeaderRejection(t, mgr, "console", "c1")
 }
 
@@ -600,17 +597,13 @@ func consoleAssertThreadlessSendVisibleOrError(t *testing.T, mgr *FakeManager, p
 	send := map[string]any{"id": "op-send-nothread", "channel": "console", "conversation": "c1", "kind": "send",
 		"message": map[string]any{"kind": "answer", "body": "general feed fallback", "status": "succeeded"}}
 	mgr.QueueOp(send)
-	waitFor(t, "thread-less send completion", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-send-nothread"); return n > 0 })
-	_, c := completionsFor(mgr, "op-send-nothread")
-	if c.Error != "" {
-		return // scenario 2: an explicit error is an accepted outcome too.
-	}
-	// scenario 1: it must be VISIBLE on the channel's general feed.
-	out := consoleReadJSON(t, p, "/api/channel/feed")
-	b, _ := json.Marshal(out["messages"])
-	if !strings.Contains(string(b), "general feed fallback") {
-		t.Fatalf("a thread-less send completed successfully but is nowhere visible: feed=%s", b)
-	}
+	waitFor(t, "thread-less send delivery", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-send-nothread"); return n > 0 })
+	// The console reports nothing back, so the send must be VISIBLE on the
+	// channel's general feed.
+	waitFor(t, "the thread-less send on the general feed", 10*time.Second, func() bool {
+		b, _ := json.Marshal(consoleReadJSON(t, p, "/api/channel/feed")["messages"])
+		return strings.Contains(string(b), "general feed fallback")
+	})
 }
 
 // consoleAssertDeleteConversationActsOrErrors pins B3 for the console in both
@@ -619,40 +612,30 @@ func consoleAssertThreadlessSendVisibleOrError(t *testing.T, mgr *FakeManager, p
 // a silent success.
 func consoleAssertDeleteConversationActsOrErrors(t *testing.T, mgr *FakeManager, p *Process, heldThreadID string) {
 	t.Helper()
-	// Cannot act: no threadId at all.
+	// Cannot act: no threadId at all. The console has nothing to report it to, so
+	// it logs and goes on: the next op below is still applied.
 	missing := map[string]any{"id": "op-del-missing", "channel": "console", "conversation": "c1", "kind": "delete-conversation"}
 	mgr.QueueOp(missing)
-	waitFor(t, "delete-conversation without a thread id completes", 20*time.Second,
+	waitFor(t, "delete-conversation without a thread id delivered", 20*time.Second,
 		func() bool { n, _ := completionsFor(mgr, "op-del-missing"); return n > 0 })
-	if _, c := completionsFor(mgr, "op-del-missing"); c.Error == "" {
-		t.Fatalf("delete-conversation with no thread id must not silently succeed")
-	}
 
 	// Held: the thread established earlier in this run.
 	held := map[string]any{"id": "op-del-held", "channel": "console", "conversation": "c1", "kind": "delete-conversation",
 		"threadId": heldThreadID}
 	mgr.QueueOp(held)
-	waitFor(t, "delete-conversation for a held thread completes", 20*time.Second,
+	waitFor(t, "delete-conversation for a held thread delivered", 20*time.Second,
 		func() bool { n, _ := completionsFor(mgr, "op-del-held"); return n > 0 })
-	if _, c := completionsFor(mgr, "op-del-held"); c.Error != "" {
-		t.Fatalf("delete-conversation for a thread the adapter holds must act, not error: %+v", c)
-	}
 	waitFor(t, "the transcript to carry the archive tombstone", 10*time.Second, func() bool {
 		b, _ := json.Marshal(consoleReadJSON(t, p, "/api/conversations/c1")["transcript"])
 		return strings.Contains(string(b), "archived")
 	})
 }
 
-// consoleAssertOperationNeverExceedsReclaimWindow pins A1/A2 for the console.
-// The console carries no per-operation retry loop of its own (cache.go's
-// GetOrFetch makes exactly ONE direct read on a cache miss, see adapter.go's
-// threadID) — it ignores reclaimAfterSeconds entirely, which OPS-4/OPS-5
-// make fully conformant PROVIDED it still never silently outlives the claim
-// window. This drives that one direct read through a sustained 500 — the
-// shape backpressure takes for a GET — and pins the outcome: the operation
-// completes (as a failure) near-instantly, nowhere close to the window,
-// rather than hanging past it.
-func consoleAssertOperationNeverExceedsReclaimWindow(t *testing.T, mgr *FakeManager) {
+// consoleAssertEnsureTopicNeedsNoRead pins that the console applies an
+// ensure-topic from the op alone: the thread id is the one the manager assigned,
+// so an unreachable conversation read cannot delay or fail it, and nothing is
+// retried against a claim window the stream no longer has.
+func consoleAssertEnsureTopicNeedsNoRead(t *testing.T, mgr *FakeManager) {
 	t.Helper()
 	const conversation = "c-retry-budget"
 	mgr.FailConversationRead(conversation, http.StatusInternalServerError) // never clears
@@ -660,16 +643,11 @@ func consoleAssertOperationNeverExceedsReclaimWindow(t *testing.T, mgr *FakeMana
 
 	start := time.Now()
 	mgr.QueueOp(map[string]any{"id": "op-retry-budget", "channel": "console", "conversation": conversation, "kind": "ensure-topic",
-		"topic": map[string]any{"conversation": conversation, "title": "retry budget probe", "kind": "task"}})
-	waitFor(t, "ensure-topic completes under unending backpressure", 10*time.Second,
+		"threadId": "console-uid-" + conversation,
+		"topic":    map[string]any{"conversation": conversation, "title": "retry budget probe", "kind": "task"}})
+	waitFor(t, "ensure-topic delivered under unending backpressure", 10*time.Second,
 		func() bool { n, _ := completionsFor(mgr, "op-retry-budget"); return n > 0 })
-	elapsed := time.Since(start)
-	if _, c := completionsFor(mgr, "op-retry-budget"); c.Error == "" {
-		t.Fatalf("ensure-topic against an unreachable conversation read must not silently succeed: %+v", c)
-	}
-	// chat.ReclaimAfter — the documented default a console ignoring the field
-	// is judged against (OPS-5) — is 5 minutes.
-	if docDefault := 5 * time.Minute; elapsed >= docDefault {
-		t.Fatalf("ensure-topic must complete well inside the documented %s reclaim window, took %s", docDefault, elapsed)
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("ensure-topic must not wait on a conversation read, took %s", elapsed)
 	}
 }

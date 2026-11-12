@@ -41,3 +41,11 @@ func (h *handle) Feed(ctx context.Context, resume commandbus.Sequence) (<-chan c
 func (h *handle) Stats(_ context.Context, queue commandbus.Queue, kind commandbus.Kind) (commandbus.QueueStats, error) {
 	return h.s.stats(queue, kind)
 }
+
+func (h *handle) Publish(_ context.Context, feed commandbus.Queue, id commandbus.CommandID, payload []byte) (commandbus.FeedEntry, bool, error) {
+	return h.s.publish(feed, id, payload)
+}
+
+func (h *handle) Follow(ctx context.Context, feed commandbus.Queue, after commandbus.CommandID) (<-chan commandbus.FeedEntry, error) {
+	return h.s.follow(ctx, feed, after)
+}

@@ -29,6 +29,9 @@ type store struct {
 	entries []entrylog.Entry       // every entry, as appended, for Backing.Entries
 	events  []commandbus.TaskEvent // one per entry, the gap-free history Feed replays
 	wake    chan struct{}          // closed and replaced on every append
+
+	feedInv []commandbus.FeedDeclaration
+	feeds   map[commandbus.Queue]*feedLog
 }
 
 func (s *store) now() time.Time {

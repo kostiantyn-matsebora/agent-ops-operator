@@ -13,7 +13,7 @@
 // plus the channel adapter contract (bearer-token auth, see ADAPTER_TOKEN):
 //
 //	GET  /channel/ops?adapter=&wait=    outbound op long-poll (204 on timeout)
-//	GET  /channel/ops/stream?adapter=   the same ops pushed over SSE, resumable (optional)
+//	GET  /channel/ops/stream?adapter=   a feed adapter's ops pushed over SSE, resumed by cursor (the console)
 //	POST /channel/ops/{id}/done         async op completion
 //	POST /channel/inbound               {"channel","threadId","text"} -> router
 //	GET  /channel/channels?adapter=     channels served by an adapter (+config)

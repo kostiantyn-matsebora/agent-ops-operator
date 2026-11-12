@@ -309,8 +309,10 @@ id per event, and a reconnect that names the last event it received.
   performs the side effects that an acknowledgement used to trigger (marking a run
   reply delivered, closing a topic). A lost frame is recovered by the replay, never
   by a lease.
-- **Retention.** The feed's log is trimmed by age and count (24 hours by default,
-  declared per queue), not by consumption. This replaces D-2's removal on settle
+- **Retention.** The feed's log is trimmed by age and count (30 seconds by default,
+  declared per queue), not by consumption. A gap longer than the window is
+  recovered from the stored conversation record, which the console merges on
+  every read, so the window only has to cover a reconnect. This replaces D-2's removal on settle
   for this queue: a replayable feed must outlive its delivery.
 - **Thread id.** The manager assigns the console thread's id when it enqueues the
   `ensure-topic` entry and the console uses the one it is given, so no result
@@ -319,6 +321,50 @@ id per event, and a reconnect that names the last event it received.
   replay across a reconnect never duplicates a message.
 
 The same shape serves any later consumer, such as a mobile app.
+
+As built:
+
+- The retained log is keyed by ADAPTER (`feed.<adapter>`), not by channel: a
+  console serving several Channels reads one log, so one cursor orders everything
+  it is sent. Order within a channel is a fortiori the log order. It is a log of
+  its own beside the task queues (`Bus.Publish` / `Bus.Follow`), declared once in
+  `DefaultFeedInventory` (30s, 5000 entries, 30s dedup window of a repeated
+  id) and set from `CHANNEL_FEED_RETENTION` / `CHANNEL_FEED_MAX_ENTRIES`. Which
+  adapters read a feed is `CHANNEL_FEED_ADAPTERS` (default `console`).
+- A repeated command id inside the dedup window is appended once. Past it the id
+  is appended again, so an id a recreated conversation reuses still reaches the
+  console.
+- A feed `delete-conversation` is not pending once appended: its only effect is
+  the tombstone, and the finalizer is never held waiting for a console.
+- A `close-topic` replayed after a reopen does not archive the live thread: the
+  archive mark is written only for a closed conversation.
+- An empty cursor replays the whole retained log (30 seconds by default). A
+  longer gap is recovered from the stored conversation record the console
+  merges. The console renders each command id once.
+
+### D-17: Adapters own delivery: get, ack, then done or failed
+
+Every channel adapter that is not a plain SSE consumer (Telegram today) delivers
+under one contract of three steps. The console is the SSE case of D-16 and takes
+no part.
+
+- **GET** reads the next message of the adapter's channel queue and changes
+  nothing. A message read by an adapter that dies before acknowledging is simply
+  offered again, since no delivery had begun.
+- **ACK** is the hand-over. From it the message is the adapter's: the manager
+  never sends it again, so there is no lease redelivery, and its **delivery TTL**
+  starts.
+- **DONE or FAILED** is the adapter's report after delivering to its surface with
+  its own retries. A message with no report when its TTL passes is failed: by the
+  adapter itself, and by the manager as a backstop when the adapter is gone.
+  Failed is final. The manager may record or dead-letter it and never redelivers.
+
+The acknowledgement is always between aops components (the adapter to the
+manager), never from the external service. A result that only the external
+service can produce, such as the topic id of a Telegram `ensure-topic`, travels
+back in the DONE report. Messages declare their delivery TTL per kind: 10 minutes for stable messages
+(replies, inputs), 2 minutes for ephemeral notices, 5 minutes for topic
+operations. Each is a chart-overridable queue value.
 
 ### D-12: What stays synchronous, and why
 

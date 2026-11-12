@@ -42,6 +42,13 @@ type Backing interface {
 	// queue's, and a backend may wait a short grace before doing so. A backend
 	// that removes them inside Settle does nothing here.
 	Compact()
+	// SetFeedPolicy declares policy for every retained feed (commandbus.FeedPolicy),
+	// before the handles that will use it are opened.
+	SetFeedPolicy(p commandbus.FeedPolicy)
+	// AgeFeed makes every retained feed entry d older, and returns once the
+	// backend has had the chance to trim what that makes expired: a backend with
+	// a virtual clock advances it, one whose server keeps the time waits.
+	AgeFeed(d time.Duration)
 }
 
 // scenarioTimeout bounds every blocking call (chiefly Claim) a scenario
@@ -72,6 +79,7 @@ func Run(t *testing.T, open func() Backing) {
 			}
 		})
 	}
+	runFeed(t, open)
 	t.Run("gap-free resumable feed", func(t *testing.T) { testGapFreeResumableFeed(t, open) })
 }
 

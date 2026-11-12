@@ -141,6 +141,21 @@ type Bus interface {
 	// channel closes when ctx is done.
 	Feed(ctx context.Context, resume Sequence) (<-chan TaskEvent, error)
 
+	// Publish appends payload to feed (a FeedQueue name) under id, once: a
+	// repeat of an id the feed holds from inside its DedupWindow is
+	// suppressed, and created reports whether this call appended. The entry is
+	// never rewritten and never removed by delivery, only by the feed's age
+	// and count (design D-16). id must be non-empty and at most MaxFeedIDLen.
+	Publish(ctx context.Context, feed Queue, id CommandID, payload []byte) (entry FeedEntry, created bool, err error)
+
+	// Follow delivers the entries of feed after the one with command id after,
+	// in log order, then each new entry as it is appended, until ctx is done
+	// and the channel closes. An after that is empty, or that the feed no
+	// longer holds, starts from the oldest entry retained. Following claims,
+	// leases and deletes nothing: any number of followers, and one that
+	// stopped reading, are independent of one another and of the producer.
+	Follow(ctx context.Context, feed Queue, after CommandID) (<-chan FeedEntry, error)
+
 	// Stats snapshots the counts for one (queue, kind) pair — the same pair
 	// Resolve matches against DefaultInventory. kind is KindDefault for a
 	// queue with no distinct kinds.

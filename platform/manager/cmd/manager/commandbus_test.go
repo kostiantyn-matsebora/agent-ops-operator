@@ -272,3 +272,26 @@ func TestMainExitsWhenMemoryIsSelectedAboveOneReplica(t *testing.T) {
 		t.Fatalf("the refusal must name the backend:\n%s", out)
 	}
 }
+
+func TestChannelFeedAdaptersDefaultToTheConsoleAndAnEmptyValueMeansNone(t *testing.T) {
+	t.Setenv(channelFeedAdaptersEnv, "")
+	if got := channelFeedAdapters(); len(got) != 0 {
+		t.Fatalf("an explicitly empty value means no feed adapter, got %v", got)
+	}
+	t.Setenv(channelFeedAdaptersEnv, "console, mobile ,")
+	if got := strings.Join(channelFeedAdapters(), "|"); got != "console|mobile" {
+		t.Fatalf("adapters = %q", got)
+	}
+}
+
+func TestChannelFeedRetentionIsReadFromTheEnvironment(t *testing.T) {
+	inv := channelFeedInventory()
+	if p := inv[0].Policy; p.MaxAge != 30*time.Second || p.MaxEntries != 5000 {
+		t.Fatalf("default retention = %+v, want 30s and 5000 entries", p)
+	}
+	t.Setenv(channelFeedRetentionEnv, "2h")
+	t.Setenv(channelFeedMaxEntriesEnv, "100")
+	if p := channelFeedInventory()[0].Policy; p.MaxAge != 2*time.Hour || p.MaxEntries != 100 {
+		t.Fatalf("retention = %+v, want 2h and 100 entries", p)
+	}
+}

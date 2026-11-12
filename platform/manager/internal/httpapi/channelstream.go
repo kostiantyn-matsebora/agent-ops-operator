@@ -8,44 +8,42 @@ import (
 	"time"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// channelStreamPoll is how often the stream looks for a newly claimable op.
-// The same cadence as the long-poll's own wait loop: the bus has no push to a
-// non-blocking claim.
+// channelStreamPoll is how often the stream looks for a changed vocabulary
+// revision.
 const channelStreamPoll = time.Second
 
-// channelStreamSweep is how often a stream re-sends the adapter's ops that are
-// leased but were never pushed on THIS connection: a claim made by a handler
-// whose client is gone without a FIN keeps writing into a dead socket for as
-// long as TCP takes to notice, and its op would otherwise sit leased (with
-// everything behind it on its key) until the lease lapsed. A variable so a test
-// can shorten it.
-var channelStreamSweep = 5 * time.Second
+// streamWriteTimeout bounds one frame's write: a client that is gone without a
+// FIN stops draining its socket, and the write fails instead of blocking the
+// handler for as long as TCP takes to notice.
+var streamWriteTimeout = 15 * time.Second
+
+// deliveredTimeout bounds the side effects a written frame triggers. They run
+// detached from the request, so a client that drops right after the write does
+// not cancel the bookkeeping that frame earned.
+const deliveredTimeout = 15 * time.Second
 
 // lastEventIDHeader is the SSE reconnect header a browser-style client sends.
 const lastEventIDHeader = "Last-Event-ID"
 
-// handleChannelOpsStream is GET /channel/ops/stream, the push form of
-// /channel/ops (async-command-bus design D-16). It is ADDITIVE: an adapter that
-// never calls it sees no change, and /channel/ops and /done keep every
-// semantic. Telegram stays on the long-poll.
+// handleChannelOpsStream is GET /channel/ops/stream, an adapter's ops as a
+// plain SSE stream (async-command-bus design D-16). It serves an adapter the
+// manager keeps a retained feed for (OpQueue.FeedAdapters: the console). Every
+// other adapter, Telegram among them, keeps /channel/ops with its claim and
+// acknowledgement, and is told so with a 404.
 //
-// One SSE event `op` per op, in queue order, `id:` = the op's command id (the
-// cursor, never an order), `data:` = the same claimedOp JSON the long-poll
-// returns.
-// Ops are claimed through OpQueue.ClaimSequenced, the long-poll's own path, so
-// leases, at-least-once delivery and idempotency are unchanged: the consumer
-// acknowledges with POST /channel/ops/{id}/done, and an op it never
-// acknowledges is redelivered when its lease lapses.
+// One SSE event `op` per op, in log order, `id:` = the op's command id, `data:`
+// = the op as JSON. The cursor is the id of the last event the client received,
+// sent back as Last-Event-ID or ?since=: the stream replays every later entry,
+// an unknown id replays from the start of the retained log, and then it pushes
+// new ones. The connection claims, leases and deletes nothing, so a dead or a
+// second connection strands nothing. The server learns a client is gone from a
+// failed write or the closed request, and simply returns.
 //
-// RESUME AND SWEEP. Before anything new, the stream re-sends every op of the
-// adapter still claimed under a live lease (OpQueue.Resume), reading the claim
-// back from the bus so the reconnect may land on any replica, and repeats that
-// every channelStreamSweep for ops not pushed on this connection (a claim made
-// by a dead connection's handler). The cursor (Last-Event-ID or ?since=) is
-// validated but advisory: an unacknowledged op can sit before it in the log. An
-// acknowledged op is settled and never re-sent.
+// An op is DELIVERED when its frame was written: the manager then runs the side
+// effects an acknowledgement used to trigger (OpQueue.Delivered), once per op id.
 func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) {
 	adapter, ok := adapterParam(w, r)
 	if !ok {
@@ -58,7 +56,12 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 	if !contractOK(w, r) {
 		return
 	}
-	if _, ok := resumeCursor(w, r); !ok {
+	cursor, ok := resumeCursor(w, r)
+	if !ok {
+		return
+	}
+	if !s.Ops.IsFeed(adapter) {
+		writeJSON(w, 404, map[string]string{"error": "adapter " + adapter + " reads its ops from GET /channel/ops, not a stream"})
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -66,7 +69,13 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 500, map[string]string{"error": "streaming unsupported"})
 		return
 	}
-	ctx := r.Context()
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	ops, err := s.Ops.OpenFeed(ctx, adapter, cursor)
+	if err != nil {
+		writeJSON(w, 503, map[string]string{"error": "the ops feed is unavailable: " + err.Error()})
+		return
+	}
 	s.setVocabularyRevision(ctx, w)
 	lastRevision := s.vocabularyRevision(ctx)
 	h := w.Header()
@@ -78,56 +87,49 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 	// follow until the next op exists.
 	flusher.Flush()
 
-	// pushed holds the ops this connection has written, so the sweep re-sends
-	// only what some other (dead) claimant holds.
-	pushed := map[string]struct{}{}
-	send := func(so chat.SequencedOp) bool {
-		if writeOpFrame(w, flusher, so) != nil {
-			return false
-		}
-		pushed[so.Op.ID] = struct{}{}
-		return true
+	rc := http.NewResponseController(w)
+	write := func(f func() error) bool {
+		_ = rc.SetWriteDeadline(time.Now().Add(streamWriteTimeout))
+		return f() == nil
 	}
-	if !s.resendOutstanding(ctx, adapter, pushed, send) {
-		return
-	}
-	sweep := time.NewTicker(channelStreamSweep)
-	defer sweep.Stop()
-
 	poll := time.NewTicker(channelStreamPoll)
 	defer poll.Stop()
 	keepAlive := time.NewTicker(streamKeepAlive)
 	defer keepAlive.Stop()
 	for {
-		// Drain what is claimable before waiting, so a backlog is not paced at
-		// one op a second.
-		for {
-			so, ok := s.Ops.ClaimSequenced(adapter)
-			if !ok {
-				break
-			}
-			if !send(so) {
-				return // the op stays leased; the reconnect resumes it
-			}
-		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-sweep.C:
-			if !s.resendOutstanding(ctx, adapter, pushed, send) {
+		case op, ok := <-ops:
+			if !ok {
 				return
 			}
+			if !validCursor(op.ID) {
+				log.FromContext(ctx).Error(fmt.Errorf("op id %q cannot be an SSE event id", op.ID), "skip a feed entry", "adapter", adapter)
+				continue
+			}
+			if !write(func() error { return writeOpFrame(w, flusher, op) }) {
+				return
+			}
+			dctx, stop := context.WithTimeout(context.WithoutCancel(ctx), deliveredTimeout)
+			s.Ops.Delivered(dctx, op)
+			stop()
 		case <-keepAlive.C:
-			if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
+			if !write(func() error {
+				if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
+					return err
+				}
+				flusher.Flush()
+				return nil
+			}) {
 				return
 			}
-			flusher.Flush()
 		case <-poll.C:
 			// The long-poll stamps the revision on every response; a stream has
 			// one response, so a change after connect is its own event.
 			if rev := s.vocabularyRevision(ctx); rev != lastRevision {
 				lastRevision = rev
-				if writeVocabularyFrame(w, flusher, rev) != nil {
+				if !write(func() error { return writeVocabularyFrame(w, flusher, rev) }) {
 					return
 				}
 			}
@@ -135,37 +137,12 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// resendOutstanding sends every op of adapter that is leased and not yet pushed
-// on this connection, and forgets pushed ids that are no longer outstanding
-// (acknowledged). False when a write failed.
-func (s *Server) resendOutstanding(ctx context.Context, adapter string, pushed map[string]struct{}, send func(chat.SequencedOp) bool) bool {
-	outstanding := s.Ops.Resume(ctx, adapter)
-	live := make(map[string]struct{}, len(outstanding))
-	for _, so := range outstanding {
-		live[so.Op.ID] = struct{}{}
-	}
-	for id := range pushed {
-		if _, ok := live[id]; !ok {
-			delete(pushed, id)
-		}
-	}
-	for _, so := range outstanding {
-		if _, done := pushed[so.Op.ID]; done {
-			continue
-		}
-		if !send(so) {
-			return false
-		}
-	}
-	return true
-}
-
 // maxCursorLen bounds a resume cursor: a command id is a short derived string,
 // and the value is client input.
 const maxCursorLen = 512
 
 // resumeCursor reads the consumer's resume point: ?since= wins over
-// Last-Event-ID, absent means "" (everything outstanding). The cursor is a
+// Last-Event-ID, absent means "" (the whole retained log). The cursor is a
 // command id and so opaque, but it is client input: a value that is too long or
 // holds a control character cannot be an id the stream ever sent, and is
 // refused rather than looked up.
@@ -197,19 +174,12 @@ func validCursor(raw string) bool {
 }
 
 // writeOpFrame writes one `op` event and flushes it.
-func writeOpFrame(w http.ResponseWriter, flusher http.Flusher, so chat.SequencedOp) error {
-	reclaim := int(so.ReclaimAfter.Seconds())
-	if reclaim < 1 {
-		reclaim = 1
-	}
-	data, err := json.Marshal(claimedOp{Op: so.Op, ReclaimAfterSeconds: reclaim})
+func writeOpFrame(w http.ResponseWriter, flusher http.Flusher, op *chat.Op) error {
+	data, err := json.Marshal(op)
 	if err != nil {
 		return err
 	}
-	if !validCursor(so.Op.ID) {
-		return fmt.Errorf("op id %q cannot be an SSE event id", so.Op.ID)
-	}
-	if _, err := fmt.Fprintf(w, "event: op\nid: %s\ndata: %s\n\n", so.Op.ID, data); err != nil {
+	if _, err := fmt.Fprintf(w, "event: op\nid: %s\ndata: %s\n\n", op.ID, data); err != nil {
 		return err
 	}
 	flusher.Flush()

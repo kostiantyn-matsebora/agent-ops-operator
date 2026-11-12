@@ -291,61 +291,6 @@ func (m *Manager) send(ctx context.Context, method, path string, payload []byte)
 	return nil, lastErr
 }
 
-// NextOp long-polls for the next outbound op; nil when none arrived in time.
-//
-// Also returns the vocabulary revision the response carried — read directly
-// off the HTTP response rather than through `do`, because it rides every
-// status this endpoint can answer (200, 204, 503 alike) and `do` discards
-// headers once it has decoded a body.
-func (m *Manager) NextOp(ctx context.Context, adapter string, waitSeconds int) (*Op, string, error) {
-	path := fmt.Sprintf("/channel/ops?adapter=%s&contract=%s&wait=%d",
-		url.QueryEscape(adapter), ContractVersion, waitSeconds)
-	req, err := http.NewRequestWithContext(ctx, "GET", m.BaseURL+path, nil)
-	if err != nil {
-		return nil, "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+m.Token)
-	resp, err := m.HTTP.Do(req)
-	if err != nil {
-		return nil, "", err
-	}
-	defer resp.Body.Close()
-	revision := resp.Header.Get(VocabularyRevisionHeader)
-	// durable-chat-ops-broker: 503 means the replica that answered is not the
-	// current leader and cannot safely claim an op on this adapter's behalf —
-	// never a failure to surface or back off from, exactly like an ordinary
-	// 204 except the caller should retry at once rather than pacing itself as
-	// it would after a genuine error.
-	//
-	// "Retry at once" only reaches a different replica if the retry actually
-	// dials one: a Kubernetes Service picks a backend per TCP CONNECTION, not
-	// per request, so an HTTP/1.1 keep-alive connection that happened to land
-	// on a non-leader stays pinned to it — every subsequent poll on that same
-	// connection gets the same non-leader's 503, forever, with no error ever
-	// surfacing. Measured live: a long-poll loop pinned this way never
-	// completed a single op across several minutes and a pod restart, despite
-	// the leader's queue holding one the whole time. Closing the idle
-	// connection here is what makes the NEXT poll dial fresh and gives it a
-	// new chance to land on the leader.
-	if resp.StatusCode == http.StatusServiceUnavailable {
-		m.HTTP.CloseIdleConnections()
-		return nil, revision, nil
-	}
-	if resp.StatusCode == http.StatusNoContent {
-		return nil, revision, nil
-	}
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return nil, revision, fmt.Errorf("GET %s: %d %s", path, resp.StatusCode, bytes.TrimSpace(b))
-	}
-	var op Op
-	if err := json.NewDecoder(resp.Body).Decode(&op); err != nil {
-		return nil, revision, err
-	}
-	return &op, revision, nil
-}
-
-// CompleteOp reports an op result (threadID for ensure-topic; opErr on failure).
 // Vocabulary fetches what may be typed on a chat surface.
 //
 // The console CAN see Pipelines — it watches them for topology and
@@ -378,18 +323,6 @@ type VocabularyEntry struct {
 	// Icon is how the entry is recognised in a list — an emoji, or nothing.
 	Icon    string `json:"icon,omitempty"`
 	Profile string `json:"profile,omitempty"`
-}
-
-func (m *Manager) CompleteOp(ctx context.Context, opID, threadID, opErr string) error {
-	body := map[string]string{}
-	if threadID != "" {
-		body["threadId"] = threadID
-	}
-	if opErr != "" {
-		body["error"] = opErr
-	}
-	_, err := m.do(ctx, "POST", "/channel/ops/"+url.PathEscape(opID)+"/done", body, nil)
-	return err
 }
 
 // Inbound pushes one user message into the manager's router. threadId is

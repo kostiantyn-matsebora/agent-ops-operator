@@ -59,6 +59,42 @@ func commandBusConsumerConcurrency() int {
 	return envInt(commandBusConsumerConcurrencyEnv, defaultCommandBusConsumerConcurrency)
 }
 
+// The retained feed of an adapter the manager pushes ops to over a stream
+// (design D-16: the console). CHANNEL_FEED_ADAPTERS names the adapters, comma
+// separated; each one's feed keeps entries CHANNEL_FEED_RETENTION long (30s) and
+// at most CHANNEL_FEED_MAX_ENTRIES (5000), whether or not they were read. Every
+// other adapter keeps its claim and acknowledgement.
+const (
+	channelFeedAdaptersEnv     = "CHANNEL_FEED_ADAPTERS"
+	channelFeedRetentionEnv    = "CHANNEL_FEED_RETENTION"
+	channelFeedMaxEntriesEnv   = "CHANNEL_FEED_MAX_ENTRIES"
+	defaultChannelFeedAdapters = "console"
+)
+
+// channelFeedAdapters is the list of adapters that read a feed. An explicitly
+// empty value means none.
+func channelFeedAdapters() []string {
+	raw, ok := os.LookupEnv(channelFeedAdaptersEnv)
+	if !ok {
+		raw = defaultChannelFeedAdapters
+	}
+	var out []string
+	for _, name := range strings.Split(raw, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// channelFeedInventory declares the feed retention from the environment.
+func channelFeedInventory() []commandbus.FeedDeclaration {
+	inv := commandbus.DefaultFeedInventory()
+	inv[0].Policy.MaxAge = envDurationOr(channelFeedRetentionEnv, commandbus.DefaultFeedMaxAge)
+	inv[0].Policy.MaxEntries = envInt(channelFeedMaxEntriesEnv, commandbus.DefaultFeedMaxEntries)
+	return inv
+}
+
 // managerReplicasEnv names this release's manager replica count. The chart
 // wires it from .Values.replicas, the SAME value that already sets the
 // Deployment's own spec.replicas — not a second, independently-settable
@@ -127,7 +163,7 @@ func managerReplicas() int {
 func newCommandBus(mgr ctrl.Manager, namespace, backend string) (commandbus.Bus, error) {
 	switch backend {
 	case commandBusBackendMemory:
-		return commandbusmemory.Open(), nil
+		return commandbusmemory.Open(commandbusmemory.WithFeedInventory(channelFeedInventory())), nil
 	case commandBusBackendNats:
 		return newNatsCommandBus(mgr, namespace)
 	}
@@ -153,7 +189,8 @@ func newNatsCommandBus(mgr ctrl.Manager, namespace string) (commandbus.Bus, erro
 		return nil, fmt.Errorf("command bus: %w", err)
 	}
 
-	bus, err := openCommandBusWhenReady(context.Background(), conn, namespace, commandBusOpenTimeout, commandBusOpenRetryInterval, commandBusNatsOptions...)
+	bus, err := openCommandBusWhenReady(context.Background(), conn, namespace, commandBusOpenTimeout, commandBusOpenRetryInterval,
+		append([]commandbusnats.Option{commandbusnats.WithFeedInventory(channelFeedInventory())}, commandBusNatsOptions...)...)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("opening the nats command bus: %w", err)

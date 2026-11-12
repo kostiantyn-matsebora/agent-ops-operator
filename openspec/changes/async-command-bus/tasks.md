@@ -372,12 +372,22 @@ becomes an append-only log (design D-2, D-16): nothing is rewritten.
 
 The claim/lease/acknowledge feed for the console proved fragile (a dead connection's claim stranded ops for a lease; a redelivery rendered twice). The console becomes a standard SSE consumer (design D-16).
 
-- [ ] 15.1 Make the console channel's log a retained feed: trimmed by age and count (24h default, declared per queue), not removed on delivery. Telegram's queue keeps claim and acknowledgement.
-- [ ] 15.2 `GET /channel/ops/stream` reads the feed by cursor: replays every entry after `Last-Event-ID`/`?since=` (unknown id: from the start of the retained log), then pushes new entries. No claim, lease or acknowledgement. Remove the sweep, `Resume` by lease and the `/done` dependence for the console.
-- [ ] 15.3 Run the side effects an acknowledgement used to trigger (run reply delivered, close-topic, delete-conversation) when the frame is written to a live stream.
-- [ ] 15.4 The manager assigns the console thread id on `ensure-topic`. The console uses it.
-- [ ] 15.5 Console client: reconnect with the last received id, idle watchdog, render once per command id, no `/done` call and no unacked cache.
+- [x] 15.1 Make the console channel's log a retained feed: trimmed by age and count (30s default, declared per queue), not removed on delivery. Telegram's queue keeps claim and acknowledgement.
+- [x] 15.2 `GET /channel/ops/stream` reads the feed by cursor: replays every entry after `Last-Event-ID`/`?since=` (unknown id: from the start of the retained log), then pushes new entries. No claim, lease or acknowledgement. Remove the sweep, `Resume` by lease and the `/done` dependence for the console.
+- [x] 15.3 Run the side effects an acknowledgement used to trigger (run reply delivered, close-topic, delete-conversation) when the frame is written to a live stream.
+- [x] 15.4 The manager assigns the console thread id on `ensure-topic`. The console uses it.
+- [x] 15.5 Console client: reconnect with the last received id, idle watchdog, render once per command id, no `/done` call and no unacked cache.
 - [ ] 15.6 Redeploy and repeat the Tuya scenario and a delete: answers arrive once, in order, without a refresh, and a delete is not held waiting for the console.
+
+## 16. Adapter-owned delivery (Telegram) — backend-developer
+
+The same contract for every non-console channel adapter (design D-17). Starts after section 15.
+
+- [ ] 16.1 Add the three-step contract to the channel adapter API: read without change, acknowledge as hand-over (starts the delivery TTL, the manager never resends), report done or failed. Declare a delivery TTL per message kind.
+- [ ] 16.2 Remove the lease redelivery for acknowledged ops. The manager fails a message with no report at its TTL as a backstop.
+- [ ] 16.3 Move `channels/telegram` to it: retry against the gateway until the TTL, then report failed. The `ensure-topic` topic id travels back in the done report.
+- [ ] 16.4 Keep the manager's delivery markers and the close and delete gating driven by the done and failed reports.
+- [ ] 16.5 Redeploy and confirm Telegram delivery, a delivery failure ending as failed at its TTL, and an adapter restart not duplicating a message.
 
 ## 10. Unit tests
 
@@ -565,6 +575,7 @@ landed. `concepts.md`'s state-restart table still described
 - [x] 12.1.9 Re-run `python3 .github/scripts/docs-generate.py`, because chart values changed.
   Clean both before and after — the new guide's `renders bundle=commandbus`
   block generated correctly on the first pass.
+- [ ] 12.1.12 `docs/contracts/channel-adapter.md`: the get, ack, done-or-failed contract and the delivery TTL, and the console as a plain SSE consumer.
 - [ ] 12.1.11 Reference docs: `docs/contracts.md`, `docs/concepts.md` and `.claude/rules/{gotchas,invariants}.md` state that every bus queue is an append-only log, a command id is a cursor and never an order, and drop the ledger/`Order` wording. Add the 10071 submit race to `gotchas.md`. Then `docs-generate.py --check`.
 - [ ] 12.1.10 `docs/contracts/channel-adapter.md` and `docs/contracts.md`: the per-channel queue, the console stream with resume by command id. Then `docs/concepts.md` for the single fan-out point.
 
