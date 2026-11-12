@@ -168,13 +168,14 @@ Their existing behaviour SHALL be preserved:
 - a failed attempt SHALL be retried by the bus with backoff, and the id SHALL stay pending while it retries
 - after a task goes dead its id SHALL be parked, then released, so reconciliation MAY derive it again
 - a fire-and-forget `send` SHALL carry a short time to live
-- `delete-conversation` SHALL carry a time to live equal to the finalizer's grace and SHALL never be parked, so a deletion never wedges on a down adapter
+- `delete-conversation` SHALL carry a time to live equal to the finalizer's grace
+- `delete-conversation` SHALL never be parked, so a deletion never wedges on a down adapter
 - the lease of a claimed operation SHALL default to five minutes and be owned by the command bus's ledger
 - the chart value `claimStalenessSeconds` SHALL be inert
 
 The claim body an adapter reads from `/channel/ops` SHALL keep its shape.
-Its reclaim interval SHALL report the bus's fixed five-minute lease. The queue depth read at `/api/queues` SHALL
-keep working from the per-queue statistics.
+Its reclaim interval SHALL report the bus's fixed five-minute lease.
+The queue depth read at `/api/queues` SHALL keep working from the per-queue statistics.
 
 The `done` call of `/channel/ops/{id}/done` SHALL run its completion handlers
 synchronously before it replies, because a thread binding is what inbound
