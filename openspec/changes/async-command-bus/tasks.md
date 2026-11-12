@@ -383,6 +383,7 @@ The claim/lease/acknowledge feed for the console proved fragile (a dead connecti
 
 The same contract for every non-console channel adapter (design D-17). Starts after section 15.
 
+- [ ] 16.0 Move the console to the same contract: its ACK is receipt from the manager, no delivery TTL, no report, and the manager deletes the message at the ACK. Replace the retained feed of section 15 and drop its replay window.
 - [ ] 16.1 Add the three-step contract to the channel adapter API: read without change, acknowledge as hand-over (starts the delivery TTL, the manager never resends), report done or failed. Declare a delivery TTL per message kind.
 - [ ] 16.2 Remove the lease redelivery for acknowledged ops. The manager fails a message with no report at its TTL as a backstop.
 - [ ] 16.3 Move `channels/telegram` to it: retry against the gateway until the TTL, then report failed. The `ensure-topic` topic id travels back in the done report.

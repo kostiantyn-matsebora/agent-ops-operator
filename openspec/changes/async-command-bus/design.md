@@ -344,9 +344,12 @@ As built:
 
 ### D-17: Adapters own delivery: get, ack, then done or failed
 
-Every channel adapter that is not a plain SSE consumer (Telegram today) delivers
-under one contract of three steps. The console is the SSE case of D-16 and takes
-no part.
+Every channel adapter delivers under one contract: GET, ACK, then DONE or
+FAILED. The console is the simple case, where the ACK is its receipt of the
+message from the manager (not the push on to browsers, which stays fire-and-forget),
+there is no delivery TTL and no report, and the manager DELETES the message from
+the queue at the ACK, as a regular queue does. Telegram uses all three steps with a
+delivery TTL. This supersedes D-16's retained feed, which was built first.
 
 - **GET** reads the next message of the adapter's channel queue and changes
   nothing. A message read by an adapter that dies before acknowledging is simply
