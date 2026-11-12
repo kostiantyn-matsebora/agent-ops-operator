@@ -27,6 +27,7 @@ mocked backend, not a behavior proof against a real one.
 | Conformance | WHERE APPLICABLE, behaviour a contract promises to more than one implementation |
 | System | ALWAYS ADDRESSED (a section, or one ticked line saying why not), critical paths a cluster decides (`platform/manager/test/system/`) |
 | Console browser e2e | OPTIONAL, UI paths in a browser (`e2e-live`) |
+| Documentation | ALWAYS, its own last task, reference docs and the adopter site |
 
 A test that cannot fail against the old code proves nothing, so show it
 failing first. Skipping a required tier is the user's call, never the

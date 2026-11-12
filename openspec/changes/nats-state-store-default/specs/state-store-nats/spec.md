@@ -248,6 +248,7 @@ tested. The `kube` pin SHALL be exercised by a system run of its own.
 - **WHEN** the smoke tier runs with `stateStore.backend` set to `kube`
 - **THEN** it passes and the install renders no state server
 
+### Requirement: The state servers' volumes outlive an uninstall
 The state servers' volumes SHALL outlive an uninstall of the chart, so a reinstall finds its data where it was.
 
 #### Scenario: An uninstall keeps the state servers' volumes

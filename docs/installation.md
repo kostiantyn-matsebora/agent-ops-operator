@@ -243,10 +243,11 @@ The next release, listed under `[Unreleased]` in the changelog, is **BREAKING
 too: the default state backend changes to `nats`**.
 
 A fresh install now also runs three more pods and three more volumes.
-They are a clustered state server. It replaces the `Conversation` and
-`Signal` custom resources as the live record. It also holds what lived on
-`SignalSource` status, the cooldown window and the receipt counters, and each
-adapter's own state.
+They are a clustered state server.
+
+It replaces the `Conversation` and `Signal` custom resources as the live
+record. It also holds what lived on `SignalSource` status, the cooldown window
+and the receipt counters, and each adapter's own state.
 
 The state servers' volumes are claims too, so their storage class is set
 before install. See [Storage](#storage).

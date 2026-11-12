@@ -182,7 +182,7 @@ A remote session records the cluster runs as not performed. It dispatches
 `system-smoke.yml` and `system-full.yml` with `--ref change/<name>`.
 
 **Most of this section did not run against a real cluster from the session that wrote it.**
-No `docker` daemon, no `k3d` — confirmed at the start of that dispatch. Item 5.18 is the exception, run later on a fresh k3d cluster.
+No `docker` daemon, no `k3d` — confirmed at the start of that dispatch. Items 5.18 to 5.22 are the exception, run later on a fresh k3d cluster.
 
 Each item below names what WAS verified without one — compiles, vets,
 matches this package's own conventions, typechecks, is discovered by

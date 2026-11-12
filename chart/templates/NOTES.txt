@@ -8,7 +8,7 @@ Ask an agent:  a task is an ordinary signal — post it to a SignalSource a Read
     -d '{"source":"<signalsource>","signals":[{"initiationId":"ask-1","kind":"task","payload":"..."}]}'
 
 {{- if eq (include "agentops.stateBackend" .) "nats" }}
-{{- if eq (int (.Values.nats.replicas | default 3)) 1 }}
+{{- if eq (int .Values.nats.replicas) 1 }}
 
 NATS IS RUNNING WITH ONE REPLICA — the state store has a SINGLE POINT OF
 FAILURE. Losing this pod holds every conversation until it restarts, and a
