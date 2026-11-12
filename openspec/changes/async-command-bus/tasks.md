@@ -268,6 +268,96 @@ was already real, already passing, and left alone. Three gaps closed:
 - [x] 10.5 The chart's render and guard tests for every permutation: default, URL, `memory`, each contradiction, credential precedence, `--is-upgrade`.
 - [x] 10.6 `go test` in every other module still passes, and `python3 .github/scripts/publication-guard.py` is clean.
 
+## 11. System tests
+
+**WRITTEN, COMPILES, NOT RUN — no cluster in this environment.** Same
+constraint section 9's own end-to-end flows recorded. Every lane below is
+added to `platform/manager/test/system/async_system_test.go`, calls
+`fullTier(t)` after `requireEnv(t)`, and is verified by:
+
+```sh
+cd platform/manager
+go vet -tags system ./test/system/...                        # clean
+go test -tags system -c -o /tmp/system.test ./test/system/    # builds
+go build ./... && go vet ./...                                # clean
+KUBEBUILDER_ASSETS=~/.envtest/k8s/1.31.0-linux-amd64 go test ./... -count=1   # all ok, incl. internal/integration
+```
+
+None of this is a pass of the lanes themselves — that needs the real k3d
+cluster, images and chart `system-full.yml` provisions, which this role
+did not run. Left for whoever dispatches the cluster tier (11.7).
+
+- [ ] 11.1 Add lanes to `platform/manager/test/system/`, run against THIS working copy's chart and images, not the default branch's.
+  **PACK-WIDE GUARANTEE, not a per-lane assertion.** `install.go`'s own
+  `Install` always renders `filepath.Join(repoRoot(), "chart")` — this
+  checkout's own working tree, never a fetched ref — and `valuesYAML()`
+  always pins `image: agentops-manager tag: e2e`, the tag `images.go`'s
+  `BuildAndImport` just built from this commit and `Import`ed directly
+  into the node (never pulled). The one named exception:
+  `commandBus.nats.image` (`chart/values.yaml`) is a pinned THIRD-PARTY
+  image (`nats:2.10-alpine` by digest) genuinely unrelated to "this
+  working copy," unlike `agentops-manager`, which carries every line
+  sections 1-8 wrote.
+- [ ] 11.2 Lane: the bundle comes up, the credential is projected by the kubelet, and the NetworkPolicy admits only the manager.
+  `TestAsyncCommandBusBundleUpCredentialProjectedNetworkPolicyEnforced`,
+  three `t.Run` steps:
+
+  | Step | Asserts |
+  |---|---|
+  | bundle up | the StatefulSet at its chart default of 3 ready replicas |
+  | credential | `COMMANDBUS_NATS_USER`/`PASSWORD` on the manager pod as `valueFrom.secretKeyRef` against `agentops-commandbus-credentials`, never a literal. The manager's own Available status stands in for "the kubelet-resolved connection already succeeded" — its image is distroless, with no shell to exec a probe from |
+  | NetworkPolicy | the FIRST live enforcement lane in this package (the existing `internal/integration/charttemplate_networkpolicy_test.go` is a chart-render test only). Enables `global.agentops.networkPolicy.enabled`, execs `wget` from a non-manager pod (the state store's own nats bundle) against the bus's client port, and asserts the real CNI (k3s's bundled network-policy controller, never disabled by `EnsureCluster`) drops it, while the manager itself stays Available through its own admitted rule |
+- [ ] 11.3 Lane: a claim on one manager replica completes on another, and a lapsed lease is redelivered.
+  `TestAsyncClaimOnOneReplicaCompletesOnAnother`. **DOCUMENTED DECISION**
+  (the same kind of call 9.7 already makes): nothing this pack exposes
+  names which replica's own goroutine holds a task's claim —
+  `consumer.Pool`'s own `ConsumerID` defaults to the queue's name, never
+  `POD_NAME`, so `/state/tasks`' `lease.holder` reads identically on
+  every replica, and `taskClose`/`taskDelete` are too fast to reliably
+  catch strictly between "claimed" and "settled" from outside the
+  process without a double this task's scope has no mandate to extend.
+  So the lane pins what it CAN control deterministically: scales to
+  exactly one replica first (the sole possible claimant), adds a live
+  sibling, then force-deletes the original mid-accept and waits past the
+  lease's own 5-minute worst case (8 minutes) for the SAME task UID to
+  settle exactly once, with the accept endpoint never going down (a
+  sibling stays Ready throughout, unlike 9.6's full-process restart).
+- [ ] 11.4 Lane: ordering holds under parallel consumers across two replicas.
+  `TestAsyncOrderingHoldsAcrossTwoReplicasUnderParallelConsumers`. Two
+  live manager replicas, five inbound messages submitted in rapid
+  succession against ONE conversation (one Key), observed on the task
+  stream to settle in submission order — design D-2's own claim-time
+  rule ("the next is not claimable until the previous has settled"),
+  watched directly rather than assumed.
+- [ ] 11.5 Lane: a manager restart and a bus-server rolling restart lose no accepted task.
+  `TestAsyncManagerRestartAndBusServerRestartLoseNoAcceptedTask`, two
+  `t.Run` halves. Manager half reuses 9.6's own
+  `restartManagerSchedulable`/`postInboundDuringRestart` mechanism
+  (the same fact, asked for again at the system tier by design D-14's
+  own table). Bus-server half rolls the bundle's own 3 StatefulSet pods
+  one at a time (captured ordinals, never re-listed mid-roll), each
+  interleaved with a newly-accepted task, asserting every one still
+  succeeds — no claim-timing race to document here, since the ledger
+  itself is a 3-way replicated JetStream store, same shape as
+  `state_nats_test.go`'s own
+  `TestNatsServerPodDeletionMidConversationCompletes`.
+- [ ] 11.6 Lane: backoff into a dead letter against a surface that really fails.
+  `TestAsyncBackoffIntoADeadLetterAgainstARealFailure`. Section 9.7
+  already proves this shape against `test/fakebotapi`'s own cooperating
+  `/control/fail` toggle. This lane instead repoints `telegram.apiBase`
+  (a plain chart value) at a cluster-internal host nothing answers, so
+  every outbound call fails with a genuine DNS/connection error the
+  kubelet's own network stack produces — the thing only a real cluster
+  decides, per design D-14's own table — through the same backoff,
+  dead-letter and `/state/dead-letters` listing checks 9.7 already uses.
+- [ ] 11.7 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
+  **NOT PERFORMED — no cluster in this environment.** Left for whoever
+  opens the pull request to dispatch, per `.github/routines/
+  implement-issue.md`'s own step 6:
+  ```sh
+  gh workflow run system-smoke.yml --ref change/async-command-bus
+  ```
+
 ## 9. End-to-end tests — testing-specialist
 
 **WRITTEN, COMPILES, NOT RUN — no cluster in this environment.** Same
@@ -365,96 +455,6 @@ role did not run. Left for whoever dispatches the cluster tier.
   commandbus conformance suite (task 2.6, "park then release"), so
   re-proving it here too would cost every full-tier run several more
   real minutes for a fact this lane does not uniquely decide.
-
-## 11. System tests
-
-**WRITTEN, COMPILES, NOT RUN — no cluster in this environment.** Same
-constraint section 9's own end-to-end flows recorded. Every lane below is
-added to `platform/manager/test/system/async_system_test.go`, calls
-`fullTier(t)` after `requireEnv(t)`, and is verified by:
-
-```sh
-cd platform/manager
-go vet -tags system ./test/system/...                        # clean
-go test -tags system -c -o /tmp/system.test ./test/system/    # builds
-go build ./... && go vet ./...                                # clean
-KUBEBUILDER_ASSETS=~/.envtest/k8s/1.31.0-linux-amd64 go test ./... -count=1   # all ok, incl. internal/integration
-```
-
-None of this is a pass of the lanes themselves — that needs the real k3d
-cluster, images and chart `system-full.yml` provisions, which this role
-did not run. Left for whoever dispatches the cluster tier (11.7).
-
-- [ ] 11.1 Add lanes to `platform/manager/test/system/`, run against THIS working copy's chart and images, not the default branch's.
-  **PACK-WIDE GUARANTEE, not a per-lane assertion.** `install.go`'s own
-  `Install` always renders `filepath.Join(repoRoot(), "chart")` — this
-  checkout's own working tree, never a fetched ref — and `valuesYAML()`
-  always pins `image: agentops-manager tag: e2e`, the tag `images.go`'s
-  `BuildAndImport` just built from this commit and `Import`ed directly
-  into the node (never pulled). The one named exception:
-  `commandBus.nats.image` (`chart/values.yaml`) is a pinned THIRD-PARTY
-  image (`nats:2.10-alpine` by digest) genuinely unrelated to "this
-  working copy," unlike `agentops-manager`, which carries every line
-  sections 1-8 wrote.
-- [ ] 11.2 Lane: the bundle comes up, the credential is projected by the kubelet, and the NetworkPolicy admits only the manager.
-  `TestAsyncCommandBusBundleUpCredentialProjectedNetworkPolicyEnforced`,
-  three `t.Run` steps:
-
-  | Step | Asserts |
-  |---|---|
-  | bundle up | the StatefulSet at its chart default of 3 ready replicas |
-  | credential | `COMMANDBUS_NATS_USER`/`PASSWORD` on the manager pod as `valueFrom.secretKeyRef` against `agentops-commandbus-credentials`, never a literal. The manager's own Available status stands in for "the kubelet-resolved connection already succeeded" — its image is distroless, with no shell to exec a probe from |
-  | NetworkPolicy | the FIRST live enforcement lane in this package (the existing `internal/integration/charttemplate_networkpolicy_test.go` is a chart-render test only). Enables `global.agentops.networkPolicy.enabled`, execs `wget` from a non-manager pod (the state store's own nats bundle) against the bus's client port, and asserts the real CNI (k3s's bundled network-policy controller, never disabled by `EnsureCluster`) drops it, while the manager itself stays Available through its own admitted rule |
-- [ ] 11.3 Lane: a claim on one manager replica completes on another, and a lapsed lease is redelivered.
-  `TestAsyncClaimOnOneReplicaCompletesOnAnother`. **DOCUMENTED DECISION**
-  (the same kind of call 9.7 already makes): nothing this pack exposes
-  names which replica's own goroutine holds a task's claim —
-  `consumer.Pool`'s own `ConsumerID` defaults to the queue's name, never
-  `POD_NAME`, so `/state/tasks`' `lease.holder` reads identically on
-  every replica, and `taskClose`/`taskDelete` are too fast to reliably
-  catch strictly between "claimed" and "settled" from outside the
-  process without a double this task's scope has no mandate to extend.
-  So the lane pins what it CAN control deterministically: scales to
-  exactly one replica first (the sole possible claimant), adds a live
-  sibling, then force-deletes the original mid-accept and waits past the
-  lease's own 5-minute worst case (8 minutes) for the SAME task UID to
-  settle exactly once, with the accept endpoint never going down (a
-  sibling stays Ready throughout, unlike 9.6's full-process restart).
-- [ ] 11.4 Lane: ordering holds under parallel consumers across two replicas.
-  `TestAsyncOrderingHoldsAcrossTwoReplicasUnderParallelConsumers`. Two
-  live manager replicas, five inbound messages submitted in rapid
-  succession against ONE conversation (one Key), observed on the task
-  stream to settle in submission order — design D-2's own claim-time
-  rule ("the next is not claimable until the previous has settled"),
-  watched directly rather than assumed.
-- [ ] 11.5 Lane: a manager restart and a bus-server rolling restart lose no accepted task.
-  `TestAsyncManagerRestartAndBusServerRestartLoseNoAcceptedTask`, two
-  `t.Run` halves. Manager half reuses 9.6's own
-  `restartManagerSchedulable`/`postInboundDuringRestart` mechanism
-  (the same fact, asked for again at the system tier by design D-14's
-  own table). Bus-server half rolls the bundle's own 3 StatefulSet pods
-  one at a time (captured ordinals, never re-listed mid-roll), each
-  interleaved with a newly-accepted task, asserting every one still
-  succeeds — no claim-timing race to document here, since the ledger
-  itself is a 3-way replicated JetStream store, same shape as
-  `state_nats_test.go`'s own
-  `TestNatsServerPodDeletionMidConversationCompletes`.
-- [ ] 11.6 Lane: backoff into a dead letter against a surface that really fails.
-  `TestAsyncBackoffIntoADeadLetterAgainstARealFailure`. Section 9.7
-  already proves this shape against `test/fakebotapi`'s own cooperating
-  `/control/fail` toggle. This lane instead repoints `telegram.apiBase`
-  (a plain chart value) at a cluster-internal host nothing answers, so
-  every outbound call fails with a genuine DNS/connection error the
-  kubelet's own network stack produces — the thing only a real cluster
-  decides, per design D-14's own table — through the same backoff,
-  dead-letter and `/state/dead-letters` listing checks 9.7 already uses.
-- [ ] 11.7 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
-  **NOT PERFORMED — no cluster in this environment.** Left for whoever
-  opens the pull request to dispatch, per `.github/routines/
-  implement-issue.md`'s own step 6:
-  ```sh
-  gh workflow run system-smoke.yml --ref change/async-command-bus
-  ```
 
 ## 12. Documentation
 

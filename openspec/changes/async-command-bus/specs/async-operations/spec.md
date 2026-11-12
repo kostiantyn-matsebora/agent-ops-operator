@@ -169,7 +169,7 @@ Their existing behaviour SHALL be preserved:
 - after a task goes dead its id SHALL be parked, then released, so reconciliation MAY derive it again
 - a fire-and-forget `send` SHALL carry a short time to live
 - `delete-conversation` SHALL carry a time to live equal to the finalizer's grace and SHALL never be parked, so a deletion never wedges on a down adapter
-- the lease of a claimed operation SHALL default to five minutes, owned by the command bus's ledger; the chart value `claimStalenessSeconds` is inert
+- the lease of a claimed operation SHALL default to five minutes, owned by the command bus's ledger, and the chart value `claimStalenessSeconds` SHALL be inert
 
 The claim body an adapter reads from `/channel/ops` SHALL be unchanged,
 including its reclaim interval. The queue depth read at `/api/queues` SHALL
