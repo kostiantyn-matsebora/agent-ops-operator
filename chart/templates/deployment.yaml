@@ -1,4 +1,5 @@
 {{- include "agentops.stateStoreGuard" . }}
+{{- include "agentops.commandBusGuard" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -83,6 +84,45 @@ spec:
                   name: {{ include "nats.credentialSecretName" (dict "nats" .Values.nats) }}
                   key: password
             {{- end }}
+            # async-command-bus D-1: an INDEPENDENT selector from
+            # STATE_BACKEND above — the guard above has already refused a
+            # backend this manager does not carry, and `memory` above one
+            # replica.
+            - name: COMMANDBUS_BACKEND
+              value: {{ include "agentops.commandBusBackend" . | quote }}
+            {{- if eq (include "agentops.commandBusBackend" .) "nats" }}
+            # The command bus's OWN connection facts — NEVER NATS_URL/
+            # NATS_USER/NATS_PASSWORD above, which belong to the STATE
+            # store's bundle (design D-1: "it never reads NATS_*").
+            # COMMANDBUS_NATS_URL points at the rendered bundle's client
+            # Service by default, or at the explicit commandBus.nats.url
+            # when the bundle is off.
+            - name: COMMANDBUS_NATS_URL
+              value: {{ include "agentops.commandBusNatsURL" . | quote }}
+            - name: COMMANDBUS_NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "commandbus.credentialSecretName" (dict "commandbus" .Values.commandBus.nats) }}
+                  key: user
+            - name: COMMANDBUS_NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "commandbus.credentialSecretName" (dict "commandbus" .Values.commandBus.nats) }}
+                  key: password
+            {{- end }}
+            # Sizes every consumer.Pool the manager runs, independent of
+            # which backend answers it — same shape as
+            # SIGNAL_CONSUMER_CONCURRENCY below.
+            - name: COMMANDBUS_CONSUMER_CONCURRENCY
+              value: {{ .Values.commandBus.consumerConcurrency | quote }}
+            # design D-13: the manager itself refuses `memory` above one
+            # replica at startup — the SAME contradiction
+            # agentops.commandBusGuard already fails at render time,
+            # faster. Read from the SAME value that already sets this
+            # Deployment's own spec.replicas, never a second,
+            # independently-settable number.
+            - name: MANAGER_REPLICAS
+              value: {{ .Values.replicas | quote }}
             - name: MAX_ACTIVE_CONVERSATIONS
               value: {{ .Values.maxActiveConversations | quote }}
             - name: MAX_QUEUED_CONVERSATIONS

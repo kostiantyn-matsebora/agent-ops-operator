@@ -52,6 +52,125 @@ maxQueuedConversations: 50
 stateStore:
   backend: nats
 
+# The async command bus (design async-command-bus D-1/D-13): durable
+# work-unit submission, claim-with-lease and retry for every verb this
+# release converted to it. INDEPENDENT of stateStore.backend above — an
+# install may run the kube state store with the nats command bus, or the
+# reverse. The manager reads the choice as COMMANDBUS_BACKEND, never
+# STATE_BACKEND.
+#
+# `nats` is the DEFAULT. The bus renders its OWN three-server bundle
+# (chart/charts/commandbus/) — SAME SHAPE as the stateStore `nats` bundle
+# above (three servers, a volume each, a PodDisruptionBudget, a
+# chart-generated credential), but a SEPARATE template, not that subchart
+# instantiated twice under an alias: every object name in
+# chart/charts/nats/templates/_helpers.tpl is a hardcoded literal
+# (agentops-nats and friends, 9 occurrences, none parameterized), so a
+# second instance would collide on the StatefulSet, both Services, the
+# PDB, the credential Secret and the NetworkPolicy alike. Task 8.1's own
+# verdict, recorded in openspec/changes/async-command-bus/tasks.md section 8.
+#
+# `memory` keeps every task in one process's heap and is REFUSED above one
+# `replicas` (`agentops.commandBusGuard`), mirroring the manager's own
+# runtime refusal of the identical contradiction
+# (cmd/manager/commandbus.go) as a faster, cluster-less failure.
+commandBus:
+  backend: nats
+  # Sizes every consumer.Pool the manager runs (COMMANDBUS_CONSUMER_
+  # CONCURRENCY), independent of which backend answers it. Matches
+  # cmd/manager/commandbus.go's own defaultCommandBusConsumerConcurrency.
+  consumerConcurrency: 4
+  nats:
+    # NULLABLE, same convention as the stateStore `nats` bundle's own
+    # `enabled` comment above: left unset, the bundle renders exactly when
+    # `commandBus.backend` is `nats` AND no `url` below is given.
+    # Hand-setting it is read ONLY by `agentops.commandBusGuard` as a
+    # consistency check against `url` and the backend selector — true
+    # alongside a set `url`, or false alongside an empty one, both fail
+    # the render naming the contradiction.
+    #
+    # enabled: true   # or false — uncomment only to assert the choice and
+    #                 # have the guard catch a mismatch; absent, `url`
+    #                 # alone decides and no check runs.
+    #
+    # AN EXTERNALLY-RUN server instead of the rendered bundle. Mutually
+    # exclusive with the bundle above, and needs its own credential from
+    # `auth.user`/`.password` or `auth.existingSecret` below — this chart
+    # never guesses one for a server it does not manage.
+    url: ""
+    # The chart-generated credential (Secret agentops-commandbus-
+    # credentials), resolved in the SAME order as every other one here:
+    # an explicit value, then an existing Secret, then generation on
+    # install only. `user` defaults to `commandbus` when nothing supplies
+    # one — only the password is ever generated.
+    auth:
+      user: ""
+      password: ""
+      # An existingSecret must carry the keys `user` and `password`.
+      existingSecret: ""
+      secretName: agentops-commandbus-credentials
+    # The rendered bundle's own StatefulSet replica count AND the
+    # `--routes` peer list it is sized from — matching
+    # internal/commandbus/nats's own DefaultReplicas (3).
+    #
+    # NOT WIRED to the manager as an env var, unlike the stateStore
+    # bundle's own NATS_REPLICAS: confirmed against
+    # platform/manager/cmd/manager/commandbus.go and
+    # internal/commandbus/nats/nats.go, the command bus's Config takes no
+    # replica-count override from this process today, and every JetStream
+    # bucket it opens replicates at that package's own hardcoded default
+    # regardless of this value. Raising this past 3 runs a bigger SERVER
+    # cluster without raising the bucket replication factor; this is still
+    # real chart-time configuration for that reason alone (the
+    # StatefulSet, the PDB, the `--routes` list), same as the stateStore
+    # bundle's own `replicas` is before any backend reads it back.
+    replicas: 3
+    image:
+      repository: nats
+      tag: 2.10-alpine
+      # The official `nats` image's manifest-LIST digest (linux/amd64 AND
+      # linux/arm64 both present), pinned per build-test.md: "EVERY IMAGE
+      # IS MULTI-ARCH. NO EXCEPTION." Same tag and digest as the
+      # stateStore bundle's own — one vendor image, two independent
+      # installs of it. Re-pin on a deliberate bump, never silently.
+      digest: sha256:b83efabe3e7def1e0a4a31ec6e078999bb17c80363f881df35edc70fcb6bb927
+    persistence:
+      # Per-replica store directory (jetstream file store). ALWAYS
+      # ReadWriteOnce: a StatefulSet volumeClaimTemplate is one claim per
+      # pod, never shared.
+      size: 10Gi
+      # "" = the cluster's default provisioner, "-" = no class (bind a
+      # pre-created PV), a name = that class.
+      storageClassName: ""
+    resources: {}
+    # Probed on the monitoring port (8222): /healthz answers before
+    # authorization is checked, so the probe needs no credential.
+    probes:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    # Allows exactly one replica down at a time — two down loses quorum.
+    # Meaningless under replicas: 1, where the chart still renders it.
+    podDisruptionBudget:
+      maxUnavailable: 1
+    nodeSelector: {}
+  # KNOWN GAP, NAMED RATHER THAN PAPERED OVER (task 8.2): design D-5's
+  # per-queue attempts/backoff/TTL/dedup-window/park-cooloff, and the
+  # sweep interval and dead-letter retention caps (design D-13's own Open
+  # Questions: "Chart values with documented defaults"), have NO chart
+  # value here. platform/manager/cmd/manager/commandbus.go reads no env
+  # var for any of them, and internal/commandbus/nats's own
+  # WithInventory/WithSweepInterval/WithLedgerRetention/
+  # WithDeadLetterRetention Options are wired from production code
+  # nowhere — commandBusNatsOptions is nil outside tests, so every bucket
+  # opens at commandbus.DefaultInventory()'s and commandbus/nats's own
+  # hardcoded defaults regardless of anything set here. Adding that wiring
+  # is Go-side work (cmd/manager would need its own COMMANDBUS_SWEEP_
+  # INTERVAL / COMMANDBUS_LEDGER_RETENTION / COMMANDBUS_DEAD_LETTER_
+  # MAX_AGE / COMMANDBUS_DEAD_LETTER_MAX_COUNT, plus a shape for a
+  # per-queue override), out of this chart's lane — rendering a value here
+  # with nothing on the other end would be exactly the inert knob this
+  # comment exists to refuse.
+
 # Signals are a durable message queue on the Kubernetes API (kind Signal):
 # /signal/inbound stores one per admitted signal, the leader's consumer pool
 # routes them, the leader's housekeeping bounds and collects them. Every bound

@@ -1,0 +1,42 @@
+{{- /*
+The async command bus's `nats` backend server (design async-command-bus
+D-13). Rendered from HERE, the parent, rather than natively from
+`chart/charts/commandbus/templates/` — `agentops.commandBusBackend` and
+`agentops.commandBusNatsBundleEnabled` read `.Values.commandBus`, a
+PARENT-scope value, and a subchart cannot see it (chart.md: "A SUBCHART
+READS NO PARENT SCOPE BUT `global.`"), exactly the reasoning
+`chart/templates/nats.yaml` already carries for the state-store bundle. So
+`chart/charts/commandbus/` carries no Chart.yaml dependency `condition:`
+and defines everything as named templates only, included from here with
+`.Values.commandBus.nats` passed in explicitly — the one direction Helm
+allows a value to cross this boundary.
+
+NOT `chart/charts/nats/` instantiated a second time under an alias (task
+8.1): every object name in that subchart's own `_helpers.tpl` is a
+hardcoded literal, so a second instance would collide on every one of
+them. This is a renamed sibling instead, with its own object names
+(agentops-commandbus and friends).
+
+The credential renders whenever `commandBus.backend` is `nats`, whether or
+not the bundle itself does — an external `commandBus.nats.url` still needs
+a Secret the manager reads through `valueFrom` (invariants.md: "Manager
+reads NO secrets"). The bundle (StatefulSet, Services, PodDisruptionBudget,
+NetworkPolicy) renders only when `agentops.commandBusNatsBundleEnabled`
+resolves true — the guard above has already refused every other
+combination, so there is no second place "is the bundle selected" can
+answer differently.
+*/ -}}
+{{- include "agentops.commandBusGuard" . }}
+{{- if eq (include "agentops.commandBusBackend" .) "nats" }}
+{{ include "commandbus.credential" (dict "root" $ "commandbus" .Values.commandBus.nats) }}
+{{- if eq (include "agentops.commandBusNatsBundleEnabled" .) "true" }}
+---
+{{ include "commandbus.statefulset" (dict "root" $ "commandbus" .Values.commandBus.nats) }}
+---
+{{ include "commandbus.services" (dict "root" $ "commandbus" .Values.commandBus.nats) }}
+---
+{{ include "commandbus.pdb" (dict "root" $ "commandbus" .Values.commandBus.nats) }}
+---
+{{ include "commandbus.networkpolicy" (dict "root" $ "commandbus" .Values.commandBus.nats) }}
+{{- end }}
+{{- end }}

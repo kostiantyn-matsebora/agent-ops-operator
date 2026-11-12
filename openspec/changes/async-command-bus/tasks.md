@@ -183,12 +183,67 @@ Left to a future change if the gap matters beyond this.
 
 ## 8. Chart — deployment-engineer
 
-- [ ] 8.1 Decide whether the existing `nats` subchart can be instantiated a second time under an alias. If it cannot, give the bus its own template.
+- [x] 8.1 Decide whether the existing `nats` subchart can be instantiated a second time under an alias. If it cannot, give the bus its own template.
+  **Verdict: cannot — own template.** `chart/charts/nats/templates/_helpers.tpl`
+  names every object it renders with a hardcoded literal, 9 occurrences across
+  5 definitions, none parameterized by anything the caller's `dict` passes in:
+  `agentops-nats` (StatefulSet + both Services' selector/labels + PDB +
+  NetworkPolicy, repeated), `agentops-nats-headless`, `agentops-nats-client`,
+  `agentops-nats-credentials`, and `agentops-nats`'s own
+  `app.kubernetes.io/name` label used as BOTH the pod selector and the
+  NetworkPolicy's identity. A second instantiation under an alias would
+  collide on every one of them — two StatefulSets, two Services of each kind,
+  one PDB and one credential Secret all claiming the same name. Retrofitting
+  a name parameter through every one of those 9 sites is real surface-area
+  risk on an already-shipped, already-tested bundle, for a benefit (sharing
+  template code between two near-identical-but-not-identical-forever
+  resources) D-13 does not ask for. Gave the bus its own template instead:
+  `chart/charts/commandbus/templates/_helpers.tpl` (a renamed sibling,
+  `commandbus.statefulset`/`.services`/`.pdb`/`.credential`/`.networkpolicy`,
+  objects named `agentops-commandbus` and friends throughout), rendered from
+  `chart/templates/commandbus.yaml` mirroring `templates/nats.yaml`'s own
+  structure and doc comment.
 - [ ] 8.2 Add `commandBus.backend`, `commandBus.nats.url`, `commandBus.nats.auth.*`, per-queue declarations and the dead-letter retention caps as values.
-- [ ] 8.3 Render a bundle by default, with a PodDisruptionBudget and a chart-generated credential resolved in the usual order (explicit, existing Secret, generation on install only).
-- [ ] 8.4 Add the NetworkPolicy rule admitting only the manager to the bus server.
-- [ ] 8.5 Inject the connection variables into the manager Deployment.
-- [ ] 8.6 Extend the guard: exactly one of a rendered bundle or a URL, a URL needs its own credential, `memory` with more than one replica fails, every contradiction names the value.
+  DONE for `commandBus.backend`, `commandBus.nats.url`/`.enabled`/`.auth.*`/
+  `.replicas`/`.image`/`.persistence`/`.probes`/`.podDisruptionBudget` and
+  `commandBus.consumerConcurrency` (wiring `COMMANDBUS_CONSUMER_CONCURRENCY`,
+  real and backend-independent — confirmed read at
+  `cmd/manager/commandbus.go`'s `commandBusConsumerConcurrency()`, called from
+  both `OpQueue.Run`'s pool and `httpapi`'s own registration in `main.go`).
+  NOT DONE for the per-queue declarations (attempts/backoff/TTL/dedup window/
+  park cool-off/in-flight cap) and the dead-letter/ledger retention caps
+  (sweep interval, ledger retention, dead-letter max age and count) — a
+  genuine Go-side gap, not a chart oversight. Confirmed by reading
+  `cmd/manager/commandbus.go` end to end and grepping `internal/commandbus/`
+  for every env read: the ONLY env vars this binary consumes for the command
+  bus are `COMMANDBUS_BACKEND`, `COMMANDBUS_NATS_URL`,
+  `COMMANDBUS_NATS_USER`, `COMMANDBUS_NATS_PASSWORD` and
+  `COMMANDBUS_CONSUMER_CONCURRENCY`. `internal/commandbus/nats/bus.go`'s own
+  `WithInventory`/`WithSweepInterval`/`WithLedgerRetention`/
+  `WithDeadLetterRetention` `Option`s exist, but `commandBusNatsOptions` —
+  the one slice `newNatsCommandBus` passes them through — is `nil` in
+  production (only a test sets it). So every bucket opens today at
+  `commandbus.DefaultInventory()`'s and `commandbus/nats`'s own hardcoded
+  defaults regardless of any chart value. Rendering a value here with
+  nothing on the other end would be exactly the inert-knob-with-no-effect
+  this task's own instructions refuse. Named in `chart/values.yaml`'s own
+  comment under `commandBus:` so the gap is visible there too, and the
+  env vars a follow-up would need to add are named above — Go-side work,
+  out of this lane.
+- [x] 8.3 Render a bundle by default, with a PodDisruptionBudget and a chart-generated credential resolved in the usual order (explicit, existing Secret, generation on install only).
+- [x] 8.4 Add the NetworkPolicy rule admitting only the manager to the bus server.
+- [x] 8.5 Inject the connection variables into the manager Deployment.
+- [x] 8.6 Extend the guard: exactly one of a rendered bundle or a URL, a URL needs its own credential, `memory` with more than one replica fails, every contradiction names the value.
+  `agentops.commandBusGuard` (`chart/templates/_helpers.tpl`), included from
+  both `templates/commandbus.yaml` and `templates/deployment.yaml` (the
+  render needs it even when the whole bundle template is otherwise
+  skippable). `commandBus.nats.enabled` follows `commandBus.nats.url`'s
+  presence exactly as `nats.enabled` follows `stateStore.backend` — hand-set
+  it to catch a contradiction, leave it alone and a url opts out of the
+  bundle on its own with no error. Verified against every permutation in
+  `platform/manager/internal/integration/charttemplate_test.go`'s new
+  `TestCommandBus*` cases (see hand-back report for the exact failure
+  strings).
 
 ## 9. End-to-end tests — testing-specialist
 

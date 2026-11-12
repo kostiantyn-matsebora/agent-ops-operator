@@ -3878,3 +3878,222 @@ func TestNatsEnvWiresToItsOwnSecret(t *testing.T) {
 		}
 	}
 }
+
+// ---- the command bus (design async-command-bus D-1/D-13) --------------
+//
+// INDEPENDENT of stateStore.backend above: COMMANDBUS_BACKEND is its own
+// selector, cmd/manager/commandbus.go reads its own COMMANDBUS_NATS_* trio,
+// and its bundle is a renamed sibling of chart/charts/nats/ (task 8.1 —
+// that subchart's own object names are hardcoded literals, so a second
+// instance under an alias would collide on every one of them), never that
+// subchart rendered twice.
+
+// COMMANDBUS_BACKEND is rendered from commandBus.backend, and the manager
+// reads exactly this name (cmd/manager/commandbus.go, commandBusBackendEnv).
+// The default is nats (design D-13).
+func TestCommandBusBackendEnvIsRenderedFromTheSelector(t *testing.T) {
+	deploy := findDocByKindAndMetaName(helmTemplate(t), "Deployment", "agentops-manager")
+	if !strings.Contains(deploy, "name: COMMANDBUS_BACKEND\n              value: \"nats\"") {
+		t.Fatalf("manager Deployment must carry COMMANDBUS_BACKEND=nats by default:\n%s", deploy)
+	}
+	// Never the state store's own variable names (design D-1: "it never
+	// reads NATS_*") — a shared name would let the two backends collide.
+	if !strings.Contains(deploy, "name: NATS_URL\n") {
+		t.Fatalf("the state store's own NATS_URL must still render independently:\n%s", deploy)
+	}
+}
+
+// commandBus.backend=memory keeps every task in one process's heap and
+// renders no bundle at all — the StatefulSet, both Services, the PDB, the
+// NetworkPolicy and the generated credential all belong to the nats path
+// alone.
+func TestCommandBusMemoryBackendRendersNoBundle(t *testing.T) {
+	out := helmTemplate(t, "--set", "commandBus.backend=memory", "--set", "replicas=1")
+	for _, kind := range []string{"StatefulSet", "PodDisruptionBudget"} {
+		if findDocByKindAndMetaName(out, kind, "agentops-commandbus") != "" {
+			t.Fatalf("commandBus.backend=memory must render no %s named agentops-commandbus", kind)
+		}
+	}
+	for _, name := range []string{"agentops-commandbus-headless", "agentops-commandbus-client"} {
+		if findDocByKindAndMetaName(out, "Service", name) != "" {
+			t.Fatalf("commandBus.backend=memory must render no Service %s", name)
+		}
+	}
+	if secretDoc(out, "agentops-commandbus-credentials") != "" {
+		t.Fatal("commandBus.backend=memory must generate no command bus credential")
+	}
+	deploy := findDocByKindAndMetaName(out, "Deployment", "agentops-manager")
+	if !strings.Contains(deploy, "name: COMMANDBUS_BACKEND\n              value: \"memory\"") {
+		t.Fatalf("manager Deployment must carry COMMANDBUS_BACKEND=memory:\n%s", deploy)
+	}
+	for _, name := range []string{"COMMANDBUS_NATS_URL", "COMMANDBUS_NATS_USER", "COMMANDBUS_NATS_PASSWORD"} {
+		if strings.Contains(deploy, "name: "+name+"\n") {
+			t.Fatalf("commandBus.backend=memory must render no %s:\n%s", name, deploy)
+		}
+	}
+}
+
+// design D-13: `memory` is refused with more than one manager replica —
+// the chart's own guard mirrors the manager's own runtime refusal
+// (cmd/manager/commandbus.go, commandBusBackendFromEnv) as a faster,
+// cluster-less failure. The chart's own default replicas is 2, so the
+// bare selector already triggers it.
+func TestCommandBusGuardRefusesMemoryAboveOneReplica(t *testing.T) {
+	msg := helmTemplateErr(t, "--set", "commandBus.backend=memory")
+	for _, w := range []string{"commandBus.backend=memory", "replicas=2"} {
+		if !strings.Contains(msg, w) {
+			t.Errorf("failure must contain %q:\n%s", w, msg)
+		}
+	}
+	// One replica passes.
+	helmTemplate(t, "--set", "commandBus.backend=memory", "--set", "replicas=1")
+}
+
+// An unknown commandBus.backend fails naming the value, same shape as
+// agentops.stateStoreGuard's own unknown-backend refusal.
+func TestCommandBusGuardRefusesAnUnknownBackend(t *testing.T) {
+	msg := helmTemplateErr(t, "--set", "commandBus.backend=nope")
+	for _, w := range []string{`commandBus.backend="nope"`, "not a known command bus backend"} {
+		if !strings.Contains(msg, w) {
+			t.Errorf("failure must contain %q:\n%s", w, msg)
+		}
+	}
+}
+
+// design D-13: nats requires EXACTLY ONE of a rendered bundle or
+// commandBus.nats.url. Left alone, a url opts out of the bundle on its
+// own (no contradiction) — only an EXPLICIT commandBus.nats.enabled that
+// disagrees with the url's presence fails.
+func TestCommandBusGuardRefusesExactlyOneOfBundleOrURL(t *testing.T) {
+	// Both at once: url set AND the bundle hand-enabled.
+	msg := helmTemplateErr(t, "--set", "commandBus.nats.url=nats://external:4222", "--set", "commandBus.nats.enabled=true",
+		"--set", "commandBus.nats.auth.user=u", "--set", "commandBus.nats.auth.password=p")
+	for _, w := range []string{"commandBus.nats.url=\"nats://external:4222\"", "commandBus.nats.enabled=true", "exactly one of a rendered bundle or commandBus.nats.url"} {
+		if !strings.Contains(msg, w) {
+			t.Errorf("both-set failure must contain %q:\n%s", w, msg)
+		}
+	}
+	// Neither: no url AND the bundle hand-disabled.
+	msg = helmTemplateErr(t, "--set", "commandBus.nats.enabled=false")
+	for _, w := range []string{"commandBus.nats.enabled=false", "commandBus.nats.url is empty", "exactly one of a rendered bundle or commandBus.nats.url"} {
+		if !strings.Contains(msg, w) {
+			t.Errorf("neither-set failure must contain %q:\n%s", w, msg)
+		}
+	}
+	// Left alone, a url opts out of the bundle automatically — no
+	// contradiction, as long as it carries its own credential.
+	helmTemplate(t, "--set", "commandBus.nats.url=nats://external:4222",
+		"--set", "commandBus.nats.auth.user=u", "--set", "commandBus.nats.auth.password=p")
+}
+
+// design D-13: "a URL needs its own credential".
+func TestCommandBusGuardRefusesAURLWithNoCredential(t *testing.T) {
+	msg := helmTemplateErr(t, "--set", "commandBus.nats.url=nats://external:4222")
+	for _, w := range []string{"commandBus.nats.url=\"nats://external:4222\"", "needs its own credential"} {
+		if !strings.Contains(msg, w) {
+			t.Errorf("failure must contain %q:\n%s", w, msg)
+		}
+	}
+	// An existingSecret satisfies it with no explicit user/password.
+	helmTemplate(t, "--set", "commandBus.nats.url=nats://external:4222", "--set", "commandBus.nats.auth.existingSecret=my-bus-secret")
+}
+
+// The default install's command bus bundle: a 3-replica StatefulSet, both
+// Services, a PodDisruptionBudget and the generated credential — every
+// object templates/commandbus.yaml's own gate owns, together. Distinct
+// object names from the state-store nats bundle throughout (task 8.1).
+func TestCommandBusBundleRendersByDefault(t *testing.T) {
+	out := helmTemplate(t)
+	sts := findDocByKindAndMetaName(out, "StatefulSet", "agentops-commandbus")
+	if sts == "" {
+		t.Fatal("agentops-commandbus StatefulSet not rendered by default")
+	}
+	if !strings.Contains(sts, "replicas: 3") {
+		t.Fatalf("default install must run 3 replicas:\n%s", sts)
+	}
+	if !strings.Contains(sts, "serviceName: agentops-commandbus-headless") {
+		t.Fatalf("StatefulSet must bind the headless Service:\n%s", sts)
+	}
+	for _, name := range []string{"agentops-commandbus-headless", "agentops-commandbus-client"} {
+		if findDocByKindAndMetaName(out, "Service", name) == "" {
+			t.Fatalf("Service %s not rendered", name)
+		}
+	}
+	if findDocByKindAndMetaName(out, "PodDisruptionBudget", "agentops-commandbus") == "" {
+		t.Fatal("PodDisruptionBudget not rendered")
+	}
+	if secretDoc(out, "agentops-commandbus-credentials") == "" {
+		t.Fatal("agentops-commandbus-credentials Secret not generated on install")
+	}
+	// Both bundles exist side by side, never colliding on a shared object.
+	if findDocByKindAndMetaName(out, "StatefulSet", "agentops-nats") == "" {
+		t.Fatal("the state-store nats bundle must still render alongside the command bus bundle")
+	}
+}
+
+// The manager never reads the command bus credential's Secret itself
+// (invariants.md: "Manager reads NO secrets") — COMMANDBUS_NATS_USER/
+// COMMANDBUS_NATS_PASSWORD reach it only via valueFrom, following
+// commandBus.nats.auth.secretName/existingSecret.
+func TestCommandBusEnvWiresToItsOwnSecret(t *testing.T) {
+	wantRef := func(secret, key string) string {
+		return "name: COMMANDBUS_NATS_" + strings.ToUpper(key) + "\n              valueFrom:\n                secretKeyRef:\n                  name: " + secret + "\n                  key: " + key
+	}
+	deploy := findDocByKindAndMetaName(helmTemplate(t), "Deployment", "agentops-manager")
+	if deploy == "" {
+		t.Fatal("manager Deployment not rendered")
+	}
+	if !strings.Contains(deploy, "name: COMMANDBUS_NATS_URL\n              value: \"nats://agentops-commandbus-client.") {
+		t.Fatalf("COMMANDBUS_NATS_URL must be a plain value naming the bundle's client Service by default:\n%s", deploy)
+	}
+	if !strings.Contains(deploy, wantRef("agentops-commandbus-credentials", "user")) || !strings.Contains(deploy, wantRef("agentops-commandbus-credentials", "password")) {
+		t.Fatalf("COMMANDBUS_NATS_USER/COMMANDBUS_NATS_PASSWORD must wire to the default Secret's keys:\n%s", deploy)
+	}
+
+	// An external URL: the bundle renders nothing, and the manager points
+	// at the URL instead, still only via its own credential's Secret.
+	out := helmTemplate(t, "--set", "commandBus.nats.url=nats://external:4222",
+		"--set", "commandBus.nats.auth.existingSecret=my-bus-secret")
+	for _, kind := range []string{"StatefulSet", "PodDisruptionBudget"} {
+		if findDocByKindAndMetaName(out, kind, "agentops-commandbus") != "" {
+			t.Fatalf("a URL-selected command bus must render no %s named agentops-commandbus", kind)
+		}
+	}
+	extDeploy := findDocByKindAndMetaName(out, "Deployment", "agentops-manager")
+	if !strings.Contains(extDeploy, "name: COMMANDBUS_NATS_URL\n              value: \"nats://external:4222\"") {
+		t.Fatalf("COMMANDBUS_NATS_URL must follow the explicit URL once the bundle is off:\n%s", extDeploy)
+	}
+	if !strings.Contains(extDeploy, wantRef("my-bus-secret", "user")) {
+		t.Fatalf("COMMANDBUS_NATS_USER/COMMANDBUS_NATS_PASSWORD must follow commandBus.nats.auth.existingSecret:\n%s", extDeploy)
+	}
+}
+
+// COMMANDBUS_CONSUMER_CONCURRENCY sizes every consumer.Pool the manager
+// runs (cmd/manager/commandbus.go, commandBusConsumerConcurrencyEnv) —
+// rendered regardless of backend, unlike the COMMANDBUS_NATS_* trio.
+func TestCommandBusConsumerConcurrencyIsRenderedRegardlessOfBackend(t *testing.T) {
+	for _, backend := range []string{"nats", "memory"} {
+		args := []string{"--set", "commandBus.backend=" + backend}
+		if backend == "memory" {
+			args = append(args, "--set", "replicas=1")
+		}
+		deploy := findDocByKindAndMetaName(helmTemplate(t, args...), "Deployment", "agentops-manager")
+		if !strings.Contains(deploy, "name: COMMANDBUS_CONSUMER_CONCURRENCY\n              value: \"4\"") {
+			t.Fatalf("backend=%s must still carry COMMANDBUS_CONSUMER_CONCURRENCY=4:\n%s", backend, deploy)
+		}
+	}
+}
+
+// design D-13: the manager's own startup refusal of memory above one
+// replica reads MANAGER_REPLICAS from the SAME value that already sets
+// this Deployment's own spec.replicas — never a second, independently
+// settable number.
+func TestManagerReplicasEnvMatchesSpecReplicas(t *testing.T) {
+	deploy := findDocByKindAndMetaName(helmTemplate(t, "--set", "replicas=3", "--set", "commandBus.backend=nats"), "Deployment", "agentops-manager")
+	if !strings.Contains(deploy, "replicas: 3") {
+		t.Fatalf("spec.replicas must be 3:\n%s", deploy)
+	}
+	if !strings.Contains(deploy, "name: MANAGER_REPLICAS\n              value: \"3\"") {
+		t.Fatalf("MANAGER_REPLICAS must match spec.replicas:\n%s", deploy)
+	}
+}
