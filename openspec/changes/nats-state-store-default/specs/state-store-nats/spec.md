@@ -197,8 +197,8 @@ render SHALL name the loss of the guarantee in the chart notes.
 ### Requirement: The backend is proven on a real cluster and in a real browser
 The `nats` backend SHALL be covered by the system tier and the console browser
 tier, not only by the in-process conformance suite. What a cluster decides
-(pod loss, quorum, a drain, a volume, the network policy, the import against
-real custom resources) SHALL be a system lane. What a user sees through the
+(pod loss, quorum, a drain, a rolling image upgrade, a volume, the network
+policy, the import against real custom resources) SHALL be a system lane. What a user sees through the
 console across those events SHALL be an `e2e-live` spec.
 
 Both tiers SHALL run against the default install, so the default is the thing
@@ -247,6 +247,8 @@ tested. The `kube` pin SHALL be exercised by a system run of its own.
 #### Scenario: The kube pin passes the smoke
 - **WHEN** the smoke tier runs with `stateStore.backend` set to `kube`
 - **THEN** it passes and the install renders no state server
+
+The state servers' volumes SHALL outlive an uninstall of the chart, so a reinstall finds its data where it was.
 
 #### Scenario: An uninstall keeps the state servers' volumes
 - **WHEN** the chart is uninstalled on the default backend

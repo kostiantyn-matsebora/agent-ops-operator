@@ -175,8 +175,8 @@ kubectl -n agent-ops logs -f agentops-conv-<name>      # live transcript
 
 {: .ao-callout}
 > **Reading the answer back through `kubectl` needs the `kube` backend.**
-> On the default, `nats`, the Conversation is not a Kubernetes object — read
-> the answer in the console instead, or install with
+> On the default, `nats`, the Conversation record lives in the state store,
+> not as an object `kubectl` lists. Read the answer in the console instead, or install with
 > `--set stateStore.backend=kube` and:
 >
 > ```sh
