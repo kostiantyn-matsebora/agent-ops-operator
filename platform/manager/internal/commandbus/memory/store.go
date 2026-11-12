@@ -397,11 +397,23 @@ func (s *store) stats(queue commandbus.Queue, kind commandbus.Kind) (commandbus.
 	s.reapLocked(now)
 
 	out := commandbus.QueueStats{Queue: queue, Kind: kind}
-	var oldestPending time.Time
+	var oldestPending, oldestRunning time.Time
 	markPending := func(t *commandbus.Task) {
 		out.Pending++
 		if oldestPending.IsZero() || t.SubmittedAt.Before(oldestPending) {
 			oldestPending = t.SubmittedAt
+			out.OldestPendingID, out.OldestPendingKey = t.CommandID, t.Key
+		}
+	}
+	// UpdatedAt, not SubmittedAt: a Running task's age is how long it has
+	// been CLAIMED (claimEligibleLocked stamps UpdatedAt at the moment of
+	// claim), the same "claimed and never completed" clock
+	// internal/chat.OpQueue's own old Op.ClaimedAt() kept.
+	markRunning := func(t *commandbus.Task) {
+		out.Running++
+		if oldestRunning.IsZero() || t.UpdatedAt.Before(oldestRunning) {
+			oldestRunning = t.UpdatedAt
+			out.OldestRunningID, out.OldestRunningKey = t.CommandID, t.Key
 		}
 	}
 	for _, t := range s.tasks {
@@ -418,7 +430,7 @@ func (s *store) stats(queue commandbus.Queue, kind commandbus.Kind) (commandbus.
 				markPending(t)
 			}
 		case commandbus.StateRunning:
-			out.Running++
+			markRunning(t)
 		case commandbus.StateDead:
 			out.Dead++
 			if t.Parked(now) {
@@ -428,6 +440,9 @@ func (s *store) stats(queue commandbus.Queue, kind commandbus.Kind) (commandbus.
 	}
 	if !oldestPending.IsZero() {
 		out.OldestPendingAge = now.Sub(oldestPending)
+	}
+	if !oldestRunning.IsZero() {
+		out.OldestRunningAge = now.Sub(oldestRunning)
 	}
 	return out, nil
 }

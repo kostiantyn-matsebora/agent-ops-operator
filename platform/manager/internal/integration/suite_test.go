@@ -130,7 +130,7 @@ func TestMain(m *testing.M) {
 // testOps builds the channel plumbing against the envtest client; the queue's
 // registry is empty, so every channel type behaves as adapter-served.
 func testOps() *chat.OpQueue {
-	return &chat.OpQueue{Conversations: stores.Conversations, Runs: stores.Runs, Registry: chat.NewRegistry()}
+	return &chat.OpQueue{Conversations: stores.Conversations, Runs: stores.Runs, Registry: chat.NewRegistry(), Bus: memory.Open()}
 }
 
 func reconciler() *controller.ConversationReconciler {
@@ -175,7 +175,12 @@ func apiServer() *httpapi.Server {
 func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 	acts := activity.New(512)
 	rt := runtimepod.Config{ContextPVC: "test-context"}
-	ops := &chat.OpQueue{Conversations: stores.Conversations, Runs: stores.Runs, Registry: chat.NewRegistry(), Activity: acts}
+	// async-command-bus task 6: built BEFORE ops (and handed to it below) so
+	// OpQueue shares the exact same Bus the Server's own "conv" queue side
+	// carries — see the Bus field's own comment further down for why a
+	// fresh one per Server is the right model.
+	bus := memory.Open()
+	ops := &chat.OpQueue{Conversations: stores.Conversations, Runs: stores.Runs, Registry: chat.NewRegistry(), Activity: acts, Bus: bus}
 	srv := &httpapi.Server{
 		// routingClient mirrors production's mgr.GetClient(); Reader stays the
 		// raw k8sClient, as production's mgr.GetAPIReader() does.
@@ -211,7 +216,7 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 		// builds a second apiServer() and gets a second, empty bus, which is
 		// the right model for memory's own "tests and local development only"
 		// backend.
-		Bus: memory.Open(),
+		Bus: bus,
 	}
 	lastServer = srv
 	return srv, acts

@@ -26,9 +26,12 @@ func busServer(t *testing.T, objs ...client.Object) (*Server, client.Client, com
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(objs...).Build()
 	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
-	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry()}
-	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
 	bus := memory.Open()
+	// async-command-bus task 6: OpQueue shares the SAME Bus as the Server's
+	// own "conv" queue side, exactly as cmd/manager wires one Bus value
+	// into both.
+	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: bus}
+	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
 	s := &Server{
 		Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs,
 		Namespace: "agent-ops", AdapterToken: "bus-test-master", Ops: q, Router: router, Bus: bus,

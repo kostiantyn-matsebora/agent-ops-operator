@@ -22,6 +22,7 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/signalroute"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
@@ -62,7 +63,7 @@ func newSigEnv(t *testing.T, objs ...client.Object) *sigEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ops := &chat.OpQueue{Conversations: backend.Stores.Conversations, Runs: backend.Stores.Runs, Registry: chat.NewRegistry(), Activity: acts}
+	ops := &chat.OpQueue{Conversations: backend.Stores.Conversations, Runs: backend.Stores.Runs, Registry: chat.NewRegistry(), Activity: acts, Bus: memory.Open()}
 	e := &sigEnv{t: t, c: c, acts: acts, ops: ops, now: time.Now()}
 	e.r = &SignalReconciler{
 		Client: c, Reader: c, Namespace: sigNS, Activity: acts, Ops: ops, Cooldowns: ingest.NewCooldownBook(),

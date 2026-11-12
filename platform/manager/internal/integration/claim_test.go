@@ -21,6 +21,7 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	commandbusmemory "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
@@ -252,7 +253,12 @@ func TestRunReplyFailureSurfacesUndeliveredReplyAndSuccessClearsIt(t *testing.T)
 		t.Fatal(err)
 	}
 
-	ops := testOps()
+	// A Backing, not plain testOps()/memory.Open(): a failed run reply is
+	// now RETRIED by the bus with backoff (design D-5, out.stable) rather
+	// than released for an immediate re-derive, so advancing the clock past
+	// that backoff is what stands in for "later" below.
+	backing := commandbusmemory.New()
+	ops := &chat.OpQueue{Conversations: stores.Conversations, Runs: stores.Runs, Registry: chat.NewRegistry(), Bus: backing.Bus()}
 	var ch agentopsv1alpha1.Channel
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "chan-undelivered"}, &ch); err != nil {
 		t.Fatal(err)
@@ -272,7 +278,8 @@ func TestRunReplyFailureSurfacesUndeliveredReplyAndSuccessClearsIt(t *testing.T)
 		t.Fatalf("expected undeliveredReply=run-1: %+v", binding)
 	}
 
-	// re-derive and succeed this time
+	// re-derive and succeed this time, once the bus's own backoff elapses
+	backing.Advance(6 * time.Minute)
 	ops.EnqueueRunReply(ctx, &ch, recOf(t, conv.Name), "run-1", &tid, chat.AnswerMessage("the answer", ""))
 	op = ops.Claim("tg-undelivered")
 	if op == nil {

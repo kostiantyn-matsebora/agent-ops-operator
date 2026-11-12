@@ -17,6 +17,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
@@ -235,7 +236,7 @@ func TestEnsureTopicsSurfacesAClaimError(t *testing.T) {
 			return apierrors.NewConflict(schema.GroupResource{Resource: "conversations"}, "conv-1", errors.New("stale"))
 		},
 	}).Build()
-	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me", Ops: &chat.OpQueue{Registry: chat.NewRegistry()}}
+	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me", Ops: &chat.OpQueue{Registry: chat.NewRegistry(), Bus: memory.Open()}}
 
 	if _, err := r.ensureTopics(context.Background(), claimRec(t, r.Conversations, "conv-1")); err == nil {
 		t.Fatal("want the claim error surfaced")
@@ -255,7 +256,7 @@ func TestEnsureTopicsCarriesThePreviousThreadIDOnReopen(t *testing.T) {
 	ch := &agentopsv1alpha1.Channel{ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: claimTestNS}}
 	ch.Spec.Adapter = "slack"
 	c := fakeClaimClient(t, conv, ch).Build()
-	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me", Ops: &chat.OpQueue{Registry: chat.NewRegistry()}}
+	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me", Ops: &chat.OpQueue{Registry: chat.NewRegistry(), Bus: memory.Open()}}
 
 	pending, err := r.ensureTopics(context.Background(), claimRec(t, r.Conversations, "conv-1"))
 	if err != nil || !pending {
@@ -287,7 +288,7 @@ func TestDeliverRunRepliesSkipsAClaimOnlyPlaceholder(t *testing.T) {
 	ch := &agentopsv1alpha1.Channel{ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: claimTestNS}}
 	ch.Spec.Adapter = "slack"
 	c := fakeClaimClient(t, conv, ch).Build()
-	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, Ops: &chat.OpQueue{Registry: chat.NewRegistry()}}
+	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, Ops: &chat.OpQueue{Registry: chat.NewRegistry(), Bus: memory.Open()}}
 
 	rec := claimRec(t, r.Conversations, "conv-1")
 	if err := r.deliverRunReplies(context.Background(), rec, claimRuns(t, r.Runs, "conv-1")); err != nil {
@@ -314,7 +315,7 @@ func TestDeliverRunRepliesDeliversOnceTheThreadIsReal(t *testing.T) {
 	ch := &agentopsv1alpha1.Channel{ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: claimTestNS}}
 	ch.Spec.Adapter = "slack"
 	c := fakeClaimClient(t, conv, ch).Build()
-	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, Ops: &chat.OpQueue{Registry: chat.NewRegistry()}}
+	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, Ops: &chat.OpQueue{Registry: chat.NewRegistry(), Bus: memory.Open()}}
 
 	rec := claimRec(t, r.Conversations, "conv-1")
 	if err := r.deliverRunReplies(context.Background(), rec, claimRuns(t, r.Runs, "conv-1")); err != nil {
@@ -349,7 +350,7 @@ func TestDeliverRunRepliesSettlesANoteLeftByACrashAfterTheRunMarker(t *testing.T
 			ch := &agentopsv1alpha1.Channel{ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: claimTestNS}}
 			ch.Spec.Adapter = "slack"
 			c := fakeClaimClient(t, conv, ch).Build()
-			r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, Ops: &chat.OpQueue{Registry: chat.NewRegistry()}}
+			r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, Ops: &chat.OpQueue{Registry: chat.NewRegistry(), Bus: memory.Open()}}
 
 			rec := claimRec(t, r.Conversations, "conv-1")
 			if err := r.deliverRunReplies(context.Background(), rec, claimRuns(t, r.Runs, "conv-1")); err != nil {

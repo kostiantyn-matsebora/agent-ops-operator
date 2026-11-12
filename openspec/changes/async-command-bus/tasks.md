@@ -99,12 +99,81 @@ suite now passes (`go test ./internal/integration/...`).
 
 ## 6. `OpQueue` migration — backend-developer
 
-- [ ] 6.1 Re-implement `OpQueue` over the bus as `out.<channelType>`, keyed by conversation and channel, keeping `Enqueue*`, `Claim`, `Complete`, `Settled`, `Pending` and `Stats`.
-- [ ] 6.2 Keep the dedup rule: a stable id is suppressed while pending, retrying, parked or settled. A failure never suppresses its own recovery.
-- [ ] 6.3 Keep `Complete`'s handlers synchronous before the `200`. A failing handler releases the id.
-- [ ] 6.4 Give ephemeral sends their short TTL and `delete-conversation` a TTL of the finalizer's grace, never parked.
-- [ ] 6.5 Run in-process providers as a consumer over `out.<type>`.
-- [ ] 6.6 Keep `/api/queues` working from the per-queue statistics.
+- [x] 6.1 Re-implement `OpQueue` over the bus as `out.<channelType>`, keyed by conversation and channel, keeping `Enqueue*`, `Claim`, `Complete`, `Settled`, `Pending` and `Stats`.
+- [x] 6.2 Keep the dedup rule: a stable id is suppressed while pending, retrying, parked or settled. A failure never suppresses its own recovery.
+- [x] 6.3 Keep `Complete`'s handlers synchronous before the `200`. A failing handler releases the id.
+- [x] 6.4 Give ephemeral sends their short TTL and `delete-conversation` a TTL of the finalizer's grace, never parked.
+- [x] 6.5 Run in-process providers as a consumer over `out.<type>`.
+- [x] 6.6 Keep `/api/queues` working from the per-queue statistics.
+
+**Claim stays non-blocking over a blocking `Bus.Claim`.**
+`handleChannelOps` already owns the long poll. `OpQueue.Claim` gives
+`Bus.Claim` a short, non-zero deadline and reads `context.DeadlineExceeded`
+as "nothing claimable".
+
+Not literally zero: the nats backend's own mirror-readiness wait ties a
+zero deadline against an already-ready channel. Go's `select` breaks that
+tie at random. Proven against both backends
+(`TestClaimOnAnEmptyQueueReturnsPromptly`/
+`TestClaimWithAShortDeadlineStillFindsAnEligibleTask` in
+`internal/commandbus/memory` and `internal/commandbus/nats`).
+
+**`commandbus.QueueStats` gained five fields**: `OldestPendingID`,
+`OldestPendingKey`, `OldestRunningAge`, `OldestRunningID`,
+`OldestRunningKey`. `Stats()`'s own identity fields need an op's identity,
+not only a count, and the bus carried none. Both backends and the
+conformance suite extended together (`testPerQueueStatistics`).
+
+**The claimed-op to bus-task bridge is a small local index**:
+`OpQueue.claimed`, keyed by the PUBLISHED op id, holding the lease token
+and the attempt/maxAttempts pair `resultingStateAfterFail` needs. Claim
+populates it. Complete consumes it.
+
+**Complete's old release-on-failure hack is retired.** The bus's own
+attempts and backoff (design D-5) give a failed stable op its next chance
+now. Complete calls `Fail`.
+
+`CodeUnavailable` is for an adapter's own reported error.
+`CodeInternal` is for the manager's own write failing despite the
+adapter's success. Either way the bus decides retry vs dead.
+
+One narrow exception, found and fixed along the way.
+`out.deleteConversation`'s own `DedupWindow` is declared `0`
+(deliberately, conformance-tested). That offers the bus no suppression at
+all the instant after a success.
+
+`finalizeClose` (`internal/controller`) re-enqueues every pass regardless.
+`OpQueue.enqueue` now checks its own local "settled" mirror (success only,
+never Dead) before ever asking the bus.
+
+This restores the old queue's "stays completed" behaviour for this one
+op, without touching the already-examined inventory value.
+
+**In-process providers run via a real `consumer.Pool`**, one per
+`Registry`-registered channel type, started from `OpQueue.Run`.
+
+This is a new `manager.RunnableFunc`, registered unconditionally from
+`cmd/manager` — it also carries the watch-fed Pending/Settled/Stats
+mirror, needed regardless of whether any type is registered.
+
+`Registry` gained `Types()` to list what to start pools for.
+
+No channel type is registered in production today (`platform/console` is
+an external adapter). This path is exercised by tests only, and the
+mechanism is real and unchanged by that.
+
+**A real, now-twice-found commandbus gap, left open.** `Bus` has no "list
+every queue in use" call.
+
+`OpQueue.Stats()` works around it with its own `channelTypes` set,
+populated from this process's own enqueues and claims, and from
+`watchMirror`'s Feed consumption of every `out.*` queue it observes.
+
+That is sufficient for every test and for `/api/queues`. A fresh replica
+with no local history will not list a channel type until its own Feed
+watch, or a local enqueue or claim, has seen one.
+
+Left to a future change if the gap matters beyond this.
 
 ## 7. Leader proxy and claim placeholder — backend-developer
 

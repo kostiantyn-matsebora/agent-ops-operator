@@ -35,7 +35,7 @@ func memberWorkReportServer(t *testing.T, parent *agentopsv1alpha1.Conversation,
 		WithObjects(member, parent).
 		WithStatusSubresource(member, parent).Build()
 	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
-	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry()}
+	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: memory.Open()}
 	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
 	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Activity: activity.New(64), Router: router}, member
 }
@@ -148,7 +148,7 @@ func rootWorkReportServer(t *testing.T, root *agentopsv1alpha1.Conversation) *Se
 		WithObjects(root, co).
 		WithStatusSubresource(root).Build()
 	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
-	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry()}
+	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: memory.Open()}
 	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
 	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Activity: activity.New(64), Router: router}
 }

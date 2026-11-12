@@ -26,7 +26,7 @@ import (
 // AutoCloseConversation's own farewell+patch, the inline fallback path
 // these tests confirm is unchanged when Bus is nil.
 func routerOver(c client.Client, store state.Collection[state.ConversationRecord]) *chat.Router {
-	q := &chat.OpQueue{Conversations: store, Registry: chat.NewRegistry()}
+	q := &chat.OpQueue{Conversations: store, Registry: chat.NewRegistry(), Bus: memory.Open()}
 	return &chat.Router{Client: c, Reader: c, Conversations: store, Namespace: claimTestNS, Ops: q}
 }
 

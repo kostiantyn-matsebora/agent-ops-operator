@@ -28,7 +28,7 @@ func coordFixtureIntercepting(t *testing.T, funcs interceptor.Funcs, objs ...cli
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(objs...).
 		WithInterceptorFuncs(funcs).Build()
-	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 	return &Router{Client: c, Reader: c, Conversations: newTestStore(c), Runs: newTestRuns(c), Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}, c
 }
 

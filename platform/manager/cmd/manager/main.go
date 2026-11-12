@@ -237,9 +237,26 @@ func main() {
 	acts := activity.New(envInt("ACTIVITY_BUFFER", activity.DefaultSize))
 
 	registry := chat.NewRegistry()
-	ops := &chat.OpQueue{Conversations: stores.Conversations, Runs: stores.Runs, Registry: registry, Activity: acts}
+	// async-command-bus task 6: OpQueue's own Enqueue*/Claim/Complete are now
+	// thin wrappers over the SAME Bus the "conv" consumer.Pool below claims
+	// from — Concurrency sizes OpQueue.Run's own in-process consumer.Pool(s)
+	// (registered below), reusing the one knob every pool in this process
+	// already shares.
+	ops := &chat.OpQueue{
+		Conversations: stores.Conversations, Runs: stores.Runs, Registry: registry, Activity: acts,
+		Bus: bus, Concurrency: commandBusConsumerConcurrency(),
+	}
 	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: namespace, Ops: ops, Activity: acts}
 	controlURL := env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080")
+
+	// OpQueue.Run (task 6): the watch-fed Pending/Settled/Stats mirror, plus
+	// one consumer.Pool per Registry-registered in-process channel type —
+	// on EVERY replica, never gated on leader election, the same posture
+	// the "conv" pool below already has.
+	if err := mgr.Add(manager.RunnableFunc(ops.Run)); err != nil {
+		setupLog.Error(err, "channel op queue")
+		os.Exit(1)
+	}
 
 	// ChannelAdapter lifecycle: adapters are plugged in as CRs; the reconciler
 	// owns their Deployments (zero-RBAC SA, derived contract token, projected

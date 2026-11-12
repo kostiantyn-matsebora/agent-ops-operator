@@ -39,11 +39,13 @@ func coordServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(objs...).Build()
 	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
-	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry()}
+	bus := memory.Open()
+	// async-command-bus task 6: shares the SAME Bus as the Server below.
+	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: bus}
 	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
 	return &Server{
 		Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops",
-		AdapterToken: coordTestMasterKey, Router: router, Bus: memory.Open(),
+		AdapterToken: coordTestMasterKey, Router: router, Bus: bus,
 	}, c
 }
 

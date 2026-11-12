@@ -43,11 +43,13 @@ func TestDeliverInputsNeverFencesOnEscalatedAt(t *testing.T) {
 
 	ch := nsChannel("esc-desk", "esc-ta")
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch).Build()
-	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 
 	DeliverInputs(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv))
 
-	ops := drain(q, "esc-ta")
+	// Both inputs share one Key (conversation × channel, design D-2) — the
+	// second is not claimable until the first settles.
+	ops := drainCompleting(q, "esc-ta")
 	if len(ops) != 2 {
 		t.Fatalf("want BOTH inputs delivered, got %d ops: %+v", len(ops), ops)
 	}
@@ -79,7 +81,7 @@ func TestDeliverInputsNeverFencesAChannelThatIsNotAnEscalationChannel(t *testing
 
 	ch := nsChannel("ordinary", "some-ta")
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch).Build()
-	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 
 	DeliverInputs(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv))
 
@@ -113,7 +115,7 @@ func TestDeliverInputsCarriesOriginKindOnTheComposedSignal(t *testing.T) {
 
 	ch := nsChannel("console", "console-ta")
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch).Build()
-	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 
 	DeliverInputs(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv))
 
@@ -154,7 +156,7 @@ func TestDeliverInputsCarriesSeverityFromTheConversationInput(t *testing.T) {
 
 	ch := nsChannel("console", "console-ta")
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch, ci).Build()
-	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 
 	DeliverInputs(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv))
 
@@ -202,7 +204,7 @@ func TestDeliverInputsOmitsSeverityWhenTheInputCarriesNone(t *testing.T) {
 
 	ch := nsChannel("console", "console-ta")
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch, ci).Build()
-	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 
 	DeliverInputs(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv))
 

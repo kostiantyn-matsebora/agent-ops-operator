@@ -584,6 +584,20 @@ func testPerQueueStatistics(t *testing.T, open func() Backing, d commandbus.Decl
 	if stats.OldestPendingAge <= 0 {
 		t.Fatalf("OldestPendingAge = %v, want > 0", stats.OldestPendingAge)
 	}
+	// async-command-bus task 6: the identities OpQueue.Stats() needs beside
+	// the counts — an op id (CommandID) and an ordering key alone cannot be
+	// recovered from a count.
+	if stats.OldestPendingID != pending.CommandID || stats.OldestPendingKey != pending.Key {
+		t.Fatalf("OldestPendingID/Key = %q/%q, want %q/%q",
+			stats.OldestPendingID, stats.OldestPendingKey, pending.CommandID, pending.Key)
+	}
+	if stats.OldestRunningAge <= 0 {
+		t.Fatalf("OldestRunningAge = %v, want > 0", stats.OldestRunningAge)
+	}
+	if stats.OldestRunningID != running.CommandID || stats.OldestRunningKey != running.Key {
+		t.Fatalf("OldestRunningID/Key = %q/%q, want %q/%q",
+			stats.OldestRunningID, stats.OldestRunningKey, running.CommandID, running.Key)
+	}
 }
 
 // testPerInvocationInFlightCap is not one of design D-14/2.6's named

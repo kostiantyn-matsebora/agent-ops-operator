@@ -65,3 +65,20 @@ func (r *Registry) Resolve(channelType string) ProviderFactory {
 	defer r.mu.RUnlock()
 	return r.factories[channelType]
 }
+
+// Types lists every channel type with a registered in-process factory, a
+// snapshot at call time. OpQueue.Run (async-command-bus design D-10: "in-
+// process providers become a consumer consuming out.<type>") calls this
+// once at startup to build one consumer.Pool per type — a type registered
+// afterwards is not picked up, which is not a real limitation today: every
+// registration site registers before any op can flow (cmd/manager wires
+// the registry before the manager starts serving).
+func (r *Registry) Types() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.factories))
+	for t := range r.factories {
+		out = append(out, t)
+	}
+	return out
+}
