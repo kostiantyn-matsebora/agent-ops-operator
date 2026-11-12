@@ -1316,7 +1316,7 @@
     {
       "id": "reconciler-op-claim",
       "pattern": "\\bOpClaim\\b",
-      "says": "the command bus's own CommandID dedup replaces it (async-command-bus design D-11) — no reconciler-level claim is written any more, and a value found on status.threads[].claim is never read for a decision, only displayed",
+      "says": "the command bus's lease (a claim token and a lease-until, async-command-bus design D-11) replaces it — no reconciler-level claim is written any more, and a value found on status.threads[].claim is never read for a decision, only displayed",
       "allow": [
         "removed",
         "retired",

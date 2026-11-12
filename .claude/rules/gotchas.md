@@ -31,7 +31,7 @@
 | A candidate transport library's `Publish(topic, ...)` silently ignored `topic` and used its own internally configured stream name instead | spiked before building on it (design D-3) — found only by testing against a real in-process server, not by reading the library's docs |
 | A JetStream stream name forbids dots, and a declared queue name (`in.signal`, `out.<type>`) has one | relevant only if a transport maps a queue name directly onto a stream name — the chosen ledger-over-KV design (D-2) uses the queue as a KV key segment instead, which has no such restriction |
 | A test harness built with no `commandbus.Bus` field panicked the instant a converted endpoint ran, aborting the WHOLE envtest binary instead of failing one test | wire a `commandbus/memory` bus into every shared test-server constructor the moment a handler can reach `s.Bus`, before any converted endpoint lands — a nil dependency should fail the ONE test that needs it, never the suite |
-| A coordinator verb's cascade can be built at ACCEPT time while its own authorization check is deferred into the task it also builds | an unauthorized `/coordinate/close` could close live descendants before its own task ever ran and refused them — a scope check gating a cascade must run before ANY of that cascade is enqueued, never after |
+| A coordinator verb's cascade can be built at ACCEPT time while its own authorization check is deferred into the task it also builds | an unauthorized Coordinator `close` verb could close live descendants before its own task ever ran and refused them — a scope check gating a cascade must run before ANY of that cascade is enqueued, never after |
 
 ### Wiring, review and CI mechanics
 
