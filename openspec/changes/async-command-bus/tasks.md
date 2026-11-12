@@ -48,12 +48,12 @@ shape. The spike (a throwaway module outside the repo) is deleted.
 
 ## 3. `nats` backend — backend-developer
 
-- [ ] 3.1 Implement the ledger over JetStream KV buckets (`tasks`, `ids`, `dead`), each created with the configured replica count and a prefix of its own.
-- [ ] 3.2 Claim by compare-and-swap on the task revision, with the claim-time ordering rule over the ordered feed (design D-2).
-- [ ] 3.3 A watch-fed local mirror for pending and settled ids, so reconcile never reads the server.
-- [ ] 3.4 Sweeps: parked-id release, TTL expiry, ledger and dead-letter retention caps.
-- [ ] 3.5 Pass the conformance suite and bench against the in-process server.
-- [ ] 3.6 Extend the static import test to name `internal/state/nats` and `commandbus/nats` as the only importers of `nats.go`.
+- [x] 3.1 Implement the ledger over JetStream KV buckets (`tasks`, `ids`, `dead`), each created with the configured replica count and a prefix of its own.
+- [x] 3.2 Claim by compare-and-swap on the task revision, with the claim-time ordering rule over the ordered feed (design D-2).
+- [x] 3.3 A watch-fed local mirror for pending and settled ids, so reconcile never reads the server.
+- [x] 3.4 Sweeps: parked-id release, TTL expiry, ledger and dead-letter retention caps.
+- [x] 3.5 Pass the conformance suite and bench against the in-process server.
+- [x] 3.6 Extend the static import test to name `internal/state/nats` and `commandbus/nats` as the only importers of `nats.go`.
 
 ## 4. Manager wiring — backend-developer
 
