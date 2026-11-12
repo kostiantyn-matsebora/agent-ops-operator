@@ -50,37 +50,45 @@ NetworkPolicy rule. It never reads `NATS_*`.
 An adopter may still point both at one server. That is a deployment choice. The
 bus prefixes its buckets so nothing collides.
 
-### D-2: The ledger drives everything, the transport only stores and wakes
+### D-2: A queue is an append-only log, and delivery state is derived from it
 
-Order, lease and backoff all live in the ledger, never in the transport.
+**No entry is ever modified.** A message is appended once, when it is
+submitted. Everything that later happens to it is a further append, never a
+rewrite.
 
 | Concern | Where it lives |
 |---|---|
-| Lease (claim token, lease-until) | the task record, written by compare-and-swap on its revision |
-| Next eligible time after a failure | `notBefore` on the task record |
-| Per-key order | claim-time rule over the ledger's ordered feed |
-| Wake-up of an idle consumer | the ledger's change feed |
+| The message | one immutable entry, appended once. Its identity is the producer's command id, made before the append. It says nothing about order |
+| Order | the position the log gives the entry on append. FIFO is the log's own |
+| Claim, lease, failure, retry, acknowledgement | further entries appended to the same log, never changes to the message |
+| Current state of a message | derived by folding its own entries: the last one decides |
+| Consumer position | the command id of the last entry the consumer acknowledged. A cursor, nothing more |
 
-This is what lets a claim on one replica be completed on another. A message
-object's acknowledgement cannot do that.
+The `nats` backend is one JetStream stream per queue family, with subjects
+`<queue>.<key>.msg` and `<queue>.<key>.ev`. Nothing in it is updated or purged
+by the bus. Retention is the stream's own limit (age, and count where declared).
 
-The `nats` backend therefore needs only JetStream KV buckets and their watches:
-`tasks`, `ids` (command id to current task) and `dead`. It needs no delivery
-stream.
+- **Exclusive claim without a rewrite.** A claim is an append of a `claimed`
+  entry to the key's `ev` subject, conditional on that subject's last sequence
+  (JetStream's expected-last-subject-sequence). Two consumers racing for one
+  key cannot both append, so a lost race is a rejected append, never a lost
+  update.
+- **Per-key order.** A consumer may claim an entry only when every earlier
+  entry of its key is settled. Settled is terminal, so a stale view can only
+  delay a claim.
+- **A lapsed lease needs no write.** A running entry whose lease has passed
+  reads as retryable when folded. The next claim appends with the next attempt.
+- **Wake-up** is the stream's own change feed.
+- **A dead entry** is appended to a separate `dead` log with its own limits, the
+  bound on dead-letter retention.
 
-**Why the ordering rule is safe under a stale view.** A consumer claims a task
-only when no earlier task of its key is unsettled. Three facts make that sound:
-
-1. The change feed is ordered. Seeing task 2 means task 1 was already seen.
-2. Settled is terminal. A stale view can only call a task unsettled, never
-   settled by mistake.
-3. The claim itself is a compare-and-swap on the task's own revision.
-
-So the worst a stale view does is delay a claim.
+Every consumer folds the log into a local mirror, as the previous design did
+with its ledger, so a claim on one replica completes on another.
 
 | Alternative | Rejected because |
 |---|---|
-| Partitioned subjects, one consumer each | A slow task stalls unrelated keys that share a partition. Partition count would leak into the contract |
+| One mutable record per message, rewritten on claim and settle | Two writers contend on one record. Measured: a claim landing between a submit's two writes failed the submit with NATS 10071 |
+| Partitioned subjects, one consumer each | A slow task stalls unrelated keys that share a partition |
 | Message acks as the lease | Cannot complete on another replica |
 
 ### D-3: A library is allowed under the transport only if a spike passes
@@ -102,10 +110,10 @@ If any check fails, or the library adds more than it saves once D-2 owns the
 lease, the `nats` backend uses `nats.go` KV directly, as the state backend does.
 That fallback needs no spec change and no task change beyond the transport file.
 
-### D-4: Command id, task uid, and the dedup states
+### D-4: Command id, and the dedup states
 
-The **command id** is the dedup key and is derived by the producer. The **task
-uid** is unique per attempt record.
+The **command id** is the dedup key and is derived by the producer before the
+append. The state below is derived by folding the entry's own appended entries.
 
 ```
 queued ─claim─▶ running ─ok──────────────▶ succeeded   (id suppressed for the settled window)
@@ -117,12 +125,12 @@ queued ─claim─▶ running ─ok──────────────▶
 queued past its TTL ─▶ expired   (settled for ordering, never runs)
 ```
 
-- A submit finds the id in `ids` and is suppressed while the latest task is
+- A submit finds the id's latest entry and is suppressed while the latest task is
   queued, running, retrying, parked, or succeeded within the dedup window.
 - It is not suppressed once the task succeeded past the window, is dead past its
   cool-off, or expired.
-- A sweep releases a parked id after its cool-off. The dead task's record stays
-  in history.
+- A parked id is released by the passage of its cool-off, with no write. The dead
+  entry stays in the `dead` log until its limits remove it.
 - `expired` counts as settled for ordering, so a task that never ran cannot
   block its key.
 
@@ -168,7 +176,7 @@ on `not_found`. Deleting something absent is the outcome the caller wanted.
 The accept step reads the `causedBy` tree and enqueues one task per member.
 
 - Members go before the parent, all on the root's key.
-- The order is visible at once in the ledger.
+- The order is visible at once in the log.
 - It is simpler to reason about than a parent that enqueues its own members at
   run time.
 
@@ -276,15 +284,17 @@ The manager pushes the console channel's queue entries over the console's single
 SSE stream, in queue order. Telegram keeps its `/channel/ops` long-poll over the
 same per-channel queue.
 
-- Each entry carries a sequence within its channel's queue.
-- The consumer acknowledges an entry by sequence, through the existing
+- Each entry is sent with its command id as the SSE `id`.
+- The consumer acknowledges an entry through the existing
   `/channel/ops/{id}/done`.
-- A reconnect names the last acknowledged sequence and the manager replays every
-  later entry. An unacknowledged entry stays queued, so a dropped connection
-  loses nothing and duplicates only what the consumer had not acknowledged.
+- A reconnect names the id of the last entry the consumer acknowledged
+  (`Last-Event-ID`). The manager finds that entry's place in the channel's queue
+  and replays every entry after it that is not acknowledged. An unknown id
+  starts from the oldest unacknowledged entry.
 - A consumer that was away needs no refresh to catch up.
 
-The same shape serves any later consumer, such as a mobile app.
+The id is a cursor and never an order. Order is the queue's own. The same shape
+serves any later consumer, such as a mobile app.
 
 ### D-12: What stays synchronous, and why
 
@@ -343,8 +353,8 @@ section sits just before unit.
 - **A new `nats.go` version for the state backend** → the state suite re-runs
   against it in the spike, before anything else is built.
 - **Reconcile hot-path cost** → the local mirror of pending and settled ids.
-- **The ledger is a second state home** → declared bounded and lossy. A lost
-  ledger record never loses a conversation, and the reconciler re-derives owed
+- **The log is a second state home** → declared bounded and lossy. A lost
+  log entry never loses a conversation, and the reconciler re-derives owed
   ops.
 - **A rate-limited surface still sees waves of retries** → jitter spreads them.
   A per-queue pause is deferred and noted in the open questions.
@@ -356,7 +366,7 @@ section sits just before unit.
 
 1. Upgrade the chart. A default install renders the bus bundle. The manager
    starts when the bus is reachable.
-2. The ledger starts empty. Ops owed at the moment of upgrade are re-derived by
+2. The log starts empty. Ops owed at the moment of upgrade are re-derived by
    the reconciler, as they are after any restart today.
 3. Requests in flight at the upgrade finish under the old manager. New ones
    are accepted by the new one.

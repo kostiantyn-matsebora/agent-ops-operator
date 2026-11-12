@@ -38,12 +38,12 @@ no partial task.
 
 #### Scenario: A failed submit leaves nothing behind
 - **WHEN** the bus cannot record a task
-- **THEN** the submit fails as `unavailable` and no task of that submit appears in the ledger
+- **THEN** the submit fails as `unavailable` and no task of that submit appears in the log
 
 ### Requirement: A submit is idempotent by command id
 Every submit SHALL carry a command id. The command id is the deduplication
 key. Every attempt of a task SHALL carry its own task uid, minted by the bus,
-unique for the life of the ledger and never reused.
+unique for the life of the log and never reused.
 
 A submit whose command id the dedup rule suppresses SHALL succeed and SHALL
 return the existing task. It SHALL create no second task.
@@ -76,7 +76,7 @@ A command id SHALL be suppressed while its task is in any of these states:
 
 A failure SHALL NOT be recorded as a success. A dead task SHALL NOT suppress
 its own recovery forever. After the park cool-off the id is released and the
-same command id SHALL be resubmittable. The failed attempt's ledger record
+same command id SHALL be resubmittable. The failed attempt's log entries
 stays as history.
 
 #### Scenario: A succeeded id is suppressed inside the window
@@ -94,6 +94,34 @@ stays as history.
 #### Scenario: A failure is not remembered as success
 - **WHEN** every attempt of a task fails
 - **THEN** no point in its life makes a resubmit return it as succeeded
+
+### Requirement: Every queue is append-only
+A queue SHALL be an append-only log. A message SHALL be appended once, when it
+is submitted, and no entry SHALL ever be modified or removed by the bus.
+
+Everything that later happens to a message, whether claimed, failed, retried,
+completed or dead, SHALL be a further entry appended to the log. The state of
+a message SHALL be derived from its own entries, the last one deciding.
+
+The position of an entry SHALL be assigned by the log on append. A message's
+identity, its command id, SHALL be derived before the append and SHALL carry no
+order. A consumer's position SHALL be the command id of the last entry it
+acknowledged.
+
+Retention SHALL remove entries only by the log's own declared limits, never by
+an operation of the bus on one entry.
+
+#### Scenario: Nothing is rewritten
+- **WHEN** a task is submitted, claimed, fails retryably, is claimed again and completes
+- **THEN** the log holds the original message entry unchanged plus appended entries for each step, and no entry was written twice
+
+#### Scenario: A submit is one write
+- **WHEN** a consumer claims a task the instant it becomes visible
+- **THEN** the submit still succeeds, since it made no write after the append
+
+#### Scenario: A consumer resumes from its last acknowledged id
+- **WHEN** a consumer reconnects naming the command id of the last entry it acknowledged
+- **THEN** it receives every later entry that is not acknowledged, in log order
 
 ### Requirement: Every queue is FIFO and a retry keeps its place
 A consumer SHALL claim the oldest eligible task of a queue first. A task is
@@ -121,7 +149,7 @@ has none.
 
 A task has settled when it is succeeded, dead or expired.
 
-The rule SHALL be enforced at claim time from the ledger. Partitioning is not
+The rule SHALL be enforced at claim time from the log. Partitioning is not
 part of the contract and no behaviour SHALL depend on it.
 
 #### Scenario: One key runs one task at a time
@@ -140,16 +168,17 @@ part of the contract and no behaviour SHALL depend on it.
 - **WHEN** a queued task of a key expires unclaimed
 - **THEN** the next task of that key is not held back by it
 
-### Requirement: A claim is a lease held in the ledger
-A claim SHALL record a claim token and a lease-until instant on the task's
-ledger record, written conditionally on the record's revision. A claim made by
+### Requirement: A claim is a lease held in the log
+A claim SHALL be an entry appended to the task's log carrying a claim token and
+a lease-until instant, appended conditionally on the last entry the claimant
+saw, so that of two simultaneous claims only one is appended. A claim made by
 one replica SHALL be completable by another replica that presents the claim
 token.
 
-A completion carrying a token that is not the record's current token SHALL be
-refused and SHALL change nothing.
+A completion carrying a token that is not the latest claim's token SHALL be
+refused and SHALL append nothing.
 
-A lease that lapses SHALL return the task to the queue for redelivery. The
+A lease that lapses SHALL return the task to the queue for redelivery without any write: the task reads as retryable once its lease has passed. The
 lapsed lease SHALL count as one attempt that failed with the code
 `unavailable`, since no consumer reported one.
 
@@ -215,7 +244,7 @@ A code outside the vocabulary SHALL be refused by the bus and recorded as
 
 #### Scenario: An unknown code is not trusted
 - **WHEN** a consumer reports a code the vocabulary does not name
-- **THEN** the ledger records `internal` and the task follows the `internal` rule
+- **THEN** the log records `internal` and the task follows the `internal` rule
 
 ### Requirement: A task is in one of six states
 A task SHALL be in exactly one state. The states are:
@@ -233,7 +262,7 @@ A task SHALL be in exactly one state. The states are:
 
 #### Scenario: A task walks the states
 - **WHEN** a task is submitted, claimed, fails retryably once, is claimed again and completes
-- **THEN** the ledger shows queued, running, retrying, running and succeeded in that order
+- **THEN** the log shows queued, running, retrying, running and succeeded in that order
 
 ### Requirement: A kind may declare a time to live
 A queue or a kind MAY declare a time to live for a task. A task still `queued`
@@ -250,8 +279,8 @@ A task already `running` SHALL NOT expire.
 - **WHEN** a claimed task passes its time to live while running
 - **THEN** it keeps running and settles by its own outcome
 
-### Requirement: The ledger records every task and is bounded lossy telemetry
-The bus SHALL keep a ledger record per task attempt chain. A record SHALL carry:
+### Requirement: The log records every task and is bounded lossy telemetry
+The bus SHALL keep, per task, the entries of its attempt chain. Together they SHALL carry:
 
 - the command id and the task uid
 - the invocation id
@@ -264,31 +293,31 @@ The bus SHALL keep a ledger record per task attempt chain. A record SHALL carry:
 - the last error code and its message
 - the lease, as claim token and lease-until
 
-The ledger SHALL be bounded by a retention cap declared per queue, in age and
+The log SHALL be bounded by a retention cap declared per queue, in age and
 in size. Past either cap
-the oldest settled records SHALL be removed. The ledger SHALL be declared
+the oldest settled entries SHALL be removed by the log's own limits. The log SHALL be declared
 lossy telemetry. Its loss SHALL cost history and unfinished work, never
 conversation correctness.
 
-Records that are not settled SHALL NOT be removed by the retention cap.
+Entries of a task that is not settled SHALL NOT be removed by the retention cap.
 
 #### Scenario: Old settled records are trimmed
 - **WHEN** a queue's settled records exceed its retention cap
 - **THEN** the oldest settled records are removed and no unsettled record is
 
 #### Scenario: A record carries its whole identity
-- **WHEN** a task is read from the ledger
+- **WHEN** a task is read from the log
 - **THEN** it names its command id, task uid, invocation id, verb, queue, key, actor, state and attempt
 
-### Requirement: The ledger feed is gap-free and resumable
-The bus SHALL offer a change feed over ledger records. A consumer SHALL be able
+### Requirement: The log feed is gap-free and resumable
+The bus SHALL offer a change feed over the log's entries. A consumer SHALL be able
 to resume from a point it kept.
 
 After resuming it SHALL observe every change made after that point, including
 changes made while it was not consuming. Duplicate deliveries are permitted.
 A gap is not.
 
-Each event SHALL carry the task's ledger record as of a revision. Events of one
+Each event SHALL carry the task's derived state as of an entry. Events of one
 task SHALL arrive in revision order.
 
 A consumer whose point has been trimmed past SHALL be told to resync and
@@ -299,11 +328,11 @@ SHALL NOT be served a feed with a silent gap.
 - **THEN** it observes every change made during the disconnect
 
 #### Scenario: A trimmed point is reported
-- **WHEN** a consumer resumes from a point older than the ledger retains
+- **WHEN** a consumer resumes from a point older than the log retains
 - **THEN** it is told to resync and is not given a feed that skips changes
 
 ### Requirement: Dead letters are listed read-only
-A dead task SHALL leave a dead-letter record carrying its ledger record, its
+A dead task SHALL leave a dead-letter record carrying its log entries, its
 last code and its message. The bus SHALL offer a read-only listing and a
 read-only feed of dead letters.
 
@@ -352,7 +381,7 @@ Each queue SHALL declare:
 - its ordering key, or that it has none
 - its maximum attempts and its backoff
 - its time to live, where one applies
-- its ledger retention
+- its log retention
 - its dedup window and its park cool-off
 - the most tasks of one invocation it allows in flight at once
 

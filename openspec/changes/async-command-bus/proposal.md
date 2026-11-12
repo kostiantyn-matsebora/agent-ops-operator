@@ -43,13 +43,13 @@ capability that does not depend on where state is kept.
   - A queue may declare an **ordering key**.
   - Tasks sharing a key are serialized. The next is not claimable until the
     previous has settled.
-  - The rule is enforced at claim time through the ledger, never by
+  - The rule is enforced at claim time through the log, never by
     partitioning.
-- **A task ledger** records each attempt (state, attempt, error code, lease)
+- **A task log** records each attempt (state, attempt, error code, lease)
   and feeds a gap-free change stream.
-  - The lease is held in the ledger, so a claim made on one replica can be
+  - The lease is held in the log, so a claim made on one replica can be
     completed on another.
-  - The ledger is declared bounded, lossy telemetry. The conversation record
+  - The log is declared bounded, lossy telemetry. The conversation record
     stays the only durable truth.
 - **Bus-owned retry.** Attempts are bounded, with backoff and jitter per kind.
   - After the last attempt a task goes `dead`, leaves a read-only dead-letter
@@ -83,8 +83,8 @@ capability that does not depend on where state is kept.
   nudge reached the console before the analysis it reacted to.
 - **The console is fed from its queue over one SSE stream, with resume.** The
   manager pushes the console channel's entries in queue order. A consumer
-  acknowledges by sequence and a reconnect replays from its last acknowledged
-  sequence, so a dropped connection loses nothing and needs no refresh.
+  acknowledges by command id and a reconnect replays from its last acknowledged
+  id, so a dropped connection loses nothing and needs no refresh.
   Telegram keeps its long-poll over the same per-channel queue.
 - **Read surface:** `GET /state/tasks` (with a stream) and
   `GET /state/dead-letters`. Both are read-only and use the existing `/state/*`
@@ -126,9 +126,9 @@ capability that does not depend on where state is kept.
 - `command-bus`: the contract.
   - Durable accept and idempotent submit.
   - FIFO claim and per-key serialization.
-  - The ledger-held lease.
+  - The log-held lease.
   - Bus-owned backoff, and the dead and parked states.
-  - Per-kind TTL, the ledger feed and per-queue stats.
+  - Per-kind TTL, the log feed and per-queue stats.
   - The closed queue inventory, the `nats` and `memory` backends, the
     conformance suite and the chart selector.
 - `async-operations`: the manager's use of it.
@@ -150,7 +150,7 @@ capability that does not depend on where state is kept.
 - `coordination-escalation`: `escalate` is a task. The member branch is a
   close followed by a result append on one key. The append id is derived from
   the task.
-- `state-durability`: the ledger and dead-letter record are a third declared
+- `state-durability`: the log and dead-letter record are a third declared
   home, bounded and lossy.
 - `component-network-isolation`: adds a requirement. The manager may reach the command-bus server.
   No other component may.
@@ -188,8 +188,8 @@ capability that does not depend on where state is kept.
 - `docs/CHANGELOG.md`: the semantic change and upgrade notes.
 - A `docs/guides/` page for the bundle.
 - `.claude/rules/structure.md`, `invariants.md`, `gotchas.md` and
-  `terminology.md`: the ledger as a declared state home, the ordering and
-  idempotency rules, and the words task, invocation, ledger and dead letter.
+  `terminology.md`: the log as a declared state home, the ordering and
+  idempotency rules, and the words task, invocation, log and dead letter.
 
 ### Adopter site
 

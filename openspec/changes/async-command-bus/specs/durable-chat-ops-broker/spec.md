@@ -6,7 +6,7 @@
 ## REMOVED Requirements
 
 ### Requirement: A non-leader proxies a poll it cannot safely answer
-**Reason**: A claim lives in the command bus's ledger.
+**Reason**: A claim lives in the command bus's log.
 
 - Every replica serves the poll.
 - Any replica completes a claim another made.
@@ -21,11 +21,11 @@ never sees the rejection again.
 
 Claiming an outbound channel op out to a polling adapter SHALL be performed by
 whichever manager replica serves the poll. The claim SHALL be a lease recorded
-in the command bus's ledger, not on the Conversation and not in a replica's
+in the command bus's log, not on the Conversation and not in a replica's
 memory.
 
-The lease SHALL carry a claim token and a lease-until instant, written
-conditionally on the task's revision. A claim made by one replica SHALL be
+The lease SHALL carry a claim token and a lease-until instant, appended
+conditionally on the last entry the claimant saw. A claim made by one replica SHALL be
 completable by another that presents the token.
 
 The Conversation's `status.threads[].claim` SHALL NOT be written. A value
@@ -35,7 +35,7 @@ found there is ignored.
 
 - **WHEN** the replica holding the leader-election `Lease` serves a poll while
   a channel op is waiting
-- **THEN** it claims the op as a lease in the bus's ledger exactly as any
+- **THEN** it claims the op as a lease in the bus's log exactly as any
   other replica would, with no special standing
 
 #### Scenario: Any replica serves the poll
@@ -49,7 +49,7 @@ found there is ignored.
 
 - **WHEN** one replica claims an op and the adapter's done call reaches
   another replica
-- **THEN** the completion succeeds because the claim token matches the ledger
+- **THEN** the completion succeeds because the claim token matches the log
 
 #### Scenario: A non-leader never writes a claim
 - **WHEN** a replica that is not the current `Lease` holder serves a poll
@@ -68,14 +68,14 @@ return the op to its queue for redelivery, counted as one attempt by the
 command bus.
 
 The lease duration SHALL default to five minutes, owned by the command bus's
-ledger. The chart value `claimStalenessSeconds` no longer feeds it and is
+log. The chart value `claimStalenessSeconds` no longer feeds it and is
 inert, kept only so an existing install's values still render.
 
 The bus returns an expired lease. No replica clears it, and leadership has no
 part in it.
 
 A leader failover SHALL NOT require waiting for the lease. The lease is in the
-ledger, which a failover does not touch, and a claim whose holder is gone
+log, which a failover does not touch, and a claim whose holder is gone
 expires on its own schedule while every other op keeps flowing.
 
 #### Scenario: A legitimately slow claim is left alone
@@ -179,10 +179,10 @@ Each channel SHALL have its own ordered queue. An adapter SHALL receive the entr
 - **THEN** the other continues to receive its entries in order
 
 ### Requirement: The console is fed from its queue over one stream and resumes after a disconnect
-The manager SHALL push the console channel's queue entries over the console's single SSE stream, in queue order, each carrying its sequence. A consumer SHALL acknowledge an entry by sequence. A reconnect that names the last acknowledged sequence SHALL replay every later entry, and an unacknowledged entry SHALL stay queued.
+The manager SHALL push the console channel's queue entries over the console's single SSE stream, in queue order, each carrying its command id. A consumer SHALL acknowledge an entry by its command id. A reconnect that names the last acknowledged command id SHALL replay every later unacknowledged entry in queue order, and an unacknowledged entry SHALL stay queued. The command id is a cursor and carries no order.
 
 #### Scenario: A dropped connection loses nothing
-- **WHEN** the stream drops while entries are being produced and the console reconnects with its last acknowledged sequence
+- **WHEN** the stream drops while entries are being produced and the console reconnects with its last acknowledged command id
 - **THEN** it receives every later entry in order, without a refresh
 
 #### Scenario: A replay does not duplicate an acknowledged entry

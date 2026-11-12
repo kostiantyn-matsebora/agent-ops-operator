@@ -170,7 +170,7 @@ Their existing behaviour SHALL be preserved:
 - a fire-and-forget `send` SHALL carry a short time to live
 - `delete-conversation` SHALL carry a time to live equal to the finalizer's grace
 - `delete-conversation` SHALL never be parked, so a deletion never wedges on a down adapter
-- the lease of a claimed operation SHALL default to five minutes and be owned by the command bus's ledger
+- the lease of a claimed operation SHALL default to five minutes and be owned by the command bus's log
 - the chart value `claimStalenessSeconds` SHALL be inert
 
 The claim body an adapter reads from `/channel/ops` SHALL keep its shape.
@@ -304,7 +304,7 @@ token scheme:
 
 | Endpoint | Returns |
 |---|---|
-| `GET /state/tasks` | the ledger's tasks |
+| `GET /state/tasks` | the log's tasks |
 | `GET /state/tasks/{id}` | one task by its task uid |
 | `GET /state/tasks/stream` | a server-sent stream of task changes |
 | `GET /state/dead-letters` | the dead-letter records |

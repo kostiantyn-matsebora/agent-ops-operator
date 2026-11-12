@@ -7,7 +7,7 @@ Kubernetes state after a manager restart. A run whose result is recorded in
 re-enqueued by reconciliation.
 
 The command bus SHALL be the hot path. The record of what is owed SHALL be
-the Conversation's own `status`, not the bus. The bus's ledger is bounded
+the Conversation's own `status`, not the bus. The bus's log is bounded
 telemetry and SHALL NOT be the only place an owed operation is recorded.
 
 Re-derivation SHALL NOT depend on a restart. The bus's deduplication SHALL
@@ -86,7 +86,7 @@ that thread, cleared when delivery succeeds.
 
 #### Scenario: A claim held only in a dead process's memory is not the record of anything
 - **WHEN** a manager replica claims an `ensure-topic` op and then crashes before the adapter completes it
-- **THEN** the claim is a lease in the bus's ledger, it expires on its own, and the op is redelivered to the next matching poll on any replica
+- **THEN** the claim is a lease in the bus's log, it expires on its own, and the op is redelivered to the next matching poll on any replica
 
 ### Requirement: A restart-resilience matrix is documented and maintained
 The documentation, in `docs/concepts.md`, SHALL carry a matrix naming every component, the state it
@@ -101,9 +101,9 @@ The matrix SHALL name `status.threads[].undeliveredReply`: a state store
 record, surviving every restart.
 
 The matrix SHALL name a channel op's claim as a lease in the command bus's
-ledger. For it the matrix SHALL say:
+log. For it the matrix SHALL say:
 
-- the ledger is bounded telemetry
+- the log is bounded telemetry
 - a lease expires on its own after a manager restart
 - what a restart of the bus server itself costs under each shipped bus backend
 
@@ -119,7 +119,7 @@ The matrix SHALL name the `Signal` record — its spec, its claimants and its pr
 
 #### Scenario: Claim and owed-reply state have rows
 - **WHEN** an operator asks what a manager restart does to a claimed op or an undelivered reply
-- **THEN** the matrix names the claim as a lease in the command bus's ledger and the reply as a conversation record in the state store, surviving the restart
+- **THEN** the matrix names the claim as a lease in the command bus's log and the reply as a conversation record in the state store, surviving the restart
 
 #### Scenario: A backend restart has a row
 - **WHEN** an operator asks what restarting the state backend or the bus server costs
@@ -132,8 +132,8 @@ The matrix SHALL name the `Signal` record — its spec, its claimants and its pr
 
 ## ADDED Requirements
 
-### Requirement: The task ledger and dead-letter record are declared bounded lossy telemetry
-The command bus's task ledger and dead-letter record SHALL be classified in
+### Requirement: The task log and dead-letter record are declared bounded lossy telemetry
+The command bus's task log and dead-letter record SHALL be classified in
 the deliberately lossy home. They SHALL be documented as lossy and SHALL
 report their gaps.
 
@@ -149,12 +149,12 @@ as a gap in history, never as a period in which nothing happened.
 The manager SHALL still mount no PersistentVolume. A bus server's own storage
 belongs to the bus server and not to the manager.
 
-#### Scenario: Losing the ledger costs no correctness
-- **WHEN** the entire task ledger and dead-letter record are lost
+#### Scenario: Losing the log costs no correctness
+- **WHEN** the entire task log and dead-letter record are lost
 - **THEN** conversations, deliveries, signals and suppression are unaffected, and only task history and work not yet claimed are missing
 
 #### Scenario: A trimmed feed is reported as a gap
-- **WHEN** a task-stream consumer resumes from a point the ledger no longer retains
+- **WHEN** a task-stream consumer resumes from a point the log no longer retains
 - **THEN** it is told to resync and shows a gap, not silence
 
 #### Scenario: An accepted command's effect is recoverable from state

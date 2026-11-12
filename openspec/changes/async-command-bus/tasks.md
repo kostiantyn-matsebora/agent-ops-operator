@@ -48,8 +48,8 @@ shape. The spike (a throwaway module outside the repo) is deleted.
 
 ## 3. `nats` backend — backend-developer
 
-- [x] 3.1 Implement the ledger over JetStream KV buckets (`tasks`, `ids`, `dead`), each created with the configured replica count and a prefix of its own.
-- [x] 3.2 Claim by compare-and-swap on the task revision, with the claim-time ordering rule over the ordered feed (design D-2).
+- [x] 3.1 SUPERSEDED by 14.1 (queues are append-only, design D-2). Implement the ledger over JetStream KV buckets (`tasks`, `ids`, `dead`), each created with the configured replica count and a prefix of its own.
+- [x] 3.2 SUPERSEDED by 14.2. Claim by compare-and-swap on the task revision, with the claim-time ordering rule over the ordered feed (design D-2).
 - [x] 3.3 A watch-fed local mirror for pending and settled ids, so reconcile never reads the server.
 - [x] 3.4 Sweeps: parked-id release, TTL expiry, ledger and dead-letter retention caps.
 - [x] 3.5 Pass the conformance suite and bench against the in-process server.
@@ -351,9 +351,22 @@ role did not run. Left for whoever dispatches the cluster tier.
 - [x] 13.1 Key the `out` family per Channel resource, `out.<channel>`, keyed by conversation. An adapter drains the queues of every Channel that names it, so `/channel/ops?adapter=` is unchanged.
 - [x] 13.2 Add one fan-out function recording a thread entry and enqueueing it to each bound channel's queue in causal order, less the surface that displayed it.
 - [x] 13.3 Route inputs, run replies, escalations and notices through it. Remove the separate producers in the reconcile pass and the stopgap flush of run replies before later inputs. The reconciler stays the backstop and calls the same function.
-- [x] 13.4 Give each entry a per-channel sequence, and serve the console channel's queue over its one SSE stream in queue order.
-- [x] 13.5 Resume: a reconnect naming the last acknowledged sequence replays every later entry. Acknowledgement is the existing `/channel/ops/{id}/done`, and an unacknowledged entry stays queued.
+- [x] 13.4 SUPERSEDED by 14.4 (a command id is the cursor, no sequence field). Give each entry a per-channel sequence, and serve the console channel's queue over its one SSE stream in queue order.
+- [x] 13.5 SUPERSEDED by 14.4. Resume: a reconnect naming the last acknowledged sequence replays every later entry. Acknowledgement is the existing `/channel/ops/{id}/done`, and an unacknowledged entry stays queued.
 - [x] 13.6 Move the console to the stream. Telegram keeps its long-poll over the same per-channel queue.
+
+## 14. Append-only queues — backend-developer
+
+Measured live: a claim landing between a submit's create and its second write of
+`Order` failed the submit with NATS 10071, so an escalation was lost. Every queue
+becomes an append-only log (design D-2, D-16): nothing is rewritten.
+
+- [ ] 14.1 Rebuild the `nats` backend as JetStream streams of immutable entries, subjects `<queue>.<key>.msg` and `.ev`, with a separate `dead` log. Remove the `tasks`/`ids` records, `Task.Order`, `recordOrder` and the second write in `createTask`.
+- [ ] 14.2 Claim, complete, fail and dead-letter are appended entries. A claim is appended conditionally on the key's last entry, so only one of two racing claims lands. State is folded from a task's own entries, and a lapsed lease reads as retryable with no write.
+- [ ] 14.3 Rebuild the `memory` backend as the same append-only log, so both meet one contract.
+- [ ] 14.4 Replace the sequence with the command id as the cursor: the SSE `id:` is the command id, a reconnect naming the last acknowledged id replays every later unacknowledged entry in log order, and an unknown id starts from the oldest unacknowledged entry. Update `ClaimSequenced`, `Resume`, `Bus.Running`, the console `feedCursor` and `StreamOps`.
+- [ ] 14.5 Keep retention to the log's own limits, with no operation of the bus on a single entry.
+- [ ] 14.6 Redeploy the manager and console to the live cluster and repeat the "How is ha doing?" scenario: no escalation fails, the analysis precedes the nudge, and nothing needs a refresh.
 
 ## 10. Unit tests
 
@@ -377,6 +390,9 @@ was already real, already passing, and left alone. Three gaps closed:
 - [x] 10.7 Unit-test the single fan-out point: an entry reaches each bound channel once less the displaying surface, and a run reply is enqueued before the corrective input its turn caused.
 - [x] 10.8 Unit-test the per-channel queues: one channel not acknowledging never delays another channel of the same adapter type.
 - [x] 10.9 Unit-test the console feed: entries arrive in queue order with their sequence, a reconnect replays after the last acknowledged sequence, and an acknowledged entry is not delivered again.
+
+- [ ] 10.10 Conformance, walked for both backends: no entry is ever written twice, a submit succeeds when a consumer claims at once (the 10071 regression, 200 submits against a racing consumer), state folds from entries, and a lapsed lease redelivers with no write.
+- [ ] 10.11 Unit-test the resume by command id: a reconnect replays only unacknowledged later entries in log order, and an unknown id starts from the oldest unacknowledged.
 
 ## 11. System tests
 
@@ -460,7 +476,7 @@ did not run. Left for whoever dispatches the cluster tier (11.8).
   kubelet's own network stack produces — the thing only a real cluster
   decides, per design D-14's own table — through the same backoff,
   dead-letter and `/state/dead-letters` listing checks 9.7 already uses.
-- [ ] 11.7 System lane: drop the console stream while entries are produced, reconnect with the last acknowledged sequence, and confirm nothing is lost, duplicated or reordered, against the full tier.
+- [ ] 11.7 System lane: drop the console stream while entries are produced, reconnect with the last acknowledged command id, and confirm nothing is lost, duplicated or reordered, against the full tier.
 - [ ] 11.8 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
   **NOT PERFORMED — no cluster in this environment.** Left for whoever
   opens the pull request to dispatch, per `.github/routines/
@@ -538,7 +554,8 @@ landed. `concepts.md`'s state-restart table still described
 - [x] 12.1.9 Re-run `python3 .github/scripts/docs-generate.py`, because chart values changed.
   Clean both before and after — the new guide's `renders bundle=commandbus`
   block generated correctly on the first pass.
-- [ ] 12.1.10 `docs/contracts/channel-adapter.md` and `docs/contracts.md`: the per-channel queue, the console stream with resume and sequence acknowledgement. Then `docs/concepts.md` for the single fan-out point.
+- [ ] 12.1.11 Reference docs: `docs/contracts.md`, `docs/concepts.md` and `.claude/rules/{gotchas,invariants}.md` state that every bus queue is an append-only log, a command id is a cursor and never an order, and drop the ledger/`Order` wording. Add the 10071 submit race to `gotchas.md`. Then `docs-generate.py --check`.
+- [ ] 12.1.10 `docs/contracts/channel-adapter.md` and `docs/contracts.md`: the per-channel queue, the console stream with resume by command id. Then `docs/concepts.md` for the single fan-out point.
 
 ### 12.2 Adopter site
 

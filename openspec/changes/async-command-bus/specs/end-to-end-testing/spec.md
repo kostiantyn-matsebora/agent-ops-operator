@@ -31,7 +31,7 @@ but the manager reaches the server.
 
 #### Scenario: Ordering holds with several consumers
 - **WHEN** several `close` and `delete` tasks of one root and tasks of other roots are accepted together with more than one replica serving
-- **THEN** the ledger shows the one root's tasks never overlapping and in submission order
+- **THEN** the log shows the one root's tasks never overlapping and in submission order
 
 #### Scenario: A failing task ends in a dead letter
 - **WHEN** a task whose handler fails retryably on every attempt is accepted
@@ -64,7 +64,7 @@ record. A flow SHALL NOT be satisfied by the reply code alone, because a
 
 #### Scenario: A cascade deletes members first
 - **WHEN** a root with closed members is deleted
-- **THEN** the ledger shows each member's `delete` task settle before the root's, and no conversation of the tree remains
+- **THEN** the log shows each member's `delete` task settle before the root's, and no conversation of the tree remains
 
 #### Scenario: A Telegram message and a console message each become one input
 - **WHEN** an inbound message arrives through the fake Bot API lane and another through the console channel
