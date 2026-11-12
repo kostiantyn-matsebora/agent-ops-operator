@@ -227,8 +227,8 @@ spec:
             initialDelaySeconds: 5
           # The probe port answers only once the state store has opened, and
           # on nats that waits for the cluster to elect a leader. Liveness
-          # starts after this passes, so a slow election is waited out (5m)
-          # instead of killing the pod mid-wait.
+          # and readiness both start after this passes, so a slow election is
+          # waited out (5m) instead of killing the pod mid-wait.
           {{- if ne (include "agentops.stateBackend" .) "kube" }}
           startupProbe:
             httpGet:
