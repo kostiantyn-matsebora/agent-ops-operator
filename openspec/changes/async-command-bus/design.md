@@ -287,23 +287,38 @@ enqueued before the analysis it reacted to, so it reached the console first.
 | Order by timestamp inside each producer | Every new producer must remember the rule. The stopgap did this for two |
 | A global queue for all channels | One slow channel delays every other |
 
-### D-16: The console is fed from its queue over one SSE stream, with resume
+### D-16: The console is a plain SSE consumer of its log: cursor, no acknowledgement
 
-The manager pushes the console channel's queue entries over the console's single
-SSE stream, in queue order. Telegram keeps its `/channel/ops` long-poll over the
-same per-channel queue.
+A consumer that is pushed to, not asked, needs no claim, lease or acknowledgement.
+The console channel's queue is read the standard SSE way: an ordered log with an
+id per event, and a reconnect that names the last event it received.
 
-- Each entry is sent with its command id as the SSE `id`.
-- The consumer acknowledges an entry through the existing
-  `/channel/ops/{id}/done`.
-- A reconnect names the id of the last entry the consumer acknowledged
-  (`Last-Event-ID`). The manager finds that entry's place in the channel's queue
-  and replays every entry after it that is not acknowledged. An unknown id
-  starts from the oldest unacknowledged entry.
-- A consumer that was away needs no refresh to catch up.
+- **Feed.** `GET /channel/ops/stream` pushes each entry of the console channel's
+  log after the cursor, in log order, as an event whose `id` is the entry's
+  command id. Telegram keeps its `/channel/ops` long-poll with claim and
+  acknowledgement, over the same per-channel queue family.
+- **Cursor.** The client's position is the id of the last event it received. A
+  reconnect sends it as `Last-Event-ID` (or `?since=`). The server replays every
+  entry after that one, then pushes new ones. An unknown id replays from the start
+  of the retained log. Nothing is claimed, leased or deleted by a connection, so
+  two connections, a dead connection or a replica change strand nothing.
+- **Dropped connections** are detected by the server from the failed write or the
+  closed request, and by the client's idle watchdog on the keep-alive. Both only
+  end the connection. The client reconnects with its cursor.
+- **Delivered means the entry was written to a live stream.** The manager then
+  performs the side effects that an acknowledgement used to trigger (marking a run
+  reply delivered, closing a topic). A lost frame is recovered by the replay, never
+  by a lease.
+- **Retention.** The feed's log is trimmed by age and count (24 hours by default,
+  declared per queue), not by consumption. This replaces D-2's removal on settle
+  for this queue: a replayable feed must outlive its delivery.
+- **Thread id.** The manager assigns the console thread's id when it enqueues the
+  `ensure-topic` entry and the console uses the one it is given, so no result
+  travels back.
+- **Idempotent render.** The console renders an entry once per command id, so a
+  replay across a reconnect never duplicates a message.
 
-The id is a cursor and never an order. Order is the queue's own. The same shape
-serves any later consumer, such as a mobile app.
+The same shape serves any later consumer, such as a mobile app.
 
 ### D-12: What stays synchronous, and why
 

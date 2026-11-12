@@ -178,13 +178,20 @@ Each channel SHALL have its own ordered queue. An adapter SHALL receive the entr
 - **WHEN** one of two Channels of the same adapter type stops acknowledging
 - **THEN** the other continues to receive its entries in order
 
-### Requirement: The console is fed from its queue over one stream and resumes after a disconnect
-The manager SHALL push the console channel's queue entries over the console's single SSE stream, in queue order, each carrying its command id. A consumer SHALL acknowledge an entry by its command id. A reconnect that names the last acknowledged command id SHALL replay every later unacknowledged entry in queue order, and an unacknowledged entry SHALL stay queued. The command id is a cursor and carries no order.
+### Requirement: The console is a plain SSE consumer of its log and resumes from a cursor
+The manager SHALL push the console channel's log entries over the console's single SSE stream, in log order, each carrying its command id as the event id. The console SHALL need no acknowledgement. A reconnect that names the last event received SHALL replay every later entry, and an unknown id SHALL replay from the start of the retained log. A connection SHALL claim, lease and delete nothing, so a dead or second connection strands no entry.
+
+The console channel's log SHALL be retained for its declared window (24 hours by default) and trimmed by age and count, not by delivery. The manager SHALL assign the console thread's id itself. The console SHALL render an entry once per command id.
 
 #### Scenario: A dropped connection loses nothing
-- **WHEN** the stream drops while entries are being produced and the console reconnects with its last acknowledged command id
-- **THEN** it receives every later entry in order, without a refresh
+- **WHEN** the stream drops while entries are produced and the console reconnects with the last event it received
+- **THEN** it receives every later entry in order, without a refresh and without an acknowledgement
 
-#### Scenario: A replay does not duplicate an acknowledged entry
-- **WHEN** the console reconnects after acknowledging an entry
-- **THEN** that entry is not delivered again
+#### Scenario: A dead connection strands nothing
+- **WHEN** a connection is gone without closing and a new one opens
+- **THEN** the new connection receives every entry after its cursor, and no entry waits on a lease
+
+#### Scenario: A replay does not duplicate a rendered entry
+- **WHEN** the console reconnects with a cursor older than entries it already rendered
+- **THEN** each entry is rendered once
+

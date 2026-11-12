@@ -368,6 +368,17 @@ becomes an append-only log (design D-2, D-16): nothing is rewritten.
 - [x] 14.5 Delete a message and its entries when it settles as succeeded (the server removes them, as a regular queue does). Retain an unconsumed message for 7 days by default, then trim it. Dedup after settle rests on the dedup window. The bus performs no other delete.
 - [ ] 14.6 Redeploy the manager and console to the live cluster and repeat the "How is ha doing?" scenario: no escalation fails, the analysis precedes the nudge, and nothing needs a refresh.
 
+## 15. Console as a plain SSE consumer — backend-developer
+
+The claim/lease/acknowledge feed for the console proved fragile (a dead connection's claim stranded ops for a lease; a redelivery rendered twice). The console becomes a standard SSE consumer (design D-16).
+
+- [ ] 15.1 Make the console channel's log a retained feed: trimmed by age and count (24h default, declared per queue), not removed on delivery. Telegram's queue keeps claim and acknowledgement.
+- [ ] 15.2 `GET /channel/ops/stream` reads the feed by cursor: replays every entry after `Last-Event-ID`/`?since=` (unknown id: from the start of the retained log), then pushes new entries. No claim, lease or acknowledgement. Remove the sweep, `Resume` by lease and the `/done` dependence for the console.
+- [ ] 15.3 Run the side effects an acknowledgement used to trigger (run reply delivered, close-topic, delete-conversation) when the frame is written to a live stream.
+- [ ] 15.4 The manager assigns the console thread id on `ensure-topic`. The console uses it.
+- [ ] 15.5 Console client: reconnect with the last received id, idle watchdog, render once per command id, no `/done` call and no unacked cache.
+- [ ] 15.6 Redeploy and repeat the Tuya scenario and a delete: answers arrive once, in order, without a refresh, and a delete is not held waiting for the console.
+
 ## 10. Unit tests
 
 Audited across the whole repo, not just re-run. Everything else audited
