@@ -29,9 +29,9 @@ homes, and SHALL NOT hold state that belongs to no class:
     offsets, webhook registrations)
 
   It is reached only through the state store contract, by every component
-  that reads it. The selected backend decides where it is kept. The `kube`
-  backend keeps it in the Kubernetes API, so a default install keeps this
-  state where it always was.
+  that reads it. The selected backend decides where it is kept. The default
+  backend, `nats`, keeps it on the volumes of its own clustered state server.
+  The `kube` backend keeps it in the Kubernetes API.
 - **PersistentVolume** — state that genuinely IS a filesystem: the runtime's
   agent session files and, optionally, its repository checkout.
 - **Deliberately lossy** — bounded telemetry whose loss costs history, never

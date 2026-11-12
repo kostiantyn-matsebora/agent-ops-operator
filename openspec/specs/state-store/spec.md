@@ -529,10 +529,9 @@ and `lastReceived`.
 The manager SHALL release a source through a helper over the contract. The helper:
 
 - lists the source's signals by the any-phase source index
-- deletes each one under the revision it listed
-- clears the source's cooldown window
-
-The receipt counters are not cleared. Under the `kube` backend they live on the source object, which release does not touch.
+- deletes each one not held by the source currently holding the name, under the revision it listed
+- clears the source's cooldown window, only when no source holds the name
+- clears the source's receipt counters, only when no source holds the name
 
 Release is idempotent and raises no error for a source with none.
 
@@ -542,13 +541,25 @@ Release is a helper, not an operation of the contract. The any-phase source inde
 
 A name can be reused by a successor source, so the release SHALL decide from the source that holds the name at the moment of each delete.
 
-After listing the signals, the release SHALL read the source by that name from the authoritative store of configuration, never from a cache. Under the `kube` backend that is the Kubernetes API server.
+After listing the signals, the release SHALL read the source by that name from the authoritative store of configuration, never from a cache.
+
+That store is the Kubernetes API server under every backend. A source's configuration is a Kubernetes object whichever backend keeps its signals.
 
 A signal recorded under the identity of the source that holds the name now SHALL be kept. Every other signal of the name SHALL be deleted under the revision it was listed at.
 
-A conflict SHALL re-read that signal and decide again, with exponential back-off and a bounded number of attempts.
+A conflict SHALL re-read that signal and decide again. Retries SHALL back off exponentially, at most 20 attempts. The back-off base is an implementation detail.
 
-The cooldown window SHALL be cleared only when no source holds the name. The caller supplies no identity, so a successor created at any point during the release keeps its signals.
+When the attempts are exhausted the release SHALL return the conflict as an error and leave that signal in place. The next pass retries it.
+
+The cooldown window and the receipt counters SHALL be cleared only when no source holds the name. The caller supplies no identity, so a successor created at any point during the release keeps its signals.
+
+#### Scenario: A released source leaves no state behind
+- **WHEN** a source is released and no other source holds its name
+- **THEN** its signals, its cooldown window and its receipt counters are gone
+
+#### Scenario: Another source of the same name keeps the counters
+- **WHEN** a source is released while another source holds the same name
+- **THEN** the window and the counters are left alone
 
 #### Scenario: Release removes one source and no other
 - **WHEN** a source with a live, a terminal signal and a window is released
@@ -560,7 +571,7 @@ The cooldown window SHALL be cleared only when no source holds the name. The cal
 - **WHEN** a source is released by name while a signal recorded under the
   identity of a source that now holds that name exists
 - **THEN** the previous incarnation's signals are gone and the successor's stay,
-  and under `kube` so does the successor's window
+  and so does the successor's window
 
 #### Scenario: A signal that changes during release is decided again
 - **WHEN** a listed signal is modified before its delete is attempted
@@ -650,7 +661,8 @@ parent and word-chain lookups to the two labels the manager always wrote.
 Metadata the record does not model, whoever set it, SHALL survive a write
 through the store.
 
-It SHALL be the default backend and SHALL render no bundle.
+It SHALL be selectable as `kube` and SHALL render no bundle. It SHALL NOT be
+the default.
 
 #### Scenario: Objects are byte-identical
 - **WHEN** the same conversation lifecycle runs before and after the store
@@ -665,19 +677,24 @@ It SHALL be the default backend and SHALL render no bundle.
   no annotation unless it set an expiry
 
 #### Scenario: The system pack passes unchanged
-- **WHEN** the system pack runs against a default install
+- **WHEN** the system pack runs against an install that selects `kube`
 - **THEN** every lane passes without a test being edited
 
+#### Scenario: Selecting it renders no bundle
+- **WHEN** the selector names `kube`
+- **THEN** the render enables no backend bundle
+
 ### Requirement: Exactly one backend is selected
-The chart SHALL expose one selector naming the state backend. The render
-SHALL fail, naming the value, on any of:
+The chart SHALL expose one selector naming the state backend, `nats` by
+default. The render SHALL fail, naming the value, on any of:
 
 - a backend the chart does not know
 - a backend whose bundle is not enabled
 - more than one backend's bundle enabled
 
-The manager SHALL learn its backend from the chart alone and SHALL refuse to
-start on a name it does not implement.
+The default SHALL enable the `nats` bundle without the adopter setting a
+second value. The manager SHALL learn its backend from the chart alone and
+SHALL refuse to start on a name it does not implement.
 
 #### Scenario: An unknown backend fails the render
 - **WHEN** the selector names a backend the chart has no bundle for
@@ -685,8 +702,17 @@ start on a name it does not implement.
 
 #### Scenario: The default needs nothing
 - **WHEN** the selector is left at its default
-- **THEN** the render enables no bundle and the manager starts on the `kube`
-  backend
+- **THEN** the render includes the `nats` bundle without the adopter
+  enabling it, and the manager starts on the `nats` backend
+
+#### Scenario: Pinning kube needs one value
+- **WHEN** the selector names `kube`
+- **THEN** the render succeeds with no bundle, without setting
+  `nats.enabled`
+
+#### Scenario: A bundle left on under another backend fails
+- **WHEN** the selector names `kube` and `nats.enabled` is true
+- **THEN** the render fails and names `nats.enabled`
 
 ### Requirement: Workloads are released by the manager, not by ownership
 The manager SHALL delete a conversation's runtime pod and ConfigMap itself
@@ -816,3 +842,44 @@ act, so no behaviour depends on an owner reference being honoured.
 #### Scenario: Two surfaces never share a key
 - **WHEN** a channel and a signal source each store a value under one key
 - **THEN** each reads its own value
+
+### Requirement: Deleting a conversation releases what it owns
+Deleting a conversation, by any path, SHALL release the body of every input still queued on it.
+
+The release SHALL happen before the record is let go.
+
+Under the `nats` backend it SHALL also remove the conversation's runs.
+
+Under the `nats` backend a periodic sweep SHALL remove the runs and blobs a crash left without an owner.
+
+The sweep SHALL wait a grace of 10 minutes first. A blob written ahead of the input naming it is not an orphan.
+
+#### Scenario: A queued input's blob goes with the conversation
+- **WHEN** a conversation with a queued input held out of line is deleted
+- **THEN** that blob is gone and a blob no queue names is untouched
+
+#### Scenario: Runs go with the conversation
+- **WHEN** a conversation with runs is deleted under `nats`
+- **THEN** its runs are removed by that delete
+
+#### Scenario: The sweep spares a fresh blob
+- **WHEN** the sweep runs while a blob younger than the grace names no input
+- **THEN** it removes orphaned runs and old unowned blobs, and the young blob stays
+
+### Requirement: Run history is bounded the same on every backend
+A conversation SHALL keep its newest ten runs on every backend, the oldest falling off. Growing a run that has aged out SHALL report not-found.
+
+#### Scenario: The eleventh run drops the oldest
+- **WHEN** an eleventh run is appended to a conversation
+- **THEN** ten runs remain, the oldest is gone, and growing it reports not-found
+
+### Requirement: A reader's stream survives silence
+The conversation and signal streams SHALL write a keep-alive while they have nothing to send. A reader SHALL treat a stream silent past several keep-alives as dead and relist before it resumes.
+
+#### Scenario: An idle stream emits keep-alives
+- **WHEN** a stream has nothing to send for a keep-alive interval
+- **THEN** it writes a keep-alive
+
+#### Scenario: A silent stream is relisted
+- **WHEN** a reader sees no bytes past several keep-alive intervals
+- **THEN** it gives the stream up, relists, and then resumes

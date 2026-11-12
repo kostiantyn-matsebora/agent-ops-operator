@@ -72,8 +72,6 @@ SHALL refuse to start on a name it does not implement.
 - **WHEN** the selector names `kube` and `nats.enabled` is true
 - **THEN** the render fails and names `nats.enabled`
 
-## ADDED Requirements
-
 ### Requirement: A deleted source's signals are released by the manager
 The manager SHALL release a source through a helper over the contract. The helper:
 
@@ -131,6 +129,8 @@ The cooldown window and the receipt counters SHALL be cleared only when no sourc
 - **WHEN** a `SignalSource` is deleted in an environment where owner-reference
   garbage collection does not run
 - **THEN** its signals are removed by the manager within its next reconciliation
+
+## ADDED Requirements
 
 ### Requirement: Deleting a conversation releases what it owns
 Deleting a conversation, by any path, SHALL release the body of every input still queued on it.
