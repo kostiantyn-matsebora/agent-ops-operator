@@ -223,3 +223,34 @@ func TestDeliverInputsOmitsSeverityWhenTheInputCarriesNone(t *testing.T) {
 		t.Fatalf("an unrated signal must omit severity from the wire, got %s", raw)
 	}
 }
+
+// A run's reply is enqueued ahead of an input that arrived after the run
+// finished, because the flush hook runs before each input: ops are claimed in
+// the order they were enqueued, so this is the order the thread reads in.
+func TestDeliverInputsInOrderFlushesEarlierWorkBeforeEachInput(t *testing.T) {
+	t0 := time.Now()
+	early := metav1.NewTime(t0.Add(-time.Minute))
+	late := metav1.NewTime(t0.Add(time.Minute))
+
+	conv := testConv("ordered-conv")
+	conv.Namespace = testNS
+	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "plain-desk"}}
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "plain-desk", ThreadID: "t-1"}}
+	origin := &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: "member-1", Entry: "worker"}
+	conv.Spec.Inputs = []agentopsv1alpha1.InputItem{
+		{ID: "first", Type: agentopsv1alpha1.InputTask, Payload: "first", ReceivedAt: early, Origin: origin},
+		{ID: "second", Type: agentopsv1alpha1.InputTask, Payload: "second", ReceivedAt: late, Origin: origin},
+	}
+
+	ch := nsChannel("plain-desk", "plain-ta")
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch).Build()
+	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
+
+	var flushed []time.Time
+	DeliverInputsInOrder(context.Background(), Env{Reader: c, Blobs: newTestBlobs(c), Namespace: testNS}, q, crRec(conv),
+		func(at time.Time) { flushed = append(flushed, at) })
+
+	if len(flushed) != 2 || !flushed[0].Equal(early.Time) || !flushed[1].Equal(late.Time) {
+		t.Fatalf("flush must run once before each input, in input order, got %v", flushed)
+	}
+}

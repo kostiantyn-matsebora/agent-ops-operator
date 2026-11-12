@@ -406,7 +406,7 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// Input delivery, PARALLEL to dispatch rather than sequenced with it:
 		// the human reads the event while the agent is already working, and a
 		// run that hangs or dies still leaves the thread saying what happened.
-		chat.DeliverInputs(ctx, chat.Env{Reader: r.Client, Blobs: r.Blobs, Namespace: r.Namespace}, r.Ops, &conv)
+		r.deliverInputsAndReplies(ctx, &conv, runs)
 		// The BACKSTOP that makes a reply derivable rather than queue-resident.
 		if err := r.deliverRunReplies(ctx, &conv, runs); err != nil {
 			logger.Error(err, "re-deriving undelivered run replies")
@@ -1308,6 +1308,25 @@ func (r *ConversationReconciler) inferredPipeline(ctx context.Context, conv *sta
 		return p.Name
 	}
 	return ""
+}
+
+// deliverInputsAndReplies enqueues every input's delivery, ordered against the
+// run replies: a channel's ops are claimed in the order they were enqueued, so
+// a run that finished before an input arrived (the hand-back its own turn
+// caused) has its reply enqueued first, never after it.
+func (r *ConversationReconciler) deliverInputsAndReplies(ctx context.Context, conv *state.ConversationRecord, runs []state.Run) {
+	flushed := map[string]bool{}
+	chat.DeliverInputsInOrder(ctx, chat.Env{Reader: r.Client, Blobs: r.Blobs, Namespace: r.Namespace}, r.Ops, conv,
+		func(t time.Time) {
+			for i := range runs {
+				run := &runs[i]
+				if flushed[run.RunID] || !run.DeliveryTracked || run.FinishedAt == nil || !run.FinishedAt.Before(t) {
+					continue
+				}
+				flushed[run.RunID] = true
+				r.enqueueRunReply(ctx, conv, run, map[string]bool{})
+			}
+		})
 }
 
 // deliverRunReplies re-derives the answer for every completed run that a bound

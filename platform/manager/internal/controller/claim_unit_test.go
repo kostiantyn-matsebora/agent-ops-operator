@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,5 +265,46 @@ func TestDeliverRunRepliesSettlesANoteLeftByACrashAfterTheRunMarker(t *testing.T
 				t.Fatalf("note = %+v, want %q", b, tc.wantNote)
 			}
 		})
+	}
+}
+
+// A run's reply is enqueued ahead of an input that arrived after the run
+// finished, even though the input sits earlier in the reconcile pass: a
+// channel's ops are claimed in enqueue order, so the thread reads the answer
+// before the hand-back its own turn caused.
+func TestRunReplyIsEnqueuedBeforeAnInputReceivedAfterItFinished(t *testing.T) {
+	finished := time.Now().Add(-time.Minute)
+	conv := claimTestConv("conv-1")
+	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "c1"}}
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "c1", ThreadID: "t1"}}
+	fin := metav1.NewTime(finished)
+	conv.Status.Runs = []agentopsv1alpha1.RunStatus{{
+		RunID: "run-1", Status: "succeeded", Result: "the analysis", DeliveryTracked: true, FinishedAt: &fin,
+	}}
+	conv.Spec.Inputs = []agentopsv1alpha1.InputItem{{
+		ID: "move-per-turn:conv-1:run-1", Type: agentopsv1alpha1.InputReply, Payload: "decide a move",
+		ReceivedAt: metav1.NewTime(finished.Add(time.Second)),
+		Origin:     &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginManager, Name: "move-per-turn"},
+	}}
+	ch := &agentopsv1alpha1.Channel{ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: claimTestNS}}
+	ch.Spec.Adapter = "slack"
+	c := fakeClaimClient(t, conv, ch).Build()
+	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, Ops: &chat.OpQueue{Registry: chat.NewRegistry(), Bus: memory.Open()}}
+
+	rec := claimRec(t, r.Conversations, "conv-1")
+	runs := claimRuns(t, r.Runs, "conv-1")
+	r.deliverInputsAndReplies(context.Background(), rec, runs)
+	if err := r.deliverRunReplies(context.Background(), rec, runs); err != nil {
+		t.Fatal(err)
+	}
+
+	first := r.Ops.Claim("slack")
+	if first == nil || !strings.HasPrefix(first.ID, "send:") {
+		t.Fatalf("the run's reply must be claimed first, got %+v", first)
+	}
+	r.Ops.Complete(context.Background(), first.ID, chat.OpResult{})
+	second := r.Ops.Claim("slack")
+	if second == nil || !strings.HasPrefix(second.ID, "input:") {
+		t.Fatalf("the hand-back input must follow the reply, got %+v", second)
 	}
 }

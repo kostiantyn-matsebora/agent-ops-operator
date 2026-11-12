@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"time"
 
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -65,6 +66,15 @@ type Env struct {
 // that was already open, not the thread's opening post. Nothing here is fenced
 // on `status.escalatedAt` any more.
 func DeliverInputs(ctx context.Context, env Env, ops *OpQueue, conv *state.ConversationRecord) {
+	DeliverInputsInOrder(ctx, env, ops, conv, nil)
+}
+
+// DeliverInputsInOrder is DeliverInputs that calls flushBefore(t) ahead of
+// each input received at t, so the caller can enqueue what happened earlier
+// (a run's reply) first. A channel's ops are claimed in the order they were
+// enqueued, so this is what keeps a thread reading in the order things
+// happened: a run's answer before the hand-back its own turn caused.
+func DeliverInputsInOrder(ctx context.Context, env Env, ops *OpQueue, conv *state.ConversationRecord, flushBefore func(time.Time)) {
 	if ops == nil || len(conv.ChannelRefs) == 0 {
 		return
 	}
@@ -73,6 +83,9 @@ func DeliverInputs(ctx context.Context, env Env, ops *OpQueue, conv *state.Conve
 		item := &conv.Inputs[i]
 		if item.Origin == nil { // predates provenance: delivered nowhere
 			continue
+		}
+		if flushBefore != nil {
+			flushBefore(item.ReceivedAt)
 		}
 		p.deliver(ctx, item)
 	}
