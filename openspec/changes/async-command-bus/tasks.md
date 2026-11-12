@@ -39,12 +39,12 @@ shape. The spike (a throwaway module outside the repo) is deleted.
 
 ## 2. Contract, `memory` backend, conformance suite — backend-developer
 
-- [ ] 2.1 Define the contract in `platform/manager/internal/commandbus/`: submit, claim with lease, settle, fail with a code, task and dead-letter reads and feeds, per-queue statistics.
-- [ ] 2.2 Define the closed queue inventory and its declarations: key, attempts, backoff, TTL, dedup window, park cool-off, per-invocation in-flight cap. A kind may override its queue's attempts and backoff.
-- [ ] 2.3 Define the error-code vocabulary and derive retryability from the code. Record an unknown code as `internal`.
-- [ ] 2.4 Write the `memory` backend.
-- [ ] 2.5 Write the conformance suite and bench, walked once per queue in the inventory, failing and naming a queue left unwired.
-- [ ] 2.6 Conformance covers: durable accept, idempotent submit, dedup across every state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-lapse redelivery, bounded retry into dead, TTL expiry counting as settled, a gap-free resumable feed, dead-letter listing, per-queue statistics.
+- [x] 2.1 Define the contract in `platform/manager/internal/commandbus/`: submit, claim with lease, settle, fail with a code, task and dead-letter reads and feeds, per-queue statistics.
+- [x] 2.2 Define the closed queue inventory and its declarations: key, attempts, backoff, TTL, dedup window, park cool-off, per-invocation in-flight cap. A kind may override its queue's attempts and backoff.
+- [x] 2.3 Define the error-code vocabulary and derive retryability from the code. Record an unknown code as `internal`.
+- [x] 2.4 Write the `memory` backend.
+- [x] 2.5 Write the conformance suite and bench, walked once per queue in the inventory, failing and naming a queue left unwired.
+- [x] 2.6 Conformance covers: durable accept, idempotent submit, dedup across every state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-lapse redelivery, bounded retry into dead, TTL expiry counting as settled, a gap-free resumable feed, dead-letter listing, per-queue statistics.
 
 ## 3. `nats` backend — backend-developer
 
