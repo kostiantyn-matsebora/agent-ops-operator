@@ -14,6 +14,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
@@ -27,8 +28,11 @@ func (erroringReader) Read([]byte) (int, error) { return 0, errors.New("boom") }
 const coordTestMasterKey = "master-key"
 
 // coordServer builds a Server wired for /coordinate/*: a fake client seeded
-// with the given objects, a Router sharing the same client, and the master
-// key every derived token in these tests is checked against.
+// with the given objects, a Router sharing the same client, the master key
+// every derived token in these tests is checked against, and a fresh
+// commandbus/memory Bus — close and escalate (async-command-bus task 5.2/
+// 5.5) accept onto it now; invoke and read stay fully synchronous (D-12)
+// and never touch it.
 func coordServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
@@ -37,7 +41,25 @@ func coordServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
 	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry()}
 	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
-	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", AdapterToken: coordTestMasterKey, Router: router}, c
+	return &Server{
+		Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops",
+		AdapterToken: coordTestMasterKey, Router: router, Bus: memory.Open(),
+	}, c
+}
+
+// drainCoordinateTasks runs every taskId a /coordinate/close or
+// /coordinate/escalate accept returned to a terminal state, against s's own
+// Bus — coordinate_test.go's own use of the SAME drainAllConvTasks
+// acceptendpoints_test.go defines, since both live in package httpapi.
+func drainCoordinateTasks(t *testing.T, s *Server, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	var out struct {
+		TaskIDs []string `json:"taskIds"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	drainAllConvTasks(t, s, s.Bus, out.TaskIDs)
 }
 
 func postCoordinate(s *Server, path, token string, body map[string]any) *httptest.ResponseRecorder {
@@ -119,19 +141,26 @@ func TestHandleCoordinateCloseEnforcesOneHopReach(t *testing.T) {
 	s, c := coordServer(t, coordCoordinator("co-a"), root, member, grandchild)
 	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
 
-	// The direct member: allowed.
+	// The direct member: allowed. Accept stays 200, but the close is now
+	// deferred into taskCloseCoordinated — the conversation is still open
+	// right after the 202-shaped... 200 reply, exactly as every other
+	// converted endpoint's own accept-then-process split (design D-9).
 	rec := postCoordinate(s, "/coordinate/close", token,
 		map[string]any{"conversation": "root-1", "target": "member-1", "reason": "done"})
 	if rec.Code != 200 {
 		t.Fatalf("closing a direct member must succeed, got %d: %s", rec.Code, rec.Body.String())
 	}
+	drainCoordinateTasks(t, s, rec)
 	var gotMember agentopsv1alpha1.Conversation
 	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "member-1"}, &gotMember)
 	if gotMember.Status.Phase != agentopsv1alpha1.ConversationClosed {
-		t.Fatal("the direct member must be closed")
+		t.Fatal("the direct member must be closed once its task is processed")
 	}
 
-	// The grandchild, reached directly from the root: refused.
+	// The grandchild, reached directly from the root: refused. Accept still
+	// returns 200 (the widened-scope check is no longer a cheap read run at
+	// accept — it runs, unchanged, inside taskCloseCoordinated), but once
+	// drained the conversation is untouched.
 	root2 := coordRoot("root-2", "co-a")
 	memberOf2 := &agentopsv1alpha1.Conversation{}
 	memberOf2.Name, memberOf2.Namespace = "member-2", "agent-ops"
@@ -143,13 +172,14 @@ func TestHandleCoordinateCloseEnforcesOneHopReach(t *testing.T) {
 	token2 := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-2")
 	rec2 := postCoordinate(s2, "/coordinate/close", token2,
 		map[string]any{"conversation": "root-2", "target": "grandchild-2", "reason": "trying to reach too far"})
-	if rec2.Code != 403 {
-		t.Fatalf("closing a grandchild directly must be refused, got %d: %s", rec2.Code, rec2.Body.String())
+	if rec2.Code != 200 {
+		t.Fatalf("accept must succeed even for an eventually out-of-scope close, got %d: %s", rec2.Code, rec2.Body.String())
 	}
+	drainCoordinateTasks(t, s2, rec2)
 	var gotGrand agentopsv1alpha1.Conversation
 	c2.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "grandchild-2"}, &gotGrand)
 	if gotGrand.Status.Phase == agentopsv1alpha1.ConversationClosed {
-		t.Fatal("an out-of-scope close must change nothing")
+		t.Fatal("an out-of-scope close must change nothing once its task is processed")
 	}
 }
 
@@ -172,6 +202,7 @@ func TestHandleCoordinateEscalatePostsIntoTheAlreadyBoundThreadOnTheUncausedRoot
 	if rec.Code != 200 {
 		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	drainCoordinateTasks(t, s, rec)
 	var got agentopsv1alpha1.Conversation
 	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &got)
 	if got.Status.EscalatedAt == nil || got.Status.EscalationMessage != "3 members failed" {
@@ -413,10 +444,11 @@ func TestHandleCoordinateCloseDefaultsTargetToTheCaller(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	drainCoordinateTasks(t, s, rec)
 	var got agentopsv1alpha1.Conversation
 	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &got)
 	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
-		t.Fatal("omitting target must close the caller itself")
+		t.Fatal("omitting target must close the caller itself, once its task is processed")
 	}
 }
 
@@ -701,10 +733,11 @@ func TestHandleCoordinateCloseWidenedBoundPermitsAPlainMemberToCloseASiblingRoot
 	if rec.Code != 200 {
 		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	drainCoordinateTasks(t, s, rec)
 	var got agentopsv1alpha1.Conversation
 	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "incident-1"}, &got)
 	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
-		t.Fatal("the sibling root must be closed")
+		t.Fatal("the sibling root must be closed, once its task is processed")
 	}
 }
 
@@ -718,13 +751,63 @@ func TestHandleCoordinateCloseWidenedBoundRefusesTheCallersOwnAncestorRoot(t *te
 	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "reaper-1")
 	rec := postCoordinate(s, "/coordinate/close", token,
 		map[string]any{"conversation": "reaper-1", "target": "root-1", "reason": "trying to close my own root"})
-	if rec.Code != 403 {
-		t.Fatalf("want 403, got %d: %s", rec.Code, rec.Body.String())
+	// Accept still succeeds (200): the widened-scope refusal is no longer a
+	// cheap read run at accept, so it surfaces only once taskCloseCoordinated
+	// runs — see TestHandleCoordinateCloseEnforcesOneHopReach's own comment.
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	drainCoordinateTasks(t, s, rec)
 	var got agentopsv1alpha1.Conversation
 	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &got)
 	if got.Status.Phase == agentopsv1alpha1.ConversationClosed {
-		t.Fatal("the reaper must never close its own ancestor root")
+		t.Fatal("the reaper must never close its own ancestor root, even once its task is processed")
+	}
+}
+
+// design D-7, task 5.3: the accept-time cascade walk builds one task per
+// member it can SEE at accept time. A member invoked AFTER accept, before
+// the root's own task has actually run, is still found and closed — not by
+// anything this decomposition writes, but because taskCloseCoordinated's
+// own call to Router.CloseCoordinated (unchanged) re-lists root-1's live
+// causedBy members FRESH when it runs, never from the accept-time
+// snapshot that built the member tasks ahead of it.
+func TestHandleCoordinateCloseAncestorReChecksAMemberInvokedAfterAccept(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	// An alert, not a person's own request — isHumanInitiated must report
+	// false, or the self-close below is refused outright.
+	root.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
+	member := coordMember("member-1", "root-1", "worker")
+	s, c := coordServer(t, coordCoordinator("co-a"), root, member)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/close", token,
+		map[string]any{"conversation": "root-1", "reason": "done"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	ids := acceptedIDs(t, rec)
+	if len(ids) != 2 {
+		t.Fatalf("want member-1's own CascadeMember task plus the root's own task (2), got %v", ids)
+	}
+
+	// A member invoked AFTER accept — the accept-time walk never saw it, so
+	// no task was ever built for it.
+	late := coordMember("member-2", "root-1", "worker")
+	if err := c.Create(context.Background(), late); err != nil {
+		t.Fatal(err)
+	}
+
+	drainCoordinateTasks(t, s, rec)
+
+	for _, name := range []string{"member-1", "member-2"} {
+		var got agentopsv1alpha1.Conversation
+		if err := c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: name}, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
+			t.Fatalf("%s must be closed, including the one invoked after accept, got phase %q", name, got.Status.Phase)
+		}
 	}
 }
 
@@ -875,12 +958,16 @@ func TestHandleCoordinateCloseOnSelfStampsTheMove(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	// The move is stamped at ACCEPT, before the task ever runs — checked
+	// here, before draining, to pin that ordering.
+	assertMoved(t, c, "root-1", true)
+	drainCoordinateTasks(t, s, rec)
 	var got agentopsv1alpha1.Conversation
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
-		t.Fatalf("close on self must close the caller, phase=%s", got.Status.Phase)
+		t.Fatalf("close on self must close the caller once its task is processed, phase=%s", got.Status.Phase)
 	}
 	assertMoved(t, c, "root-1", true)
 }
@@ -899,4 +986,37 @@ func TestHandleCoordinateVerbWithNoInflightRunStampsNothing(t *testing.T) {
 	if inflight := inflightOf(t, c, "root-1"); inflight != nil {
 		t.Fatalf("no inflight run must be invented by the stamp, got %+v", inflight)
 	}
+}
+
+// design D-A, mirrored from /coordinate/invoke's own "accepted-then-failed
+// still counts as a move": the stamp is written synchronously inside
+// handleCoordinateClose, before the task that will eventually refuse the
+// close (ErrOutOfScope, closing the reaper's own ancestor root) ever runs.
+func TestHandleCoordinateCloseStampsTheMoveEvenWhenItsTaskLaterFails(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	reaper := coordMember("reaper-1", "root-1", "reaper")
+	reaper.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r1"}
+	s, c := coordServer(t, coordCoordinator("co-a"), root, reaper)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "reaper-1")
+
+	rec := postCoordinate(s, "/coordinate/close", token,
+		map[string]any{"conversation": "reaper-1", "target": "root-1", "reason": "trying to close my own root"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	// Stamped at ACCEPT, on the CALLER's own inflight run (reaper-1) — before
+	// the task that will eventually refuse this close has even been claimed.
+	assertMoved(t, c, "reaper-1", true)
+
+	drainCoordinateTasks(t, s, rec)
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		t.Fatal("the reaper's close of its own ancestor root must still be refused once the task runs")
+	}
+	// The stamp survives the task's own refusal — it was never conditioned
+	// on the eventual outcome.
+	assertMoved(t, c, "reaper-1", true)
 }

@@ -15,22 +15,36 @@
 //	/close, /exit (chat, on a bound thread)    conv   the conversation
 //	a plain inbound chat reply                 conv   the conversation
 //	reopen, delete, reset-context               conv   the conversation
-//	the idle timer's auto-close                 conv   the conversation
-//	a budget-exceeded close+escalate             conv   the conversation
+//	the idle timer's auto-close                 conv   the conversation (root)
+//	a budget-exceeded close+escalate             conv   the conversation (root)
 //	                                                    (always a Coordinator
 //	                                                    root by construction)
+//	/coordinate/close                           conv   the TARGET (root)
+//	/coordinate/escalate                        conv   the conversation
 //
-// A conversation IS its own cascade's root for every verb this package
-// enqueues: /close's and the idle timer's cascades run wholesale inside one
-// task, calling the exact Router methods that already recurse live over
-// `causedBy` (chat.Router.CloseConversation/AutoCloseConversation/
-// CloseBudgetExceeded, unchanged) — so "the ancestor re-checks its
-// descendants when it runs" (design D-7) holds for them today, at the cost
-// of the per-member ledger visibility a fuller decomposition would add
-// (see the package-level report this change was handed back with). DELETE
-// is the one verb decomposed per D-7's letter: handleConversationDelete
-// enqueues one task per already-closed descendant, deepest-first, ending
-// with the target itself, all sharing the target's name as Key (task 5.10).
+// A conversation is its own cascade's root for every close-shaped verb
+// this package or internal/controller enqueues (design D-7, task 5.3):
+// the idle timer's auto-close, a budget-exceeded close+escalate and
+// /coordinate/close each walk their own target's causedBy subtree
+// (closeCascadeRequests, closecascade.go) and submit one CascadeMember
+// task per LIVE descendant, members before the parent, ahead of that
+// verb's OWN final request — the exact Router call that already recursed
+// live over causedBy before this change (chat.Router.CloseConversation/
+// AutoCloseConversation/CloseBudgetExceeded/CloseCoordinated, unchanged),
+// now reused as the ancestor's own run-time re-check.
+//
+// A plain chat `/close` (and the console's bulk close, N individual chat
+// closes) is the one close-shaped verb this does NOT reach: it is
+// discovered only by parsing text inside chat.Router.HandleMessage, which
+// already runs INSIDE a single "conv" task with no commandbus.Bus of its
+// own to reach — see closecascade.go's own doc comment for why. It still
+// cascades correctly, wholesale, inside that one task.
+//
+// DELETE is decomposed per D-7's letter too, over an already fully-closed
+// subtree with no run-time re-check needed (a Closed conversation can
+// invoke no new member): handleConversationDelete enqueues one task per
+// already-closed descendant, deepest-first, ending with the target itself,
+// all sharing the target's name as Key (task 5.10).
 //
 // in.signal (source + initiationId) carries no producer in this change —
 // see the hand-back report for why handleSignalInbound's own publish/

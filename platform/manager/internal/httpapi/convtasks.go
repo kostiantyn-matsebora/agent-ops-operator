@@ -7,15 +7,14 @@
 // run inside.
 //
 // Every verb below is a thin call into a chat.Router/Server method that
-// already existed before this change and is UNCHANGED by it (close, exit,
-// reopen, reset-context, the cascades CloseConversation/
-// AutoCloseConversation/CloseBudgetExceeded already perform live against
-// causedBy): this file only moves WHEN they run, never WHAT they do. See
-// accept.go's package doc for which verb gets which Key, and the change's
-// own hand-back report for the two simplifications against design D-7 this
-// package made under time: a plain close/auto-close/budget-exceeded
-// cascade runs wholesale inside one task rather than one task per member
-// (delete, task 5.10, is the one cascade decomposed per the letter of D-7).
+// already existed before this change — close, exit, reopen, reset-context,
+// CloseCoordinated, Escalate — and is UNCHANGED by it: this file only moves
+// WHEN they run, never WHAT they do. The one exception is VerbClose's own
+// CascadeMember branch, which calls the NEW CloseConversationReason rather
+// than a recursive Router method — see that field's own doc comment
+// (internal/convtask.Payload). See accept.go's package doc for which verb
+// gets which Key and which close-shaped verb's cascade is decomposed per
+// design D-7 (task 5.3) versus left wholesale (plain chat `/close`).
 package httpapi
 
 import (
@@ -61,6 +60,10 @@ func (s *Server) HandleConvTask(ctx context.Context, task commandbus.Task) error
 		return s.taskResetContext(ctx, &p)
 	case convtask.VerbInboundMessage:
 		return s.taskInboundMessage(ctx, &p)
+	case convtask.VerbCloseCoordinated:
+		return s.taskCloseCoordinated(ctx, &p)
+	case convtask.VerbEscalate:
+		return s.taskEscalate(ctx, &p)
 	default:
 		return consumer.WithCode(commandbus.CodeInvalidCommand,
 			fmt.Errorf("conv task %s: unknown verb %q", task.UID, p.Verb))
@@ -68,13 +71,14 @@ func (s *Server) HandleConvTask(ctx context.Context, task commandbus.Task) error
 }
 
 // closeBudgetExceeded is handleWorkDone's own budget-exceeded call site
-// (design D-E's maxTurns edge, task 5.4): ENQUEUE a "conv" task when s.Bus
-// is set, falling back to calling chat.Router directly, inline, when it is
-// not — the exact pattern internal/controller's own closeBudgetExceeded
-// follows for the deadline edge, kept in step rather than duplicated with
-// drift. CommandID is stable per conversation, so a /work/done redelivery
-// (same conversation, same digest text or not) resubmits a suppressed id
-// rather than a second task.
+// (design D-E's maxTurns edge, task 5.4): ENQUEUE a close CASCADE when
+// s.Bus is set, falling back to calling chat.Router directly, inline, when
+// it is not — the exact pattern internal/controller's own
+// closeBudgetExceeded follows for the deadline edge, kept in step rather
+// than duplicated with drift (closeCascadeRequests, closecascade.go, is
+// the ONE shared builder both call). CommandID is stable per conversation,
+// so a /work/done redelivery (same conversation, same digest text or not)
+// resubmits a suppressed id rather than a second task.
 func (s *Server) closeBudgetExceeded(ctx context.Context, conv *state.ConversationRecord, digest string) error {
 	if s.Bus == nil {
 		if s.Router == nil {
@@ -82,7 +86,7 @@ func (s *Server) closeBudgetExceeded(ctx context.Context, conv *state.Conversati
 		}
 		return s.Router.CloseBudgetExceeded(ctx, conv, digest)
 	}
-	_, err := s.Bus.Submit(ctx, commandbus.SubmitRequest{
+	rootReq := commandbus.SubmitRequest{
 		Queue:     ConvQueue,
 		CommandID: commandbus.CommandID("budget-exceeded:" + conv.Name),
 		Key:       commandbus.Key(conv.Name),
@@ -90,8 +94,17 @@ func (s *Server) closeBudgetExceeded(ctx context.Context, conv *state.Conversati
 			Verb: convtask.VerbClose, Conversation: conv.Name,
 			CloseKind: convtask.CloseBudgetExceeded, Reason: digest,
 		}.Encode(),
-	})
-	return err
+	}
+	reqs, err := s.closeCascadeRequests(ctx, conv.Name, "budget-exceeded", rootReq)
+	if err != nil {
+		return err
+	}
+	for _, req := range reqs {
+		if _, err := s.Bus.Submit(ctx, req); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // convByName re-reads a conversation by name, fresh — a task runs some time
@@ -125,6 +138,14 @@ func (s *Server) taskClose(ctx context.Context, p *convtask.Payload) error {
 	conv, err := s.convByName(ctx, p.Conversation)
 	if err != nil {
 		return codeForRouterErr(err)
+	}
+	if p.CascadeMember {
+		// One node of a decomposed close cascade (design D-7, task 5.3): the
+		// recursion closeWithCascade/cascadeCloseMembers used to perform
+		// already ran at accept time (or at the controller's own call
+		// site), as the ordered task list this task is one entry of — see
+		// convtask.CloseMemberRequests' own doc comment.
+		return codeForRouterErr(s.Router.CloseConversationReason(ctx, conv, p.Reason))
 	}
 	switch p.CloseKind {
 	case convtask.CloseAuto:
@@ -223,6 +244,58 @@ func (s *Server) taskInboundMessage(ctx context.Context, p *convtask.Payload) er
 		return err
 	}
 	return nil
+}
+
+// taskCloseCoordinated is /coordinate/close's own task (async-command-bus
+// task 5.2/5.5, replacing what handleCoordinateClose used to call inline):
+// re-reads the ACTING caller fresh by name — a task runs some time after
+// accept, so, exactly like every other handler in this file, it trusts
+// nothing about either conversation beyond the two names its payload
+// carries — then calls Router.CloseCoordinated UNCHANGED. That unchanged
+// call is also this cascade's own "ancestor re-checks its descendants at
+// run time" step (design D-7): it re-lists caller's/target's live causedBy
+// members fresh when THIS task runs, closing any straggler invoked between
+// accept and now, exactly as it always has.
+func (s *Server) taskCloseCoordinated(ctx context.Context, p *convtask.Payload) error {
+	caller, err := s.convByName(ctx, p.Caller)
+	if err != nil {
+		return codeForRouterErr(err)
+	}
+	return codeForCoordinateErr(s.Router.CloseCoordinated(ctx, caller, p.Conversation, p.Reason))
+}
+
+// taskEscalate is /coordinate/escalate's own task (task 5.2/5.5), and the
+// FINAL request of a budget-exceeded cascade (task 5.3) — every member of
+// which has already closed, on the same root key, strictly before this
+// task is claimable. Conversation names the escalating conversation
+// itself; Reason carries the message/digest.
+func (s *Server) taskEscalate(ctx context.Context, p *convtask.Payload) error {
+	conv, err := s.convByName(ctx, p.Conversation)
+	if err != nil {
+		return codeForRouterErr(err)
+	}
+	return codeForCoordinateErr(s.Router.Escalate(ctx, conv, p.Reason))
+}
+
+// codeForCoordinateErr maps a CloseCoordinated/Escalate refusal onto the
+// commandbus closed vocabulary (design D-6) by REUSING statusFor
+// (coordinate.go) — the exact classification the HTTP handlers already
+// gave these same errors (a scope mistake is 403, never worth retrying),
+// so the two surfaces cannot drift apart by having two lists of the same
+// errors.
+func codeForCoordinateErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, state.ErrNotFound) {
+		return consumer.WithCode(commandbus.CodeNotFound, err)
+	}
+	switch statusFor(err) {
+	case 401, 403:
+		return consumer.WithCode(commandbus.CodeForbidden, err)
+	default:
+		return err // unparsed: Fail's own ParseErrorCode fallback -> internal, retried
+	}
 }
 
 // inboundMessageCommandID is design D-9's inbound-dedup rule for a channel

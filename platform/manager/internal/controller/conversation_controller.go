@@ -494,18 +494,23 @@ func (r *ConversationReconciler) autoClose(ctx context.Context, conv *state.Conv
 }
 
 // closeBudgetExceeded and autoCloseConversation (async-command-bus task
-// 5.4): ENQUEUE a "conv" task when r.Bus is set, falling back to calling
+// 5.4) ENQUEUE a close CASCADE when r.Bus is set, falling back to calling
 // chat.Router directly, inline, exactly as this reconciler always has, when
 // it is not (nil: every existing test, and any install that has not wired
-// one). Both close kinds carry the EXACT same cascade chat.Router.
-// CloseBudgetExceeded/AutoCloseConversation already perform — this only
-// moves WHEN they run, on the conversation's own name as Key, consistent
-// with every other "conv" verb (internal/httpapi/accept.go's own table).
+// one). Each enqueues one CascadeMember task per LIVE causedBy descendant
+// (task 5.3, design D-7: "members go before the parent"), deepest-first,
+// ahead of the SAME top-level request the earlier, simpler version of this
+// change submitted alone — the exact cascade chat.Router.
+// CloseBudgetExceeded/AutoCloseConversation already perform, re-run
+// unchanged as that final request, which is what gives the ancestor's own
+// task its run-time re-check of stragglers for free. All share the
+// conversation's own name as Key, consistent with every other "conv" verb
+// (internal/httpapi/accept.go's own table).
 func (r *ConversationReconciler) closeBudgetExceeded(ctx context.Context, conv *state.ConversationRecord, digest string) error {
 	if r.Bus == nil {
 		return r.Router.CloseBudgetExceeded(ctx, conv, digest)
 	}
-	_, err := r.Bus.Submit(ctx, commandbus.SubmitRequest{
+	rootReq := commandbus.SubmitRequest{
 		Queue:     convtask.Queue,
 		CommandID: commandbus.CommandID("budget-exceeded:" + conv.Name),
 		Key:       commandbus.Key(conv.Name),
@@ -513,15 +518,15 @@ func (r *ConversationReconciler) closeBudgetExceeded(ctx context.Context, conv *
 			Verb: convtask.VerbClose, Conversation: conv.Name,
 			CloseKind: convtask.CloseBudgetExceeded, Reason: digest,
 		}.Encode(),
-	})
-	return err
+	}
+	return r.submitCloseCascade(ctx, conv.Name, "budget-exceeded", rootReq)
 }
 
 func (r *ConversationReconciler) autoCloseConversation(ctx context.Context, conv *state.ConversationRecord, idle time.Duration) error {
 	if r.Bus == nil {
 		return r.Router.AutoCloseConversation(ctx, conv, idle)
 	}
-	_, err := r.Bus.Submit(ctx, commandbus.SubmitRequest{
+	rootReq := commandbus.SubmitRequest{
 		Queue:     convtask.Queue,
 		CommandID: commandbus.CommandID("auto-close:" + conv.Name),
 		Key:       commandbus.Key(conv.Name),
@@ -529,8 +534,31 @@ func (r *ConversationReconciler) autoCloseConversation(ctx context.Context, conv
 			Verb: convtask.VerbClose, Conversation: conv.Name,
 			CloseKind: convtask.CloseAuto, IdleForMS: idle.Milliseconds(),
 		}.Encode(),
-	})
-	return err
+	}
+	// A plain auto-close's cascade members carry no reason verbatim either
+	// (closeConversation's own cascadeCloseMembers call never did) — "" to
+	// match.
+	return r.submitCloseCascade(ctx, conv.Name, "", rootReq)
+}
+
+// submitCloseCascade lists rootName's own causedBy subtree
+// (chat.Router.Descendants) and submits one CascadeMember task per LIVE
+// descendant (convtask.CloseMemberRequests) ahead of rootReq, in order —
+// this reconciler's own analogue of httpapi's closeCascadeRequests, over
+// the same commandbus.Bus.Submit loop since there is no accept-time
+// invocationId to mint here (nothing is reporting back to an HTTP caller).
+func (r *ConversationReconciler) submitCloseCascade(ctx context.Context, rootName, reason string, rootReq commandbus.SubmitRequest) error {
+	descendants, err := r.Router.Descendants(ctx, rootName)
+	if err != nil {
+		return err
+	}
+	reqs := append(convtask.CloseMemberRequests(rootName, reason, descendants), rootReq)
+	for _, req := range reqs {
+		if _, err := r.Bus.Submit(ctx, req); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // finished reports whether a conversation has nothing left to do. It gates

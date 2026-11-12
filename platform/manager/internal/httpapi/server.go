@@ -1519,27 +1519,13 @@ func (s *Server) deleteCascadeRequests(ctx context.Context, rootName string) ([]
 // deleteCascadeOrder turns a flat descendant list into deepest-first
 // post-order, rootName last — a child's own children are visited (and so
 // ordered) before it, and rootName is visited only once every other name
-// has been. Built from causedBy.Parent alone (the index chat.Router.
-// Descendants already resolved it against is a hint, never trusted twice
-// here).
+// has been. The algorithm itself now lives in convtask.CascadeOrder — the
+// close cascade (closeCascadeRequests, task 5.3) needs the SAME ordering,
+// so it is written once and shared rather than kept as two copies that
+// could drift (this function stays, under its own name, only because
+// cascade_delete_test.go already pins it).
 func deleteCascadeOrder(rootName string, descendants []state.ConversationRecord) []string {
-	children := map[string][]string{}
-	for i := range descendants {
-		d := &descendants[i]
-		if d.CausedBy != nil {
-			children[d.CausedBy.Parent] = append(children[d.CausedBy.Parent], d.Name)
-		}
-	}
-	var out []string
-	var visit func(name string)
-	visit = func(name string) {
-		for _, child := range children[name] {
-			visit(child)
-		}
-		out = append(out, name)
-	}
-	visit(rootName)
-	return out
+	return convtask.CascadeOrder(rootName, descendants)
 }
 
 func phaseOrOpen(conv *state.ConversationRecord) string {

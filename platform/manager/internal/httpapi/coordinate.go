@@ -28,6 +28,8 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/convtask"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
@@ -207,6 +209,24 @@ type closeReq struct {
 	Reason       string `json:"reason"`
 }
 
+// handleCoordinateClose is /coordinate/close's ACCEPT step (async-command-
+// bus design D-9, task 5.2/5.5): authentication and resolving target
+// default to the caller (a cheap read, exactly as before) still run here,
+// synchronously — the widened-scope check CloseCoordinated itself performs
+// (one-hop membership, the Coordinator-owner sibling-root widening,
+// isHumanInitiated) is NOT cheap in that sense and is deferred into the
+// task, which re-derives it fresh when it runs.
+//
+// D-9's own "a coordinator verb keeps the 200 and body it returns today
+// and gains the same two fields": the reply stays 200 {"ok":true}, now
+// carrying invocationId/taskIds too, never 202 — the one way this verb's
+// wire shape differs from reopen/delete/reset-context/channel-inbound.
+//
+// The cascade (design D-7, task 5.3): closeCascadeRequests walks the
+// TARGET's own causedBy subtree and submits one task per LIVE member ahead
+// of the final VerbCloseCoordinated task (taskCloseCoordinated,
+// convtasks.go), which performs the unchanged Router.CloseCoordinated call
+// — scope check, self-close and run-time re-check, all together.
 func (s *Server) handleCoordinateClose(w http.ResponseWriter, r *http.Request) {
 	var in closeReq
 	if err := readJSON(r, &in); err != nil || in.Reason == "" {
@@ -227,14 +247,32 @@ func (s *Server) handleCoordinateClose(w http.ResponseWriter, r *http.Request) {
 	if target == "" {
 		target = caller.Name
 	}
-	if err := s.Router.CloseCoordinated(ctx, caller, target, in.Reason); err != nil {
-		writeCoordinateError(w, statusFor(err), err)
+	rootReq := commandbus.SubmitRequest{
+		Queue:     ConvQueue,
+		CommandID: commandbus.CommandID("coordinate-close:" + target),
+		Key:       commandbus.Key(target),
+		Payload: convtask.Payload{
+			Verb: convtask.VerbCloseCoordinated, Conversation: target,
+			Caller: caller.Name, Reason: in.Reason,
+		}.Encode(),
+	}
+	reqs, err := s.closeCascadeRequests(ctx, target, in.Reason, rootReq)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	// Stamped even when the target was the caller itself and is now Closed: a
-	// Closed conversation is never judged, so the mark is the record only.
+	resp, err := s.acceptAndEnqueue(ctx, reqs...)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	// Stamped at ACCEPT, unconditionally on a successful Submit — not
+	// deferred into the task — exactly as /coordinate/invoke's own stamp
+	// already runs on an accepted call, "accepted-then-failed... still
+	// counts as a move" (design D-A): the verb was accepted, whatever the
+	// eventual task outcome.
 	s.stampMove(ctx, caller.Name)
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	writeJSON(w, 200, map[string]any{"ok": true, "invocationId": resp.InvocationID, "taskIds": resp.TaskIDs})
 }
 
 type escalateReq struct {
@@ -242,6 +280,13 @@ type escalateReq struct {
 	Message      string `json:"message"`
 }
 
+// handleCoordinateEscalate is /coordinate/escalate's own ACCEPT step
+// (async-command-bus design D-9, task 5.2/5.5): authentication stays here,
+// synchronously; the escalate itself (a cascade-close-then-append for a
+// CAUSED caller, a plain status patch for an uncaused root) runs later, in
+// taskEscalate. The reply stays 200 {"ok":true}, now with
+// invocationId/taskIds — D-9's "a coordinator verb keeps the 200... and
+// gains the same two fields".
 func (s *Server) handleCoordinateEscalate(w http.ResponseWriter, r *http.Request) {
 	var in escalateReq
 	if err := readJSON(r, &in); err != nil || in.Message == "" {
@@ -257,14 +302,21 @@ func (s *Server) handleCoordinateEscalate(w http.ResponseWriter, r *http.Request
 		writeCoordinateError(w, statusFor(err), err)
 		return
 	}
-	if err := s.Router.Escalate(ctx, caller, in.Message); err != nil {
-		writeCoordinateError(w, statusFor(err), err)
+	resp, err := s.acceptAndEnqueue(ctx, commandbus.SubmitRequest{
+		Queue:     ConvQueue,
+		CommandID: commandbus.CommandID("escalate:" + caller.Name),
+		Key:       commandbus.Key(caller.Name),
+		Payload:   convtask.Payload{Verb: convtask.VerbEscalate, Conversation: caller.Name, Reason: in.Message}.Encode(),
+	})
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	// An escalate on an already-escalated root replays no digest but is still
-	// a decision, so it is still a move (design D-A).
+	// An escalate on an already-escalated root replays no digest but is
+	// still a decision, so it is still a move (design D-A) — stamped at
+	// ACCEPT, same reasoning as handleCoordinateClose's own stamp.
 	s.stampMove(ctx, caller.Name)
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	writeJSON(w, 200, map[string]any{"ok": true, "invocationId": resp.InvocationID, "taskIds": resp.TaskIDs})
 }
 
 // stampMove records on the CALLER's inflight run that the verb just accepted

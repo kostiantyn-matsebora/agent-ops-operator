@@ -758,6 +758,18 @@ func (r *Router) cascadeCloseMembers(ctx context.Context, parentName, reason str
 	return nil
 }
 
+// CloseConversationReason closes EXACTLY ONE conversation — no cascade —
+// idempotent on an already-Closed target. Exported for the command-bus
+// close cascade's own accept-time decomposition (async-command-bus design
+// D-7, internal/convtask.CloseMemberRequests): a cascade's member tasks
+// close only themselves through this method, never closeWithCascade/
+// cascadeCloseMembers — the recursion those two perform now happens once,
+// at accept time, as the ordered task list itself, rather than inside any
+// one task.
+func (r *Router) CloseConversationReason(ctx context.Context, conv *state.ConversationRecord, reason string) error {
+	return r.closeConversationReason(ctx, conv, reason)
+}
+
 // closeConversationReason is closeConversation plus a stamped CloseReason —
 // required from a coordinator's own close (conversation-close), absent from
 // an ordinary `/close`.

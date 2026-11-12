@@ -12,6 +12,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
@@ -31,13 +32,16 @@ func routerOver(c client.Client, store state.Collection[state.ConversationRecord
 
 func TestCloseBudgetExceededEnqueuesAConvTaskWhenBusIsSet(t *testing.T) {
 	c := fakeClaimClient(t, claimTestConv("c-1")).Build()
+	store := claimStore(c)
 	bus := memory.Open()
-	r := &ConversationReconciler{Conversations: claimStore(c), Bus: bus}
-	conv := claimRec(t, claimStore(c), "c-1")
+	r := &ConversationReconciler{Conversations: store, Bus: bus, Router: routerOver(c, store)}
+	conv := claimRec(t, store, "c-1")
 
 	if err := r.closeBudgetExceeded(context.Background(), conv, "budget-exceeded: deadline passed"); err != nil {
 		t.Fatal(err)
 	}
+	// c-1 has no causedBy descendants, so the cascade (design D-7, task 5.3)
+	// submits exactly ONE request — its own unchanged top-level task.
 	task, err := bus.Claim(context.Background(), convtask.Queue, "test")
 	if err != nil {
 		t.Fatal(err)
@@ -56,9 +60,10 @@ func TestCloseBudgetExceededEnqueuesAConvTaskWhenBusIsSet(t *testing.T) {
 
 func TestAutoCloseConversationEnqueuesAConvTaskWhenBusIsSet(t *testing.T) {
 	c := fakeClaimClient(t, claimTestConv("c-1")).Build()
+	store := claimStore(c)
 	bus := memory.Open()
-	r := &ConversationReconciler{Conversations: claimStore(c), Bus: bus}
-	conv := claimRec(t, claimStore(c), "c-1")
+	r := &ConversationReconciler{Conversations: store, Bus: bus, Router: routerOver(c, store)}
+	conv := claimRec(t, store, "c-1")
 
 	if err := r.autoCloseConversation(context.Background(), conv, 90*time.Minute); err != nil {
 		t.Fatal(err)
@@ -76,6 +81,56 @@ func TestAutoCloseConversationEnqueuesAConvTaskWhenBusIsSet(t *testing.T) {
 	}
 	if time.Duration(p.IdleForMS)*time.Millisecond != 90*time.Minute {
 		t.Fatalf("want the idle window round-tripped, got %dms", p.IdleForMS)
+	}
+}
+
+// A conversation with LIVE causedBy members enqueues one CascadeMember task
+// per member, deepest-first, ahead of the root's own request, all sharing
+// the ROOT's name as Key (design D-7, task 5.3) — this package's own
+// analogue of httpapi's TestDeleteCascadeRequestsBuildsOneTaskPerConversationKeyedOnTheRoot.
+func TestCloseBudgetExceededEnqueuesTheCascadeMembersBeforeTheRoot(t *testing.T) {
+	root := claimTestConv("root-1")
+	member := claimTestConv("member-1")
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "worker"}
+	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: "root-1"}
+	c := fakeClaimClient(t, root, member).Build()
+	store := claimStore(c)
+	bus := memory.Open()
+	r := &ConversationReconciler{Conversations: store, Bus: bus, Router: routerOver(c, store)}
+	conv := claimRec(t, store, "root-1")
+
+	if err := r.closeBudgetExceeded(context.Background(), conv, "budget-exceeded: deadline passed"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := bus.Claim(context.Background(), convtask.Queue, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp, err := convtask.Decode(first.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fp.CascadeMember || fp.Conversation != "member-1" {
+		t.Fatalf("want member-1's own CascadeMember task first, got %+v", fp)
+	}
+	if first.Key != commandbus.Key("root-1") {
+		t.Fatalf("want the ROOT's own name as Key, got %q", first.Key)
+	}
+	// member-1's task settles before root-1's becomes claimable — they share
+	// a Key, so the bus serializes them in submission order.
+	if err := bus.Settle(context.Background(), first.UID, first.Lease.Token); err != nil {
+		t.Fatal(err)
+	}
+	second, err := bus.Claim(context.Background(), convtask.Queue, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp, err := convtask.Decode(second.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sp.CascadeMember || sp.Conversation != "root-1" || sp.CloseKind != convtask.CloseBudgetExceeded {
+		t.Fatalf("want root-1's own close/budget-exceeded task last, got %+v", sp)
 	}
 }
 
