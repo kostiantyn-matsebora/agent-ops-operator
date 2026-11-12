@@ -70,12 +70,22 @@ capability that does not depend on where state is kept.
   - A batch is only an `invocationId` tag shared by its tasks.
   - A cascade enqueues one task per member, members before the parent, on the
     root conversation's key.
-- **`OpQueue` moves onto the bus** as the `out.<channelType>` queues, keyed by
-  conversation and channel.
+- **`OpQueue` moves onto the bus** as one `out.<channel>` queue per Channel
+  resource, keyed by conversation.
+  - A channel's backlog never delays another channel of the same adapter type.
   - Its method surface is kept, so the router, reconciler and handlers do not
     change.
   - Fire-and-forget sends gain a TTL, so a restart cannot deliver a stale
     notice.
+- **One fan-out point.** Every thread entry (input, run reply, escalation,
+  notice) is recorded once and enqueued from a single function to each bound
+  channel's queue, in causal order. Separate producers raced: the move-per-turn
+  nudge reached the console before the analysis it reacted to.
+- **The console is fed from its queue over one SSE stream, with resume.** The
+  manager pushes the console channel's entries in queue order. A consumer
+  acknowledges by sequence and a reconnect replays from its last acknowledged
+  sequence, so a dropped connection loses nothing and needs no refresh.
+  Telegram keeps its long-poll over the same per-channel queue.
 - **Read surface:** `GET /state/tasks` (with a stream) and
   `GET /state/dead-letters`. Both are read-only and use the existing `/state/*`
   token scheme.

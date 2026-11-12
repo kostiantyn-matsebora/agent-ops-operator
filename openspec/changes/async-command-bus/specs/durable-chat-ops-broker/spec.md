@@ -155,3 +155,36 @@ fallback.
 - **WHEN** a poll on `/channel/ops` or a read of `/state/tasks` reaches a
   non-leader replica
 - **THEN** that replica answers it from the command bus and forwards nothing
+
+## ADDED Requirements
+
+### Requirement: A thread entry is fanned out once, in causal order
+Every thread entry (an input, a run reply, an escalation, a notice) SHALL be enqueued from one function to the queue of each channel bound to the conversation, except the surface that already displayed it.
+
+The order in which entries are enqueued SHALL be the order in which they happened. No other code path SHALL enqueue a thread entry.
+
+#### Scenario: An answer precedes the hand-back its turn caused
+- **WHEN** a run finishes without a move and the manager appends its corrective input
+- **THEN** every bound channel's queue holds the run's reply before the corrective input
+
+#### Scenario: Entries reach each bound channel once
+- **WHEN** an entry is recorded for a conversation bound to two channels
+- **THEN** each channel's queue holds it once, except the surface that displayed it
+
+### Requirement: A channel's queue is independent of other channels
+Each channel SHALL have its own ordered queue. An adapter SHALL receive the entries of every channel that names it, and a channel that is unavailable SHALL NOT delay any other.
+
+#### Scenario: An unavailable channel does not hold back its sibling
+- **WHEN** one of two Channels of the same adapter type stops acknowledging
+- **THEN** the other continues to receive its entries in order
+
+### Requirement: The console is fed from its queue over one stream and resumes after a disconnect
+The manager SHALL push the console channel's queue entries over the console's single SSE stream, in queue order, each carrying its sequence. A consumer SHALL acknowledge an entry by sequence. A reconnect that names the last acknowledged sequence SHALL replay every later entry, and an unacknowledged entry SHALL stay queued.
+
+#### Scenario: A dropped connection loses nothing
+- **WHEN** the stream drops while entries are being produced and the console reconnects with its last acknowledged sequence
+- **THEN** it receives every later entry in order, without a refresh
+
+#### Scenario: A replay does not duplicate an acknowledged entry
+- **WHEN** the console reconnects after acknowledging an entry
+- **THEN** that entry is not delivered again

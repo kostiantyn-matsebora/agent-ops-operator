@@ -345,7 +345,7 @@ a contract change with a conformance scenario.
 |---|---|
 | `conv` | the root conversation of the `causedBy` tree |
 | `in.signal` | the source and the `initiationId` |
-| `out.<channelType>` | the conversation and the channel |
+| `out.<channel>` | the conversation |
 
 Each queue SHALL declare:
 
@@ -360,9 +360,13 @@ Each queue SHALL declare:
 - **WHEN** a submit names a queue the inventory does not declare
 - **THEN** it is refused as `invalid_command` and nothing is recorded
 
-#### Scenario: A queue per channel type
-- **WHEN** a channel of a type the install serves is wired
-- **THEN** its operations flow through the `out.<channelType>` queue of that type, keyed by conversation and channel
+#### Scenario: A queue per channel
+- **WHEN** a channel is wired
+- **THEN** its operations flow through its own `out.<channel>` queue, keyed by conversation
+
+#### Scenario: One channel's backlog does not delay another
+- **WHEN** two channels of one adapter type are bound and one is unavailable
+- **THEN** the other's operations are claimed and delivered without waiting
 
 ### Requirement: Delivery is at least once and handlers are idempotent
 The bus SHALL deliver a task at least once. A handler SHALL be idempotent: a

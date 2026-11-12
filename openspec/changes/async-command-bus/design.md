@@ -135,9 +135,9 @@ change them. Each is a chart value.
 |---|---|---|---|---|---|
 | `conv` | root conversation | 5 | 1s to 30s, jitter | none | in-flight cap per invocation paces a bulk batch |
 | `in.signal` | source + `initiationId` | 5 | 1s to 30s, jitter | none | |
-| `out.<type>` stable kinds | conversation × channel | 8 | 5s to 5m, jitter | none | ensure-topic, run reply, input card, close-topic |
-| `out.<type>` ephemeral sends | conversation × channel | 2 | 5s | 2m | acks and notices |
-| `out.<type>` delete-conversation | conversation × channel | 3 | 5s | finalizer grace | never parked |
+| `out.<channel>` stable kinds | conversation | 8 | 5s to 5m, jitter | none | ensure-topic, run reply, input card, close-topic |
+| `out.<channel>` ephemeral sends | conversation | 2 | 5s | 2m | acks and notices |
+| `out.<channel>` delete-conversation | conversation | 3 | 5s | finalizer grace | never parked |
 
 Each queue also declares its dedup window, its park cool-off and the
 per-invocation in-flight cap. A kind may override a queue's attempts and
@@ -232,7 +232,9 @@ router, reconciler and handlers do not change.
 - **`Pending(id)` and `Settled(id)`** run on every reconcile pass. They read a
   watch-fed local mirror of pending and settled ids, never the server.
 - **Ephemeral sends** carry the short TTL in D-5.
-- **In-process providers** become a consumer consuming `out.<type>`.
+- **One queue per Channel resource**, `out.<channel>`. An adapter drains the
+  queues of every Channel that names it, so `/channel/ops?adapter=` is unchanged.
+- **In-process providers** become a consumer consuming `out.<channel>`.
 - **`/api/queues`** keeps working from the per-queue statistics.
 
 ### D-11: The leader proxy narrows and the claim placeholder retires
@@ -247,13 +249,50 @@ ignored. The lease defaults to five minutes through the existing
 `claimStalenessSeconds`, so the `reclaimAfterSeconds` an adapter receives does
 not change.
 
+### D-15: Thread entries have one fan-out point
+
+One function records a thread entry and enqueues it to the queue of every bound
+channel. Bound channels are the Conversation's snapshot of the Pipeline or
+Coordinator wiring, less the surface that already displayed the entry.
+
+- Inputs, run replies, escalations and notices all pass through it, so the order
+  in which they are enqueued is the order they happened.
+- It replaces the separate producers in the reconcile pass (`DeliverInputs`,
+  `deliverRunReplies`, `deliverEscalation`, the reopen notice). The reconciler
+  remains the backstop and calls this one function.
+- It supersedes the stopgap that flushed run replies before later inputs.
+
+A queue preserves enqueue order and nothing more. Measured live, the nudge was
+enqueued before the analysis it reacted to, so it reached the console first.
+
+| Alternative | Rejected because |
+|---|---|
+| Order by timestamp inside each producer | Every new producer must remember the rule. The stopgap did this for two |
+| A global queue for all channels | One slow channel delays every other |
+
+### D-16: The console is fed from its queue over one SSE stream, with resume
+
+The manager pushes the console channel's queue entries over the console's single
+SSE stream, in queue order. Telegram keeps its `/channel/ops` long-poll over the
+same per-channel queue.
+
+- Each entry carries a sequence within its channel's queue.
+- The consumer acknowledges an entry by sequence, through the existing
+  `/channel/ops/{id}/done`.
+- A reconnect names the last acknowledged sequence and the manager replays every
+  later entry. An unacknowledged entry stays queued, so a dropped connection
+  loses nothing and duplicates only what the consumer had not acknowledged.
+- A consumer that was away needs no refresh to catch up.
+
+The same shape serves any later consumer, such as a mobile app.
+
 ### D-12: What stays synchronous, and why
 
 | Operation | Reason |
 |---|---|
 | `invoke` | the reply carries the member and the budget reservation. An accepted-then-failed invoke would still count as a move |
 | `/work`, `/work/done`, `/work/context` | the runtime contract. Move-per-turn runs inside `/work/done` before the run is recorded, so a retried report is judged again and the corrective append lands once |
-| `/channel/ops`, `/channel/ops/{id}/done` | the consumer end of `out.*` |
+| `/channel/ops`, `/channel/ops/{id}/done`, the console's channel stream | the consumer end of `out.*` |
 | reads, streams, sessions, adapter state and status, `/activity`, mark read and unread | no work to defer, or the caller needs the result |
 
 The budget-exceeded close is enqueued as a `conv` close task after the run is

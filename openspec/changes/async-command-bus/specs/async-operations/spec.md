@@ -60,7 +60,7 @@ Every asynchronous command SHALL map to one queue and one ordering key:
 | `escalate` | `conv` | the root conversation of the target |
 | `append-result` | `conv` | the root conversation of the parent |
 | `ingest-signal` | `in.signal` | the source and the `initiationId` |
-| `ensure-topic`, `send`, `close-topic`, `delete-conversation` | `out.<channelType>` | the conversation and the channel |
+| `ensure-topic`, `send`, `close-topic`, `delete-conversation` | `out.<channel>` | the conversation |
 
 What the commands cover:
 
@@ -161,7 +161,7 @@ derived from the task, never from the clock, so a redelivery appends once.
 - **THEN** the parent holds one copy of the result
 
 ### Requirement: Channel operations run on the bus with their semantics preserved
-Outbound channel operations SHALL be tasks on the `out.<channelType>` queues.
+Outbound channel operations SHALL be tasks on the per-channel `out.<channel>` queues.
 Their existing behaviour SHALL be preserved:
 
 - a derived, stable operation id SHALL deduplicate against a pending task and a succeeded one

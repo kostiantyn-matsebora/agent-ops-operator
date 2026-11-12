@@ -346,6 +346,15 @@ role did not run. Left for whoever dispatches the cluster tier.
   re-proving it here too would cost every full-tier run several more
   real minutes for a fact this lane does not uniquely decide.
 
+## 13. Per-channel queues, one fan-out point, console feed — backend-developer
+
+- [ ] 13.1 Key the `out` family per Channel resource, `out.<channel>`, keyed by conversation. An adapter drains the queues of every Channel that names it, so `/channel/ops?adapter=` is unchanged.
+- [ ] 13.2 Add one fan-out function recording a thread entry and enqueueing it to each bound channel's queue in causal order, less the surface that displayed it.
+- [ ] 13.3 Route inputs, run replies, escalations and notices through it. Remove the separate producers in the reconcile pass and the stopgap flush of run replies before later inputs. The reconciler stays the backstop and calls the same function.
+- [ ] 13.4 Give each entry a per-channel sequence, and serve the console channel's queue over its one SSE stream in queue order.
+- [ ] 13.5 Resume: a reconnect naming the last acknowledged sequence replays every later entry. Acknowledgement is the existing `/channel/ops/{id}/done`, and an unacknowledged entry stays queued.
+- [ ] 13.6 Move the console to the stream. Telegram keeps its long-poll over the same per-channel queue.
+
 ## 10. Unit tests
 
 Audited across the whole repo, not just re-run. Everything else audited
@@ -365,6 +374,9 @@ was already real, already passing, and left alone. Three gaps closed:
 - [x] 10.4 The static import test, the error-code derivation table test and the leader-proxy exemption test.
 - [x] 10.5 The chart's render and guard tests for every permutation: default, URL, `memory`, each contradiction, credential precedence, `--is-upgrade`.
 - [x] 10.6 `go test` in every other module still passes, and `python3 .github/scripts/publication-guard.py` is clean.
+- [ ] 10.7 Unit-test the single fan-out point: an entry reaches each bound channel once less the displaying surface, and a run reply is enqueued before the corrective input its turn caused.
+- [ ] 10.8 Unit-test the per-channel queues: one channel not acknowledging never delays another channel of the same adapter type.
+- [ ] 10.9 Unit-test the console feed: entries arrive in queue order with their sequence, a reconnect replays after the last acknowledged sequence, and an acknowledged entry is not delivered again.
 
 ## 11. System tests
 
@@ -383,7 +395,7 @@ KUBEBUILDER_ASSETS=~/.envtest/k8s/1.31.0-linux-amd64 go test ./... -count=1   # 
 
 None of this is a pass of the lanes themselves — that needs the real k3d
 cluster, images and chart `system-full.yml` provisions, which this role
-did not run. Left for whoever dispatches the cluster tier (11.7).
+did not run. Left for whoever dispatches the cluster tier (11.8).
 
 - [ ] 11.1 Add lanes to `platform/manager/test/system/`, run against THIS working copy's chart and images, not the default branch's.
   **PACK-WIDE GUARANTEE, not a per-lane assertion.** `install.go`'s own
@@ -448,7 +460,8 @@ did not run. Left for whoever dispatches the cluster tier (11.7).
   kubelet's own network stack produces — the thing only a real cluster
   decides, per design D-14's own table — through the same backoff,
   dead-letter and `/state/dead-letters` listing checks 9.7 already uses.
-- [ ] 11.7 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
+- [ ] 11.7 System lane: drop the console stream while entries are produced, reconnect with the last acknowledged sequence, and confirm nothing is lost, duplicated or reordered, against the full tier.
+- [ ] 11.8 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
   **NOT PERFORMED — no cluster in this environment.** Left for whoever
   opens the pull request to dispatch, per `.github/routines/
   implement-issue.md`'s own step 6:
@@ -525,6 +538,7 @@ landed. `concepts.md`'s state-restart table still described
 - [x] 12.1.9 Re-run `python3 .github/scripts/docs-generate.py`, because chart values changed.
   Clean both before and after — the new guide's `renders bundle=commandbus`
   block generated correctly on the first pass.
+- [ ] 12.1.10 `docs/contracts/channel-adapter.md` and `docs/contracts.md`: the per-channel queue, the console stream with resume and sequence acknowledgement. Then `docs/concepts.md` for the single fan-out point.
 
 ### 12.2 Adopter site
 
@@ -539,7 +553,7 @@ landed. `concepts.md`'s state-restart table still described
   README's component list never goes past top-level directories
   (`platform/manager/` etc.). No new top-level directory was added —
   nothing to change.
-- [x] 12.2.4 The console UI is not touched, so `npm run screenshots` and `npm run demo` do not apply.
+- [ ] 12.2.4 The console moves to the stream, so re-run `npm run screenshots` and `npm run demo` in `platform/console/ui` and screenshot the live thread.
   Confirmed with `git diff --stat` from this change's own branch point —
   zero files under `platform/console/ui/` touched by any of this change's
   own commits.
