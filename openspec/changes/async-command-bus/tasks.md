@@ -361,11 +361,11 @@ Measured live: a claim landing between a submit's create and its second write of
 `Order` failed the submit with NATS 10071, so an escalation was lost. Every queue
 becomes an append-only log (design D-2, D-16): nothing is rewritten.
 
-- [ ] 14.1 Rebuild the `nats` backend as JetStream streams of immutable entries, subjects `<queue>.<key>.msg` and `.ev`, with a separate `dead` log. Remove the `tasks`/`ids` records, `Task.Order`, `recordOrder` and the second write in `createTask`.
-- [ ] 14.2 Claim, complete, fail and dead-letter are appended entries. A claim is appended conditionally on the key's last entry, so only one of two racing claims lands. State is folded from a task's own entries, and a lapsed lease reads as retryable with no write.
-- [ ] 14.3 Rebuild the `memory` backend as the same append-only log, so both meet one contract.
-- [ ] 14.4 Replace the sequence with the command id as the cursor: the SSE `id:` is the command id, a reconnect naming the last acknowledged id replays every later unacknowledged entry in log order, and an unknown id starts from the oldest unacknowledged entry. Update `ClaimSequenced`, `Resume`, `Bus.Running`, the console `feedCursor` and `StreamOps`.
-- [ ] 14.5 Keep retention to the log's own limits, with no operation of the bus on a single entry.
+- [x] 14.1 Rebuild the `nats` backend as JetStream streams of immutable entries, subjects `<queue>.<key>.msg` and `.ev`, with a separate `dead` log. Remove the `tasks`/`ids` records, `Task.Order`, `recordOrder` and the second write in `createTask`.
+- [x] 14.2 Claim, complete, fail and dead-letter are appended entries. A claim is appended conditionally on the key's last entry, so only one of two racing claims lands. State is folded from a task's own entries, and a lapsed lease reads as retryable with no write.
+- [x] 14.3 Rebuild the `memory` backend as the same append-only log, so both meet one contract.
+- [x] 14.4 Replace the sequence with the command id as the cursor: the SSE `id:` is the command id, a reconnect naming the last acknowledged id replays every later unacknowledged entry in log order, and an unknown id starts from the oldest unacknowledged entry. Update `ClaimSequenced`, `Resume`, `Bus.Running`, the console `feedCursor` and `StreamOps`.
+- [x] 14.5 Delete a message and its entries when it settles as succeeded (the server removes them, as a regular queue does). Retain an unconsumed message for 7 days by default, then trim it. Dedup after settle rests on the dedup window. The bus performs no other delete.
 - [ ] 14.6 Redeploy the manager and console to the live cluster and repeat the "How is ha doing?" scenario: no escalation fails, the analysis precedes the nudge, and nothing needs a refresh.
 
 ## 10. Unit tests
@@ -391,8 +391,8 @@ was already real, already passing, and left alone. Three gaps closed:
 - [x] 10.8 Unit-test the per-channel queues: one channel not acknowledging never delays another channel of the same adapter type.
 - [x] 10.9 Unit-test the console feed: entries arrive in queue order with their sequence, a reconnect replays after the last acknowledged sequence, and an acknowledged entry is not delivered again.
 
-- [ ] 10.10 Conformance, walked for both backends: no entry is ever written twice, a submit succeeds when a consumer claims at once (the 10071 regression, 200 submits against a racing consumer), state folds from entries, and a lapsed lease redelivers with no write.
-- [ ] 10.11 Unit-test the resume by command id: a reconnect replays only unacknowledged later entries in log order, and an unknown id starts from the oldest unacknowledged.
+- [x] 10.10 Conformance, walked for both backends: no entry is ever written twice, a submit succeeds when a consumer claims at once (the 10071 regression, 200 submits against a racing consumer), state folds from entries, and a lapsed lease redelivers with no write.
+- [x] 10.11 Unit-test the resume by command id: a reconnect replays only unacknowledged later entries in log order, and an unknown id starts from the oldest unacknowledged.
 
 ## 11. System tests
 

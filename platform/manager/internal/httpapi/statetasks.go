@@ -37,7 +37,6 @@ type taskWire struct {
 	Detail       string         `json:"detail,omitempty"`
 	NotBefore    *time.Time     `json:"notBefore,omitempty"`
 	Lease        *taskLeaseWire `json:"lease,omitempty"`
-	Order        uint64         `json:"order"`
 	SubmittedAt  time.Time      `json:"submittedAt"`
 	UpdatedAt    time.Time      `json:"updatedAt"`
 	SucceededAt  *time.Time     `json:"succeededAt,omitempty"`
@@ -66,7 +65,7 @@ func newTaskWire(t commandbus.Task) taskWire {
 		UID: t.UID, CommandID: string(t.CommandID), Queue: string(t.Queue), Kind: string(t.Kind),
 		Key: string(t.Key), InvocationID: t.InvocationID, State: string(t.State),
 		Attempt: t.Attempt, MaxAttempts: t.MaxAttempts, Code: string(t.Code), Detail: t.Detail,
-		Order: t.Order, SubmittedAt: t.SubmittedAt, UpdatedAt: t.UpdatedAt,
+		SubmittedAt: t.SubmittedAt, UpdatedAt: t.UpdatedAt,
 		NotBefore: orNilTime(t.NotBefore), SucceededAt: orNilTime(t.SucceededAt),
 		DeadAt: orNilTime(t.DeadAt), ParkedUntil: orNilTime(t.ParkedUntil),
 	}

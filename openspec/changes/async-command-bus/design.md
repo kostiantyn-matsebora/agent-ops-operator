@@ -65,8 +65,17 @@ rewrite.
 | Consumer position | the command id of the last entry the consumer acknowledged. A cursor, nothing more |
 
 The `nats` backend is one JetStream stream per queue family, with subjects
-`<queue>.<key>.msg` and `<queue>.<key>.ev`. Nothing in it is updated or purged
-by the bus. Retention is the stream's own limit (age, and count where declared).
+`<queue>.<key>.msg` and `<queue>.<key>.ev`. Nothing in it is ever updated.
+
+**Consumed messages are deleted, unconsumed ones are kept for 7 days.** When a
+message settles as succeeded, the server removes it and its entries, as a
+regular queue drops what was consumed. A message never consumed is retained for
+the stream's age limit (7 days by default) and then trimmed, so it expires. The
+bus performs no other delete and never touches an unsettled entry. A command
+id's duplicate suppression after settling is an in-memory mark each replica keeps
+for the queue's dedup window (the server's duplicate window is one stream-wide
+value and cannot hold per-queue windows). Physical removal follows a short grace
+(30s by default) so a replica catching up and the change feed see no gap.
 
 - **Exclusive claim without a rewrite.** A claim is an append of a `claimed`
   entry to the key's `ev` subject, conditional on that subject's last sequence

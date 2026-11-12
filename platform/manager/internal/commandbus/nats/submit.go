@@ -3,77 +3,65 @@ package nats
 import (
 	"context"
 	"fmt"
+	mathrand "math/rand"
 	"time"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 )
 
-// Submit implements commandbus.Bus (design D-4/D-9). The dedup check reads
-// "ids" directly from the server — Submit is the one call D-9 requires
-// cheap, not zero-network, and a stale mirror could suppress a resubmit
-// that should have gone through, or let one through that should have been
-// suppressed, either of which is the exact bug D-4 exists to prevent.
-func (b *Bus) Submit(ctx context.Context, req commandbus.SubmitRequest) (commandbus.Task, error) {
-	if req.CommandID == "" || req.Key == "" {
-		return commandbus.Task{}, fmt.Errorf("%w: CommandID and Key are both required", commandbus.ErrInvalidRequest)
-	}
-	decl, ok := commandbus.Resolve(b.inventory, req.Queue, req.Kind)
-	if !ok {
-		return commandbus.Task{}, fmt.Errorf("%w: queue=%q kind=%q", commandbus.ErrUnknownQueue, req.Queue, req.Kind)
-	}
-	now := b.clock.now()
-	key := dedupKey(req.Queue, req.Kind, req.CommandID)
+// appendAttempts bounds how many times one operation re-plans after a lost
+// race before giving up. Every lost race means another writer landed, so the
+// bound is only reached under sustained contention on one key.
+const appendAttempts = 100
 
-	if entry, err := b.ids.Get(ctx, key); err == nil {
-		uid := string(entry.Value())
-		if t, _, found, rerr := b.loadAndReap(ctx, uid, now); rerr == nil && found && t.Suppresses(now, decl.Policy.DedupWindow) {
-			return t, nil
-		}
-	} else if !isNotFoundErr(err) {
-		return commandbus.Task{}, fmt.Errorf("commandbus/nats: submit: look up %q: %w", key, err)
-	}
-
-	return b.createTask(ctx, req, decl, key, now)
+// raceBackoff is a short, growing, jittered pause after a lost race, so
+// writers contending for one key do not re-plan in lockstep.
+func raceBackoff(attempt int) time.Duration {
+	return time.Duration(mathrand.Int63n(int64(time.Millisecond)*int64(min(attempt, 10)+1))) + 1
 }
 
-// createTask mints a fresh task and its dedup mapping. Order is assigned
-// from the Create's own revision — this bucket's one strictly increasing,
-// shared-across-every-queue counter (design D-14/2.6) — which the task
-// learns only after Create returns, so a second, CAS write folds it into
-// the stored record. Between the two writes the task is briefly visible
-// to a concurrent Claim with Order still zero: a self-correcting window,
-// bounded to this one round trip, that can at most mis-order one claim
-// pass — Claim's own CAS still makes exclusivity exact regardless (design
-// D-2's "the claim itself is a compare-and-swap").
-func (b *Bus) createTask(ctx context.Context, req commandbus.SubmitRequest, decl commandbus.Declaration, key string, now time.Time) (commandbus.Task, error) {
-	task := commandbus.Task{
-		UID: newUID(), CommandID: req.CommandID, Queue: req.Queue, Kind: req.Kind, Key: req.Key,
-		Payload: req.Payload, InvocationID: req.InvocationID,
-		State: commandbus.StateQueued, MaxAttempts: decl.Policy.Attempts,
-		SubmittedAt: now, UpdatedAt: now,
+func pause(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
 	}
-	data, err := encodeTask(task)
-	if err != nil {
-		return commandbus.Task{}, err
-	}
-	rev, err := b.tasks.Create(ctx, task.UID, data)
-	if err != nil {
-		return commandbus.Task{}, fmt.Errorf("commandbus/nats: submit: create task: %w", err)
-	}
+}
 
-	task.Order = rev
-	data, err = encodeTask(task)
-	if err != nil {
-		return commandbus.Task{}, err
+// Submit implements commandbus.Bus (design D-4/D-9). It is ONE append: the
+// message entry, conditional on the key's message subject still ending where
+// the plan saw it. The dedup lookup reads the mirror after fencing on the
+// server's last sequence — Submit is the one call D-9 requires cheap, not
+// zero-network — and a submit that loses the race for its key's subject
+// (another message landed, possibly the very command id being submitted)
+// re-plans from a fresh view, so of several replicas submitting one command id
+// exactly one creates a task and every caller gets its uid.
+//
+// Nothing is written after the append, so a consumer claiming the task the
+// instant it is visible cannot fail the submit.
+func (b *Bus) Submit(ctx context.Context, req commandbus.SubmitRequest) (commandbus.Task, error) {
+	for attempt := 0; attempt < appendAttempts; attempt++ {
+		if err := b.sync(ctx); err != nil {
+			return commandbus.Task{}, fmt.Errorf("commandbus/nats: submit: %w", err)
+		}
+		sub, err := b.mirror.log.PlanSubmit(req, b.clock.now())
+		if err != nil {
+			return commandbus.Task{}, err
+		}
+		if sub.Existing != nil {
+			return *sub.Existing, nil
+		}
+		_, err = b.append(ctx, sub.Append)
+		if err == nil {
+			return sub.Task, nil
+		}
+		if !isWrongLastSeq(err) {
+			return commandbus.Task{}, fmt.Errorf("commandbus/nats: submit: append message: %w", err)
+		}
+		if err := pause(ctx, raceBackoff(attempt)); err != nil {
+			return commandbus.Task{}, fmt.Errorf("commandbus/nats: submit: %w", err)
+		}
 	}
-	orderRev, err := b.tasks.Update(ctx, task.UID, data, rev)
-	if err != nil {
-		return commandbus.Task{}, fmt.Errorf("commandbus/nats: submit: set order on task %s: %w", task.UID, err)
-	}
-	b.bumpSelfSeq(orderRev)
-
-	if _, err := b.ids.Put(ctx, key, []byte(task.UID)); err != nil {
-		return commandbus.Task{}, fmt.Errorf("commandbus/nats: submit: map dedup id %q: %w", key, err)
-	}
-	return task, nil
+	return commandbus.Task{}, fmt.Errorf("commandbus/nats: submit %q: still losing the race for key %q after %d attempts", req.CommandID, req.Key, appendAttempts)
 }

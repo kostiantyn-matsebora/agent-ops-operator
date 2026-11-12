@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -381,10 +382,9 @@ func testLeaseCompletionThroughASecondHandle(t *testing.T, open func() Backing, 
 	if err := second.Settle(ctx, claimed.UID, claimed.Lease.Token); err != nil {
 		t.Fatalf("Settle through a second handle on the same store: %v", err)
 	}
-	got, err := first.GetTask(ctx, claimed.UID)
-	mustNoErr(t, err, "GetTask")
-	if got.State != commandbus.StateSucceeded {
-		t.Fatalf("state = %v, want Succeeded", got.State)
+	// A consumed task is removed from the log: absent through every handle.
+	if _, err := first.GetTask(ctx, claimed.UID); !errors.Is(err, commandbus.ErrNotFound) {
+		t.Fatalf("GetTask of a consumed task = %v, want ErrNotFound", err)
 	}
 }
 
@@ -406,7 +406,8 @@ func testRunningListsHeldLeases(t *testing.T, open func() Backing, d commandbus.
 	if _, err := first.Submit(ctx, req(queue, d.Kind, "cmd-run-b", "key-run-b")); err != nil {
 		t.Fatalf("Submit b: %v", err)
 	}
-	if got, err := second.Running(ctx, queue); err != nil || len(got) != 0 {
+	queues := []commandbus.Queue{queue}
+	if got, err := second.Running(ctx, queues, ""); err != nil || len(got) != 0 {
 		t.Fatalf("Running before any claim = %v, %v; want none", got, err)
 	}
 	claimedA, err := first.Claim(ctx, queue, "c1")
@@ -414,27 +415,27 @@ func testRunningListsHeldLeases(t *testing.T, open func() Backing, d commandbus.
 	claimedB, err := first.Claim(ctx, queue, "c1")
 	mustNoErr(t, err, "Claim b")
 
-	got, err := second.Running(ctx, queue)
+	got, err := second.Running(ctx, queues, "")
 	mustNoErr(t, err, "Running")
-	if len(got) != 2 || got[0].UID != a.UID || got[0].Order >= got[1].Order {
-		t.Fatalf("Running = %+v, want both claimed tasks oldest Order first", got)
+	if len(got) != 2 || got[0].UID != a.UID || got[1].UID != claimedB.UID {
+		t.Fatalf("Running = %+v, want both claimed tasks in log order", got)
 	}
 	if got[0].Lease == nil || got[0].Lease.Token != claimedA.Lease.Token {
 		t.Fatalf("Running must carry the live lease token so another replica can settle it")
 	}
-	if other, _ := second.Running(ctx, queue+"-other"); len(other) != 0 {
+	if other, _ := second.Running(ctx, []commandbus.Queue{queue + "-other"}, ""); len(other) != 0 {
 		t.Fatalf("Running listed another queue's tasks: %v", other)
 	}
 
 	mustNoErr(t, second.Settle(ctx, claimedA.UID, claimedA.Lease.Token), "Settle a")
-	got, err = first.Running(ctx, queue)
+	got, err = first.Running(ctx, queues, "")
 	mustNoErr(t, err, "Running after settle")
 	if len(got) != 1 || got[0].UID != claimedB.UID {
 		t.Fatalf("Running after settling a = %+v, want only b", got)
 	}
 
 	b.Advance(b.LeaseDuration() + time.Second)
-	got, err = first.Running(ctx, queue)
+	got, err = first.Running(ctx, queues, "")
 	mustNoErr(t, err, "Running after lapse")
 	if len(got) != 0 {
 		t.Fatalf("Running listed a lapsed lease: %+v", got)

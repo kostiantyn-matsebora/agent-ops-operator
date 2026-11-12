@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/entrylog"
 )
 
 // Backing is a fresh, isolated instance of a backend's durable state, kept
@@ -31,6 +32,16 @@ type Backing interface {
 	// guessing a number that might also blow through an unrelated queue's
 	// TTL.
 	LeaseDuration() time.Duration
+	// Entries reads back every entry the backing's log holds, in append
+	// order, as stored. It is how the append-only scenarios see that nothing
+	// was written twice or rewritten (design D-2): a backend that updated an
+	// entry in place would show it here as a changed or repeated one.
+	Entries() []entrylog.Entry
+	// Compact runs whatever removal of consumed entries the backend defers: the
+	// entries of a task that succeeded are removed from the log, like a regular
+	// queue's, and a backend may wait a short grace before doing so. A backend
+	// that removes them inside Settle does nothing here.
+	Compact()
 }
 
 // scenarioTimeout bounds every blocking call (chiefly Claim) a scenario
@@ -105,4 +116,9 @@ var declarationScenarios = []declarationScenario{
 	{"dead-letter listing", testDeadLetterListing},
 	{"per-queue statistics", testPerQueueStatistics},
 	{"per-invocation in-flight cap", testPerInvocationInFlightCap},
+	{"running resumes after a command id", testRunningResumesAfterACommandID},
+	{"nothing is rewritten", testNothingIsRewritten},
+	{"a submit is one write under a racing consumer", testSubmitIsOneWriteUnderARacingConsumer},
+	{"state folds from the entries", testStateFoldsFromEntries},
+	{"a lapsed lease redelivers with no write", testLapsedLeaseRedeliversWithNoWrite},
 }

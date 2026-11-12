@@ -2,50 +2,31 @@ package nats
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
-
-	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 )
 
-// DeadLetters implements commandbus.Bus, reading the "dead" bucket
-// directly (package doc): a listing call, not Claim's hot reconcile path,
-// so a live scan costs nothing the contract minds, and it is the ONLY
-// source that needs to be correct regardless of whether the ledger
-// retention sweep (sweep.go) has already purged the matching "tasks"
-// record — archiveDead (task.go) writes here the instant a task reaches
-// Dead, never waiting for that sweep.
+// DeadLetters implements commandbus.Bus: every dead task the queue log still
+// holds, plus every one only the dead log still holds, oldest death first,
+// within the dead log's own age and count limits. The dead log is what lets
+// this reach past the queue log's own retention.
 func (b *Bus) DeadLetters(ctx context.Context, queue commandbus.Queue) ([]commandbus.Task, error) {
-	lister, err := b.dead.ListKeys(ctx)
-	if err != nil {
-		if errors.Is(err, jetstream.ErrNoKeysFound) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("commandbus/nats: dead letters: list keys: %w", err)
+	if err := b.sync(ctx); err != nil {
+		return nil, fmt.Errorf("commandbus/nats: dead letters: %w", err)
 	}
-	var out []commandbus.Task
-	for uid := range lister.Keys() {
-		entry, err := b.dead.Get(ctx, uid)
-		if err != nil {
-			continue // raced the retention sweep's own purge; not this listing's job to report
-		}
-		t, err := decodeTask(entry.Value())
-		if err != nil {
-			continue
-		}
-		if queue != "" && t.Queue != queue {
-			continue
-		}
-		out = append(out, t)
+	now := b.clock.now()
+	out := b.mirror.log.DeadTasks(queue, now)
+	seen := make(map[string]bool, len(out))
+	for _, t := range out {
+		seen[t.UID] = true
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].DeadAt.Equal(out[j].DeadAt) {
-			return out[i].Order < out[j].Order
+	for _, t := range b.mirror.deadSnapshots() {
+		if !seen[t.UID] && (queue == "" || t.Queue == queue) {
+			out = append(out, t)
 		}
-		return out[i].DeadAt.Before(out[j].DeadAt)
-	})
-	return out, nil
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].DeadAt.Before(out[j].DeadAt) })
+	return b.withinDeadLimits(out, now), nil
 }

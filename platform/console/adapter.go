@@ -146,7 +146,7 @@ func (a *Adapter) serveOps(ctx context.Context) {
 			a.pollOpsFor(ctx, streamReprobe)
 			continue
 		case err != nil && ctx.Err() == nil:
-			log.Printf("ops stream: %v; reconnecting with the last acknowledged sequence", err)
+			log.Printf("ops stream: %v; reconnecting from the last acknowledged op", err)
 		}
 		if delivered {
 			backoff = streamBackoffInitial
@@ -197,9 +197,9 @@ type opOutcome struct{ threadID, opErr string }
 // which is what tells a healthy drop from a manager that keeps refusing.
 func (f *opFeed) run(ctx context.Context) (delivered bool, err error) {
 	err = f.a.mgr.StreamOps(ctx, f.a.adapterName, f.cursor.resumeToken(), f.a.noteVocabularyRevision,
-		func(op *Op, seq uint64) error {
+		func(op *Op, id string) error {
 			delivered = true
-			return f.handle(ctx, op, seq)
+			return f.handle(ctx, op, id)
 		})
 	return delivered, err
 }
@@ -207,8 +207,8 @@ func (f *opFeed) run(ctx context.Context) (delivered bool, err error) {
 // handle executes one op, at most once per id, then acknowledges it. A failed
 // acknowledgement ends the connection: the op stays outstanding in the cursor,
 // so the reconnect replays it and the cached outcome is acknowledged again.
-func (f *opFeed) handle(ctx context.Context, op *Op, seq uint64) error {
-	f.cursor.received(seq)
+func (f *opFeed) handle(ctx context.Context, op *Op, id string) error {
+	f.cursor.received(id)
 	out, seen := f.unacked[op.ID]
 	if !seen {
 		out.threadID, out.opErr = f.a.execute(ctx, op)
@@ -221,7 +221,7 @@ func (f *opFeed) handle(ctx context.Context, op *Op, seq uint64) error {
 		return fmt.Errorf("complete op %s: %w", op.ID, err)
 	}
 	delete(f.unacked, op.ID)
-	f.cursor.acknowledged(seq)
+	f.cursor.acknowledged(id)
 	return nil
 }
 

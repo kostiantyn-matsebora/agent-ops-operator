@@ -5,11 +5,17 @@
 // internal/state — a kube-store install runs it exactly as a nats-store one
 // does.
 //
-// Order, lease and backoff all live in the ledger a Bus implementation
-// keeps, never in whatever transport carries the wake-up (design D-2). That
-// is what lets a claim made through one Bus value complete through another:
-// the lease token Claim hands back, not the Bus value or any connection it
-// holds, is the only credential Settle and Fail check.
+// Every queue is an append-only log (design D-2): a message is appended once
+// at Submit, and a claim, a failure, a completion are further entries, never
+// a rewrite. A task's state is folded from its own entries, the last one
+// deciding, and its position in the queue is the one the log gave its message.
+// That is what lets a claim made through one Bus value complete through
+// another: the lease token Claim hands back, not the Bus value or any
+// connection it holds, is the only credential Settle and Fail check. The bus
+// never rewrites an entry. A consumed (succeeded) task is removed from the log
+// with its entries, like a regular queue's, and is thereafter absent: GetTask
+// reports ErrNotFound, and its command id stays suppressed for the queue's
+// dedup window. Every other entry is retained by the log's own limits.
 //
 // Two backends exist: commandbus/memory, for tests and local development,
 // and commandbus/nats (a later change), for a production install. Both pass
@@ -88,7 +94,7 @@ type Bus interface {
 	// then returns it with a fresh Lease. consumerID is recorded as the
 	// Lease's Holder, for a human reading /state/tasks, and is never
 	// consulted by Settle or Fail. Ties among equally-eligible tasks break
-	// by Order, oldest first; a task whose Key names an earlier unsettled
+	// by log position, oldest first; a task whose Key names an earlier unsettled
 	// task on the same queue is skipped until that one settles.
 	Claim(ctx context.Context, queue Queue, consumerID string) (Task, error)
 
@@ -113,19 +119,21 @@ type Bus interface {
 	GetTask(ctx context.Context, taskUID string) (Task, error)
 
 	// DeadLetters lists every dead task on queue, oldest first. An empty
-	// queue lists across every queue. The ledger is declared bounded and
-	// lossy telemetry (design D-2) — a backend may cap how far back this
-	// reaches, never silently invent an entry.
+	// queue lists across every queue. Dead tasks are kept in a log of their
+	// own with its own limits (design D-2) — a backend may cap how far back
+	// this reaches, never silently invent an entry.
 	DeadLetters(ctx context.Context, queue Queue) ([]Task, error)
 
-	// Running lists the tasks on queue that are Running under a lease still
-	// in force, oldest Order first: the set a consumer that lost its
-	// connection (and possibly its replica) may still be holding. A lapsed
-	// lease is excluded -- the backend reclaims it and Claim hands it out
-	// again. Each Task carries its current Lease, so a replica that never made
-	// the claim can adopt it and Settle with the token (design D-16, the
-	// console feed's resume).
-	Running(ctx context.Context, queue Queue) ([]Task, error)
+	// Running lists the tasks on any of queues that are Running under a lease
+	// still in force, in log order: the set a consumer that lost its
+	// connection (and possibly its replica) may still be holding. after is the
+	// command id of the last entry the consumer acknowledged (design D-16):
+	// only tasks whose message was appended after it, on any of queues, are
+	// listed, and an id the log does not know (or "") lists every one, which
+	// is the oldest unacknowledged entry onward. A lapsed lease is excluded --
+	// Claim hands it out again. Each Task carries its current Lease, so a
+	// replica that never made the claim can adopt it and Settle with the token.
+	Running(ctx context.Context, queues []Queue, after CommandID) ([]Task, error)
 
 	// Feed delivers a gap-free, resumable stream of TaskEvent across every
 	// queue, resuming strictly after resume (the zero Sequence starts from

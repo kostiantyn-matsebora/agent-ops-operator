@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -167,32 +167,21 @@ func ackOp(t *testing.T, base, id string) {
 
 func streamQuery() string { return "adapter=" + streamAdapter + "&contract=" + chat.ContractVersion }
 
-func seq(t *testing.T, ev sseEvent) uint64 {
-	t.Helper()
-	n, err := strconv.ParseUint(ev.id, 10, 64)
-	if err != nil {
-		t.Fatalf("id %q is not a sequence", ev.id)
-	}
-	return n
-}
-
-func TestChannelOpsStreamDeliversInQueueOrderWithIncreasingIDs(t *testing.T) {
+func TestChannelOpsStreamDeliversInQueueOrderWithTheCommandIDAsEventID(t *testing.T) {
 	s, _, _ := busServer(t)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	ids := enqueueStreamOps(t, s.Ops, "order", 3)
 
 	c := openStream(t, srv.URL, streamQuery(), "")
-	var last uint64
 	for i, want := range ids {
 		ev, op := c.next()
 		if ev.event != "op" || op.ID != want {
 			t.Fatalf("event %d = %q %q, want op %q", i, ev.event, op.ID, want)
 		}
-		if got := seq(t, ev); got <= last {
-			t.Fatalf("sequence %d does not increase past %d", got, last)
+		if ev.id != want {
+			t.Fatalf("event %d id = %q, want the op's command id %q (the cursor is never an order)", i, ev.id, want)
 		}
-		last = seq(t, ev)
 		if op.ReclaimAfterSeconds != int(chat.ReclaimAfter.Seconds()) {
 			t.Fatalf("reclaimAfterSeconds = %d, want the lease", op.ReclaimAfterSeconds)
 		}
@@ -208,17 +197,15 @@ func TestChannelOpsStreamDeliversInQueueOrderWithIncreasingIDs(t *testing.T) {
 	}
 }
 
-func TestChannelOpsStreamResumeReplaysOnlyUnacknowledgedOpsAfterTheSequence(t *testing.T) {
+func TestChannelOpsStreamResumeReplaysOnlyUnacknowledgedOpsAfterTheCommandID(t *testing.T) {
 	s, _, _ := busServer(t)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	ids := enqueueStreamOps(t, s.Ops, "resume", 4)
 
 	c := openStream(t, srv.URL, streamQuery(), "")
-	seqs := make([]string, 0, 4)
 	for range ids {
-		ev, _ := c.next()
-		seqs = append(seqs, ev.id)
+		c.next()
 	}
 	ackOp(t, srv.URL, ids[0])
 	ackOp(t, srv.URL, ids[1])
@@ -227,8 +214,8 @@ func TestChannelOpsStreamResumeReplaysOnlyUnacknowledgedOpsAfterTheSequence(t *t
 	// While away, one more op is produced.
 	late := enqueueStreamOps(t, s.Ops, "away", 1)
 
-	// Last-Event-ID names the last acknowledged sequence.
-	r := openStream(t, srv.URL, streamQuery(), seqs[1])
+	// Last-Event-ID names the command id of the last acknowledged op.
+	r := openStream(t, srv.URL, streamQuery(), ids[1])
 	for _, want := range []string{ids[2], ids[3], late[0]} {
 		if _, op := r.next(); op.ID != want {
 			t.Fatalf("replayed %q, want %q (acknowledged ops are never re-sent, then new ops follow)", op.ID, want)
@@ -237,12 +224,37 @@ func TestChannelOpsStreamResumeReplaysOnlyUnacknowledgedOpsAfterTheSequence(t *t
 	r.expectQuiet(300 * time.Millisecond)
 	r.cancel()
 
-	// ?since= wins over the header and filters by sequence: ops 0 and 1 are
-	// acknowledged and absent whatever the token, op 2 is at the token.
-	q := openStream(t, srv.URL, streamQuery()+"&since="+seqs[2], seqs[0])
+	// ?since= wins over the header: ops 0 and 1 are acknowledged and absent
+	// whatever the cursor, op 2 is the cursor so only later ops follow it.
+	q := openStream(t, srv.URL, streamQuery()+"&since="+url.QueryEscape(ids[2]), ids[0])
 	if _, op := q.next(); op.ID != ids[3] {
-		t.Fatalf("since=%s replayed %q, want only %q", seqs[2], op.ID, ids[3])
+		t.Fatalf("since=%s replayed %q, want only %q", ids[2], op.ID, ids[3])
 	}
+}
+
+// An id the queue does not know is a cursor from a log that has since dropped
+// it, or a forgery: either way the stream starts from the oldest unacknowledged
+// op rather than refusing or skipping anything.
+func TestChannelOpsStreamUnknownCursorStartsFromTheOldestUnacknowledged(t *testing.T) {
+	s, _, _ := busServer(t)
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	ids := enqueueStreamOps(t, s.Ops, "unknown", 3)
+
+	c := openStream(t, srv.URL, streamQuery(), "")
+	for range ids {
+		c.next()
+	}
+	ackOp(t, srv.URL, ids[0])
+	c.cancel()
+
+	r := openStream(t, srv.URL, streamQuery(), "an-id-no-op-ever-had")
+	for _, want := range ids[1:] {
+		if _, op := r.next(); op.ID != want {
+			t.Fatalf("replayed %q, want %q (every unacknowledged op, oldest first)", op.ID, want)
+		}
+	}
+	r.expectQuiet(300 * time.Millisecond)
 }
 
 func TestChannelOpsStreamAcknowledgedOpIsNeverResentAndStaysSettled(t *testing.T) {
@@ -256,7 +268,7 @@ func TestChannelOpsStreamAcknowledgedOpIsNeverResentAndStaysSettled(t *testing.T
 	ackOp(t, srv.URL, ids[0])
 	c.cancel()
 
-	r := openStream(t, srv.URL, streamQuery(), "0")
+	r := openStream(t, srv.URL, streamQuery(), ev.id)
 	r.expectQuiet(300 * time.Millisecond)
 	if st, err := bus.Stats(context.Background(), "out.console-ui", commandbus.KindOutEphemeral); err != nil || st.Running != 0 || st.Pending != 0 {
 		t.Fatalf("acknowledged op %s must be settled, not outstanding: %+v %v", ev.id, st, err)
@@ -270,10 +282,8 @@ func TestChannelOpsStreamResumesOnADifferentReplica(t *testing.T) {
 	ids := enqueueStreamOps(t, a.Ops, "xrep", 3)
 
 	c := openStream(t, srvA.URL, streamQuery(), "")
-	var seqs []string
 	for range ids {
-		ev, _ := c.next()
-		seqs = append(seqs, ev.id)
+		c.next()
 	}
 	ackOp(t, srvA.URL, ids[0])
 	c.cancel() // replica A is gone as far as the consumer is concerned
@@ -282,7 +292,7 @@ func TestChannelOpsStreamResumesOnADifferentReplica(t *testing.T) {
 	srvB := httptest.NewServer(b.Handler())
 	t.Cleanup(srvB.Close)
 
-	r := openStream(t, srvB.URL, streamQuery(), seqs[0])
+	r := openStream(t, srvB.URL, streamQuery(), ids[0])
 	for _, want := range ids[1:] {
 		if ev, op := r.next(); op.ID != want || ev.id == "" {
 			t.Fatalf("replica B replayed %q, want %q", op.ID, want)
@@ -296,7 +306,7 @@ func TestChannelOpsStreamResumesOnADifferentReplica(t *testing.T) {
 	if st, _ := bus.Stats(context.Background(), "out.console-ui", commandbus.KindOutEphemeral); st.Running != 0 {
 		t.Fatalf("acks on the second replica must settle the first replica's claims: %+v", st)
 	}
-	again := openStream(t, srvB.URL, streamQuery(), "0")
+	again := openStream(t, srvB.URL, streamQuery(), ids[2])
 	again.expectQuiet(300 * time.Millisecond)
 }
 
@@ -329,8 +339,9 @@ func TestChannelOpsStreamRefusals(t *testing.T) {
 		"no contract":             {"adapter=console", "bus-test-master", 400},
 		"another adapter's scope": {streamQuery(), scoped, 403},
 		"unknown parameter":       {streamQuery() + "&wait=5", "bus-test-master", 400},
-		"non-numeric since":       {streamQuery() + "&since=abc", "bus-test-master", 400},
-		"negative since":          {streamQuery() + "&since=-1", "bus-test-master", 400},
+		"control character in id": {streamQuery() + "&since=a%0Ab", "bus-test-master", 400},
+		"over-long cursor":        {streamQuery() + "&since=" + strings.Repeat("x", 600), "bus-test-master", 400},
+		"any plain id":            {streamQuery() + "&since=abc", "bus-test-master", 200},
 	} {
 		if got := get(tc.query, tc.token); got != tc.want {
 			t.Errorf("%s: status %d, want %d", name, got, tc.want)
@@ -340,10 +351,10 @@ func TestChannelOpsStreamRefusals(t *testing.T) {
 	if got := get("adapter=telegram&contract="+chat.ContractVersion, scoped); got != 200 {
 		t.Errorf("own scope: status %d, want 200", got)
 	}
-	// A bad Last-Event-ID header is refused the same way as a bad ?since=.
+	// An over-long Last-Event-ID header is refused the same way as a bad ?since=.
 	req, _ := http.NewRequest("GET", srv.URL+"/channel/ops/stream?"+streamQuery(), nil)
 	req.Header.Set("Authorization", "Bearer bus-test-master")
-	req.Header.Set(lastEventIDHeader, "not-a-number")
+	req.Header.Set(lastEventIDHeader, strings.Repeat("x", 600))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

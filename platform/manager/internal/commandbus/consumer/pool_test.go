@@ -86,8 +86,9 @@ func TestPoolSettlesATaskOnHandlerSuccess(t *testing.T) {
 	}
 
 	waitFor(t, 2*time.Second, func() bool {
-		got, err := bus.GetTask(ctx, task.UID)
-		return err == nil && got.State == commandbus.StateSucceeded
+		// A consumed task is removed from the log, so settled reads as absent.
+		_, err := bus.GetTask(ctx, task.UID)
+		return errors.Is(err, commandbus.ErrNotFound)
 	})
 
 	// A pool whose Config.ConsumerID was left empty names its claim after

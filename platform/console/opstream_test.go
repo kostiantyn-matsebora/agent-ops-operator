@@ -14,8 +14,10 @@ import (
 )
 
 // streamingManager is the manager's /channel/ops/stream and /done as the
-// console sees them: ops with sequences, a resume that replays what is
-// unacknowledged above Last-Event-ID, and acknowledgements that settle.
+// console sees them: ops in log order identified by command id, a resume that
+// replays what is unacknowledged after the op Last-Event-ID names (every
+// unacknowledged op when it names none, or one the log does not hold), and
+// acknowledgements that settle.
 type streamingManager struct {
 	t      *testing.T
 	server *httptest.Server
@@ -30,10 +32,7 @@ type streamingManager struct {
 	dropConn []context.CancelFunc
 }
 
-type streamedOp struct {
-	seq uint64
-	op  Op
-}
+type streamedOp struct{ op Op }
 
 func newStreamingManager(t *testing.T) *streamingManager {
 	t.Helper()
@@ -62,9 +61,9 @@ func newStreamingManager(t *testing.T) *streamingManager {
 	return m
 }
 
-func (m *streamingManager) push(seq uint64, id string) {
+func (m *streamingManager) push(id string) {
 	m.mu.Lock()
-	m.ops = append(m.ops, streamedOp{seq: seq, op: Op{
+	m.ops = append(m.ops, streamedOp{op: Op{
 		ID: id, Channel: "console", Kind: "send", ThreadID: strPtr("thread-" + id),
 		Message: &OpMessage{Kind: "answer", Body: "body " + id},
 	}})
@@ -77,7 +76,7 @@ func (m *streamingManager) push(seq uint64, id string) {
 func strPtr(s string) *string { return &s }
 
 func (m *streamingManager) serveStream(w http.ResponseWriter, r *http.Request) {
-	since, _ := strconv.ParseUint(r.Header.Get("Last-Event-ID"), 10, 64)
+	after := r.Header.Get("Last-Event-ID")
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	m.mu.Lock()
@@ -88,21 +87,27 @@ func (m *streamingManager) serveStream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 	flusher := w.(http.Flusher)
 	flusher.Flush()
-	sent := map[uint64]bool{}
+	sent := map[string]bool{}
 	for {
 		m.mu.Lock()
+		first := 0 // an id this log does not hold starts from the oldest op
+		for i, o := range m.ops {
+			if o.op.ID == after {
+				first = i + 1
+			}
+		}
 		var due []streamedOp
-		for _, o := range m.ops {
-			if o.seq > since && !m.settled[o.op.ID] && !sent[o.seq] {
+		for _, o := range m.ops[first:] {
+			if !m.settled[o.op.ID] && !sent[o.op.ID] {
 				due = append(due, o)
-				sent[o.seq] = true
+				sent[o.op.ID] = true
 			}
 		}
 		wake := m.wake
 		m.mu.Unlock()
 		for _, o := range due {
 			data, _ := json.Marshal(claimedOpWire{Op: o.op, ReclaimAfterSeconds: 300})
-			fmt.Fprintf(w, "event: op\nid: %d\ndata: %s\n\n", o.seq, data)
+			fmt.Fprintf(w, "event: op\nid: %s\ndata: %s\n\n", o.op.ID, data)
 			flusher.Flush()
 		}
 		select {
@@ -187,9 +192,9 @@ func startConsole(t *testing.T, m *streamingManager) (*Adapter, *Transcripts) {
 func TestConsoleConsumesTheStreamInOrderAndAcknowledgesEachOp(t *testing.T) {
 	m := newStreamingManager(t)
 	_, tr := startConsole(t, m)
-	m.push(10, "a")
-	m.push(11, "b")
-	m.push(12, "c")
+	m.push("a")
+	m.push("b")
+	m.push("c")
 
 	m.waitFor("three acknowledgements", func() bool { return len(m.settled) == 3 })
 	for _, id := range []string{"a", "b", "c"} {
@@ -207,8 +212,8 @@ func TestConsoleResumesAfterADropWithoutLosingOrDuplicating(t *testing.T) {
 	m := newStreamingManager(t)
 	_, tr := startConsole(t, m)
 
-	m.push(10, "a")
-	m.push(11, "b")
+	m.push("a")
+	m.push("b")
 	m.waitFor("a and b acknowledged", func() bool { return m.settled["a"] && m.settled["b"] })
 
 	// c is delivered and rendered, but its acknowledgement is refused: the
@@ -216,25 +221,25 @@ func TestConsoleResumesAfterADropWithoutLosingOrDuplicating(t *testing.T) {
 	m.mu.Lock()
 	m.failAck["c"] = 1
 	m.mu.Unlock()
-	m.push(12, "c")
+	m.push("c")
 	m.waitFor("a reconnect after the refused ack", func() bool { return len(m.resumes) >= 2 })
 	m.waitFor("c acknowledged on the replay", func() bool { return m.settled["c"] })
 
-	if got := m.resume(1); got != "11" {
-		t.Fatalf("the reconnect sent Last-Event-ID %q, want 11: just under the unacknowledged c", got)
+	if got := m.resume(1); got != "" {
+		t.Fatalf("the reconnect sent Last-Event-ID %q, want none: c is outstanding, so the manager starts from the oldest unacknowledged op", got)
 	}
-	m.push(13, "d")
+	m.push("d")
 	m.waitFor("d acknowledged", func() bool { return m.settled["d"] })
 
 	// A forced drop with everything acknowledged resumes from the last
-	// acknowledged sequence and replays nothing.
+	// acknowledged command id and replays nothing.
 	m.mu.Lock()
 	before := len(m.resumes)
 	m.mu.Unlock()
 	m.dropAll()
 	m.waitFor("a reconnect after the forced drop", func() bool { return len(m.resumes) > before })
-	if got := m.resume(-1); got != "13" {
-		t.Fatalf("after acknowledging everything the reconnect sent %q, want 13", got)
+	if got := m.resume(-1); got != "d" {
+		t.Fatalf("after acknowledging everything the reconnect sent %q, want d, the last acknowledged id", got)
 	}
 
 	time.Sleep(50 * time.Millisecond)
@@ -290,7 +295,7 @@ func TestStreamOpsReportsAnUnsupportedManagerAndRefusals(t *testing.T) {
 	t.Cleanup(srv.Close)
 	m := NewManager(srv.URL, "t")
 	call := func() error {
-		return m.StreamOps(context.Background(), "console", "", nil, func(*Op, uint64) error { return nil })
+		return m.StreamOps(context.Background(), "console", "", nil, func(*Op, string) error { return nil })
 	}
 	if err := call(); !errors.Is(err, errStreamUnsupported) {
 		t.Fatalf("404 = %v, want errStreamUnsupported", err)
@@ -311,12 +316,12 @@ func TestStreamOpsCarriesVocabularyRevisionsAndTheResumeHeader(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	var revs []string
-	err := NewManager(srv.URL, "t").StreamOps(context.Background(), "console", "7",
-		func(r string) { revs = append(revs, r) }, func(*Op, uint64) error { return nil })
+	err := NewManager(srv.URL, "t").StreamOps(context.Background(), "console", "op-7",
+		func(r string) { revs = append(revs, r) }, func(*Op, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotID != "7" || len(revs) != 2 || revs[0] != "r1" || revs[1] != "r2" {
+	if gotID != "op-7" || len(revs) != 2 || revs[0] != "r1" || revs[1] != "r2" {
 		t.Fatalf("Last-Event-ID %q, revisions %v", gotID, revs)
 	}
 }
@@ -332,7 +337,7 @@ func TestStreamOpsTreatsASilentConnectionAsDead(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	t.Cleanup(srv.Close)
-	err := NewManager(srv.URL, "t").StreamOps(context.Background(), "console", "", nil, func(*Op, uint64) error { return nil })
+	err := NewManager(srv.URL, "t").StreamOps(context.Background(), "console", "", nil, func(*Op, string) error { return nil })
 	if !errors.Is(err, errStreamIdle) {
 		t.Fatalf("a stream that went silent returned %v, want errStreamIdle", err)
 	}
@@ -343,22 +348,22 @@ func TestFeedCursorResumeToken(t *testing.T) {
 	if got := c.resumeToken(); got != "" {
 		t.Fatalf("nothing received: %q", got)
 	}
-	c.received(10)
-	c.acknowledged(10)
-	if got := c.resumeToken(); got != "10" {
-		t.Fatalf("after acking 10: %q", got)
+	c.received("op-a")
+	if got := c.resumeToken(); got != "" {
+		t.Fatalf("an op received and not acknowledged leaves nothing to resume after: %q", got)
 	}
-	c.received(20)
-	c.received(15) // another channel's op, lower sequence, delivered later
-	if got := c.resumeToken(); got != "14" {
-		t.Fatalf("outstanding 15 and 20 must resume under the lowest: %q", got)
+	c.acknowledged("op-a")
+	if got := c.resumeToken(); got != "op-a" {
+		t.Fatalf("after acking op-a: %q", got)
 	}
-	c.acknowledged(20)
-	if got := c.resumeToken(); got != "14" {
-		t.Fatalf("15 is still outstanding after 20 was acknowledged: %q", got)
+	c.received("op-c")
+	c.received("op-b") // another channel's op, older in the log, delivered later
+	c.acknowledged("op-c")
+	if got := c.resumeToken(); got != "" {
+		t.Fatalf("op-b is still outstanding after op-c was acknowledged, so no id may be named: %q", got)
 	}
-	c.acknowledged(15)
-	if got := c.resumeToken(); got != "15" {
-		t.Fatalf("all acknowledged: %q", got)
+	c.acknowledged("op-b")
+	if got := c.resumeToken(); got != "op-b" {
+		t.Fatalf("all acknowledged: the last acknowledged id is the token, got %q", got)
 	}
 }

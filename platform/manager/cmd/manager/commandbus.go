@@ -162,6 +162,9 @@ func newNatsCommandBus(mgr ctrl.Manager, namespace string) (commandbus.Bus, erro
 	if err := mgr.AddReadyzCheck("command-bus", commandBusReadinessCheck(conn)); err != nil {
 		return nil, fmt.Errorf("registering the command bus's readiness check: %w", err)
 	}
+	if err := mgr.Add(commandBusSweep{bus: bus}); err != nil {
+		return nil, fmt.Errorf("registering the command bus's sweep: %w", err)
+	}
 	return bus, nil
 }
 
@@ -197,3 +200,19 @@ func commandBusReadinessCheck(conn *commandbusnats.Conn) healthz.Checker {
 		return conn.Reachable(req.Context())
 	}
 }
+
+// commandBusSweep runs the nats bus's background sweep (commandbus/nats Run):
+// it removes the entries of consumed tasks once their grace has passed, closes a
+// lapsed task whose attempts are spent, and lets the mirror forget what the
+// log's limits dropped. EVERY replica runs it, never only the leader: each
+// replica's mirror holds its own list of consumed tasks, and a removal done
+// twice is harmless.
+type commandBusSweep struct{ bus *commandbusnats.Bus }
+
+func (s commandBusSweep) Start(ctx context.Context) error {
+	s.bus.Run(ctx)
+	return nil
+}
+
+// NeedLeaderElection is false: see commandBusSweep.
+func (commandBusSweep) NeedLeaderElection() bool { return false }

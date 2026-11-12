@@ -2,11 +2,8 @@ package nats
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
-
-	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 )
@@ -53,39 +50,55 @@ func eventually(t *testing.T, what string, ok func() bool) {
 	t.Fatalf("never became true: %s", what)
 }
 
-func TestSweepPurgesSettledTaskPastLedgerRetention(t *testing.T) {
-	bus, clk := sweepFixture(t, WithLedgerRetention(time.Minute))
+// logMsgs is how many entries the queue log's stream holds — what the bus
+// itself must never reduce.
+func logMsgs(t *testing.T, bus *Bus) uint64 {
+	t.Helper()
+	info, err := bus.logInfo(context.Background())
+	if err != nil {
+		t.Fatalf("log info: %v", err)
+	}
+	return info.State.Msgs
+}
+
+func TestSweepForgetsSettledTaskPastLogRetentionWithoutTouchingTheLog(t *testing.T) {
+	bus, clk := sweepFixture(t, WithLogRetention(time.Minute, 0))
 	ctx := context.Background()
-	dead := makeDead(t, bus, "purge-me")
+	dead := makeDead(t, bus, "forget-me")
+	before := logMsgs(t, bus)
 
 	eventually(t, "mirror sees the dead task", func() bool {
 		got, err := bus.GetTask(ctx, dead.UID)
 		return err == nil && got.State == commandbus.StateDead
 	})
-	clk.advance(10 * time.Minute) // past the dedup window and the ledger retention
+	clk.advance(10 * time.Minute) // past the dedup window and the log's retention
 	bus.sweepOnce(ctx)
 
-	eventually(t, "task purged from the ledger", func() bool {
-		_, err := bus.tasks.Get(ctx, dead.UID)
-		return errors.Is(err, jetstream.ErrKeyNotFound)
-	})
+	if _, ok := bus.mirror.log.Task(dead.UID, clk.now()); ok {
+		t.Fatalf("the mirror still holds a task settled past the log's retention")
+	}
+	if after := logMsgs(t, bus); after != before {
+		t.Fatalf("the sweep changed the log: %d entries before, %d after (the bus removes none)", before, after)
+	}
+	if got, err := bus.GetTask(ctx, dead.UID); err != nil || got.State != commandbus.StateDead {
+		t.Fatalf("GetTask = %v, %v; want the dead task still read from the dead log", got.State, err)
+	}
 }
 
 func TestSweepKeepsSettledTaskInsideRetention(t *testing.T) {
-	bus, clk := sweepFixture(t, WithLedgerRetention(time.Hour))
+	bus, clk := sweepFixture(t, WithLogRetention(time.Hour, 0))
 	ctx := context.Background()
 	dead := makeDead(t, bus, "keep-me")
 
 	clk.advance(10 * time.Minute) // dedup window passed, retention not
 	bus.sweepOnce(ctx)
 
-	got, err := bus.GetTask(ctx, dead.UID)
-	if err != nil || got.State != commandbus.StateDead {
-		t.Fatalf("GetTask = %v, %v; want the Dead task kept", got.State, err)
+	if _, ok := bus.mirror.log.Task(dead.UID, clk.now()); !ok {
+		t.Fatalf("the mirror forgot a task settled inside the log's retention")
 	}
 }
 
-func TestSweepReapsLapsedLeaseWithoutAClaim(t *testing.T) {
+func TestSweepAppendsNothingForALapseWithAttemptsLeft(t *testing.T) {
 	bus, clk := sweepFixture(t)
 	ctx := context.Background()
 	if _, err := bus.Submit(ctx, commandbus.SubmitRequest{Queue: "conv", CommandID: "lapse", Key: "lapse"}); err != nil {
@@ -95,30 +108,65 @@ func TestSweepReapsLapsedLeaseWithoutAClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
+	before := logMsgs(t, bus)
 	clk.advance(bus.leaseDuration + time.Second)
 	bus.sweepOnce(ctx)
 
-	eventually(t, "lapsed lease reaped off Running", func() bool {
-		got, err := bus.GetTask(ctx, claimed.UID)
-		return err == nil && got.State != commandbus.StateRunning
-	})
+	if after := logMsgs(t, bus); after != before {
+		t.Fatalf("the sweep appended %d entries for a lapse that needs none", after-before)
+	}
+	got, err := bus.GetTask(ctx, claimed.UID)
+	if err != nil || got.State != commandbus.StateRetrying {
+		t.Fatalf("GetTask = %v, %v; want the lapsed task reading as retrying", got.State, err)
+	}
 }
 
-func TestSweepEnforcesDeadLetterCountCap(t *testing.T) {
+// A lapse that spends the task's last attempt reads as dead with no write, and
+// the sweep makes it a fact of the log and the dead log.
+func TestSweepClosesALapsedTaskWhoseAttemptsAreSpent(t *testing.T) {
+	inv := []commandbus.Declaration{{Queue: "conv", Policy: commandbus.Policy{Attempts: 1, DedupWindow: time.Minute, ParkCoolOff: time.Minute}}}
+	bus, clk := sweepFixture(t, WithInventory(inv))
+	ctx := context.Background()
+	if _, err := bus.Submit(ctx, commandbus.SubmitRequest{Queue: "conv", CommandID: "last", Key: "last"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	claimed, err := bus.Claim(ctx, "conv", "crashed")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	clk.advance(bus.leaseDuration + time.Second)
+	if got, err := bus.GetTask(ctx, claimed.UID); err != nil || got.State != commandbus.StateDead {
+		t.Fatalf("before the sweep: %v, %v; want dead derived from the lapse alone", got.State, err)
+	}
+	before := logMsgs(t, bus)
+	bus.sweepOnce(ctx)
+
+	if after := logMsgs(t, bus); after != before+1 {
+		t.Fatalf("the sweep appended %d entries, want the one dead entry", after-before)
+	}
+	eventually(t, "the dead log holds the task", func() bool { return bus.mirror.hasDead(claimed.UID) })
+	if l, err := bus.DeadLetters(ctx, "conv"); err != nil || len(l) != 1 {
+		t.Fatalf("DeadLetters = %v, %v; want the one task", l, err)
+	}
+}
+
+func TestDeadLogEnforcesItsCountCap(t *testing.T) {
 	bus, _ := sweepFixture(t, WithDeadLetterRetention(0, 1))
 	ctx := context.Background()
 	makeDead(t, bus, "dl-1")
 	time.Sleep(5 * time.Millisecond)
-	makeDead(t, bus, "dl-2")
+	newest := makeDead(t, bus, "dl-2")
 
-	eventually(t, "both dead-lettered", func() bool {
+	eventually(t, "only the newest listed", func() bool {
 		l, err := bus.DeadLetters(ctx, "conv")
-		return err == nil && len(l) == 2
+		return err == nil && len(l) == 1 && l[0].UID == newest.UID
 	})
-	bus.sweepOnce(ctx)
-	eventually(t, "only the newest kept", func() bool {
-		l, err := bus.DeadLetters(ctx, "conv")
-		return err == nil && len(l) == 1
+	eventually(t, "the dead stream's own limit dropped the older entry", func() bool {
+		s, err := bus.js.Stream(ctx, bus.dead)
+		if err != nil {
+			return false
+		}
+		return s.CachedInfo().State.Msgs == 1
 	})
 }
 
@@ -129,23 +177,23 @@ func TestSweepEnforcesDeadLetterAgeCap(t *testing.T) {
 	clk.advance(time.Hour)
 	bus.sweepOnce(ctx)
 
-	eventually(t, "aged dead letter purged", func() bool {
+	eventually(t, "aged dead letter no longer listed", func() bool {
 		l, err := bus.DeadLetters(ctx, "conv")
 		return err == nil && len(l) == 0
 	})
 }
 
 func TestRunSweepsUntilContextDoneOrClosed(t *testing.T) {
-	bus, clk := sweepFixture(t, WithLedgerRetention(time.Minute))
+	bus, clk := sweepFixture(t, WithLogRetention(time.Minute, 0))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { bus.Run(ctx); close(done) }()
 
-	dead := makeDead(t, bus, "run-purge")
+	dead := makeDead(t, bus, "run-prune")
 	clk.advance(10 * time.Minute)
-	eventually(t, "the background loop purges on its own", func() bool {
-		_, err := bus.tasks.Get(context.Background(), dead.UID)
-		return errors.Is(err, jetstream.ErrKeyNotFound)
+	eventually(t, "the background loop prunes the mirror on its own", func() bool {
+		_, ok := bus.mirror.log.Task(dead.UID, clk.now())
+		return !ok
 	})
 	cancel()
 	select {

@@ -787,24 +787,22 @@ func (q *OpQueue) Claim(adapter string) *Op {
 }
 
 // SequencedOp is one claimed op as the console feed (GET /channel/ops/stream)
-// pushes it: the op, its stream sequence, and how long this claim still holds.
+// pushes it: the op, and how long this claim still holds.
 //
-// Sequence is the task's own Order (commandbus.Task.Order): assigned once at
-// Submit from one counter every backend shares across ALL queues, never
-// changed by a retry, and so identical on every replica and across every
-// channel queue of an adapter, with no counter of the stream's own to lose in
-// a restart. Within one channel queue the stream delivers in Order; across an
-// adapter's channels it is not strictly monotonic (a retried op keeps its old
-// Order), which is why a resume replays every STILL-UNACKNOWLEDGED op above the
-// consumer's token rather than trusting delivery order (see Resume).
+// The stream's cursor is the op's own command id (Op.ID), sent as the SSE
+// `id:` and named back by a reconnect (design D-16). It is never an order:
+// order is the position the queue's log gave the op, and Resume reads it back
+// from the bus. Within one channel queue the stream delivers in log order;
+// across an adapter's channels a retried op keeps its old place, which is why a
+// resume replays every STILL-UNACKNOWLEDGED op after the cursor rather than
+// trusting delivery order.
 type SequencedOp struct {
 	Op           *Op
-	Sequence     uint64
 	ReclaimAfter time.Duration
 }
 
-// ClaimSequenced is Claim returning the stream sequence as well, with the same
-// non-blocking, rotating, lease-taking behaviour.
+// ClaimSequenced is Claim returning the claim for the console feed, with the
+// same non-blocking, rotating, lease-taking behaviour.
 func (q *OpQueue) ClaimSequenced(adapter string) (SequencedOp, bool) {
 	channels := q.channelsOf(adapter)
 	if len(channels) == 0 {
@@ -824,35 +822,37 @@ func (q *OpQueue) ClaimSequenced(adapter string) (SequencedOp, bool) {
 }
 
 // Resume returns every op of adapter that is claimed under a lease still in
-// force, with a sequence above since, oldest first, and makes THIS replica able
-// to acknowledge each: the claim (uid and lease token) is read back from the
-// bus, so a reconnect that lands on a replica which never made the claim still
-// completes it. Nothing is claimed afresh, so the lease the op already holds is
-// the only one, and the op cannot be handed to anyone else while the consumer
-// has it. ReclaimAfter is what that lease has left, not a fresh window.
+// force and was appended after the op named by after, in log order, and makes
+// THIS replica able to acknowledge each: the claim (uid and lease token) is
+// read back from the bus, so a reconnect that lands on a replica which never
+// made the claim still completes it. after is the command id of the last op the
+// consumer acknowledged (design D-16); "" or an id the bus does not know
+// resumes from the oldest unacknowledged op. Nothing is claimed afresh, so the
+// lease the op already holds is the only one, and the op cannot be handed to
+// anyone else while the consumer has it. ReclaimAfter is what that lease has
+// left, not a fresh window.
 //
 // An acknowledged op is Succeeded and never Running, so it is never listed. An
 // op pushed but not acknowledged is Running and is listed again.
-func (q *OpQueue) Resume(ctx context.Context, adapter string, since uint64) []SequencedOp {
+func (q *OpQueue) Resume(ctx context.Context, adapter, after string) []SequencedOp {
+	channels := q.channelsOf(adapter)
+	queues := make([]commandbus.Queue, len(channels))
+	for i, channel := range channels {
+		queues[i] = commandbus.OutQueue(channel)
+	}
+	tasks, err := q.Bus.Running(ctx, queues, commandbus.CommandID(after))
+	if err != nil {
+		log.FromContext(ctx).Error(err, "list running channel ops for a stream resume", "adapter", adapter)
+		return nil
+	}
 	var out []SequencedOp
-	for _, channel := range q.channelsOf(adapter) {
-		tasks, err := q.Bus.Running(ctx, commandbus.OutQueue(channel))
-		if err != nil {
-			log.FromContext(ctx).Error(err, "list running channel ops for a stream resume", "adapter", adapter, "channel", channel)
+	for _, task := range tasks {
+		op, ok := q.adopt(task, adapter)
+		if !ok {
 			continue
 		}
-		for _, task := range tasks {
-			if task.Order <= since {
-				continue
-			}
-			op, ok := q.adopt(task, adapter)
-			if !ok {
-				continue
-			}
-			out = append(out, SequencedOp{Op: op, Sequence: task.Order, ReclaimAfter: time.Until(task.Lease.Until)})
-		}
+		out = append(out, SequencedOp{Op: op, ReclaimAfter: time.Until(task.Lease.Until)})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Sequence < out[j].Sequence })
 	return out
 }
 
@@ -890,7 +890,7 @@ func (q *OpQueue) adoptRunning(ctx context.Context, id string) (claimEntry, bool
 	}
 	q.mu.Unlock()
 	for channel, adapter := range channels {
-		tasks, err := q.Bus.Running(ctx, commandbus.OutQueue(channel))
+		tasks, err := q.Bus.Running(ctx, []commandbus.Queue{commandbus.OutQueue(channel)}, "")
 		if err != nil {
 			continue
 		}
@@ -944,7 +944,7 @@ func (q *OpQueue) claimFrom(channel, adapter string) (SequencedOp, bool) {
 	q.markFromState(op.ID, task.State)
 
 	cp := *op
-	return SequencedOp{Op: &cp, Sequence: task.Order, ReclaimAfter: ReclaimAfter}, true
+	return SequencedOp{Op: &cp, ReclaimAfter: ReclaimAfter}, true
 }
 
 // claimPollTimeout is the deadline Claim gives Bus.Claim — see Claim's own

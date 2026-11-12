@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// ClaimSequenced carries the task's Order: it rises with enqueue order across
-// the queues of every channel the adapter serves, and a second OpQueue over the
-// same bus resumes the claims the first made and completes them.
-func TestSequencedClaimsResumeAndCompleteOnASecondQueue(t *testing.T) {
+// A second OpQueue over the same bus resumes the claims the first made, after
+// the command id of the last op the consumer acknowledged, and completes them.
+func TestClaimsResumeAfterACommandIDAndCompleteOnASecondQueue(t *testing.T) {
 	bus := testBus()
 	first := &OpQueue{Registry: NewRegistry(), Bus: bus}
 	ctx := context.Background()
@@ -29,29 +28,33 @@ func TestSequencedClaimsResumeAndCompleteOnASecondQueue(t *testing.T) {
 	if len(claimed) != 3 {
 		t.Fatalf("claimed %d ops, want 3", len(claimed))
 	}
-	bySeq := map[uint64]bool{}
+	ids := map[string]bool{}
 	for _, so := range claimed {
-		if so.Sequence == 0 || bySeq[so.Sequence] {
-			t.Fatalf("sequences must be non-zero and distinct across channels: %+v", claimed)
+		if so.Op.ID == "" || ids[so.Op.ID] {
+			t.Fatalf("command ids must be non-empty and distinct across channels: %+v", claimed)
 		}
-		bySeq[so.Sequence] = true
+		ids[so.Op.ID] = true
 	}
 
 	second := &OpQueue{
 		Registry: NewRegistry(), Bus: bus,
 		ChannelsFor: func(context.Context, string) []string { return []string{"ui-a", "ui-b"} },
 	}
-	all := second.Resume(ctx, "console", 0)
+	all := second.Resume(ctx, "console", "")
 	if len(all) != 3 {
-		t.Fatalf("resume from 0 returned %d ops, want all 3 unacknowledged", len(all))
+		t.Fatalf("resume with no cursor returned %d ops, want all 3 unacknowledged", len(all))
 	}
-	for i := 1; i < len(all); i++ {
-		if all[i-1].Sequence >= all[i].Sequence {
-			t.Fatalf("resume must return oldest sequence first: %+v", all)
+	// Log order is the order the ops were enqueued, across both channels.
+	for i, want := range []string{"1", "2", "3"} {
+		if got := all[i].Op.Message.Body; got != want {
+			t.Fatalf("resume must return ops in log order, op %d carries %q, want %q", i, got, want)
 		}
 	}
-	if got := second.Resume(ctx, "console", all[1].Sequence); len(got) != 1 || got[0].Op.ID != all[2].Op.ID {
-		t.Fatalf("resume past the second returned %+v, want only the third", got)
+	if got := second.Resume(ctx, "console", all[1].Op.ID); len(got) != 1 || got[0].Op.ID != all[2].Op.ID {
+		t.Fatalf("resume after the second returned %+v, want only the third", got)
+	}
+	if got := second.Resume(ctx, "console", "an-id-no-op-ever-had"); len(got) != 3 {
+		t.Fatalf("an unknown cursor must resume from the oldest unacknowledged op, got %d ops", len(got))
 	}
 	if all[0].ReclaimAfter <= 0 || all[0].ReclaimAfter > ReclaimAfter {
 		t.Fatalf("a replayed op reports what its lease has left, got %v", all[0].ReclaimAfter)
@@ -59,7 +62,7 @@ func TestSequencedClaimsResumeAndCompleteOnASecondQueue(t *testing.T) {
 
 	// Acknowledged on the replica that did NOT claim it.
 	second.Complete(ctx, all[0].Op.ID, OpResult{})
-	if got := second.Resume(ctx, "console", 0); len(got) != 2 {
+	if got := second.Resume(ctx, "console", ""); len(got) != 2 {
 		t.Fatalf("an acknowledged op must leave the resume set, got %d", len(got))
 	}
 	// An acknowledgement of an op nothing runs under is the tolerated duplicate.
@@ -69,7 +72,7 @@ func TestSequencedClaimsResumeAndCompleteOnASecondQueue(t *testing.T) {
 	third.noteChannel("ui-a", "console")
 	third.noteChannel("ui-b", "console")
 	third.Complete(ctx, all[1].Op.ID, OpResult{})
-	if got := third.Resume(ctx, "console", 0); len(got) != 1 {
+	if got := third.Resume(ctx, "console", ""); len(got) != 1 {
 		t.Fatalf("a bare acknowledgement on a replica that never saw the claim must settle it, left %d", len(got))
 	}
 }

@@ -1,7 +1,8 @@
-// Package nats is the production commandbus.Bus backend (design D-1 of
-// openspec/changes/async-command-bus/): JetStream KV buckets and their
-// watches, no delivery stream, exactly the shape the transport spike
-// (task 1, see tasks.md section 1's recorded verdict) settled on.
+// Package nats is the production commandbus.Bus backend (design D-1 and D-2
+// of openspec/changes/async-command-bus/): two JetStream streams of immutable
+// entries and a watch-fed local mirror, exactly the shape the transport spike
+// (task 1, see tasks.md section 1's recorded verdict) settled on, rebuilt
+// append-only by section 14.
 //
 // It is independent of internal/state/nats on purpose (design D-1: "Neither
 // imports the other"). Both talk to nats.go, but a shared connection or
@@ -11,19 +12,36 @@
 // by TestOnlyTheNatsBackendImportsTheNatsClientLibrary
 // (internal/state/static_test.go), extended to name both.
 //
-// Three buckets, prefixed by Scope so an adopter may still point both
-// backends at one server without collision (design D-1):
+// Two streams, prefixed by Scope so an adopter may still point both backends
+// at one server without collision (design D-1):
 //
-//   - "tasks": every task, keyed by UID, the ledger D-2 describes. Order,
-//     lease and backoff all live in this one record — the transport (the
-//     bucket's own watch) only stores and wakes.
-//   - "ids": CommandID (scoped by queue and kind) to the task UID currently
-//     suppressing it, for Submit's dedup lookup (design D-4).
-//   - "dead": a standing copy of every task that reached Dead, written the
-//     instant it does (archiveDead) so DeadLetters never depends on the
-//     retention sweep having run yet. The sweep (sweep.go) purges a settled
-//     task's "tasks" record once it stops suppressing, but "dead" keeps its
-//     own, separately capped, copy.
+//   - "cmdbus_log": every queue's log. Subjects are
+//     cb.<scope>.log.<queue>.<key>.msg (the message, appended once at Submit)
+//     and cb.<scope>.log.<queue>.<key>.ev (a claim, a failure, a completion,
+//     each a further appended entry). A task's state is folded from its own
+//     entries, the last one deciding, and its position in the queue is the
+//     sequence the stream gave its message. Nothing in it is ever updated. A
+//     message that is consumed (succeeded) is removed with its entries, like a
+//     regular queue's, after a short grace (WithSettledGrace) so a replica still
+//     catching up and a Feed consumer see them first; that removal is the only
+//     delete the bus makes and it never touches an unsettled entry. Everything
+//     else, unconsumed and dead alike, is retained by the stream's own age
+//     (seven days) and count limit. A resubmit of a consumed command id is
+//     suppressed for the queue's dedup window by a short in-memory mark each
+//     replica's mirror keeps, not by a retained entry.
+//   - "cmdbus_dead": a standing copy of every task that reached dead, a log of
+//     its own with its own limits, so DeadLetters reaches further back than the
+//     queues do.
+//
+// An exclusive claim is an append to the key's ev subject, conditional on that
+// subject's last sequence (JetStream's expected-last-subject-sequence): of two
+// claims racing for one key exactly one lands, and the other is a rejected
+// append, never a lost update. A submit is ONE append, so a claim landing the
+// instant a task becomes visible cannot fail it (the 10071 incident that
+// motivated section 14).
+//
+// The folding, planning and ordering rules live in commandbus/entrylog, which
+// commandbus/memory runs too; this package owns only the transport.
 package nats
 
 import (

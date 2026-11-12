@@ -407,7 +407,7 @@ func TestReclaimAfterLeaseLapse(t *testing.T) {
 	// A STABLE op, not a plain EnqueueMessage: out.ephemeral's own 2-minute
 	// TTL (design D-5) is shorter than the default 5-minute lease, so an
 	// ephemeral op left claimed that long EXPIRES on the very reap that
-	// would otherwise return it to Retrying (reapLocked applies both
+	// would otherwise read it as retryable (the fold applies both
 	// checks in sequence against the one "now"), rather than ever coming
 	// back for reclaim. out.stable declares no TTL, which is what this
 	// test needs to isolate the lease-lapse mechanism from TTL expiry.
@@ -419,19 +419,12 @@ func TestReclaimAfterLeaseLapse(t *testing.T) {
 	if again := q.Claim("slack"); again != nil {
 		t.Fatalf("claimed op must not be claimable: %+v", again)
 	}
-	// TWO rounds, not one: the bus reaps a lapsed lease lazily, on the next
-	// call that touches the store, and schedules its OWN retry backoff
-	// measured from THAT call's clock — not from the moment it actually
-	// lapsed. So the first Claim after advancing past the lease merely
-	// turns Running into Retrying-with-a-fresh-backoff; a second advance
-	// (and a second Claim) is what actually crosses it.
+	// A lapsed lease needs no write and no backoff (design D-2): once the lease
+	// has passed the folded state reads as retryable, and the very next claim
+	// appends the next attempt. The lease was already the wait.
 	backing.Advance(backing.LeaseDuration() + time.Second)
-	if again := q.Claim("slack"); again != nil {
-		t.Fatalf("want the first post-lapse claim to still be behind its own fresh backoff: %+v", again)
-	}
-	backing.Advance(6 * time.Minute) // past out.stable's own 5s-5m backoff ceiling
 	if again := q.Claim("slack"); again == nil || again.ID != op.ID {
-		t.Fatalf("lapsed lease not reclaimed: %+v", again)
+		t.Fatalf("lapsed lease not reclaimed at once: %+v", again)
 	}
 }
 

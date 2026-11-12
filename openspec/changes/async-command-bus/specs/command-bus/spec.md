@@ -97,7 +97,7 @@ stays as history.
 
 ### Requirement: Every queue is append-only
 A queue SHALL be an append-only log. A message SHALL be appended once, when it
-is submitted, and no entry SHALL ever be modified or removed by the bus.
+is submitted, and no entry SHALL ever be modified.
 
 Everything that later happens to a message, whether claimed, failed, retried,
 completed or dead, SHALL be a further entry appended to the log. The state of
@@ -108,12 +108,23 @@ identity, its command id, SHALL be derived before the append and SHALL carry no
 order. A consumer's position SHALL be the command id of the last entry it
 acknowledged.
 
-Retention SHALL remove entries only by the log's own declared limits, never by
-an operation of the bus on one entry.
+A message that settled as succeeded SHALL be removed from the log together with
+its entries. A message never consumed SHALL be retained up to the queue's
+retention (7 days by default) and then removed. The bus SHALL remove no other
+entry and SHALL never remove an unsettled one. Duplicate suppression after a
+message settled SHALL rest on the queue's dedup window, not on a retained entry. Reading a consumed task by its uid MAY report it as not found.
 
 #### Scenario: Nothing is rewritten
 - **WHEN** a task is submitted, claimed, fails retryably, is claimed again and completes
 - **THEN** the log holds the original message entry unchanged plus appended entries for each step, and no entry was written twice
+
+#### Scenario: A consumed message is removed
+- **WHEN** a task completes successfully
+- **THEN** its entries are removed from the log, and a resubmit of its command id within the dedup window is still suppressed
+
+#### Scenario: An unconsumed message is kept for its retention
+- **WHEN** a task is never claimed
+- **THEN** it stays in the log until the queue's retention passes and is then removed
 
 #### Scenario: A submit is one write
 - **WHEN** a consumer claims a task the instant it becomes visible

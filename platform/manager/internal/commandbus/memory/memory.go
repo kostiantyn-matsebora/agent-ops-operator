@@ -2,6 +2,11 @@
 // development (design D-1 of openspec/changes/async-command-bus/) — never
 // selected by a production install, which runs commandbus/nats instead.
 //
+// It is the same append-only model the nats backend runs (design D-2): the
+// shared entrylog.Log plans every write, and this package only gives each
+// entry the next sequence under one mutex. Nothing is ever rewritten or
+// removed, and the log is uncapped for as long as the Backing lives.
+//
 // A Backing is one isolated store; Bus opens an independent handle onto it.
 // Two handles from one Backing see each other's writes at once, which is
 // how this package models what a real cross-process backend gives for
@@ -14,6 +19,7 @@ import (
 	"time"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/entrylog"
 )
 
 // defaultLeaseDuration matches internal/chat's own OpQueue.ReclaimAfter —
@@ -64,13 +70,12 @@ func New(opts ...Option) *Backing {
 		baseClock:     time.Now,
 		inventory:     commandbus.DefaultInventory(),
 		leaseDuration: defaultLeaseDuration,
-		tasks:         map[string]*commandbus.Task{},
-		ids:           map[idKey]string{},
 		wake:          make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.log = entrylog.New(s.inventory)
 	return &Backing{s: s}
 }
 
@@ -88,6 +93,14 @@ func (b *Backing) Advance(d time.Duration) { b.s.advance(d) }
 // Backing treats it as lapsed — the default, or whatever WithLeaseDuration
 // set. A test advances past exactly this rather than an arbitrary guess.
 func (b *Backing) LeaseDuration() time.Duration { return b.s.leaseDur() }
+
+// Compact does nothing: this backend removes a consumed task's entries inside
+// Settle.
+func (b *Backing) Compact() {}
+
+// Entries reads back every entry appended so far, in order. The conformance
+// suite uses it to prove no entry is ever rewritten or written twice.
+func (b *Backing) Entries() []entrylog.Entry { return b.s.entriesSnapshot() }
 
 // Open is the single-handle convenience most callers want: a fresh store
 // and its one handle, in one call.

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
@@ -23,19 +22,21 @@ const lastEventIDHeader = "Last-Event-ID"
 // never calls it sees no change, and /channel/ops and /done keep every
 // semantic. Telegram stays on the long-poll.
 //
-// One SSE event `op` per op, in queue order, `id:` = the op's sequence
-// (chat.SequencedOp), `data:` = the same claimedOp JSON the long-poll returns.
+// One SSE event `op` per op, in queue order, `id:` = the op's command id (the
+// cursor, never an order), `data:` = the same claimedOp JSON the long-poll
+// returns.
 // Ops are claimed through OpQueue.ClaimSequenced, the long-poll's own path, so
 // leases, at-least-once delivery and idempotency are unchanged: the consumer
 // acknowledges with POST /channel/ops/{id}/done, and an op it never
 // acknowledges is redelivered when its lease lapses.
 //
-// RESUME. A reconnect names the last sequence the consumer holds (the
-// Last-Event-ID header, or ?since=). Before anything new, the stream re-sends
-// every op of the adapter still claimed under a live lease with a sequence
-// above it (OpQueue.Resume), reading the claim back from the bus, so the
-// reconnect may land on any replica. An acknowledged op is settled and never
-// re-sent.
+// RESUME. A reconnect names the command id of the last op the consumer
+// acknowledged (the Last-Event-ID header, or ?since=). Before anything new, the
+// stream re-sends every op of the adapter still claimed under a live lease that
+// was appended after it, in log order (OpQueue.Resume), reading the claim back
+// from the bus, so the reconnect may land on any replica. An id the bus does
+// not know starts from the oldest unacknowledged op. An acknowledged op is
+// settled and never re-sent.
 func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) {
 	adapter, ok := adapterParam(w, r)
 	if !ok {
@@ -48,7 +49,7 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 	if !contractOK(w, r) {
 		return
 	}
-	since, ok := resumeSequence(w, r)
+	since, ok := resumeCursor(w, r)
 	if !ok {
 		return
 	}
@@ -115,27 +116,40 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// resumeSequence reads the consumer's resume point: ?since= wins over
-// Last-Event-ID, absent means 0 (everything outstanding). Anything that is not
-// an unsigned integer is the caller's mistake and refused, never ignored.
-func resumeSequence(w http.ResponseWriter, r *http.Request) (uint64, bool) {
+// maxCursorLen bounds a resume cursor: a command id is a short derived string,
+// and the value is client input.
+const maxCursorLen = 512
+
+// resumeCursor reads the consumer's resume point: ?since= wins over
+// Last-Event-ID, absent means "" (everything outstanding). The cursor is a
+// command id and so opaque, but it is client input: a value that is too long or
+// holds a control character cannot be an id the stream ever sent, and is
+// refused rather than looked up.
+func resumeCursor(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if !onlyParams(w, r, "adapter", "contract", "since") {
-		return 0, false
+		return "", false
 	}
 	raw := r.URL.Query().Get("since")
 	if raw == "" {
 		raw = r.Header.Get(lastEventIDHeader)
 	}
-	if raw == "" {
-		return 0, true
+	if !validCursor(raw) {
+		writeJSON(w, 400, map[string]string{"error": "resume point is not a command id: send the id of the last op event, unchanged"})
+		return "", false
 	}
-	seq, err := strconv.ParseUint(raw, 10, 64)
-	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": fmt.Sprintf(
-			"resume point %q is not a sequence: send the id of the last op event, an unsigned integer", raw)})
-		return 0, false
+	return raw, true
+}
+
+func validCursor(raw string) bool {
+	if len(raw) > maxCursorLen {
+		return false
 	}
-	return seq, true
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // writeOpFrame writes one `op` event and flushes it.
@@ -148,7 +162,10 @@ func writeOpFrame(w http.ResponseWriter, flusher http.Flusher, so chat.Sequenced
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "event: op\nid: %d\ndata: %s\n\n", so.Sequence, data); err != nil {
+	if !validCursor(so.Op.ID) {
+		return fmt.Errorf("op id %q cannot be an SSE event id", so.Op.ID)
+	}
+	if _, err := fmt.Fprintf(w, "event: op\nid: %s\ndata: %s\n\n", so.Op.ID, data); err != nil {
 		return err
 	}
 	flusher.Flush()

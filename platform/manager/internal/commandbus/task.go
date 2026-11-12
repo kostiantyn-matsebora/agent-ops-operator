@@ -43,8 +43,11 @@ type Lease struct {
 	Until  time.Time
 }
 
-// Task is one ledger record, read back from Submit, Claim, GetTask and
-// DeadLetters. A single Task persists across every attempt of one
+// Task is one task as its own log entries fold, read back from Submit, Claim,
+// GetTask and DeadLetters (design D-2: the log is append-only and the last
+// entry decides). It carries no order: FIFO is the position the log gave the
+// task's message, so a retry keeps its place by construction. A single Task
+// persists across every attempt of one
 // submission's life — Attempt grows and Lease changes underneath it — and a
 // NEW Task (a new UID, the same CommandID) is created only when a fresh
 // Submit finds the old one no longer suppressing (succeeded past its window,
@@ -81,11 +84,6 @@ type Task struct {
 
 	// Lease is non-nil exactly while State is Running.
 	Lease *Lease
-
-	// Order is this task's own position in its queue's FIFO, assigned once
-	// at Submit and never touched again — the fact that lets a retry keep
-	// its place rather than re-entering at the back (design D-14, 2.6).
-	Order uint64
 
 	SubmittedAt time.Time
 	UpdatedAt   time.Time
