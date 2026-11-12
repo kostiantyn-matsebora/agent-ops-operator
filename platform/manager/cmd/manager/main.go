@@ -165,6 +165,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The command bus's backend (async-command-bus design D-1) is resolved
+	// and validated here too, before anything connects to a cluster: a name
+	// this binary does not carry, or memory selected above one replica
+	// (design D-13, task 4.4), is a deployment mistake that must stop the
+	// process now, independent of STATE_BACKEND above — an install may run
+	// the kube state store with the nats command bus, or the reverse.
+	commandBusBackend, err := commandBusBackendFromEnv()
+	if err != nil {
+		setupLog.Error(err, "command bus backend")
+		os.Exit(1)
+	}
+
 	// durable-chat-ops-broker: this process's own identity for the claims its
 	// reconciler writes. Needs no relation to the leader-election Lease's own
 	// HolderIdentity — see ConversationReconciler.ReplicaIdentity's comment.
@@ -195,6 +207,18 @@ func main() {
 	stores, err := newStateStores(backend, mgr, namespace)
 	if err != nil {
 		setupLog.Error(err, "state store", "backend", backend)
+		os.Exit(1)
+	}
+
+	// Opening the command bus itself needs mgr, for the nats backend's
+	// readiness check (task 4.3) — the backend name and the replica refusal
+	// were already settled above, before mgr even existed. No real
+	// consumer.Pool is registered against the returned Bus yet — a later
+	// change wires the ensure-topic/send/close-topic/delete-conversation/
+	// signal-intake handlers in and registers one pool per queue (tasks
+	// 5/6), the only remaining step this Bus value needs.
+	if _, err := newCommandBus(mgr, namespace, commandBusBackend); err != nil {
+		setupLog.Error(err, "command bus", "backend", commandBusBackend)
 		os.Exit(1)
 	}
 	// Channel plumbing: built-in channel types register in-process providers

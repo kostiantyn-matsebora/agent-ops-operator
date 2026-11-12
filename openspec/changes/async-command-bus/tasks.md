@@ -57,10 +57,10 @@ shape. The spike (a throwaway module outside the repo) is deleted.
 
 ## 4. Manager wiring — backend-developer
 
-- [ ] 4.1 Select the backend from `COMMANDBUS_BACKEND`, reading `COMMANDBUS_NATS_URL`, `COMMANDBUS_NATS_USER` and `COMMANDBUS_NATS_PASSWORD`. Never read `NATS_*`.
-- [ ] 4.2 Run the consumers on every replica, one pool per queue, with a configurable concurrency.
-- [ ] 4.3 Report not ready while the bus is unreachable.
-- [ ] 4.4 Refuse `memory` with more than one replica.
+- [x] 4.1 Select the backend from `COMMANDBUS_BACKEND`, reading `COMMANDBUS_NATS_URL`, `COMMANDBUS_NATS_USER` and `COMMANDBUS_NATS_PASSWORD`. Never read `NATS_*`.
+- [x] 4.2 Run the consumers on every replica, one pool per queue, with a configurable concurrency.
+- [x] 4.3 Report not ready while the bus is unreachable.
+- [x] 4.4 Refuse `memory` with more than one replica.
 
 ## 5. Accept and process — backend-developer
 
