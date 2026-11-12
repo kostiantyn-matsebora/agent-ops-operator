@@ -685,16 +685,21 @@ independent of the state store above.
 window and the park cool-off are compiled-in starting values, one set per
 queue, with no chart or environment override yet.
 
-#### The `commandBus.nats` bundle
+#### The command bus's NATS
 
-Its own server bundle, from `chart/charts/commandbus/values.yaml` — not a
-second copy of the state store's `nats` bundle above, since every object in
-that bundle is named by a literal no second instance could share.
+**By default the command bus uses the state store's NATS server and
+credential, and you set nothing.** Its buckets are separate from the state
+store's, on the same server. The keys below only matter if you opt into a
+dedicated server (`commandBus.nats.enabled: true`) or an external one
+(`commandBus.nats.url`). The dedicated bundle comes from
+`chart/charts/commandbus/values.yaml` — not a second copy of the state
+store's `nats` bundle above, since every object in that bundle is named by a
+literal no second instance could share.
 
 | Key | Default | Consequence |
 |---|---|---|
-| `commandBus.nats.enabled` | `null` | nullable, follows `commandBus.nats.url`'s own presence. Set it explicitly only to assert or catch a contradiction |
-| `commandBus.nats.url` | `""` | an external server instead of the rendered bundle. Mutually exclusive with it |
+| `commandBus.nats.enabled` | `null` | unset shares the state store's NATS. `true` renders a dedicated bundle |
+| `commandBus.nats.url` | `""` | an external server instead of the shared or dedicated one. Mutually exclusive with a dedicated bundle |
 | `commandBus.nats.replicas` | `3` | servers in the cluster. Chart-time only — the manager always opens every bucket at its own compiled-in replica count, regardless of this value |
 | `commandBus.nats.persistence.size` | `10Gi` | each server's own store directory |
 | `commandBus.nats.persistence.storageClassName` | `""` | the cluster's default provisioner |
@@ -709,7 +714,7 @@ explicit value, then an existing Secret, then generation on install only.
 **The render refuses a contradiction, naming the value:**
 
 - `commandBus.backend` outside `{memory, nats}`.
-- Both a rendered bundle and `commandBus.nats.url` set, or neither.
+- Both a dedicated bundle and `commandBus.nats.url` set, or `enabled: false` with no URL.
 - `commandBus.nats.url` set with no credential.
 - `commandBus.backend: memory` with `replicas` above `1`.
 

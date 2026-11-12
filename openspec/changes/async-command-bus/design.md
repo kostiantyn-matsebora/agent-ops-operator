@@ -264,13 +264,16 @@ recorded. Task 5.4 confirms the call site before the change is finished.
 `commandBus.backend` is `nats` or `memory`, independent of
 `stateStore.backend`. A guard fails every contradiction and names the value.
 
-- `nats` requires exactly one of a rendered bundle or `commandBus.nats.url`.
-  A URL needs its own credential from `commandBus.nats.auth.user` and
-  `password`, or `commandBus.nats.auth.existingSecret`.
-- The default renders a bundle, with the same shape as the state bundle: three
-  servers, a volume each, a PodDisruptionBudget, a chart-generated credential.
-  Whether the existing subchart can be instantiated a second time under an alias
-  is settled in task 8.1. If it cannot, the bus gets its own template.
+- The default shares the state store's `nats` bundle: the bus connects to its
+  client Service with its credential, in buckets of its own. Nothing is
+  configured and nothing second renders.
+- `commandBus.nats.enabled: true` renders a dedicated bundle with the same shape
+  as the state bundle: three servers, a volume each, a PodDisruptionBudget, a
+  chart-generated credential. The existing subchart cannot be instantiated twice
+  under an alias, so the bus has its own template (task 8.1).
+- `commandBus.nats.url` points at an external server and needs its own credential
+  from `commandBus.nats.auth.user` and `password`, or `commandBus.nats.auth.existingSecret`.
+- The dedicated bundle and the URL are mutually exclusive.
 - `memory` is refused with more than one manager replica.
 - The manager reports not ready while the bus is unreachable.
 

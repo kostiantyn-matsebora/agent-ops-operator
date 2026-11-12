@@ -329,8 +329,37 @@ bundle and needs no URL. Otherwise:
 {{- "false" -}}
 {{- else if hasKey $nats "enabled" -}}
 {{- if $nats.enabled -}}true{{- else -}}false{{- end -}}
+{{- else if eq (include "agentops.commandBusNatsShared" .) "true" -}}
+{{- "false" -}}
 {{- else -}}
 {{- if $urlSet -}}false{{- else -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* THE DEFAULT: THE COMMAND BUS SHARES THE STATE STORE'S NATS. No
+second server, no second set of volumes, no value to set. True exactly when
+the backend is `nats`, nothing was hand-set (`commandBus.nats.enabled`
+absent, `commandBus.nats.url` empty) and the state store's own `nats` bundle
+renders. The two keep independent bucket scopes on the one server (design
+D-1), and the manager reaches it with the state store's own connection facts.
+Setting `commandBus.nats.enabled: true` opts into a dedicated bundle,
+`commandBus.nats.url` into an external server. */ -}}
+{{- define "agentops.commandBusNatsShared" -}}
+{{- $nats := (.Values.commandBus | default dict).nats | default dict -}}
+{{- if and (eq (include "agentops.commandBusBackend" .) "nats") (not (hasKey $nats "enabled")) (eq ($nats.url | default "") "") (eq (include "agentops.stateBackend" .) "nats") -}}
+{{- "true" -}}
+{{- else -}}
+{{- "false" -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* THE SECRET THE MANAGER READS THE COMMAND BUS CREDENTIAL FROM: the state
+store's own when shared, the command bus's otherwise. */ -}}
+{{- define "agentops.commandBusCredentialSecret" -}}
+{{- if eq (include "agentops.commandBusNatsShared" .) "true" -}}
+{{- include "nats.credentialSecretName" (dict "nats" .Values.nats) -}}
+{{- else -}}
+{{- include "commandbus.credentialSecretName" (dict "commandbus" .Values.commandBus.nats) -}}
 {{- end -}}
 {{- end -}}
 
@@ -340,7 +369,9 @@ bundle's client Service when it renders, else the explicit
 `commandBus.nats.url` the guard has already confirmed is the only other
 option. */ -}}
 {{- define "agentops.commandBusNatsURL" -}}
-{{- if eq (include "agentops.commandBusNatsBundleEnabled" .) "true" -}}
+{{- if eq (include "agentops.commandBusNatsShared" .) "true" -}}
+{{- printf "nats://agentops-nats-client.%s.svc:4222" .Release.Namespace -}}
+{{- else if eq (include "agentops.commandBusNatsBundleEnabled" .) "true" -}}
 {{- printf "nats://agentops-commandbus-client.%s.svc:4222" .Release.Namespace -}}
 {{- else -}}
 {{- ((.Values.commandBus | default dict).nats | default dict).url | default "" -}}
@@ -386,7 +417,7 @@ an interactive one — same posture as `agentops.stateStoreGuard` above. */ -}}
 {{- if and $urlSet $bundleEnabled -}}
 {{- fail (printf "commandBus.backend=nats needs exactly one of a rendered bundle or commandBus.nats.url: both commandBus.nats.url=%q and the bundle (commandBus.nats.enabled=true) are set. Set commandBus.nats.enabled: false to use the URL, or clear commandBus.nats.url to use the bundle." $url) -}}
 {{- end -}}
-{{- if and (not $urlSet) (not $bundleEnabled) -}}
+{{- if and (not $urlSet) (not $bundleEnabled) (ne (include "agentops.commandBusNatsShared" .) "true") -}}
 {{- fail "commandBus.backend=nats needs exactly one of a rendered bundle or commandBus.nats.url: commandBus.nats.enabled=false and commandBus.nats.url is empty, so neither is set. Set one of them." -}}
 {{- end -}}
 {{- if $urlSet -}}

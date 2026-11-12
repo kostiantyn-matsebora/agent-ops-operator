@@ -27,7 +27,7 @@ combination, so there is no second place "is the bundle selected" can
 answer differently.
 */ -}}
 {{- include "agentops.commandBusGuard" . }}
-{{- if eq (include "agentops.commandBusBackend" .) "nats" }}
+{{- if and (eq (include "agentops.commandBusBackend" .) "nats") (ne (include "agentops.commandBusNatsShared" .) "true") }}
 {{ include "commandbus.credential" (dict "root" $ "commandbus" .Values.commandBus.nats) }}
 {{- if eq (include "agentops.commandBusNatsBundleEnabled" .) "true" }}
 ---

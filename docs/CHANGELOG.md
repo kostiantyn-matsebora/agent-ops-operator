@@ -78,9 +78,11 @@ for the source and the reference material beside this file.
   the state store: accepts work durably, runs it later on any replica, and
   records what became of it. Two backends, `nats` and `memory`, pass one
   conformance suite and bench.
-- A new `commandBus.backend` values key (default `nats`), its own
-  three-server bundle (`commandBus.nats.*`), chart-managed credential and
-  NetworkPolicy rule, independent of `stateStore.backend`. `memory` is for
+- A new `commandBus.backend` values key (default `nats`). By default the
+  bus shares the state store's NATS server and credential, so nothing is
+  added or configured. `commandBus.nats.enabled: true` renders a dedicated
+  three-server bundle (`commandBus.nats.*`) and `commandBus.nats.url` points
+  at an external one, each independent of `stateStore.backend`. `memory` is for
   tests and local development, refused above one manager replica.
 - A new read-only surface: `GET /state/tasks` (per-queue statistics),
   `GET /state/tasks/{id}`, `GET /state/tasks/stream` and

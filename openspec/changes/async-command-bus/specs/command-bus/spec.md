@@ -389,8 +389,7 @@ The chart SHALL expose one selector, `commandBus.backend`, with the values
 
 The render SHALL fail, naming the value, on a backend the chart does not know.
 
-For `nats` an install SHALL either render a server bundle or be given the URL
-of a server in `commandBus.nats.url`. It SHALL NOT do neither and SHALL NOT do both.
+For `nats` an install SHALL by default use the state store's own `nats` server and credential, with nothing configured. It MAY instead render a dedicated server bundle, or be given the URL of a server in `commandBus.nats.url`. It SHALL NOT combine a dedicated bundle with a URL.
 
 The manager SHALL learn its backend and its connection from the chart alone,
 through variables of its own, and SHALL refuse to start on a backend it does

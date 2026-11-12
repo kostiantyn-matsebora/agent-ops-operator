@@ -81,17 +81,16 @@ commandBus:
   # cmd/manager/commandbus.go's own defaultCommandBusConsumerConcurrency.
   consumerConcurrency: 4
   nats:
-    # NULLABLE, same convention as the stateStore `nats` bundle's own
-    # `enabled` comment above: left unset, the bundle renders exactly when
-    # `commandBus.backend` is `nats` AND no `url` below is given.
-    # Hand-setting it is read ONLY by `agentops.commandBusGuard` as a
-    # consistency check against `url` and the backend selector — true
-    # alongside a set `url`, or false alongside an empty one, both fail
-    # the render naming the contradiction.
+    # THE DEFAULT NEEDS NOTHING: with `commandBus.backend` `nats` and the
+    # state store on its `nats` bundle, the command bus rides that same
+    # server and credential. No second StatefulSet, volumes or Secret.
     #
-    # enabled: true   # or false — uncomment only to assert the choice and
-    #                 # have the guard catch a mismatch; absent, `url`
-    #                 # alone decides and no check runs.
+    # NULLABLE: `enabled: true` opts into a DEDICATED bundle (everything
+    # below then applies). `url` below opts into an external server.
+    # Hand-set `enabled` false with an empty `url` fails the render, and
+    # so does true alongside a `url`.
+    #
+    # enabled: true
     #
     # AN EXTERNALLY-RUN server instead of the rendered bundle. Mutually
     # exclusive with the bundle above, and needs its own credential from

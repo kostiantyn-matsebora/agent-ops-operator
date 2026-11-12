@@ -4002,11 +4002,50 @@ func TestCommandBusGuardRefusesAURLWithNoCredential(t *testing.T) {
 // Services, a PodDisruptionBudget and the generated credential — every
 // object templates/commandbus.yaml's own gate owns, together. Distinct
 // object names from the state-store nats bundle throughout (task 8.1).
-func TestCommandBusBundleRendersByDefault(t *testing.T) {
+func TestCommandBusSharesTheStateStoreNatsByDefault(t *testing.T) {
 	out := helmTemplate(t)
+	for _, kind := range []string{"StatefulSet", "PodDisruptionBudget"} {
+		if findDocByKindAndMetaName(out, kind, "agentops-commandbus") != "" {
+			t.Fatalf("the default must render no %s named agentops-commandbus: the bus shares the state store's nats", kind)
+		}
+	}
+	if secretDoc(out, "agentops-commandbus-credentials") != "" {
+		t.Fatal("the default must mint no second credential")
+	}
+	if findDocByKindAndMetaName(out, "StatefulSet", "agentops-nats") == "" {
+		t.Fatal("the state-store nats bundle must render: the command bus rides it")
+	}
+	deploy := findDocByKindAndMetaName(out, "Deployment", "agentops-manager")
+	if !strings.Contains(deploy, "name: COMMANDBUS_NATS_URL\n              value: \"nats://agentops-nats-client.") {
+		t.Fatalf("COMMANDBUS_NATS_URL must name the state store's client Service:\n%s", deploy)
+	}
+	for _, key := range []string{"user", "password"} {
+		want := "name: COMMANDBUS_NATS_" + strings.ToUpper(key) + "\n              valueFrom:\n                secretKeyRef:\n                  name: agentops-nats-credentials\n                  key: " + key
+		if !strings.Contains(deploy, want) {
+			t.Fatalf("COMMANDBUS_NATS_%s must read the state store's credential:\n%s", strings.ToUpper(key), deploy)
+		}
+	}
+}
+
+// Demo mode needs nothing extra: it renders the one state-store server, and
+// the command bus rides it.
+func TestCommandBusDemoModeRendersOneNatsServer(t *testing.T) {
+	out := helmTemplate(t, "--set", "global.demo.enabled=true")
+	if findDocByKindAndMetaName(out, "StatefulSet", "agentops-commandbus") != "" {
+		t.Fatal("demo mode must not render a second NATS StatefulSet")
+	}
+	deploy := findDocByKindAndMetaName(out, "Deployment", "agentops-manager")
+	if !strings.Contains(deploy, "name: COMMANDBUS_NATS_URL\n              value: \"nats://agentops-nats-client.") {
+		t.Fatalf("demo mode's command bus must use the state store's NATS:\n%s", deploy)
+	}
+}
+
+// commandBus.nats.enabled: true opts out of sharing for a dedicated server.
+func TestCommandBusBundleRendersWhenOptedIn(t *testing.T) {
+	out := helmTemplate(t, "--set", "commandBus.nats.enabled=true")
 	sts := findDocByKindAndMetaName(out, "StatefulSet", "agentops-commandbus")
 	if sts == "" {
-		t.Fatal("agentops-commandbus StatefulSet not rendered by default")
+		t.Fatal("agentops-commandbus StatefulSet not rendered when opted in")
 	}
 	if !strings.Contains(sts, "replicas: 3") {
 		t.Fatalf("default install must run 3 replicas:\n%s", sts)
@@ -4039,7 +4078,7 @@ func TestCommandBusEnvWiresToItsOwnSecret(t *testing.T) {
 	wantRef := func(secret, key string) string {
 		return "name: COMMANDBUS_NATS_" + strings.ToUpper(key) + "\n              valueFrom:\n                secretKeyRef:\n                  name: " + secret + "\n                  key: " + key
 	}
-	deploy := findDocByKindAndMetaName(helmTemplate(t), "Deployment", "agentops-manager")
+	deploy := findDocByKindAndMetaName(helmTemplate(t, "--set", "commandBus.nats.enabled=true"), "Deployment", "agentops-manager")
 	if deploy == "" {
 		t.Fatal("manager Deployment not rendered")
 	}
@@ -4078,7 +4117,7 @@ func TestCommandBusEnvWiresToItsOwnSecret(t *testing.T) {
 // happens on install only; a cluster-less upgrade with neither fails loudly;
 // an explicit value still renders on upgrade.
 func TestCommandBusCredentialPrecedence(t *testing.T) {
-	explicit := secretDoc(helmTemplate(t, "--set", "commandBus.nats.auth.user=pinned-user", "--set", "commandBus.nats.auth.password=pinned-pass"),
+	explicit := secretDoc(helmTemplate(t, "--set", "commandBus.nats.enabled=true", "--set", "commandBus.nats.auth.user=pinned-user", "--set", "commandBus.nats.auth.password=pinned-pass"),
 		"agentops-commandbus-credentials")
 	if explicit == "" {
 		t.Fatal("agentops-commandbus-credentials not rendered")
@@ -4090,12 +4129,12 @@ func TestCommandBusCredentialPrecedence(t *testing.T) {
 		t.Fatalf("explicit commandBus.nats.auth.password must be rendered:\n%s", explicit)
 	}
 
-	out := helmTemplate(t, "--set", "commandBus.nats.auth.existingSecret=my-commandbus-secret")
+	out := helmTemplate(t, "--set", "commandBus.nats.enabled=true", "--set", "commandBus.nats.auth.existingSecret=my-commandbus-secret")
 	if secretDoc(out, "agentops-commandbus-credentials") != "" {
 		t.Fatal("no Secret may be generated when an existing one is supplied")
 	}
 
-	install := secretDoc(helmTemplate(t), "agentops-commandbus-credentials")
+	install := secretDoc(helmTemplate(t, "--set", "commandBus.nats.enabled=true"), "agentops-commandbus-credentials")
 	if install == "" {
 		t.Fatal("the default credential must be generated on install")
 	}
@@ -4103,10 +4142,10 @@ func TestCommandBusCredentialPrecedence(t *testing.T) {
 		t.Fatalf("the generated credential must carry the keep policy:\n%s", install)
 	}
 
-	if doc := secretDoc(helmTemplate(t, "--is-upgrade"), "agentops-commandbus-credentials"); doc != "" {
+	if doc := secretDoc(helmTemplate(t, "--set", "commandBus.nats.enabled=true", "--is-upgrade"), "agentops-commandbus-credentials"); doc != "" {
 		t.Fatalf("a cluster-less upgrade with no explicit value must mint no credential, got:\n%s", doc)
 	}
-	if secretDoc(helmTemplate(t, "--is-upgrade", "--set", "commandBus.nats.auth.password=rotated"), "agentops-commandbus-credentials") == "" {
+	if secretDoc(helmTemplate(t, "--set", "commandBus.nats.enabled=true", "--is-upgrade", "--set", "commandBus.nats.auth.password=rotated"), "agentops-commandbus-credentials") == "" {
 		t.Fatal("an explicit value must still render on upgrade")
 	}
 }

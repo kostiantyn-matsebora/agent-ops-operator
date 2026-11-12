@@ -91,23 +91,22 @@ spec:
             - name: COMMANDBUS_BACKEND
               value: {{ include "agentops.commandBusBackend" . | quote }}
             {{- if eq (include "agentops.commandBusBackend" .) "nats" }}
-            # The command bus's OWN connection facts — NEVER NATS_URL/
-            # NATS_USER/NATS_PASSWORD above, which belong to the STATE
-            # store's bundle (design D-1: "it never reads NATS_*").
-            # COMMANDBUS_NATS_URL points at the rendered bundle's client
-            # Service by default, or at the explicit commandBus.nats.url
-            # when the bundle is off.
+            # The command bus's OWN connection variables — never NATS_URL/
+            # NATS_USER/NATS_PASSWORD above (design D-1: "it never reads
+            # NATS_*"), though by default they NAME the same server and
+            # Secret: the command bus shares the state store's nats bundle
+            # unless commandBus.nats.enabled or .url says otherwise.
             - name: COMMANDBUS_NATS_URL
               value: {{ include "agentops.commandBusNatsURL" . | quote }}
             - name: COMMANDBUS_NATS_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "commandbus.credentialSecretName" (dict "commandbus" .Values.commandBus.nats) }}
+                  name: {{ include "agentops.commandBusCredentialSecret" . }}
                   key: user
             - name: COMMANDBUS_NATS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "commandbus.credentialSecretName" (dict "commandbus" .Values.commandBus.nats) }}
+                  name: {{ include "agentops.commandBusCredentialSecret" . }}
                   key: password
             {{- end }}
             # Sizes every consumer.Pool the manager runs, independent of
