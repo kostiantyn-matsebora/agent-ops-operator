@@ -47,8 +47,8 @@ maxQueuedConversations: 50
 # `nats` is the DEFAULT (nats-state-store-default): state
 # lives on its own clustered volumes rather than as custom resources, so
 # `kubectl get conversations` no longer shows anything live. Pin the old
-# behaviour with `stateStore.backend: kube` — ONE value, no second one to
-# touch; the nats bundle's own `enabled` follows this selector on its own.
+# behaviour with `stateStore.backend: kube`, ONE value, no second one to
+# touch. The nats bundle's own `enabled` follows this selector on its own.
 stateStore:
   backend: nats
 
