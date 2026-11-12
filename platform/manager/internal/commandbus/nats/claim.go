@@ -173,19 +173,27 @@ func (b *Bus) nextWake(queue commandbus.Queue, now time.Time) time.Duration {
 		if t.Queue != queue {
 			continue
 		}
-		if t.State == commandbus.StateRetrying && t.NotBefore.After(now) {
-			if d := t.NotBefore.Sub(now); d < wait {
-				wait = d
-			}
+		if t.State == commandbus.StateRetrying {
+			wait = soonerWake(wait, t.NotBefore, now)
 		}
-		if t.State == commandbus.StateRunning && t.Lease != nil && t.Lease.Until.After(now) {
-			if d := t.Lease.Until.Sub(now); d < wait {
-				wait = d
-			}
+		if t.State == commandbus.StateRunning && t.Lease != nil {
+			wait = soonerWake(wait, t.Lease.Until, now)
 		}
 	}
 	if wait <= 0 {
 		wait = time.Millisecond
+	}
+	return wait
+}
+
+// soonerWake returns the shorter of wait and the time until at, ignoring an
+// instant that has already passed.
+func soonerWake(wait time.Duration, at, now time.Time) time.Duration {
+	if !at.After(now) {
+		return wait
+	}
+	if d := at.Sub(now); d < wait {
+		return d
 	}
 	return wait
 }

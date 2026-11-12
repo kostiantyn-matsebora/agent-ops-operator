@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -371,40 +372,7 @@ func TestAsyncBulkCloseEachConversationGetsItsOwnInvocation(t *testing.T) {
 		t.Fatalf("bulk close: %d %s", code, out)
 	}
 
-	invocationOf := map[string]string{}
-	succeeded := map[string]bool{}
-	deadline := time.After(3 * time.Minute)
-	for len(succeeded) < n {
-		select {
-		case f, ok := <-frames:
-			if !ok {
-				t.Fatalf("the task stream ended before every close settled: %v", succeeded)
-			}
-			w, ok := taskPut(f)
-			if !ok {
-				continue
-			}
-			var target string
-			for _, name := range names {
-				if w.Key == name {
-					target = name
-					break
-				}
-			}
-			if target == "" {
-				continue
-			}
-			if prior, seen := invocationOf[target]; seen && prior != w.InvocationID {
-				t.Fatalf("conversation %s's close task changed invocationId mid-flight: %q then %q", target, prior, w.InvocationID)
-			}
-			invocationOf[target] = w.InvocationID
-			if w.State == "succeeded" {
-				succeeded[target] = true
-			}
-		case <-deadline:
-			t.Fatalf("not every close settled within the deadline: %v of %v", succeeded, names)
-		}
-	}
+	invocationOf := awaitCloseInvocations(t, frames, names)
 
 	seenInvocations := map[string]bool{}
 	for _, name := range names {
@@ -424,6 +392,38 @@ func TestAsyncBulkCloseEachConversationGetsItsOwnInvocation(t *testing.T) {
 			return err == nil && c.Status.Phase == agentopsv1alpha1.ConversationClosed, err
 		})
 	}
+}
+
+// awaitCloseInvocations reads the task stream until every named
+// conversation's close task has succeeded, returning each one's invocationId
+// and failing if a task's invocationId changes mid-flight.
+func awaitCloseInvocations(t *testing.T, frames <-chan string, names []string) map[string]string {
+	t.Helper()
+	invocationOf := map[string]string{}
+	succeeded := map[string]bool{}
+	deadline := time.After(3 * time.Minute)
+	for len(succeeded) < len(names) {
+		select {
+		case f, ok := <-frames:
+			if !ok {
+				t.Fatalf("the task stream ended before every close settled: %v", succeeded)
+			}
+			w, ok := taskPut(f)
+			if !ok || !slices.Contains(names, w.Key) {
+				continue
+			}
+			if prior, seen := invocationOf[w.Key]; seen && prior != w.InvocationID {
+				t.Fatalf("conversation %s's close task changed invocationId mid-flight: %q then %q", w.Key, prior, w.InvocationID)
+			}
+			invocationOf[w.Key] = w.InvocationID
+			if w.State == "succeeded" {
+				succeeded[w.Key] = true
+			}
+		case <-deadline:
+			t.Fatalf("not every close settled within the deadline: %v of %v", succeeded, names)
+		}
+	}
+	return invocationOf
 }
 
 // ---- 9.4 ------------------------------------------------------------------
@@ -501,29 +501,7 @@ func TestAsyncCascadeDeleteSettlesMembersBeforeParent(t *testing.T) {
 			len(accepted.TaskIDs), accepted.TaskIDs)
 	}
 
-	var order []string
-	settled := map[string]bool{}
-	deadline := time.After(4 * time.Minute)
-	for len(settled) < len(accepted.TaskIDs) {
-		select {
-		case f, ok := <-frames:
-			if !ok {
-				t.Fatal("the task stream ended before every delete task succeeded")
-			}
-			w, ok := taskPut(f)
-			if !ok {
-				continue
-			}
-			for _, uid := range accepted.TaskIDs {
-				if w.UID == uid && w.State == "succeeded" && !settled[uid] {
-					settled[uid] = true
-					order = append(order, uid)
-				}
-			}
-		case <-deadline:
-			t.Fatalf("not every delete task settled: %v of %v", order, accepted.TaskIDs)
-		}
-	}
+	order := awaitSettleOrder(t, frames, accepted.TaskIDs)
 	// accepted.TaskIDs is already deepest-first, root last
 	// (deleteCascadeRequests/convtask.CascadeOrder) — the stream's own
 	// arrival order must match it exactly.
@@ -746,23 +724,7 @@ func TestAsyncChannelFailureBacksOffDeadLettersThenRecovers(t *testing.T) {
 	// test its UID — the task stream is the only way to find it.
 	findResp := openTaskStream(t, ctx, e, auth)
 	frames := streamFrames(findResp)
-	var uid string
-	findDeadline := time.After(6 * time.Minute)
-findUID:
-	for {
-		select {
-		case f, ok := <-frames:
-			if !ok {
-				t.Fatal("the task stream ended before the telegram ensure-topic task appeared")
-			}
-			if w, ok := taskPut(f); ok && w.Queue == "out.telegram" && strings.Contains(w.Key, conv.Name) {
-				uid = w.UID
-				break findUID
-			}
-		case <-findDeadline:
-			t.Fatal("the telegram ensure-topic task never appeared on the task stream")
-		}
-	}
+	uid := awaitTelegramTaskUID(t, frames, conv.Name)
 	findResp.Body.Close()
 
 	// Real backoff, observed through at least two genuine retries against
@@ -784,14 +746,7 @@ findUID:
 	// worst case of doubling backoff (5+10+20+40+80+160+300s ≈ 10m25s).
 	waitTaskState(t, e, auth, uid, "dead", 15*time.Minute)
 	dead := deadLetters(t, e, auth, "out.telegram")
-	found := false
-	for _, d := range dead {
-		if d.UID == uid {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.ContainsFunc(dead, func(d taskStateWire) bool { return d.UID == uid }) {
 		t.Fatalf("the dead task %s must be listed on GET /state/dead-letters?queue=out.telegram", uid)
 	}
 

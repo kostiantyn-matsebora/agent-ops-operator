@@ -96,7 +96,7 @@ func TestEnsureTopicsDispatchesUnconditionallyDedupedByTheBus(t *testing.T) {
 		t.Fatalf("pending=%v err=%v, want still pending on the second pass (no thread landed yet)", pending, err)
 	}
 
-	if op := r.Ops.Claim("slack"); op == nil {
+	if r.Ops.Claim("slack") == nil {
 		t.Fatal("the first pass's op must be claimable")
 	}
 	if op := r.Ops.Claim("slack"); op != nil {
@@ -136,7 +136,7 @@ func TestEnsureTopicsDispatchIsIndifferentToReplicaIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if op := ops.Claim("slack"); op == nil {
+	if ops.Claim("slack") == nil {
 		t.Fatal("one op must be claimable, from whichever replica dispatched it")
 	}
 	if op := ops.Claim("slack"); op != nil {

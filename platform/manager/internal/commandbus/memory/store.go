@@ -224,19 +224,27 @@ func (s *store) nextWakeLocked(queue commandbus.Queue, now time.Time) time.Durat
 		if t.Queue != queue {
 			continue
 		}
-		if t.State == commandbus.StateRetrying && t.NotBefore.After(now) {
-			if d := t.NotBefore.Sub(now); d < wait {
-				wait = d
-			}
+		if t.State == commandbus.StateRetrying {
+			wait = soonerWake(wait, t.NotBefore, now)
 		}
-		if t.State == commandbus.StateRunning && t.Lease != nil && t.Lease.Until.After(now) {
-			if d := t.Lease.Until.Sub(now); d < wait {
-				wait = d
-			}
+		if t.State == commandbus.StateRunning && t.Lease != nil {
+			wait = soonerWake(wait, t.Lease.Until, now)
 		}
 	}
 	if wait <= 0 {
 		wait = time.Millisecond
+	}
+	return wait
+}
+
+// soonerWake returns the shorter of wait and the time until at, ignoring an
+// instant that has already passed.
+func soonerWake(wait time.Duration, at, now time.Time) time.Duration {
+	if !at.After(now) {
+		return wait
+	}
+	if d := at.Sub(now); d < wait {
+		return d
 	}
 	return wait
 }
@@ -420,23 +428,7 @@ func (s *store) stats(queue commandbus.Queue, kind commandbus.Kind) (commandbus.
 		if t.Queue != queue || t.Kind != kind {
 			continue
 		}
-		switch t.State {
-		case commandbus.StateQueued:
-			markPending(t)
-		case commandbus.StateRetrying:
-			if t.NotBefore.After(now) {
-				out.Scheduled++
-			} else {
-				markPending(t)
-			}
-		case commandbus.StateRunning:
-			markRunning(t)
-		case commandbus.StateDead:
-			out.Dead++
-			if t.Parked(now) {
-				out.Parked++
-			}
-		}
+		tallyTask(&out, t, now, markPending, markRunning)
 	}
 	if !oldestPending.IsZero() {
 		out.OldestPendingAge = now.Sub(oldestPending)
@@ -445,6 +437,27 @@ func (s *store) stats(queue commandbus.Queue, kind commandbus.Kind) (commandbus.
 		out.OldestRunningAge = now.Sub(oldestRunning)
 	}
 	return out, nil
+}
+
+// tallyTask counts one task of the queue and kind stats is reading into out.
+func tallyTask(out *commandbus.QueueStats, t *commandbus.Task, now time.Time, markPending, markRunning func(*commandbus.Task)) {
+	switch t.State {
+	case commandbus.StateQueued:
+		markPending(t)
+	case commandbus.StateRetrying:
+		if t.NotBefore.After(now) {
+			out.Scheduled++
+		} else {
+			markPending(t)
+		}
+	case commandbus.StateRunning:
+		markRunning(t)
+	case commandbus.StateDead:
+		out.Dead++
+		if t.Parked(now) {
+			out.Parked++
+		}
+	}
 }
 
 // feed streams s.events from resume (0 meaning "from now") until ctx is done.

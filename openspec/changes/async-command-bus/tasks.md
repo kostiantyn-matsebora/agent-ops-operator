@@ -65,12 +65,28 @@ shape. The spike (a throwaway module outside the repo) is deleted.
 ## 5. Accept and process — backend-developer
 
 - [ ] 5.1 Build the accept step: authentication, scope, shape, unknown channel or source, signal Wired and filter reasons, the receipt, the move stamp, the thread-to-conversation lookup, then mint `invocationId`, enqueue, reply `202 {invocationId, taskIds}` additively.
-  DONE for `reopen`/`delete`/`reset-context`/`/channel/inbound` (the thread lookup, self-input and closed-thread refusals run at accept with no task) AND now for `/coordinate/close`/`/coordinate/escalate` (the move stamp runs synchronously at accept, unconditionally on a successful `Submit` — see 5.2/5.5). The reply stays `200` for these two, per the proposal's own "a coordinator verb keeps the `200`... and gains the same two fields" — `202` applies to every OTHER converted verb, not this pair. NOT done for `/signal/inbound` (no Wired/filter-reason or receipt change — publish stays synchronous, see 5.6's note) — still deferred, not guessed at.
+  - DONE for `reopen`, `delete`, `reset-context` and `/channel/inbound`.
+    The thread lookup, self-input and closed-thread refusals run at accept with no task.
+  - DONE for `/coordinate/close` and `/coordinate/escalate`.
+    The move stamp runs at accept, on a successful `Submit` (see 5.2 and 5.5).
+    The reply stays `200` for these two, per the proposal. Every other converted verb replies `202`.
+  - NOT done for `/signal/inbound`.
+    There is no Wired, filter-reason or receipt change. Publish stays synchronous (see 5.6's note).
 - [x] 5.2 Move `close` (console single and bulk, chat, coordinated, the idle timer, a member's `escalate`, budget-exceeded), `exit`, `reopen`, `delete` and `reset-context` into handlers. Keep immediate refusals that need only a cheap read, such as `delete` of a conversation not Closed.
   DONE: chat `/close`/`/exit` (via the inbound-message task), the idle timer, budget-exceeded (both call sites — the reconciler's deadline edge and `handleWorkDone`'s maxTurns edge), `reopen`, `delete`, `reset-context`, and now `coordinated` close (`/coordinate/close` → `VerbCloseCoordinated`/`taskCloseCoordinated`) and a member's `escalate` (`/coordinate/escalate` → `VerbEscalate`/`taskEscalate`). "Console bulk" is confirmed to be N individual chat `/close` messages (no bulk HTTP endpoint exists), so it is already covered by the chat path. `/coordinate/close`'s own widened-scope check (one-hop membership, the Coordinator-owner sibling-root widening, `isHumanInitiated`) is NOT a cheap read in the "immediate refusal" sense this task names — it stays deferred into `taskCloseCoordinated`, which re-derives it fresh via the unchanged `Router.CloseCoordinated`. Only target-defaults-to-caller (a string default) stays at accept.
 - [ ] 5.3 Enqueue a cascade at accept, members before the parent on the root's key. The ancestor re-checks its descendants at run time and closes any open one or fails `precondition_failed`.
-  DONE to the letter for plain auto-close (idle timer), budget-exceeded (both call sites) and `/coordinate/close` — one shared builder, `convtask.CloseMemberRequests`/`internal/httpapi`'s `closeCascadeRequests` (and the controller's own `submitCloseCascade` over the same function), used by all three plus delete (5.10). Each enqueues one `CascadeMember` task per LIVE descendant, deepest-first, ahead of that verb's own FINAL request — which is the exact pre-existing recursive Router call (`CloseConversation`/`AutoCloseConversation`/`CloseBudgetExceeded`/`CloseCoordinated`, UNCHANGED), reused rather than reimplemented: its own fresh re-listing of live `causedBy` members when it runs IS the "ancestor re-checks its descendants at run time" behaviour, closing any straggler invoked between accept and now — the same choice `closeWithCascade`'s own pre-existing second sweep already made (close it, never `precondition_failed`), kept consistent rather than invented twice. Covered by `TestHandleCoordinateCloseAncestorReChecksAMemberInvokedAfterAccept`.
-  PARTIAL on one entry point only: a plain chat `/close` (and the console's N-individual-closes) is discovered by PARSING TEXT inside `chat.Router.HandleMessage`, which already runs inside a single "conv" task with no `commandbus.Bus` of its own to reach — decomposing it would mean either `chat` importing `commandbus` (reversing this change's own dependency direction) or `httpapi` re-parsing command text ahead of `HandleMessage` (forking logic `taskInboundMessage`'s own doc comment argues against). Left as the documented simplification it already was — see `closecascade.go`'s own doc comment.
+  - DONE for plain auto-close (idle timer), budget-exceeded (both call sites) and `/coordinate/close`.
+    One shared builder serves all three plus delete (5.10): `convtask.CloseMemberRequests`, `internal/httpapi`'s `closeCascadeRequests` and the controller's `submitCloseCascade`.
+    Each enqueues one `CascadeMember` task per live descendant, deepest-first, ahead of the verb's own final request.
+    The final request is the unchanged recursive Router call (`CloseConversation`, `AutoCloseConversation`, `CloseBudgetExceeded`, `CloseCoordinated`).
+    Its fresh re-listing of live `causedBy` members is the run-time re-check, and closes any straggler invoked after accept.
+    That matches `closeWithCascade`'s own second sweep: close it, never `precondition_failed`.
+    Covered by `TestHandleCoordinateCloseAncestorReChecksAMemberInvokedAfterAccept`.
+  - PARTIAL on one entry point: a plain chat `/close` (and the console's N individual closes).
+    It is found by parsing text inside `chat.Router.HandleMessage`, already inside a single "conv" task with no `commandbus.Bus` to reach.
+    Decomposing it would need `chat` to import `commandbus`, reversing this change's dependency direction.
+    The alternative is `httpapi` re-parsing command text ahead of `HandleMessage`, forking logic `taskInboundMessage`'s doc comment argues against.
+    Left as the documented simplification, see `closecascade.go`'s doc comment.
 - [x] 5.4 Confirm where `CloseBudgetExceeded` is called relative to `recordRun`. Enqueue it as a `close` task after the run is recorded, or record why it must stay inline.
   Confirmed: in `internal/httpapi/server.go`'s `handleWorkDone`, the call sits AFTER `s.recordRun` (and after the phase-setting `state.Mutate`) — reading the lines between them shows no reordering needed. Now enqueued as a `conv`/`close`/`budget-exceeded` task there (`Server.closeBudgetExceeded`), and likewise at the reconciler's own deadline-edge call site (`ConversationReconciler.closeBudgetExceeded`) — both fall back to calling the Router inline when no Bus is wired.
 - [ ] 5.5 Split `escalate`: a root patch task, and for a member a cascading `close` then `append-result`. Derive the append's dedup id from the task, not the clock.
@@ -178,7 +194,7 @@ Left to a future change if the gap matters beyond this.
 ## 7. Leader proxy and claim placeholder — backend-developer
 
 - [x] 7.1 Exempt `/channel/ops`, `/channel/ops/{id}/done`, `/state/tasks*` and `/state/dead-letters` from the leader proxy. Accept endpoints still proxy.
-- [x] 7.2 Stop writing `status.threads[].claim` and ignore a value found there. Keep the five-minute lease through `claimStalenessSeconds`.
+- [x] 7.2 Stop writing `status.threads[].claim` and ignore a value found there. The five-minute lease is owned by the bus, and `claimStalenessSeconds` is inert.
 - [x] 7.3 Add the retired-vocabulary entry for `status.threads[].claim` in this change's apply, when the field stops being written. Doing it at proposal time would fail the guard on the published `durable-chat-ops-broker` spec, which still describes the field until archive. Run `retired-vocabulary-guard.py`.
 
 ## 8. Chart — deployment-engineer
@@ -204,32 +220,19 @@ Left to a future change if the gap matters beyond this.
   `chart/templates/commandbus.yaml` mirroring `templates/nats.yaml`'s own
   structure and doc comment.
 - [ ] 8.2 Add `commandBus.backend`, `commandBus.nats.url`, `commandBus.nats.auth.*`, per-queue declarations and the dead-letter retention caps as values.
-  DONE for `commandBus.backend`, `commandBus.nats.url`/`.enabled`/`.auth.*`/
-  `.replicas`/`.image`/`.persistence`/`.probes`/`.podDisruptionBudget` and
-  `commandBus.consumerConcurrency` (wiring `COMMANDBUS_CONSUMER_CONCURRENCY`,
-  real and backend-independent — confirmed read at
-  `cmd/manager/commandbus.go`'s `commandBusConsumerConcurrency()`, called from
-  both `OpQueue.Run`'s pool and `httpapi`'s own registration in `main.go`).
-  NOT DONE for the per-queue declarations (attempts/backoff/TTL/dedup window/
-  park cool-off/in-flight cap) and the dead-letter/ledger retention caps
-  (sweep interval, ledger retention, dead-letter max age and count) — a
-  genuine Go-side gap, not a chart oversight. Confirmed by reading
-  `cmd/manager/commandbus.go` end to end and grepping `internal/commandbus/`
-  for every env read: the ONLY env vars this binary consumes for the command
-  bus are `COMMANDBUS_BACKEND`, `COMMANDBUS_NATS_URL`,
-  `COMMANDBUS_NATS_USER`, `COMMANDBUS_NATS_PASSWORD` and
-  `COMMANDBUS_CONSUMER_CONCURRENCY`. `internal/commandbus/nats/bus.go`'s own
-  `WithInventory`/`WithSweepInterval`/`WithLedgerRetention`/
-  `WithDeadLetterRetention` `Option`s exist, but `commandBusNatsOptions` —
-  the one slice `newNatsCommandBus` passes them through — is `nil` in
-  production (only a test sets it). So every bucket opens today at
-  `commandbus.DefaultInventory()`'s and `commandbus/nats`'s own hardcoded
-  defaults regardless of any chart value. Rendering a value here with
-  nothing on the other end would be exactly the inert-knob-with-no-effect
-  this task's own instructions refuse. Named in `chart/values.yaml`'s own
-  comment under `commandBus:` so the gap is visible there too, and the
-  env vars a follow-up would need to add are named above — Go-side work,
-  out of this lane.
+  - DONE for `commandBus.backend`, `commandBus.nats.url`, `.enabled`, `.auth.*`, `.replicas`, `.image`, `.persistence`, `.probes` and `.podDisruptionBudget`.
+  - DONE for `commandBus.consumerConcurrency`, wiring `COMMANDBUS_CONSUMER_CONCURRENCY`.
+    `commandBusConsumerConcurrency()` in `cmd/manager/commandbus.go` reads it.
+    Both `OpQueue.Run`'s pool and `httpapi`'s registration in `main.go` call it.
+  - NOT DONE for the per-queue declarations: attempts, backoff, TTL, dedup window, park cool-off, in-flight cap.
+  - NOT DONE for the retention caps: sweep interval, ledger retention, dead-letter max age and count.
+  - The cause is a Go-side gap, not a chart oversight.
+    The binary reads only five command bus variables: `COMMANDBUS_BACKEND`, `COMMANDBUS_NATS_URL`, `COMMANDBUS_NATS_USER`, `COMMANDBUS_NATS_PASSWORD` and `COMMANDBUS_CONSUMER_CONCURRENCY`.
+    The `Option`s in `internal/commandbus/nats/bus.go` exist, but `commandBusNatsOptions` is `nil` in production.
+    Every bucket therefore opens at the hardcoded defaults whatever the chart says.
+  - A chart value with nothing on the other end would be an inert knob, which this task refuses.
+    The gap is named in the comment under `commandBus:` in `chart/values.yaml`.
+    A follow-up must add the env vars. That is Go-side work, out of this lane.
 - [x] 8.3 Render a bundle by default, with a PodDisruptionBudget and a chart-generated credential resolved in the usual order (explicit, existing Secret, generation on install only).
 - [x] 8.4 Add the NetworkPolicy rule admitting only the manager to the bus server.
 - [x] 8.5 Inject the connection variables into the manager Deployment.

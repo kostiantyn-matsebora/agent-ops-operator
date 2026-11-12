@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -151,18 +152,7 @@ func assertCommandBusCredentialProjected(t *testing.T, ctx context.Context, e *E
 	}
 	var seen []string
 	for _, c := range pods[0].Spec.Containers {
-		for _, ev := range c.Env {
-			if ev.Name != "COMMANDBUS_NATS_USER" && ev.Name != "COMMANDBUS_NATS_PASSWORD" {
-				continue
-			}
-			if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
-				t.Fatalf("%s must be a secretKeyRef, not a literal value", ev.Name)
-			}
-			if ev.ValueFrom.SecretKeyRef.Name != "agentops-commandbus-credentials" {
-				t.Fatalf("%s must resolve from the bundle's own credential Secret, got %q", ev.Name, ev.ValueFrom.SecretKeyRef.Name)
-			}
-			seen = append(seen, ev.Name)
-		}
+		seen = append(seen, commandBusCredentialEnvNames(t, c.Env)...)
 	}
 	if len(seen) != 2 {
 		t.Fatalf("the manager must carry both COMMANDBUS_NATS_USER and COMMANDBUS_NATS_PASSWORD, got: %v", seen)
@@ -170,6 +160,27 @@ func assertCommandBusCredentialProjected(t *testing.T, ctx context.Context, e *E
 	if err := e.K.WaitDeploymentAvailable(ctx, "agentops-manager", 2*time.Minute); err != nil {
 		t.Fatalf("the manager must be Available — i.e. already connected with the kubelet-resolved credential: %v", err)
 	}
+}
+
+// commandBusCredentialEnvNames returns the names of the command bus
+// credential variables in env, failing the test on one that is a literal or
+// resolves from any Secret but the bundle's own.
+func commandBusCredentialEnvNames(t *testing.T, env []corev1.EnvVar) []string {
+	t.Helper()
+	var seen []string
+	for _, ev := range env {
+		if ev.Name != "COMMANDBUS_NATS_USER" && ev.Name != "COMMANDBUS_NATS_PASSWORD" {
+			continue
+		}
+		if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
+			t.Fatalf("%s must be a secretKeyRef, not a literal value", ev.Name)
+		}
+		if ev.ValueFrom.SecretKeyRef.Name != "agentops-commandbus-credentials" {
+			t.Fatalf("%s must resolve from the bundle's own credential Secret, got %q", ev.Name, ev.ValueFrom.SecretKeyRef.Name)
+		}
+		seen = append(seen, ev.Name)
+	}
+	return seen
 }
 
 // assertCommandBusNetworkPolicyEnforced: enables the chart's one shared
@@ -380,29 +391,7 @@ func TestAsyncOrderingHoldsAcrossTwoReplicasUnderParallelConsumers(t *testing.T)
 		submitted = append(submitted, accepted.TaskIDs[0])
 	}
 
-	var observed []string
-	settled := map[string]bool{}
-	deadline := time.After(5 * time.Minute)
-	for len(settled) < len(submitted) {
-		select {
-		case f, ok := <-frames:
-			if !ok {
-				t.Fatalf("the task stream ended before every step settled: %v", observed)
-			}
-			w, ok := taskPut(f)
-			if !ok {
-				continue
-			}
-			for _, uid := range submitted {
-				if w.UID == uid && w.State == "succeeded" && !settled[uid] {
-					settled[uid] = true
-					observed = append(observed, uid)
-				}
-			}
-		case <-deadline:
-			t.Fatalf("not every step settled within the deadline: %v of %v", observed, submitted)
-		}
-	}
+	observed := awaitSettleOrder(t, frames, submitted)
 	for i, uid := range submitted {
 		if observed[i] != uid {
 			t.Fatalf("submission order must equal settle order under two parallel consumers: submitted %v, observed %v",
@@ -415,6 +404,34 @@ func TestAsyncOrderingHoldsAcrossTwoReplicasUnderParallelConsumers(t *testing.T)
 		t.Fatalf("closing: %d %+v", code, accepted)
 	}
 	waitTaskState(t, e, auth, accepted.TaskIDs[0], "succeeded", 2*time.Minute)
+}
+
+// awaitSettleOrder reads the task stream until every submitted task has
+// succeeded and returns their UIDs in the order the stream showed them settle.
+func awaitSettleOrder(t *testing.T, frames <-chan string, submitted []string) []string {
+	t.Helper()
+	var observed []string
+	settled := map[string]bool{}
+	deadline := time.After(5 * time.Minute)
+	for len(settled) < len(submitted) {
+		select {
+		case f, ok := <-frames:
+			if !ok {
+				t.Fatalf("the task stream ended before every step settled: %v", observed)
+			}
+			w, ok := taskPut(f)
+			if !ok || w.State != "succeeded" || settled[w.UID] {
+				continue
+			}
+			if slices.Contains(submitted, w.UID) {
+				settled[w.UID] = true
+				observed = append(observed, w.UID)
+			}
+		case <-deadline:
+			t.Fatalf("not every step settled within the deadline: %v of %v", observed, submitted)
+		}
+	}
+	return observed
 }
 
 // ---- 11.5 -------------------------------------------------------------
@@ -605,23 +622,7 @@ func TestAsyncBackoffIntoADeadLetterAgainstARealFailure(t *testing.T) {
 	// never an accept handler, so no HTTP response hands this test its
 	// UID — the task stream is the only way to find it (same idiom 9.7
 	// uses).
-	var uid string
-	deadline := time.After(6 * time.Minute)
-findUID:
-	for {
-		select {
-		case f, ok := <-frames:
-			if !ok {
-				t.Fatal("the task stream ended before the telegram ensure-topic task appeared")
-			}
-			if w, ok := taskPut(f); ok && w.Queue == "out.telegram" && strings.Contains(w.Key, conv.Name) {
-				uid = w.UID
-				break findUID
-			}
-		case <-deadline:
-			t.Fatal("the telegram ensure-topic task never appeared on the task stream")
-		}
-	}
+	uid := awaitTelegramTaskUID(t, frames, conv.Name)
 
 	retries := 0
 	waitFor(t, "at least two real retries against a genuinely unreachable address", 3*time.Minute, func() (bool, error) {
@@ -641,14 +642,27 @@ findUID:
 	// same margin 9.7 uses for the identical backoff profile.
 	waitTaskState(t, e, auth, uid, "dead", 15*time.Minute)
 	dead := deadLetters(t, e, auth, "out.telegram")
-	found := false
-	for _, d := range dead {
-		if d.UID == uid {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.ContainsFunc(dead, func(d taskStateWire) bool { return d.UID == uid }) {
 		t.Fatalf("the dead task %s must be listed on GET /state/dead-letters?queue=out.telegram", uid)
+	}
+}
+
+// awaitTelegramTaskUID reads the task stream until the telegram task for
+// the named conversation appears and returns its UID.
+func awaitTelegramTaskUID(t *testing.T, frames <-chan string, conversation string) string {
+	t.Helper()
+	deadline := time.After(6 * time.Minute)
+	for {
+		select {
+		case f, ok := <-frames:
+			if !ok {
+				t.Fatal("the task stream ended before the telegram ensure-topic task appeared")
+			}
+			if w, ok := taskPut(f); ok && w.Queue == "out.telegram" && strings.Contains(w.Key, conversation) {
+				return w.UID
+			}
+		case <-deadline:
+			t.Fatal("the telegram ensure-topic task never appeared on the task stream")
+		}
 	}
 }

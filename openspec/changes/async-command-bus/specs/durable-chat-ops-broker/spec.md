@@ -67,10 +67,9 @@ A claim SHALL carry a lease. A lease that passes with no completion SHALL
 return the op to its queue for redelivery, counted as one attempt by the
 command bus.
 
-The lease duration SHALL default to five minutes and SHALL stay configurable
-through the chart value `claimStalenessSeconds`, rendered into the manager's
-configuration, never a compiled-in constant, so an install with a slower
-transport can raise it.
+The lease duration SHALL default to five minutes, owned by the command bus's
+ledger. The chart value `claimStalenessSeconds` no longer feeds it and is
+inert, kept only so an existing install's values still render.
 
 The bus returns an expired lease. No replica clears it, and leadership has no
 part in it.

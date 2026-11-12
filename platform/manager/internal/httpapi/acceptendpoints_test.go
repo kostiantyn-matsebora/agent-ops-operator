@@ -150,7 +150,7 @@ func TestHandleContextResetAcceptsThenClearsAndAnnounces(t *testing.T) {
 	if got.Status.RuntimeContextID != "" {
 		t.Fatalf("want the handle cleared once processed, got %q", got.Status.RuntimeContextID)
 	}
-	if op := s.Ops.Claim("slack"); op == nil {
+	if s.Ops.Claim("slack") == nil {
 		t.Fatal("want the reset announced once processed")
 	}
 }
@@ -180,7 +180,7 @@ func TestHandleChannelInboundOnAClosedConversationAnswersImmediatelyWithNoTask(t
 	if ids := acceptedIDs(t, rec); len(ids) != 0 {
 		t.Fatalf("a closed-thread notice is immediate, no task — got %v", ids)
 	}
-	if op := s.Ops.Claim("slack"); op == nil {
+	if s.Ops.Claim("slack") == nil {
 		t.Fatal("want the closed-conversation notice enqueued immediately")
 	}
 }

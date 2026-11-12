@@ -10,6 +10,14 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 )
 
+const (
+	msgSubmit1       = "Submit 1"
+	msgSubmit2       = "Submit 2"
+	cmdPark          = "cmd-park"
+	keyPark          = "key-park"
+	fmtClaimedWanted = "claimed %s, want %s"
+)
+
 // withTimeout bounds one scenario's whole body — long enough for a slow CI
 // runner, short enough that a genuine deadlock fails the test rather than
 // hanging the suite.
@@ -73,9 +81,9 @@ func testIdempotentSubmit(t *testing.T, open func() Backing, d commandbus.Declar
 	request := req(queue, d.Kind, "cmd-idem", "key-idem")
 
 	first, err := bus.Submit(ctx, request)
-	mustNoErr(t, err, "Submit 1")
+	mustNoErr(t, err, msgSubmit1)
 	second, err := bus.Submit(ctx, request)
-	mustNoErr(t, err, "Submit 2")
+	mustNoErr(t, err, msgSubmit2)
 	if second.UID != first.UID {
 		t.Fatalf("a repeated CommandID minted a second task: %s != %s", second.UID, first.UID)
 	}
@@ -87,139 +95,164 @@ func testIdempotentSubmit(t *testing.T, open func() Backing, d commandbus.Declar
 func testDedupAcrossEveryState(t *testing.T, open func() Backing, d commandbus.Declaration, queue commandbus.Queue) {
 	ctx, cancel := withTimeout()
 	defer cancel()
+	env := dedupEnv{ctx: ctx, open: open, d: d, queue: queue}
 
-	t.Run("queued", func(t *testing.T) {
-		bus := open().Bus()
-		request := req(queue, d.Kind, "cmd-q", "key-q")
-		first, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit 1")
-		second, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit 2")
-		if second.UID != first.UID {
-			t.Fatalf("a Queued task did not suppress a resubmit")
-		}
-	})
+	cases := []struct {
+		name string
+		run  func(t *testing.T, e dedupEnv)
+	}{
+		{"queued", dedupQueued},
+		{"running", dedupRunning},
+		{"retrying", dedupRetrying},
+		{"succeeded within window", dedupSucceededWithinWindow},
+		{"succeeded past window", dedupSucceededPastWindow},
+		{"dead", dedupDead},
+		{"dead past cool-off", dedupDeadPastCoolOff},
+		{"expired", dedupExpired},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { c.run(t, env) })
+	}
+}
 
-	t.Run("running", func(t *testing.T) {
-		bus := open().Bus()
-		request := req(queue, d.Kind, "cmd-r", "key-r")
-		first, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit")
-		claimed, err := bus.Claim(ctx, queue, "c1")
-		mustNoErr(t, err, "Claim")
-		if claimed.UID != first.UID {
-			t.Fatalf("claimed the wrong task")
-		}
-		second, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit while running")
-		if second.UID != first.UID {
-			t.Fatalf("a Running task did not suppress a resubmit")
-		}
-	})
+// dedupEnv is what each per-state dedup scenario shares.
+type dedupEnv struct {
+	ctx   context.Context
+	open  func() Backing
+	d     commandbus.Declaration
+	queue commandbus.Queue
+}
 
-	t.Run("retrying", func(t *testing.T) {
-		bus := open().Bus()
-		request := req(queue, d.Kind, "cmd-rt", "key-rt")
-		first, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit")
-		claimed, err := bus.Claim(ctx, queue, "c1")
-		mustNoErr(t, err, "Claim")
-		mustNoErr(t, bus.Fail(ctx, claimed.UID, claimed.Lease.Token, commandbus.CodeConflict, "retry me"), "Fail")
-		second, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit while retrying")
-		if second.UID != first.UID {
-			t.Fatalf("a Retrying task did not suppress a resubmit")
-		}
-	})
+func dedupQueued(t *testing.T, e dedupEnv) {
+	bus := e.open().Bus()
+	request := req(e.queue, e.d.Kind, "cmd-q", "key-q")
+	first, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, msgSubmit1)
+	second, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, msgSubmit2)
+	if second.UID != first.UID {
+		t.Fatalf("a Queued task did not suppress a resubmit")
+	}
+}
 
-	t.Run("succeeded within window", func(t *testing.T) {
-		if d.Policy.DedupWindow <= 0 {
-			t.Skip("queue declares no dedup window")
-		}
-		bus := open().Bus()
-		request := req(queue, d.Kind, "cmd-s", "key-s")
-		first, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit")
-		claimed, err := bus.Claim(ctx, queue, "c1")
-		mustNoErr(t, err, "Claim")
-		mustNoErr(t, bus.Settle(ctx, claimed.UID, claimed.Lease.Token), "Settle")
-		second, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit right after success")
-		if second.UID != first.UID {
-			t.Fatalf("a just-Succeeded task did not suppress a resubmit within its window")
-		}
-	})
+func dedupRunning(t *testing.T, e dedupEnv) {
+	bus := e.open().Bus()
+	request := req(e.queue, e.d.Kind, "cmd-r", "key-r")
+	first, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, "Submit")
+	claimed, err := bus.Claim(e.ctx, e.queue, "c1")
+	mustNoErr(t, err, "Claim")
+	if claimed.UID != first.UID {
+		t.Fatalf("claimed the wrong task")
+	}
+	second, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, "Submit while running")
+	if second.UID != first.UID {
+		t.Fatalf("a Running task did not suppress a resubmit")
+	}
+}
 
-	t.Run("succeeded past window", func(t *testing.T) {
-		if d.Policy.DedupWindow <= 0 {
-			t.Skip("queue declares no dedup window")
-		}
-		b := open()
-		bus := b.Bus()
-		request := req(queue, d.Kind, "cmd-sp", "key-sp")
-		first, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit")
-		claimed, err := bus.Claim(ctx, queue, "c1")
-		mustNoErr(t, err, "Claim")
-		mustNoErr(t, bus.Settle(ctx, claimed.UID, claimed.Lease.Token), "Settle")
-		b.Advance(d.Policy.DedupWindow + time.Second)
-		second, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit past the window")
-		if second.UID == first.UID {
-			t.Fatalf("a Succeeded task past its window still suppressed a resubmit")
-		}
-	})
+func dedupRetrying(t *testing.T, e dedupEnv) {
+	bus := e.open().Bus()
+	request := req(e.queue, e.d.Kind, "cmd-rt", "key-rt")
+	first, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, "Submit")
+	claimed, err := bus.Claim(e.ctx, e.queue, "c1")
+	mustNoErr(t, err, "Claim")
+	mustNoErr(t, bus.Fail(e.ctx, claimed.UID, claimed.Lease.Token, commandbus.CodeConflict, "retry me"), "Fail")
+	second, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, "Submit while retrying")
+	if second.UID != first.UID {
+		t.Fatalf("a Retrying task did not suppress a resubmit")
+	}
+}
 
-	t.Run("dead", func(t *testing.T) {
-		b := open()
-		bus := b.Bus()
-		first := deadTask(t, ctx, bus, queue, d, "cmd-d", "key-d")
-		second, err := bus.Submit(ctx, req(queue, d.Kind, "cmd-d", "key-d"))
-		mustNoErr(t, err, "Submit right after dead")
-		switch {
-		case d.Policy.ParkCoolOff > 0 && second.UID != first.UID:
-			t.Fatalf("a just-Dead task did not suppress a resubmit during its park cool-off")
-		case d.Policy.ParkCoolOff <= 0 && second.UID == first.UID:
-			t.Fatalf("a Dead task with no park cool-off (D-5: never parked) still suppressed an immediate resubmit")
-		}
-	})
+func dedupSucceededWithinWindow(t *testing.T, e dedupEnv) {
+	if e.d.Policy.DedupWindow <= 0 {
+		t.Skip("queue declares no dedup window")
+	}
+	bus := e.open().Bus()
+	request := req(e.queue, e.d.Kind, "cmd-s", "key-s")
+	first, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, "Submit")
+	claimed, err := bus.Claim(e.ctx, e.queue, "c1")
+	mustNoErr(t, err, "Claim")
+	mustNoErr(t, bus.Settle(e.ctx, claimed.UID, claimed.Lease.Token), "Settle")
+	second, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, "Submit right after success")
+	if second.UID != first.UID {
+		t.Fatalf("a just-Succeeded task did not suppress a resubmit within its window")
+	}
+}
 
-	t.Run("dead past cool-off", func(t *testing.T) {
-		if d.Policy.ParkCoolOff <= 0 {
-			t.Skip("queue never parks (D-5)")
-		}
-		b := open()
-		bus := b.Bus()
-		first := deadTask(t, ctx, bus, queue, d, "cmd-dp", "key-dp")
-		b.Advance(d.Policy.ParkCoolOff + time.Second)
-		second, err := bus.Submit(ctx, req(queue, d.Kind, "cmd-dp", "key-dp"))
-		mustNoErr(t, err, "Submit past the cool-off")
-		if second.UID == first.UID {
-			t.Fatalf("a Dead task past its cool-off still suppressed a resubmit")
-		}
-	})
+func dedupSucceededPastWindow(t *testing.T, e dedupEnv) {
+	if e.d.Policy.DedupWindow <= 0 {
+		t.Skip("queue declares no dedup window")
+	}
+	b := e.open()
+	bus := b.Bus()
+	request := req(e.queue, e.d.Kind, "cmd-sp", "key-sp")
+	first, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, "Submit")
+	claimed, err := bus.Claim(e.ctx, e.queue, "c1")
+	mustNoErr(t, err, "Claim")
+	mustNoErr(t, bus.Settle(e.ctx, claimed.UID, claimed.Lease.Token), "Settle")
+	b.Advance(e.d.Policy.DedupWindow + time.Second)
+	second, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, "Submit past the window")
+	if second.UID == first.UID {
+		t.Fatalf("a Succeeded task past its window still suppressed a resubmit")
+	}
+}
 
-	t.Run("expired", func(t *testing.T) {
-		if d.Policy.TTL <= 0 {
-			t.Skip("queue declares no TTL")
-		}
-		b := open()
-		bus := b.Bus()
-		request := req(queue, d.Kind, "cmd-e", "key-e")
-		first, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit")
-		b.Advance(d.Policy.TTL + time.Second)
-		got, err := bus.GetTask(ctx, first.UID)
-		mustNoErr(t, err, "GetTask")
-		if got.State != commandbus.StateExpired {
-			t.Fatalf("state = %v, want Expired", got.State)
-		}
-		second, err := bus.Submit(ctx, request)
-		mustNoErr(t, err, "Submit after expiry")
-		if second.UID == first.UID {
-			t.Fatalf("an Expired task still suppressed a resubmit")
-		}
-	})
+func dedupDead(t *testing.T, e dedupEnv) {
+	bus := e.open().Bus()
+	first := deadTask(t, e.ctx, bus, e.queue, e.d, "cmd-d", "key-d")
+	second, err := bus.Submit(e.ctx, req(e.queue, e.d.Kind, "cmd-d", "key-d"))
+	mustNoErr(t, err, "Submit right after dead")
+	switch {
+	case e.d.Policy.ParkCoolOff > 0 && second.UID != first.UID:
+		t.Fatalf("a just-Dead task did not suppress a resubmit during its park cool-off")
+	case e.d.Policy.ParkCoolOff <= 0 && second.UID == first.UID:
+		t.Fatalf("a Dead task with no park cool-off (D-5: never parked) still suppressed an immediate resubmit")
+	}
+}
+
+func dedupDeadPastCoolOff(t *testing.T, e dedupEnv) {
+	if e.d.Policy.ParkCoolOff <= 0 {
+		t.Skip("queue never parks (D-5)")
+	}
+	b := e.open()
+	bus := b.Bus()
+	first := deadTask(t, e.ctx, bus, e.queue, e.d, "cmd-dp", "key-dp")
+	b.Advance(e.d.Policy.ParkCoolOff + time.Second)
+	second, err := bus.Submit(e.ctx, req(e.queue, e.d.Kind, "cmd-dp", "key-dp"))
+	mustNoErr(t, err, "Submit past the cool-off")
+	if second.UID == first.UID {
+		t.Fatalf("a Dead task past its cool-off still suppressed a resubmit")
+	}
+}
+
+func dedupExpired(t *testing.T, e dedupEnv) {
+	if e.d.Policy.TTL <= 0 {
+		t.Skip("queue declares no TTL")
+	}
+	b := e.open()
+	bus := b.Bus()
+	request := req(e.queue, e.d.Kind, "cmd-e", "key-e")
+	first, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, "Submit")
+	b.Advance(e.d.Policy.TTL + time.Second)
+	got, err := bus.GetTask(e.ctx, first.UID)
+	mustNoErr(t, err, "GetTask")
+	if got.State != commandbus.StateExpired {
+		t.Fatalf("state = %v, want Expired", got.State)
+	}
+	second, err := bus.Submit(e.ctx, request)
+	mustNoErr(t, err, "Submit after expiry")
+	if second.UID == first.UID {
+		t.Fatalf("an Expired task still suppressed a resubmit")
+	}
 }
 
 func testParkThenRelease(t *testing.T, open func() Backing, d commandbus.Declaration, queue commandbus.Queue) {
@@ -228,16 +261,16 @@ func testParkThenRelease(t *testing.T, open func() Backing, d commandbus.Declara
 	b := open()
 	bus := b.Bus()
 
-	first := deadTask(t, ctx, bus, queue, d, "cmd-park", "key-park")
+	first := deadTask(t, ctx, bus, queue, d, cmdPark, keyPark)
 
-	suppressed, err := bus.Submit(ctx, req(queue, d.Kind, "cmd-park", "key-park"))
+	suppressed, err := bus.Submit(ctx, req(queue, d.Kind, cmdPark, keyPark))
 	mustNoErr(t, err, "Submit immediately after dead")
 	if d.Policy.ParkCoolOff > 0 && suppressed.UID != first.UID {
 		t.Fatalf("a parked id was not suppressed immediately after going dead")
 	}
 
 	b.Advance(d.Policy.ParkCoolOff + time.Second)
-	released, err := bus.Submit(ctx, req(queue, d.Kind, "cmd-park", "key-park"))
+	released, err := bus.Submit(ctx, req(queue, d.Kind, cmdPark, keyPark))
 	mustNoErr(t, err, "Submit after the cool-off")
 	if released.UID == first.UID {
 		t.Fatalf("the id was not released once its park cool-off elapsed")
@@ -290,9 +323,9 @@ func testSerializationPerKeyUnderParallelConsumers(t *testing.T, open func() Bac
 	bus := open().Bus()
 
 	first, err := bus.Submit(ctx, req(queue, d.Kind, "cmd-serial-1", "key-serial"))
-	mustNoErr(t, err, "Submit 1")
+	mustNoErr(t, err, msgSubmit1)
 	second, err := bus.Submit(ctx, req(queue, d.Kind, "cmd-serial-2", "key-serial"))
-	mustNoErr(t, err, "Submit 2")
+	mustNoErr(t, err, msgSubmit2)
 
 	claimed, err := bus.Claim(ctx, queue, "c1")
 	mustNoErr(t, err, "Claim first")
@@ -416,7 +449,7 @@ func testLeaseLapseExpiresUnderAShortTTL(t *testing.T, open func() Backing, d co
 	claimed, err := bus.Claim(ctx, queue, "c1")
 	mustNoErr(t, err, "Claim")
 	if claimed.UID != task.UID {
-		t.Fatalf("claimed %s, want %s", claimed.UID, task.UID)
+		t.Fatalf(fmtClaimedWanted, claimed.UID, task.UID)
 	}
 
 	b.Advance(lease + time.Second)
@@ -433,7 +466,7 @@ func testLeaseLapseExpiresUnderAShortTTL(t *testing.T, open func() Backing, d co
 	freed, err := bus.Claim(ctx, queue, "c2")
 	mustNoErr(t, err, "Claim")
 	if freed.UID != next.UID {
-		t.Fatalf("claimed %s, want %s", freed.UID, next.UID)
+		t.Fatalf(fmtClaimedWanted, freed.UID, next.UID)
 	}
 }
 
@@ -450,7 +483,7 @@ func testBoundedRetryIntoDead(t *testing.T, open func() Backing, d commandbus.De
 		claimed, err := bus.Claim(ctx, queue, "c1")
 		mustNoErr(t, err, fmt.Sprintf("Claim attempt %d", attempt))
 		if claimed.UID != task.UID {
-			t.Fatalf("claimed %s, want %s", claimed.UID, task.UID)
+			t.Fatalf(fmtClaimedWanted, claimed.UID, task.UID)
 		}
 		if claimed.Attempt != attempt {
 			t.Fatalf("Attempt = %d, want %d", claimed.Attempt, attempt)
@@ -561,7 +594,7 @@ func testPerQueueStatistics(t *testing.T, open func() Backing, d commandbus.Decl
 	claimedRunning, err := bus.Claim(ctx, queue, "c1")
 	mustNoErr(t, err, "Claim running")
 	if claimedRunning.UID != running.UID {
-		t.Fatalf("claimed %s, want %s", claimedRunning.UID, running.UID)
+		t.Fatalf(fmtClaimedWanted, claimedRunning.UID, running.UID)
 	}
 
 	pending, err := bus.Submit(ctx, req(queue, d.Kind, "cmd-stat-pending", "key-stat-pending"))

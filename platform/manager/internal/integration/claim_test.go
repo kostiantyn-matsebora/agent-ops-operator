@@ -106,7 +106,7 @@ func TestEnsureTopicsResubmissionDedupsOnTheBus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if op := ops.Claim("tg-claim-2"); op == nil {
+	if ops.Claim("tg-claim-2") == nil {
 		t.Fatal("the first pass's op must be claimable")
 	}
 	if op := ops.Claim("tg-claim-2"); op != nil {
@@ -138,7 +138,7 @@ func TestEnsureTopicsDispatchIsIndifferentToReplicaIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if op := ops.Claim("tg-claim-4"); op == nil {
+	if ops.Claim("tg-claim-4") == nil {
 		t.Fatal("one op must be claimable, from whichever replica dispatched it")
 	}
 	if op := ops.Claim("tg-claim-4"); op != nil {

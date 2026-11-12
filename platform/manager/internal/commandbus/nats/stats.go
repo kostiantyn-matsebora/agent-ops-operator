@@ -57,23 +57,7 @@ func (b *Bus) Stats(ctx context.Context, queue commandbus.Queue, kind commandbus
 		if t.Queue != queue || t.Kind != kind {
 			continue
 		}
-		switch t.State {
-		case commandbus.StateQueued:
-			markPending(t)
-		case commandbus.StateRetrying:
-			if t.NotBefore.After(now) {
-				out.Scheduled++
-			} else {
-				markPending(t)
-			}
-		case commandbus.StateRunning:
-			markRunning(t)
-		case commandbus.StateDead:
-			out.Dead++
-			if t.Parked(now) {
-				out.Parked++
-			}
-		}
+		tallyTask(&out, t, now, markPending, markRunning)
 	}
 	if !oldestPending.IsZero() {
 		out.OldestPendingAge = now.Sub(oldestPending)
@@ -82,6 +66,27 @@ func (b *Bus) Stats(ctx context.Context, queue commandbus.Queue, kind commandbus
 		out.OldestRunningAge = now.Sub(oldestRunning)
 	}
 	return out, nil
+}
+
+// tallyTask counts one task of the queue and kind Stats is reading into out.
+func tallyTask(out *commandbus.QueueStats, t commandbus.Task, now time.Time, markPending, markRunning func(commandbus.Task)) {
+	switch t.State {
+	case commandbus.StateQueued:
+		markPending(t)
+	case commandbus.StateRetrying:
+		if t.NotBefore.After(now) {
+			out.Scheduled++
+		} else {
+			markPending(t)
+		}
+	case commandbus.StateRunning:
+		markRunning(t)
+	case commandbus.StateDead:
+		out.Dead++
+		if t.Parked(now) {
+			out.Parked++
+		}
+	}
 }
 
 // tasksLatestSeq reads the "tasks" bucket's own last stream sequence

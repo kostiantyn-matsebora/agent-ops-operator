@@ -805,7 +805,7 @@ func TestFailedDeleteConversationRetriesThenResubmitsImmediatelyOnceDead(t *test
 	// Three attempts exhausted: the task is now Dead. Never parked, so the
 	// re-derive inside the loop's own last iteration already produced a
 	// fresh, immediately-claimable task.
-	if again := q.Claim("slack"); again == nil {
+	if q.Claim("slack") == nil {
 		t.Fatal("a dead delete-conversation (never parked) must be immediately resubmittable")
 	}
 }

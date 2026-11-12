@@ -1264,27 +1264,7 @@ func (q *OpQueue) inProcessHandler(channelType string, factory ProviderFactory) 
 		}
 		op.channelType = channelType
 
-		res := OpResult{}
-		provider, err := factory(ctx, op.Channel)
-		if err == nil {
-			switch op.Kind {
-			case OpEnsureTopic:
-				if op.Topic != nil {
-					res.ThreadID, err = provider.EnsureTopic(ctx, *op.Topic)
-				}
-			case OpSend:
-				if op.Message != nil {
-					err = provider.Send(ctx, op.ThreadID, *op.Message)
-				}
-			case OpCloseTopic:
-				if closer, ok := provider.(TopicCloser); ok && op.ThreadID != nil {
-					err = closer.CloseTopic(ctx, *op.ThreadID)
-				}
-			}
-		}
-		if err != nil {
-			res.Error = err.Error()
-		}
+		res := executeInProcess(ctx, factory, op)
 
 		done := activity.Event{
 			Kind: activity.KindChannelOpCompleted,
@@ -1306,6 +1286,33 @@ func (q *OpQueue) inProcessHandler(channelType string, factory ProviderFactory) 
 		}
 		return nil
 	}
+}
+
+// executeInProcess runs one op against the in-process provider the factory
+// builds for its channel, folding any failure into the result's Error.
+func executeInProcess(ctx context.Context, factory ProviderFactory, op *Op) OpResult {
+	res := OpResult{}
+	provider, err := factory(ctx, op.Channel)
+	if err == nil {
+		switch op.Kind {
+		case OpEnsureTopic:
+			if op.Topic != nil {
+				res.ThreadID, err = provider.EnsureTopic(ctx, *op.Topic)
+			}
+		case OpSend:
+			if op.Message != nil {
+				err = provider.Send(ctx, op.ThreadID, *op.Message)
+			}
+		case OpCloseTopic:
+			if closer, ok := provider.(TopicCloser); ok && op.ThreadID != nil {
+				err = closer.CloseTopic(ctx, *op.ThreadID)
+			}
+		}
+	}
+	if err != nil {
+		res.Error = err.Error()
+	}
+	return res
 }
 
 // QueueStat is one adapter's outstanding-op picture: how deep, how old, and
