@@ -200,14 +200,14 @@ and crossing 3's authorization is what bounds it instead.
 
 ### Command bus isolation
 
-Under the default `nats` backend, accepted work sits on a clustered server
-of its own, structurally the same shape as the state store above and
-sharing its crossing in the threat table and diagram.
+Under the default `nats` backend, accepted work sits on a clustered server, structurally the same shape as the state store above and sharing its crossing in the threat table and diagram.
+
+With the state store on `nats` it is that very server, in buckets of its own. With the `kube` store it is a dedicated one.
 
 | | |
 |---|---|
 | **Threat** | crossing 7 — any pod that reaches the bus server reads or submits a task directly, bypassing the manager's own accept step |
-| **Control** | the client port always requires its own chart-managed credential, distinct from the state store's. Where network policy is enabled, it admits the manager's pods alone |
+| **Control** | the client port always requires a chart-managed credential. It is the state store's own where the server is shared, and the bus's own where it has a server of its own. Where network policy is enabled, it admits the manager's pods alone |
 | **Cost** | none beyond the install's existing network-policy decision |
 | **Residual risk** | the same as the state store's: one shared credential, and a policy that applies where nothing enforces it |
 
@@ -215,8 +215,12 @@ Every other component reaches accepted work through the manager's
 `/state/tasks*`/`/state/dead-letters` surface instead, never the bus
 server directly.
 
+**A channel adapter reaches its own queue only through the manager.** Reading and acknowledging an op are scoped by the adapter's derived token to the channels that name it.
+
+An acknowledgement hands the op over and starts a delivery TTL, so an adapter that goes silent can hold only its own conversations' later messages, until the TTL fails the message.
+
 **Setting `commandBus.backend: memory`** removes this crossing entirely —
-the ledger then lives in the manager's own process, reachable by nothing
+the queue logs then live in the manager's own process, reachable by nothing
 outside it. It is refused above one replica (see
 [Configuration](configuration.md#commandbus)).
 

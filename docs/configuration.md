@@ -678,23 +678,31 @@ independent of the state store above.
 
 | Key | Default | Consequence |
 |---|---|---|
-| `commandBus.backend` | `nats` | `nats` keeps the ledger on its own clustered server. `memory` keeps it in one process's heap — tests and local development only, refused above one `replicas` |
+| `commandBus.backend` | `nats` | `nats` keeps the queue logs on a clustered server. `memory` keeps them in one process's heap — tests and local development only, refused above one `replicas` |
 | `commandBus.consumerConcurrency` | `4` | consumers per queue, per replica |
+| `commandBus.channelReceiptAdapters` | `[console]` | the channel adapters whose acknowledgement is only their receipt of an op: no delivery TTL, no report, and the manager deletes the op at the acknowledgement. Renders `CHANNEL_RECEIPT_ADAPTERS`. An empty list means none, so every adapter must report |
+| `commandBus.deliveryTtl.stable` | `10m` | how long an adapter has, from acknowledging a reply or an input card, to report it done. With no report the manager fails it, final. Renders `CHANNEL_DELIVERY_TTL_STABLE` |
+| `commandBus.deliveryTtl.ephemeral` | `2m` | the same for an ack or a notice. `CHANNEL_DELIVERY_TTL_EPHEMERAL` |
+| `commandBus.deliveryTtl.topic` | `5m` | the same for `ensure-topic` and `close-topic`. `CHANNEL_DELIVERY_TTL_TOPIC` |
+| `commandBus.deliveryTtl.deleteConversation` | `5m` | the same for `delete-conversation`. `CHANNEL_DELIVERY_TTL_DELETE_CONVERSATION` |
 
-**Per-queue tuning has no value here.** Attempts, backoff, TTL, the dedup
+**Raise a delivery TTL only if a surface is slow.** An adapter spends its TTL retrying against the surface, so a longer one lets a rate-limited surface be ridden out for longer.
+
+It also holds a conversation's later messages longer behind a message the adapter lost.
+
+**Other per-queue tuning has no value here.** Attempts, backoff, TTL, the dedup
 window and the park cool-off are compiled-in starting values, one set per
 queue, with no chart or environment override yet.
 
 #### The command bus's NATS
 
-**By default the command bus uses the state store's NATS server and
-credential, and you set nothing.** Its buckets are separate from the state
-store's, on the same server. The keys below only matter if you opt into a
-dedicated server (`commandBus.nats.enabled: true`) or an external one
-(`commandBus.nats.url`). The dedicated bundle comes from
-`chart/charts/commandbus/values.yaml` — not a second copy of the state
-store's `nats` bundle above, since every object in that bundle is named by a
-literal no second instance could share.
+**By default, with the state store on `nats`, the command bus uses its NATS server and credential, and you set nothing.** Its buckets are separate from the state store's, on the same server.
+
+With the `kube` state store there is no server to share, so the default renders the dedicated bundle.
+
+The keys below only matter if you opt into a dedicated server (`commandBus.nats.enabled: true`) or an external one (`commandBus.nats.url`).
+
+The dedicated bundle comes from `chart/charts/commandbus/values.yaml` — not a second copy of the state store's `nats` bundle above, since every object in that bundle is named by a literal no second instance could share.
 
 | Key | Default | Consequence |
 |---|---|---|

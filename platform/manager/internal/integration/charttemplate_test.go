@@ -4195,3 +4195,57 @@ func TestNatsVolumeClaimTemplatesPlaceStorageClassOnTheSpec(t *testing.T) {
 		}
 	}
 }
+
+// The command bus's channel delivery knobs render on the manager Deployment
+// from commandBus.channelReceiptAdapters and commandBus.deliveryTtl. The
+// defaults equal the manager's own built-ins, so nothing changes behaviour.
+func TestCommandBusChannelDeliveryEnvDefaults(t *testing.T) {
+	deploy := findDocByKindAndMetaName(helmTemplate(t), "Deployment", "agentops-manager")
+	for name, want := range map[string]string{
+		"CHANNEL_RECEIPT_ADAPTERS":                 "console",
+		"CHANNEL_DELIVERY_TTL_STABLE":              "10m",
+		"CHANNEL_DELIVERY_TTL_EPHEMERAL":           "2m",
+		"CHANNEL_DELIVERY_TTL_TOPIC":               "5m",
+		"CHANNEL_DELIVERY_TTL_DELETE_CONVERSATION": "5m",
+	} {
+		if !strings.Contains(deploy, "name: "+name+"\n              value: \""+want+"\"") {
+			t.Fatalf("manager Deployment must carry %s=%q by default:\n%s", name, want, deploy)
+		}
+	}
+	if strings.Contains(deploy, "CHANNEL_FEED") {
+		t.Fatalf("no CHANNEL_FEED_* variable may render:\n%s", deploy)
+	}
+}
+
+func TestCommandBusChannelDeliveryEnvOverrides(t *testing.T) {
+	deploy := findDocByKindAndMetaName(helmTemplate(t,
+		"--set", "commandBus.channelReceiptAdapters={console,wall}",
+		"--set", "commandBus.deliveryTtl.stable=30m",
+		"--set", "commandBus.deliveryTtl.deleteConversation=90s",
+	), "Deployment", "agentops-manager")
+	for name, want := range map[string]string{
+		"CHANNEL_RECEIPT_ADAPTERS":                 "console,wall",
+		"CHANNEL_DELIVERY_TTL_STABLE":              "30m",
+		"CHANNEL_DELIVERY_TTL_EPHEMERAL":           "2m",
+		"CHANNEL_DELIVERY_TTL_TOPIC":               "5m",
+		"CHANNEL_DELIVERY_TTL_DELETE_CONVERSATION": "90s",
+	} {
+		if !strings.Contains(deploy, "name: "+name+"\n              value: \""+want+"\"") {
+			t.Fatalf("manager Deployment must carry %s=%q:\n%s", name, want, deploy)
+		}
+	}
+}
+
+// An empty list is an explicitly empty value (the manager reads a set-but-empty
+// variable as "no receipt adapters", an unset one as its default), and the
+// shared-NATS default still renders untouched.
+func TestCommandBusEmptyReceiptListRendersExplicitlyEmpty(t *testing.T) {
+	out := helmTemplate(t, "--set", "commandBus.channelReceiptAdapters={}")
+	deploy := findDocByKindAndMetaName(out, "Deployment", "agentops-manager")
+	if !strings.Contains(deploy, "name: CHANNEL_RECEIPT_ADAPTERS\n              value: \"\"") {
+		t.Fatalf("an empty list must render CHANNEL_RECEIPT_ADAPTERS as an explicit empty string:\n%s", deploy)
+	}
+	if !strings.Contains(deploy, "name: COMMANDBUS_BACKEND\n              value: \"nats\"") {
+		t.Fatalf("the command bus backend default must be unchanged:\n%s", deploy)
+	}
+}

@@ -1890,6 +1890,14 @@ That single rule covers the cases that otherwise need special handling:
 | the agent | any bound channel | yes |
 | a source with no matching channel | every bound channel | yes — nobody has seen it |
 
+**One function enqueues every message.** An input, a run reply, an escalation and a notice all pass through `chat.FanOutThread`, which enqueues each to the `out.<channel>` queue of every bound channel in the order it happened.
+
+Each Channel has its own queue, so a channel that is slow or down never delays another.
+
+**An adapter takes a queued message in three steps.** It reads without taking the message, acknowledges to hand it over, then reports done or failed within the kind's delivery TTL.
+
+The manager never resends an acknowledged message, and a failure is final. The console is the one adapter configured to acknowledge on receipt, with no TTL and no report. See [the channel adapter specification](contracts/channel-adapter.md#acknowledging-an-operation).
+
 **Whether the surface a message entered on displayed it is a fact about the
 TRANSPORT**, declared by its adapter (`ChannelAdapter.spec.echoesOwnMessages`).
 
@@ -1952,17 +1960,22 @@ payload is not copied into the conversation object.
     spec and status fields. A restart between a member's run being recorded
     and its result landing on the parent is closed by the reconciler
     re-deriving the missing append, exactly as a missing delivery is.
-- **The command bus ledger** — accepted work, independent of the state
+- **The command bus's queue logs** — accepted work, independent of the state
   store. The chart selects a backend with `commandBus.backend` (see
-  [configuration](configuration.md#command-bus)). `nats`, the default, is a
-  second clustered server. `memory`, one process's heap, is for tests only.
+  [configuration](configuration.md#command-bus)). `nats`, the default, shares
+  the state store's server or runs a clustered one of its own. `memory`, one
+  process's heap, is for tests only.
+  - **Every queue is an append-only log.** A message is appended once and never
+    modified. Claim, failure and settle are further entries, and state is
+    folded from them. A message that succeeded is removed, and one never
+    consumed is kept 7 days.
   - **Declared bounded and lossy telemetry**, same as the activity ring
     below. The Conversation record stays the only durable truth — a lost
-    ledger record never loses a conversation, and the reconciler re-derives
+    log never loses a conversation, and the reconciler re-derives
     owed work exactly as after any restart.
   - A `202` or `200` from `close`, `exit`, `reopen`, `delete`,
     `reset-context` or `escalate` means the task was accepted onto this
-    ledger, not that it ran. Read it back at
+    log, not that it ran. Read it back at
     [`/state/tasks/{id}`](contracts.md#accept-and-process).
 - **A PersistentVolume** — state that genuinely *is* a filesystem: a
   conversation's accumulated context, and optionally its repository checkout.
@@ -1978,8 +1991,8 @@ create a second source of truth beside the backend it already has.
 | Component | State it holds | Home | State store backend | A restart costs |
 |---|---|---|---|---|
 | Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | `kube`: the Kubernetes API's own guarantee | nothing |
-| Manager — op queue | outbound channel ops | the command bus's `out.<channelType>` queues | `commandBus.backend: nats`: the bus's own clustered ledger, quorum-committed. `memory`: one process's heap | nothing: a claim completed on one replica is visible to another, and a failed send retries with backoff before a dead letter. `ensure-topic`/input cards/run replies/`close-topic` additionally re-derive from conversation state missing their own marker, as before ([below](#ending-a-conversation)) |
-| Manager — accepted work (`close`, `exit`, `reopen`, `delete`, `reset-context`, `escalate`, inbound chat, `/coordinate/close`, `/coordinate/escalate`) | one task per accepted request, on the `conv` queue | the command bus's ledger | `commandBus.backend: nats`: quorum-committed. `memory`: one process's heap | nothing authoritative: the ledger is declared bounded and lossy, and the reconciler re-derives owed work exactly as after any restart. `/signal/inbound` is NOT in this row — it stays synchronous |
+| Manager — op queue | outbound channel ops | the command bus's `out.<channel>` queues, one per Channel | `commandBus.backend: nats`: quorum-committed. `memory`: one process's heap | nothing: an op nobody acknowledged is offered again on any replica, and an acknowledged one is failed when its delivery TTL passes, with no report. A failure is final, so `ensure-topic`/input cards/run replies/`close-topic` re-derive from conversation state missing their own marker once the cool-off passes ([below](#ending-a-conversation)) |
+| Manager — accepted work (`close`, `exit`, `reopen`, `delete`, `reset-context`, `escalate`, inbound chat, `/coordinate/close`, `/coordinate/escalate`) | one task per accepted request, on the `conv` queue | the command bus's queue log | `commandBus.backend: nats`: quorum-committed. `memory`: one process's heap | nothing authoritative: the log is declared bounded and lossy, and the reconciler re-derives owed work exactly as after any restart. `/signal/inbound` is NOT in this row — it stays synchronous |
 | Manager — thread undelivered reply | `status.threads[].undeliveredReply` | the state store, on the `Conversation` record | `kube`: the Kubernetes API's own guarantee. `nats`: the same quorum-committed guarantee, on the `conversations` bucket's entry | nothing: re-derived until delivery succeeds |
 | Manager — ingest cooldown | `initiationId` suppression | the state store | `kube`: `SignalSource.status.cooldown[]`, the Kubernetes API's own guarantee. `nats`: the `cooldowns` bucket, quorum-committed | nothing inside the window |
 | Manager — source receipt counters | `receivedTotal` and `lastReceived` per source | the state store | `kube`: `SignalSource.status`, the Kubernetes API's own guarantee. `nats`: the `receipts` bucket, quorum-committed | nothing: each count is serialized by the backend, so no increment is lost |
@@ -2309,9 +2322,9 @@ The reply's op id is stable per conversation × channel × run, so the two dedup
 against each other.
 
 A manager restart between the result landing in `status.runs[].result` and an
-adapter claiming the op therefore re-derives the answer instead of dropping it.
+adapter delivering the op therefore re-derives the answer instead of dropping it.
 
-**Marking happens when the op completes**, which is what makes the two
+**Marking happens when the op is reported done**, which is what makes the two
 directions safe:
 
 - An op lost before completion is re-derived.

@@ -59,7 +59,7 @@ a way to close. Deleting's cascade is the requirement added in this file.
 
 #### Scenario: A batch close is N ordinary closes
 - **WHEN** a surface closes several conversations in one gesture
-- **THEN** each conversation is closed through its own thread as an ordinary close, each becomes its own `close` task, and the tasks share one invocation id
+- **THEN** each conversation is closed through its own thread as an ordinary close, each becomes its own `close` task with its own invocation id, and a cascade's tasks share one
 
 #### Scenario: Teardown is identical whatever ordered the close
 - **WHEN** a conversation is closed by a batch, by a hand-typed `/close`, or by the manager's idle timer
@@ -230,27 +230,21 @@ The manager SHALL offer a reopen that returns a `Closed` conversation to phase
 `Idle`, clears `status.closedAt` — which stops the delete clock — and advances
 `status.reopens`.
 
-Reopening SHALL leave every materialized ref EXACTLY as it is. Refs are
-snapshots whose CONTENT is re-read at every use, so a reopen that re-resolved
-wiring would let a Pipeline edit re-wire a conversation that already exists. A
-reopened conversation is the SAME conversation with the same profile and the
-same capabilities, or it is a new conversation wearing an old name.
+Reopening SHALL leave every materialized ref EXACTLY as it is. Refs are snapshots whose CONTENT is re-read at every use, so a reopen that re-resolved wiring would let a Pipeline edit re-wire a conversation that already exists.
 
-A reopen whose referenced `AgentProfile` or `Channel` no longer exists SHALL
-FAIL, naming the missing object. A ref already missing at accept SHALL be
-refused with `409`. A ref that disappears after accept SHALL fail the task with
-`precondition_failed`. It SHALL NOT partially reopen and SHALL NOT silently
-drop a binding.
+A reopened conversation is the SAME conversation with the same profile and the same capabilities, or it is a new conversation wearing an old name.
+
+A reopen whose referenced `AgentProfile` or `Channel` no longer exists SHALL FAIL, naming the missing object. A ref already missing at accept SHALL be refused with `409`. A ref that disappears after accept SHALL fail the task with `precondition_failed`.
+
+It SHALL NOT partially reopen and SHALL NOT silently drop a binding.
 
 Continuity SHALL be restored only where it was promised: under a runtime whose
 `contextStorage` keeps context on a volume the agent resumes with its workspace
 and its context handle; under `none` it answers fresh and says so.
 
-The manager SHALL announce the reopen on every bound thread. The announcement is
-the MANAGER's, not each adapter's — a closing thread already receives a farewell
-from the manager, and synthesizing the reopen adapter-side would put it on
-whichever surface implemented it and leave the others silently starting to work
-again.
+The manager SHALL announce the reopen on every bound thread.
+
+The announcement is the MANAGER's, not each adapter's — a closing thread already receives a farewell from the manager, and synthesizing the reopen adapter-side would put it on whichever surface implemented it and leave the others silently starting to work again.
 
 #### Scenario: Reopen restores the same conversation
 - **WHEN** a closed conversation is reopened

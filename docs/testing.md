@@ -7,7 +7,7 @@ that chain — see below.
 | Tier | Runs | Decides | Cannot decide |
 |---|---|---|---|
 | **Unit and envtest** | every module's `go test`, and the operator's suite against a real API server | rendering, parsing, scheduling, and what a reconciler writes to a CR | anything the kubelet, the scheduler, a CSI driver or a live authorizer decides — envtest runs none of them |
-| **Contract conformance** | every adapter's and runtime's **built binary**, black-box, against a fake manager | that an adapter speaks the adapter contracts — long-poll, `contract=`, ack-once, inbound push, listing, status, no relay loop, a visible-or-error thread-less send, an act-or-error `delete-conversation`, and a retry budget bounded by the reclaim window for a channel adapter, and normalized emission, bearer auth and a surfaced rejected post for a signal adapter — plus, for a runtime, allowlist composition, `turns[]`/`toolCalls[]` bounds trimming, and the idle-TTL exit | anything about the cluster |
+| **Contract conformance** | every adapter's and runtime's **built binary**, black-box, against a fake manager | that an adapter speaks the adapter contracts — read, acknowledge, report, `contract=`, inbound push, listing, status, no relay loop, a visible-or-error thread-less send, an act-or-error `delete-conversation`, and a retry budget bounded by the delivery TTL for a channel adapter, and normalized emission, bearer auth and a surfaced rejected post for a signal adapter — plus, for a runtime, allowlist composition, `turns[]`/`toolCalls[]` bounds trimming, and the idle-TTL exit | anything about the cluster |
 | **System** | the chart from the working tree on a real single-node cluster (k3s under k3d), images built from the same commit | the substrate: credential projection by the kubelet, RBAC as the authorizer enforces it, informer liveness, context continuity across a pod restart, admission FIFO on a real pod DELETE, the signal loop breaker under a runtime that really cannot start, and — for the default `nats` state backend — a server pod loss, and quorum loss, and the import from `kube` racing an old replica | answer *quality* — that is an eval harness, a different project |
 | **Console browser e2e** (`e2e-live`, nightly) | Playwright driving a real browser against the full tier's own cluster and console — or any already-running install, by hand | real K8s API behavior none of the three above actually exercises (see below), and what a real browser renders for a real signal through the real console | anything the tiers above already gate — it is read-only verification, never a substitute for them |
 
@@ -227,7 +227,7 @@ matching coverage.
 
 | Decides | Cannot decide |
 |---|---|
-| durable accept, idempotent submit, dedup across every task state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-lapse redelivery, bounded retry into dead, TTL expiry counting as settled, a gap-free resumable feed, dead-letter listing, per-queue statistics | latency or throughput under load, or anything only a real server decides |
+| durable accept, idempotent submit, dedup across every task state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-lapse redelivery, bounded retry into dead, TTL expiry counting as settled, the hand-over (a peek changes nothing, an idempotent acknowledgement, a final failure), no entry written twice and a submit that survives a racing claim, a gap-free resumable feed, dead-letter listing, per-queue statistics | latency or throughput under load, or anything only a real server decides |
 
 - **Both backends run the same suite.** `commandbus/memory` runs it in its
   own package. `commandbus/nats` runs it against an in-process JetStream
@@ -241,7 +241,7 @@ What a real cluster decides about the bus is the system tier's job
 (`test/system/async_system_test.go`), never unit tests: credential
 projection, network policy, a claim completed on a different replica,
 ordering under parallel consumers, restart durability, a genuine channel
-failure backing off into a dead letter.
+failure ending as a final failure in a dead letter.
 
 | Lane | Decides |
 |---|---|
@@ -249,7 +249,7 @@ failure backing off into a dead letter.
 | A replica is force-deleted mid-accept | the claim it held completes on a surviving replica once the lease lapses |
 | Two replicas, one conversation | ordering holds — settlement order matches submission order on that key |
 | A manager restart, and a rolling bus-server restart | neither loses an accepted task or duplicates its side effect |
-| A channel surface that genuinely fails (DNS-unreachable, not mocked) | backoff runs its course into a dead letter, listed on `/state/dead-letters` |
+| A channel surface that genuinely fails (DNS-unreachable, not mocked) | the adapter reports failed, the message is not redelivered, and it is listed on `/state/dead-letters` |
 
 **Full-tier end-to-end flows** (`test/system/async_e2e_test.go`) cover the
 same ground from the HTTP surface inward rather than the cluster outward.

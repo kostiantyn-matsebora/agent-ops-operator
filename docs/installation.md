@@ -261,10 +261,15 @@ An existing install upgrading from `kube` imports its records into `nats` on
 the manager's first start. The steps are in the
 [changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
 
-**The same release adds the command bus**, a second clustered server beside
-it — three more pods and three more volumes, by default, independent of the
-state backend. See [Accept work durably]({{ '/guides/command-bus/' |
-relative_url }}).
+**The same release adds the command bus.** On the default `nats` state store it shares that server and adds nothing to run.
+
+Under the `kube` store it renders a clustered server of its own, three more pods and three more volumes. See [Accept work durably]({{ '/guides/command-bus/' | relative_url }}).
+
+**Upgrade your channel adapter images with the manager.** The wire contract of
+`/channel/ops` changed: an adapter now acknowledges each op it reads. The
+shipped Telegram adapter and the console move with the release, and a
+hand-built adapter must follow the
+[channel adapter specification](contracts/channel-adapter.md).
 
 `close`, `exit`, `reopen`, `delete`, `reset-context` and `escalate` now
 accept and run later instead of performing the work inline. Read
@@ -274,11 +279,13 @@ work finished.
 
 `helm uninstall` removes the workloads but leaves the CRDs and the context
 claim. Under the default `nats` backends it also leaves both the state
-store's and the command bus's server volumes, so reinstalling finds your
+store's server volumes, and the command bus's where it has a server of its own, so reinstalling finds your
 data where it was.
 
-A restarted command bus starts with an empty ledger either way. It is
-declared bounded and lossy telemetry, never the durable record.
+A restarted command bus starts with empty queue logs either way. They are
+declared bounded and lossy telemetry, never the durable record. The buckets of
+a pre-release build of the bus (`tasks`, `ids`, `dead`) are inert and may be
+deleted.
 
 Under the `kube` state-store backend it also leaves every Conversation
 custom resource.

@@ -8,10 +8,11 @@ and retries what failed. It is independent of the state store.
 ## ADDED Requirements
 
 ### Requirement: The bus is independent of the state store
-The command bus SHALL be its own contract with its own backends, its own
-connection settings and its own credential. It SHALL add no collection to the
-state store's closed inventory. Every state backend SHALL be able to run with
-every bus backend.
+The command bus SHALL be its own contract with its own backends and its own connection settings.
+
+Its credential SHALL be its own where it has a server of its own, and SHALL be the credential of the state store's server where the chart shares that server with it, with the buckets still the bus's alone.
+
+It SHALL add no collection to the state store's closed inventory. Every state backend SHALL be able to run with every bus backend.
 
 The bus carries work. The conversation record in the state store stays the only
 durable truth about what the work did.
@@ -103,16 +104,17 @@ Everything that later happens to a message, whether claimed, failed, retried,
 completed or dead, SHALL be a further entry appended to the log. The state of
 a message SHALL be derived from its own entries, the last one deciding.
 
-The position of an entry SHALL be assigned by the log on append. A message's
-identity, its command id, SHALL be derived before the append and SHALL carry no
-order. A consumer's position SHALL be the command id of the last entry it
-acknowledged.
+The position of an entry SHALL be assigned by the log on append.
 
-A message that settled as succeeded SHALL be removed from the log together with
-its entries. A message never consumed SHALL be retained up to the queue's
-retention (7 days by default) and then removed. The bus SHALL remove no other
-entry and SHALL never remove an unsettled one. Duplicate suppression after a
-message settled SHALL rest on the queue's dedup window, not on a retained entry. Reading a consumed task by its uid MAY report it as not found.
+A message's identity, its command id, SHALL be derived before the append and SHALL carry no order, and a task SHALL carry no sequence or order field.
+
+A consumer SHALL keep no cursor: a message that was neither claimed nor acknowledged is offered again.
+
+A message that settled as succeeded SHALL be removed from the log together with its entries. A message never consumed SHALL be retained up to the queue's retention (7 days by default) and then removed.
+
+The bus SHALL remove no other entry and SHALL never remove an unsettled one. Duplicate suppression after a message settled SHALL rest on the queue's dedup window, not on a retained entry.
+
+Reading a consumed task by its uid MAY report it as not found.
 
 #### Scenario: Nothing is rewritten
 - **WHEN** a task is submitted, claimed, fails retryably, is claimed again and completes
@@ -130,9 +132,13 @@ message settled SHALL rest on the queue's dedup window, not on a retained entry.
 - **WHEN** a consumer claims a task the instant it becomes visible
 - **THEN** the submit still succeeds, since it made no write after the append
 
-#### Scenario: A consumer resumes from its last acknowledged id
-- **WHEN** a consumer reconnects naming the command id of the last entry it acknowledged
-- **THEN** it receives every later entry that is not acknowledged, in log order
+#### Scenario: A reconnecting consumer is offered what it never acknowledged
+- **WHEN** a consumer reconnects after reading messages it did not acknowledge
+- **THEN** it is offered exactly the messages not acknowledged, in log order, and none that were acknowledged
+
+#### Scenario: A consumed message is not recoverable
+- **WHEN** a message is read by its uid after it settled as succeeded
+- **THEN** the read MAY report it as not found
 
 ### Requirement: Every queue is FIFO and a retry keeps its place
 A consumer SHALL claim the oldest eligible task of a queue first. A task is
@@ -180,11 +186,9 @@ part of the contract and no behaviour SHALL depend on it.
 - **THEN** the next task of that key is not held back by it
 
 ### Requirement: A claim is a lease held in the log
-A claim SHALL be an entry appended to the task's log carrying a claim token and
-a lease-until instant, appended conditionally on the last entry the claimant
-saw, so that of two simultaneous claims only one is appended. A claim made by
-one replica SHALL be completable by another replica that presents the claim
-token.
+A claim SHALL be an entry appended to the task's log carrying a claim token and a lease-until instant, appended conditionally on the last entry the claimant saw, so that of two simultaneous claims only one is appended.
+
+A claim made by one replica SHALL be completable by another replica that presents the claim token.
 
 A completion carrying a token that is not the latest claim's token SHALL be
 refused and SHALL append nothing.
@@ -194,6 +198,9 @@ lapsed lease SHALL count as one attempt that failed with the code
 `unavailable`, since no consumer reported one.
 
 A lease SHALL NOT live in the memory of one process.
+
+On a hand-over queue (below) the lease is the acknowledgement: it runs the
+queue's delivery TTL, and its lapse is a final failure, never a redelivery.
 
 #### Scenario: A claim is completed on another replica
 - **WHEN** replica A claims a task and replica B completes it with the claim token
@@ -208,7 +215,7 @@ A lease SHALL NOT live in the memory of one process.
 - **THEN** the task returns to the queue, its attempt count is one higher, the attempt is recorded as `unavailable`, and it is claimable again in its original position
 
 ### Requirement: Retry and backoff are owned by the bus
-The bus SHALL retry a failed attempt. Attempts SHALL be bounded. The delay
+On a lease-and-retry queue the bus SHALL retry a failed attempt. Attempts SHALL be bounded. The delay
 between attempts SHALL grow exponentially with jitter. Each queue SHALL declare
 the maximum attempts and the backoff, and a kind of command MAY override them.
 
@@ -230,6 +237,39 @@ to dead.
 #### Scenario: A retry is never scheduled by the consumer
 - **WHEN** a consumer reports a retryable code
 - **THEN** the next attempt time is the bus's, derived from the declared backoff
+
+### Requirement: A hand-over queue is read, acknowledged, then settled by the consumer
+A queue MAY declare a delivery TTL, which makes it a hand-over queue. The bus SHALL offer such a queue's next messages without changing them (a peek: no claim, no lease, no entry).
+
+It SHALL hand a message over on an acknowledgement by command id: a claim whose lease runs the delivery TTL, appended conditionally on the key's last entry, so that of two replicas acknowledging one message only one hands it over.
+
+An acknowledgement SHALL be idempotent: one repeated within the TTL, or landing on another replica, SHALL return the existing hand-over and hand over nothing twice.
+
+A message the queue holds but is not offering SHALL be refused as not offered, and one the queue does not hold as `not_found`.
+
+A message that was acknowledged SHALL never be offered again. The consumer settles it, as done or failed. One with no report when the delivery TTL passes SHALL be failed.
+
+A failure on a hand-over queue SHALL be final: the task goes dead with no retry, and its attempts and backoff do not apply.
+
+#### Scenario: A peek changes nothing
+- **WHEN** a consumer peeks a queue twice without acknowledging
+- **THEN** both peeks list the same message, and the log holds no entry beyond the message
+
+#### Scenario: Two replicas hand a message over once
+- **WHEN** two replicas acknowledge one message at the same moment
+- **THEN** exactly one hand-over is appended and both acknowledgements return it
+
+#### Scenario: An acknowledged message is never offered again
+- **WHEN** a message was acknowledged and its consumer is slow to report, within the delivery TTL
+- **THEN** no peek offers it again
+
+#### Scenario: No report fails the message
+- **WHEN** an acknowledged message's delivery TTL passes with no report
+- **THEN** the task is dead with its failure recorded, and it is not redelivered
+
+#### Scenario: A reported failure is final
+- **WHEN** a consumer reports an acknowledged message failed
+- **THEN** the task is dead after that one attempt and is not retried
 
 ### Requirement: Failures use a closed code vocabulary
 An attempt that does not succeed SHALL be reported with exactly one code. The
@@ -304,11 +344,9 @@ The bus SHALL keep, per task, the entries of its attempt chain. Together they SH
 - the last error code and its message
 - the lease, as claim token and lease-until
 
-The log SHALL be bounded by a retention cap declared per queue, in age and
-in size. Past either cap
-the oldest settled entries SHALL be removed by the log's own limits. The log SHALL be declared
-lossy telemetry. Its loss SHALL cost history and unfinished work, never
-conversation correctness.
+The log SHALL be bounded by a retention cap declared per queue, in age and in size. Past either cap the oldest settled entries SHALL be removed by the log's own limits.
+
+The log SHALL be declared lossy telemetry. Its loss SHALL cost history and unfinished work, never conversation correctness.
 
 Entries of a task that is not settled SHALL NOT be removed by the retention cap.
 
@@ -387,11 +425,15 @@ a contract change with a conformance scenario.
 | `in.signal` | the source and the `initiationId` |
 | `out.<channel>` | the conversation |
 
+The `out.<channel>` queues SHALL declare four kinds, each a complete declaration of its own and each a hand-over queue: `stable` (replies and inputs, delivery TTL 10 minutes), `ephemeral` (acks and notices, 2 minutes), `topic` (`ensure-topic` and `close-topic`, 5 minutes) and `delete-conversation` (5 minutes).
+
+A delivery TTL SHALL be declared per kind, never per adapter.
+
 Each queue SHALL declare:
 
 - its ordering key, or that it has none
-- its maximum attempts and its backoff
-- its time to live, where one applies
+- its maximum attempts and its backoff, where it is a lease-and-retry queue
+- its time to live, where one applies, and its delivery TTL, where it is a hand-over queue
 - its log retention
 - its dedup window and its park cool-off
 - the most tasks of one invocation it allows in flight at once
@@ -433,7 +475,9 @@ The chart SHALL expose one selector, `commandBus.backend`, with the values
 
 The render SHALL fail, naming the value, on a backend the chart does not know.
 
-For `nats` an install SHALL by default use the state store's own `nats` server and credential, with nothing configured. It MAY instead render a dedicated server bundle, or be given the URL of a server in `commandBus.nats.url`. It SHALL NOT combine a dedicated bundle with a URL.
+For `nats` an install whose state store is on `nats` SHALL by default use that state store's `nats` server and credential, with nothing configured. One whose state store is on `kube` SHALL by default render a dedicated server bundle.
+
+It MAY instead render a dedicated server bundle, or be given the URL of a server in `commandBus.nats.url`. It SHALL NOT combine a dedicated bundle with a URL.
 
 The manager SHALL learn its backend and its connection from the chart alone,
 through variables of its own, and SHALL refuse to start on a backend it does
@@ -479,6 +523,8 @@ The suite SHALL cover at minimum:
 - lease lapse and redelivery
 - dead-letter routing
 - time-to-live expiry
+- hand-over: peek without change, idempotent acknowledgement, final failure
+- no entry written twice, and a submit that succeeds against a consumer claiming at once
 - gap-free feed resume
 - per-queue statistics
 

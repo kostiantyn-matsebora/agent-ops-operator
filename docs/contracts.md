@@ -462,7 +462,7 @@ this surface instead, and carry no RBAC on either kind.
 | `GET /state/signals/stream?since=` | the signal half of the stream above |
 | `GET /state/tasks` | the command bus's per-`(queue, kind)` statistics — pending, scheduled, running and dead counts, the oldest pending task's age — never a flat listing of every task |
 | `GET /state/tasks/{id}` | one task by its bus-minted UID, 404 if unknown or already swept out of retention |
-| `GET /state/tasks/stream?since=` | SSE: one frame per task state transition, ordered by the bus's own `Sequence`, resumable |
+| `GET /state/tasks/stream?since=` | SSE: one frame per task state transition in log order, each frame's `id:` the log position to resume from |
 | `GET /state/dead-letters` | every task the bus has given up on, oldest first |
 
 Signals have no single-record route and carry no items: nothing reads one
@@ -476,6 +476,32 @@ by UID, watch the feed forward, or list dead letters.
 `/state/tasks/stream` is how a caller discovers which UIDs exist going
 forward. A task accepted before the caller started watching is visible only
 through the `invocationId`/`taskIds` its own accept reply already returned.
+
+**A task carries no order field.** Its place in the queue is the log's own,
+and the only position on the wire is the stream frame's `id:`. One task, as
+`GET /state/tasks/{id}` returns it:
+
+```json
+{
+  "uid": "7f3c1a9e-0b2d-4e61-9a55-3c0f6d2e8b14",
+  "commandId": "close:swift-otter",
+  "queue": "conv",
+  "key": "swift-otter",
+  "invocationId": "inv-4c2a",
+  "state": "retrying",
+  "attempt": 2,
+  "maxAttempts": 5,
+  "code": "unavailable",
+  "detail": "state store unreachable",
+  "notBefore": "2026-11-11T09:00:12Z",
+  "submittedAt": "2026-11-11T09:00:00Z",
+  "updatedAt": "2026-11-11T09:00:07Z"
+}
+```
+
+**A task the bus consumed is gone.** A message that settled as succeeded is
+removed from its queue log, so a read of its `uid` MAY answer `404`. Dead
+tasks are kept in the dead-letter log, 7 days or 10000 records.
 
 **The wire record** carries a kind's published field names only — `name`,
 `id`, `revision`, `createdAt`, `deletionRequestedAt`, `spec`, `status` — never
@@ -515,13 +541,9 @@ token that does not derive at all is 401.
 **Every replica serves `/state/`**, leader or not. A store read needs no
 leader.
 
-`GET /channel/ops`, `GET /channel/ops/stream` and
-`POST /channel/ops/{id}/done` join `/healthz` and `/state/` in bypassing the
-leader-proxy, alongside them. The command bus (below) makes that queue
-bus-backed rather than leader-held, so any replica answers a poll, a stream or
-a completion directly. The stream is the optional, resumable push form of the
-poll, specified in [the channel adapter
-contract](contracts/channel-adapter.md#get-channelopsstream).
+`GET /channel/ops`, `GET /channel/ops/stream`, `POST /channel/ops/{id}/ack` and `POST /channel/ops/{id}/done` join `/healthz` and `/state/` in bypassing the leader-proxy, alongside them. The command bus (below) makes that queue bus-backed rather than leader-held, so any replica answers a read, a stream, a hand-over or a report directly.
+
+The stream is the push form of the read for receipt-only adapters, specified in [the channel adapter contract](contracts/channel-adapter.md#get-channelopsstream).
 
 Every other endpoint still proxies to the leader.
 
@@ -580,9 +602,39 @@ a plain close and several for the others.
 cascade-close and the result append happen together, not as two separate,
 independently visible tasks.
 
-**Per-queue tuning has no chart exposure.** Attempts, backoff, TTL, the
-dedup window and the park cool-off are compiled-in starting values, one set
-per queue. See [Configuration](configuration.md#commandbus).
+**Per-queue tuning has no chart exposure, with one exception.** Attempts,
+backoff, TTL, the dedup window and the park cool-off are compiled-in starting
+values, one set per queue. The channel delivery TTLs and the receipt-only
+adapter list are chart values. See [Configuration](configuration.md#commandbus).
+
+### Channel operations: read, acknowledge, report
+
+**Outbound channel operations use a three-step contract, the same for every
+channel adapter.** The manager queues each on the `out.<channel>` queue of its
+Channel, and any replica serves each step.
+
+| Step | Call | Does |
+|---|---|---|
+| read | `GET /channel/ops?adapter=` | offers the next op and changes nothing, so an op read and not acknowledged is offered again |
+| acknowledge | `POST /channel/ops/{id}/ack?adapter=` | hands the op over. The manager never resends it and its delivery TTL starts |
+| report | `POST /channel/ops/{id}/done` | reports done, or failed with an `error` |
+
+```
+POST /channel/ops/send:conv-1:tg-ops:run-7/ack?adapter=telegram
+200  {"ok": true, "deliveryTtlSeconds": 600, "consumed": false}
+```
+
+**No report by the delivery TTL is a failure, and a failure is final.** The
+manager never redelivers it. What is still owed is derived again from the
+conversation after the kind's cool-off.
+
+The TTLs are 10 minutes for replies and inputs, 2 minutes for notices, and 5
+minutes for topic operations and `delete-conversation`.
+
+**The console is the declared exception.** The adapters in
+`CHANNEL_RECEIPT_ADAPTERS` acknowledge on receipt, with no TTL and no report,
+and the manager deletes the op at the acknowledgement. The mechanism is
+generic and configured, so a new adapter needs no manager change.
 
 ## Manager introspection
 
@@ -605,8 +657,9 @@ Both endpoints below are read-only and use the same bearer scheme as
 - **Runtime slots in use** against `MAX_ACTIVE_CONVERSATIONS`, counted from the
   live POD list — the same definition the admission gate uses, so the two cannot
   disagree — plus how many conversations are waiting for one.
-- **Per-adapter op queue depth**, split into **queued** (nothing is claiming)
-  and **claimed but uncompleted** (an adapter is wedged mid-delivery). Those are
+- **Per-adapter op queue depth**, split into **queued** (not yet acknowledged)
+  and **claimed but uncompleted** (acknowledged and awaiting its report, so an
+  adapter is wedged mid-delivery). Those are
   two failure modes that look identical from outside, and each carries the id
   and age of the oldest.
 - **Active cooldowns per source**, because a suppressed lane looks exactly like

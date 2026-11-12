@@ -114,6 +114,20 @@ spec:
             # SIGNAL_CONSUMER_CONCURRENCY below.
             - name: COMMANDBUS_CONSUMER_CONCURRENCY
               value: {{ .Values.commandBus.consumerConcurrency | quote }}
+            # Receipt-only adapters (the console) and the per-kind delivery
+            # TTLs. An empty list renders an explicitly empty value: the
+            # manager treats a SET-but-empty variable as none, and an unset
+            # one as its default.
+            - name: CHANNEL_RECEIPT_ADAPTERS
+              value: {{ join "," (.Values.commandBus.channelReceiptAdapters | default list) | quote }}
+            - name: CHANNEL_DELIVERY_TTL_STABLE
+              value: {{ .Values.commandBus.deliveryTtl.stable | quote }}
+            - name: CHANNEL_DELIVERY_TTL_EPHEMERAL
+              value: {{ .Values.commandBus.deliveryTtl.ephemeral | quote }}
+            - name: CHANNEL_DELIVERY_TTL_TOPIC
+              value: {{ .Values.commandBus.deliveryTtl.topic | quote }}
+            - name: CHANNEL_DELIVERY_TTL_DELETE_CONVERSATION
+              value: {{ .Values.commandBus.deliveryTtl.deleteConversation | quote }}
             # design D-13: the manager itself refuses `memory` above one
             # replica at startup — the SAME contradiction
             # agentops.commandBusGuard already fails at render time,

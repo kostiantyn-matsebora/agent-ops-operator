@@ -80,6 +80,23 @@ commandBus:
   # CONCURRENCY), independent of which backend answers it. Matches
   # cmd/manager/commandbus.go's own defaultCommandBusConsumerConcurrency.
   consumerConcurrency: 4
+  # Adapters whose acknowledgement is only their RECEIPT of a message (the
+  # console): the manager consumes a message at that acknowledgement. Every
+  # other adapter reports done or failed within the delivery TTL below.
+  # Rendered as CHANNEL_RECEIPT_ADAPTERS, comma-joined. An EMPTY list
+  # renders an explicitly empty value, meaning none. Matches
+  # cmd/manager/commandbus.go's own defaultChannelReceiptAdapters.
+  channelReceiptAdapters:
+    - console
+  # How long an adapter has, from acknowledging an outbound message, to
+  # report it done before the manager fails it. Go durations, one per kind
+  # (CHANNEL_DELIVERY_TTL_STABLE/_EPHEMERAL/_TOPIC/_DELETE_CONVERSATION).
+  # Match the command bus inventory's own declared values.
+  deliveryTtl:
+    stable: 10m
+    ephemeral: 2m
+    topic: 5m
+    deleteConversation: 5m
   nats:
     # THE DEFAULT NEEDS NOTHING: with `commandBus.backend` `nats` and the
     # state store on its `nats` bundle, the command bus rides that same

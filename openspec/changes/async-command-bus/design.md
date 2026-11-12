@@ -38,9 +38,9 @@
 `internal/state/nats` and `commandbus/nats` as the only packages that may
 import `nats.go`. Neither imports the other.
 
-The bus reads its own variables (`COMMANDBUS_BACKEND`, `COMMANDBUS_NATS_URL`,
-`COMMANDBUS_NATS_USER`, `COMMANDBUS_NATS_PASSWORD`), its own Secret and its own
-NetworkPolicy rule. It never reads `NATS_*`.
+The bus reads its own variables (`COMMANDBUS_BACKEND`, `COMMANDBUS_NATS_URL`, `COMMANDBUS_NATS_USER`, `COMMANDBUS_NATS_PASSWORD`). It never reads `NATS_*`. Where it has a server of its own, a dedicated bundle or an external one, it has its own Secret and NetworkPolicy rule.
+
+Where it shares the state store's server (D-13) the chart points those variables at the state store's Service and credential, and only the buckets stay the bus's own.
 
 | Alternative | Rejected because |
 |---|---|
@@ -59,23 +59,27 @@ rewrite.
 | Concern | Where it lives |
 |---|---|
 | The message | one immutable entry, appended once. Its identity is the producer's command id, made before the append. It says nothing about order |
-| Order | the position the log gives the entry on append. FIFO is the log's own |
-| Claim, lease, failure, retry, acknowledgement | further entries appended to the same log, never changes to the message |
+| Order | the position the log gives the entry on append. FIFO is the log's own. The message carries no order or sequence field |
+| Claim, lease, failure, retry, settle | further entries appended to the same log, never changes to the message |
 | Current state of a message | derived by folding its own entries: the last one decides |
-| Consumer position | the command id of the last entry the consumer acknowledged. A cursor, nothing more |
+| Consumer position | none. A consumer keeps no cursor. A message nobody claimed or acknowledged is simply offered again |
 
 The `nats` backend is one JetStream stream per queue family, with subjects
 `<queue>.<key>.msg` and `<queue>.<key>.ev`. Nothing in it is ever updated.
 
-**Consumed messages are deleted, unconsumed ones are kept for 7 days.** When a
-message settles as succeeded, the server removes it and its entries, as a
-regular queue drops what was consumed. A message never consumed is retained for
-the stream's age limit (7 days by default) and then trimmed, so it expires. The
-bus performs no other delete and never touches an unsettled entry. A command
-id's duplicate suppression after settling is an in-memory mark each replica keeps
-for the queue's dedup window (the server's duplicate window is one stream-wide
-value and cannot hold per-queue windows). Physical removal follows a short grace
-(30s by default) so a replica catching up and the change feed see no gap.
+**Consumed messages are deleted, unconsumed ones are kept for 7 days.** When a message settles as succeeded, the server removes it and its entries, as a regular queue drops what was consumed.
+
+A message never consumed is retained for the stream's age limit (7 days by default) and then trimmed, so it expires. The bus performs no other delete and never touches an unsettled entry.
+
+A command id's duplicate suppression after settling is an in-memory mark each replica keeps for the queue's dedup window (the server's duplicate window is one stream-wide value and cannot hold per-queue windows).
+
+Physical removal follows a short grace (30s by default) so a replica catching up and the change feed see no gap.
+
+Every replica folds the same stream, so each sets the mark when it applies the settle entry, and a replica that was running then holds it.
+
+A replica that starts after the entries were removed holds none, so a duplicate submitted to it inside the window is accepted. That is the at-least-once delivery D-4 already names, and the handler's idempotence absorbs it.
+
+The mark is a best-effort shortcut for the common case, never the only guard.
 
 - **Exclusive claim without a rewrite.** A claim is an append of a `claimed`
   entry to the key's `ev` subject, conditional on that subject's last sequence
@@ -91,8 +95,8 @@ value and cannot hold per-queue windows). Physical removal follows a short grace
 - **A dead entry** is appended to a separate `dead` log with its own limits, the
   bound on dead-letter retention.
 
-Every consumer folds the log into a local mirror, as the previous design did
-with its ledger, so a claim on one replica completes on another.
+Every consumer folds the log into a local mirror, so a claim on one replica
+completes on another.
 
 | Alternative | Rejected because |
 |---|---|
@@ -152,13 +156,19 @@ change them. Each is a chart value.
 |---|---|---|---|---|---|
 | `conv` | root conversation | 5 | 1s to 30s, jitter | none | in-flight cap per invocation paces a bulk batch |
 | `in.signal` | source + `initiationId` | 5 | 1s to 30s, jitter | none | |
-| `out.<channel>` stable kinds | conversation | 8 | 5s to 5m, jitter | none | ensure-topic, run reply, input card, close-topic |
-| `out.<channel>` ephemeral sends | conversation | 2 | 5s | 2m | acks and notices |
-| `out.<channel>` delete-conversation | conversation | 3 | 5s | finalizer grace | never parked |
+| `out.<channel>` stable | conversation | hand-over | none | queue none, delivery 10m | run reply, input card, farewell |
+| `out.<channel>` ephemeral | conversation | hand-over | none | queue 2m, delivery 2m | acks and notices |
+| `out.<channel>` topic | conversation | hand-over | none | delivery 5m | ensure-topic, close-topic |
+| `out.<channel>` delete-conversation | conversation | hand-over | none | queue 5m, delivery 5m | never parked |
+
+`conv` and `in.signal` are lease-and-retry queues. The `out.<channel>` kinds are
+hand-over queues (D-17): the bus does not retry them, because the adapter
+retries against its own surface until the delivery TTL, so they declare no
+attempts and no backoff.
 
 Each queue also declares its dedup window, its park cool-off and the
-per-invocation in-flight cap. A kind may override a queue's attempts and
-backoff.
+per-invocation in-flight cap. Each `out.<channel>` kind is a complete
+declaration of its own.
 
 ### D-6: Retry is derived from the code, and `precondition_failed` is terminal
 
@@ -170,12 +180,14 @@ The vocabulary is closed: `not_found`, `precondition_failed`, `forbidden`,
 | `conflict`, `unavailable`, `internal` | retry with backoff |
 | `not_found`, `precondition_failed`, `forbidden`, `invalid_command` | straight to dead |
 
-A consumer never chooses. A lapsed lease counts as an attempt that failed with
-`unavailable`, so a silent adapter is retried and then dead-lettered. An unknown code is recorded as `internal`.
+A consumer never chooses. On a lease-and-retry queue a lapsed lease counts as an attempt that failed with `unavailable`, so a silent consumer is retried and then dead-lettered.
+
+On a hand-over queue a lapse or a reported failure is final and never retried (D-17). An unknown code is recorded as `internal`.
 
 `precondition_failed` is terminal on purpose. A refused `/exit` mid-run must not
-become a surprise release minutes later. An adapter's reported error string
-maps to `unavailable`, so a rate-limited surface backs off.
+become a surprise release minutes later. An adapter's reported
+error on a hand-over queue is final, so a rate-limited surface is ridden out by
+the adapter inside the delivery TTL, not by the bus.
 
 `delete` of a conversation that is already gone succeeds and does not go dead
 on `not_found`. Deleting something absent is the outcome the caller wanted.
@@ -235,17 +247,19 @@ Inbound dedup: a signal keeps its `initiationId`. A channel message uses an
 optional `Idempotency-Key` header, and absent that a key derived from channel,
 thread, text and sender. No adapter has to change.
 
-### D-10: `OpQueue` keeps its surface, with bus-backed internals
+### D-10: `OpQueue` keeps its enqueue surface, with bus-backed internals
 
-`Enqueue*`, `Claim`, `Complete`, `Settled`, `Pending` and `Stats` stay. The
+`Enqueue*`, `Settled`, `Pending` and `Stats` stay. The old `Claim` becomes the
+three adapter-facing calls of D-17, `Read`, `Acknowledge` and `Complete`. The
 router, reconciler and handlers do not change.
 
-- **Dedup** follows D-4. A stable op id is suppressed while pending, retrying,
-  parked or settled. A failure never suppresses its own recovery.
+- **Dedup** follows D-4. A stable op id is suppressed while pending, parked or
+  settled. A failure never suppresses its own recovery.
 - **`Complete` still runs its handlers synchronously** before the `200`:
   `finishEnsureTopic`, the delivered and undelivered markers, the archived
   marker. The thread binding they write is what inbound messages resolve
-  through. A handler that fails releases the id, as today.
+  through. A handler that fails fails the message. That is final, and the
+  reconciler re-derives what is still owed once the kind's park cool-off passes.
 - **`Pending(id)` and `Settled(id)`** run on every reconcile pass. They read a
   watch-fed local mirror of pending and settled ids, never the server.
 - **Ephemeral sends** carry the short TTL in D-5.
@@ -256,15 +270,59 @@ router, reconciler and handlers do not change.
 
 ### D-11: The leader proxy narrows and the claim placeholder retires
 
-Any replica serves `/channel/ops` and `/channel/ops/{id}/done`, so the leader
-proxy exempts them along with `/healthz`, `/state/tasks*` and
-`/state/dead-letters`. Accept endpoints still proxy to the leader. That is
-conservative and can narrow later.
+Any replica serves the consumer end of `out.*`: `GET /channel/ops`,
+`GET /channel/ops/stream`, `POST /channel/ops/{id}/ack` and
+`POST /channel/ops/{id}/done`. The leader proxy exempts them along with
+`/healthz` and everything under `/state/`. Accept endpoints still proxy to the
+leader. That is conservative and can narrow later.
 
-`status.threads[].claim` is no longer written, and a value found there is
-ignored. The lease defaults to five minutes through the existing
-`claimStalenessSeconds`, so the `reclaimAfterSeconds` an adapter receives does
-not change.
+`status.threads[].claim` is no longer written, and a value found there is ignored. No lease is placed on a channel op at all: an acknowledged message is the adapter's, and its delivery TTL is the only clock (D-17).
+
+The old `reclaimAfterSeconds` field is gone from the op, replaced by the acknowledgement reply. `claimStalenessSeconds` is inert.
+
+### D-12: What stays synchronous, and why
+
+| Operation | Reason |
+|---|---|
+| `invoke` | the reply carries the member and the budget reservation. An accepted-then-failed invoke would still count as a move |
+| `/work`, `/work/done`, `/work/context` | the runtime contract. Move-per-turn runs inside `/work/done` before the run is recorded, so a retried report is judged again and the corrective append lands once |
+| `/channel/ops`, `/channel/ops/{id}/ack`, `/channel/ops/{id}/done`, `/channel/ops/stream` | the consumer end of `out.*` |
+| reads, streams, sessions, adapter state and status, `/activity`, mark read and unread | no work to defer, or the caller needs the result |
+
+The budget-exceeded close is enqueued as a `conv` close task after the run is
+recorded, at both of its call sites.
+
+### D-13: The chart
+
+`commandBus.backend` is `nats` or `memory`, independent of
+`stateStore.backend`. A guard fails every contradiction and names the value.
+
+- The default, when the state store is itself on `nats`, shares that bundle: the
+  bus connects to its client Service with its credential, in buckets of its own.
+  Nothing is configured and nothing second renders. With the state store on
+  `kube` there is no server to share, so the default renders the dedicated bundle
+  below.
+- `commandBus.nats.enabled: true` renders a dedicated bundle with the same shape
+  as the state bundle: three servers, a volume each, a PodDisruptionBudget, a
+  chart-generated credential. The existing subchart cannot be instantiated twice
+  under an alias, so the bus has its own template (task 8.1).
+- `commandBus.nats.url` points at an external server and needs its own credential
+  from `commandBus.nats.auth.user` and `password`, or `commandBus.nats.auth.existingSecret`.
+- The dedicated bundle and the URL are mutually exclusive.
+- `memory` is refused with more than one manager replica.
+- The manager reports not ready while the bus is unreachable.
+
+### D-14: Tests are three tiers, and the conformance suite is the first
+
+| Tier | Decides |
+|---|---|
+| Unit | the conformance suite against `memory` and against an in-process `nats-server`, the bench, handlers against `memory`, the chart's render and guard tests |
+| System | what a cluster decides: the bundle, credential projection, the NetworkPolicy, a claim on one replica completed on another, restart durability, ordering under parallel consumers, backoff into a dead letter |
+| End-to-end | full flows through the real HTTP surface with the task stream observed, in the full tier |
+
+The end-to-end flows are listed in the tasks. The repo's docs-task guard fixes
+unit, system and documentation as the last three sections, so the end-to-end
+section sits just before unit.
 
 ### D-15: Thread entries have one fan-out point
 
@@ -287,155 +345,74 @@ enqueued before the analysis it reacted to, so it reached the console first.
 | Order by timestamp inside each producer | Every new producer must remember the rule. The stopgap did this for two |
 | A global queue for all channels | One slow channel delays every other |
 
-### D-16: The console is a plain SSE consumer of its log: cursor, no acknowledgement
+### D-16: The retained console feed (withdrawn)
 
-A consumer that is pushed to, not asked, needs no claim, lease or acknowledgement.
-The console channel's queue is read the standard SSE way: an ordered log with an
-id per event, and a reconnect that names the last event it received.
+Two shapes were built for the console and withdrawn, each found fragile live. The first gave it claim, lease and acknowledgement like Telegram: a dead connection's claim stranded ops for a whole lease.
 
-- **Feed.** `GET /channel/ops/stream` pushes each entry of the console channel's
-  log after the cursor, in log order, as an event whose `id` is the entry's
-  command id. Telegram keeps its `/channel/ops` long-poll with claim and
-  acknowledgement, over the same per-channel queue family.
-- **Cursor.** The client's position is the id of the last event it received. A
-  reconnect sends it as `Last-Event-ID` (or `?since=`). The server replays every
-  entry after that one, then pushes new ones. An unknown id replays from the start
-  of the retained log. Nothing is claimed, leased or deleted by a connection, so
-  two connections, a dead connection or a replica change strand nothing.
-- **Dropped connections** are detected by the server from the failed write or the
-  closed request, and by the client's idle watchdog on the keep-alive. Both only
-  end the connection. The client reconnects with its cursor.
-- **Delivered means the entry was written to a live stream.** The manager then
-  performs the side effects that an acknowledgement used to trigger (marking a run
-  reply delivered, closing a topic). A lost frame is recovered by the replay, never
-  by a lease.
-- **Retention.** The feed's log is trimmed by age and count (30 seconds by default,
-  declared per queue), not by consumption. A gap longer than the window is
-  recovered from the stored conversation record, which the console merges on
-  every read, so the window only has to cover a reconnect. This replaces D-2's removal on settle
-  for this queue: a replayable feed must outlive its delivery.
-- **Thread id.** The manager assigns the console thread's id when it enqueues the
-  `ensure-topic` entry and the console uses the one it is given, so no result
-  travels back.
-- **Idempotent render.** The console renders an entry once per command id, so a
-  replay across a reconnect never duplicates a message.
+The second kept a retained log and a cursor the client resumed from: it needed a replay window, an event id and render-once bookkeeping, and a push stream that was the only way to a message made one lost frame invisible.
 
-The same shape serves any later consumer, such as a mobile app.
-
-As built:
-
-- The retained log is keyed by ADAPTER (`feed.<adapter>`), not by channel: a
-  console serving several Channels reads one log, so one cursor orders everything
-  it is sent. Order within a channel is a fortiori the log order. It is a log of
-  its own beside the task queues (`Bus.Publish` / `Bus.Follow`), declared once in
-  `DefaultFeedInventory` (30s, 5000 entries, 30s dedup window of a repeated
-  id) and set from `CHANNEL_FEED_RETENTION` / `CHANNEL_FEED_MAX_ENTRIES`. Which
-  adapters read a feed is `CHANNEL_FEED_ADAPTERS` (default `console`).
-- A repeated command id inside the dedup window is appended once. Past it the id
-  is appended again, so an id a recreated conversation reuses still reaches the
-  console.
-- A feed `delete-conversation` is not pending once appended: its only effect is
-  the tombstone, and the finalizer is never held waiting for a console.
-- A `close-topic` replayed after a reopen does not archive the live thread: the
-  archive mark is written only for a closed conversation.
-- An empty cursor replays the whole retained log (30 seconds by default). A
-  longer gap is recovered from the stored conversation record the console
-  merges. The console renders each command id once.
+Neither exists. The console is the receipt-only case of the one contract in D-17, and nothing in the bus keeps a cursor, a sequence or a retained feed.
 
 ### D-17: Adapters own delivery: get, ack, then done or failed
 
-Every channel adapter delivers under one contract: GET, ACK, then DONE or
-FAILED. The console is the simple case, where the ACK is its receipt of the
-message from the manager (not the push on to browsers, which stays fire-and-forget),
-there is no delivery TTL and no report, and the manager DELETES the message from
-the queue at the ACK, as a regular queue does. Telegram uses all three steps with a
-delivery TTL. This supersedes D-16's retained feed, which was built first.
+Every channel adapter delivers under one contract. It is generic: a new adapter
+needs no manager or bus code and no inventory entry, and delivery TTLs are
+declared per message kind, never per adapter.
 
-The mechanism is generic. It is the default for every channel adapter, present and
-future, so introducing a new adapter needs no manager or bus code and no
-per-adapter inventory entry: delivery TTLs are declared per message kind, never
-per adapter. The console is the one exception, a small declared set of
-"receipt-only" adapters set by configuration (the console by default), and
-everything outside that set gets the generic contract.
+| Step | Call | Effect |
+|---|---|---|
+| GET | `GET /channel/ops?adapter=&contract=&wait=` | Reads the next message of the adapter's channel queues and changes nothing. A message read by an adapter that dies before acknowledging is offered again, since no delivery had begun |
+| ACK | `POST /channel/ops/{id}/ack?adapter=` | The hand-over. From it the message is the adapter's: the manager never sends it again and its delivery TTL starts |
+| DONE or FAILED | `POST /channel/ops/{id}/done` with `{threadId?, error?}` | The adapter's report after delivering to its surface with its own retries. An `error` is FAILED |
 
-- **GET** reads the next message of the adapter's channel queue and changes
-  nothing. A message read by an adapter that dies before acknowledging is simply
-  offered again, since no delivery had begun.
-- **ACK** is the hand-over. From it the message is the adapter's: the manager
-  never sends it again, so there is no lease redelivery, and its **delivery TTL**
-  starts.
-- **DONE or FAILED** is the adapter's report after delivering to its surface with
-  its own retries. A message with no report when its TTL passes is failed: by the
-  adapter itself, and by the manager as a backstop when the adapter is gone.
-  Failed is final. The manager may record or dead-letter it and never redelivers.
+```
+GET  /channel/ops?adapter=telegram&contract=2&wait=25
+200  {"id":"send:conv-1:tg-ops:run-7","channel":"tg-ops","kind":"send","threadId":"42","message":{...}}
 
-The acknowledgement is always between aops components (the adapter to the
-manager), never from the external service. A result that only the external
-service can produce, such as the topic id of a Telegram `ensure-topic`, travels
-back in the DONE report. Messages declare their delivery TTL per kind: 10 minutes for stable messages
-(replies, inputs), 2 minutes for ephemeral notices, 5 minutes for topic
-operations. Each is a chart-overridable queue value.
+POST /channel/ops/send:conv-1:tg-ops:run-7/ack?adapter=telegram
+200  {"ok":true,"deliveryTtlSeconds":600,"consumed":false}
 
-**As built.** One bus declaration field, `Policy.DeliveryTTL`, makes a queue a
-hand-over queue: a claim is the acknowledgement, its lease runs the delivery TTL, a
-lapse or a failure is final (Dead, never Retrying), and attempts and backoff do not
-apply. New `Bus.Peek` (read, no entry) and `Bus.Acknowledge` (idempotent claim by
-command id, conditional on the key's last entry, so two replicas hand over once);
-`Publish`/`Follow` and the retained feed are gone. Message kinds are `stable` (10m),
-`ephemeral` (2m), a new `topic` kind for ensure-topic and close-topic (5m) and
-`delete-conversation` (5m); the manager reads each from
-`CHANNEL_DELIVERY_TTL_{STABLE,EPHEMERAL,TOPIC,DELETE_CONVERSATION}`. The receipt-only
-set is `CHANNEL_RECEIPT_ADAPTERS` (default `console`). HTTP: `GET /channel/ops`
-reads one message, `POST /channel/ops/{id}/ack?adapter=` answers
-`{deliveryTtlSeconds, consumed}` (404 gone, 409 not offered), `POST .../done`
-reports (an `error` fails it), `GET /channel/ops/stream` pushes unacknowledged
-messages to a receipt adapter. Deviations: a failed Telegram message is final, so
-the reconciler re-derives it only after the kind's park cool-off; the console's
-thread id keeps the `console-<uid>` shape, applied to any receipt adapter by
-configuration; the old `claimedOp.reclaimAfterSeconds` field is replaced by the ack
-reply.
+POST /channel/ops/send:conv-1:tg-ops:run-7/done        {}                       # done
+POST /channel/ops/topic:conv-1:7c1e:tg-ops/done        {"threadId":"1187"}      # done, with the result
+POST /channel/ops/send:conv-1:tg-ops:run-7/done        {"error":"chat not found"} # failed
+```
 
-### D-12: What stays synchronous, and why
+- **Acknowledge answers** `404` when the message is gone (consumed or expired) and
+  `409` when it is held but not offered (behind an unfinished message of its
+  conversation, backing off, or finished). A repeated acknowledgement within the
+  TTL returns the same reply, on any replica, so a retry hands over nothing twice.
+- **No report by the TTL** fails the message, by the adapter itself and by the
+  manager as a backstop when the adapter is gone. **Failed is final.** The bus
+  never redelivers, and what is still owed is re-derived by the reconciler only
+  after the kind's park cool-off.
+- **The acknowledgement is always between aops components**, adapter to manager,
+  never from the external service. A result only the external service can
+  produce, such as the topic id of a Telegram `ensure-topic`, travels in the DONE
+  report.
+- **Delivery TTLs** are per kind: stable 10 minutes (replies, inputs), ephemeral
+  2 minutes (acks, notices), topic 5 minutes (`ensure-topic`, `close-topic`),
+  `delete-conversation` 5 minutes. The manager reads them from
+  `CHANNEL_DELIVERY_TTL_{STABLE,EPHEMERAL,TOPIC,DELETE_CONVERSATION}`.
 
-| Operation | Reason |
-|---|---|
-| `invoke` | the reply carries the member and the budget reservation. An accepted-then-failed invoke would still count as a move |
-| `/work`, `/work/done`, `/work/context` | the runtime contract. Move-per-turn runs inside `/work/done` before the run is recorded, so a retried report is judged again and the corrective append lands once |
-| `/channel/ops`, `/channel/ops/{id}/done`, the console's channel stream | the consumer end of `out.*` |
-| reads, streams, sessions, adapter state and status, `/activity`, mark read and unread | no work to defer, or the caller needs the result |
+**The receipt-only exception.** The console is the one declared exception, and it is configuration, not code: the adapters in `CHANNEL_RECEIPT_ADAPTERS` (default `console`) acknowledge on receipt, with no delivery TTL and no report.
 
-The budget-exceeded close is enqueued as a `conv` close task after the run is
-recorded. Task 5.4 confirms the call site before the change is finished.
+The manager performs the delivery side effects and deletes the message at the acknowledgement, and the acknowledgement answers `consumed: true`. Anything outside that set gets the generic contract.
 
-### D-13: The chart
+The acknowledgement is the console's receipt of the message from the manager, not the push on to browsers, which stays fire-and-forget.
 
-`commandBus.backend` is `nats` or `memory`, independent of
-`stateStore.backend`. A guard fails every contradiction and names the value.
+A receipt adapter may read over `GET /channel/ops/stream` instead of polling. The stream pushes each unacknowledged message once per connection as an `op` event and only reads.
 
-- The default shares the state store's `nats` bundle: the bus connects to its
-  client Service with its credential, in buckets of its own. Nothing is
-  configured and nothing second renders.
-- `commandBus.nats.enabled: true` renders a dedicated bundle with the same shape
-  as the state bundle: three servers, a volume each, a PodDisruptionBudget, a
-  chart-generated credential. The existing subchart cannot be instantiated twice
-  under an alias, so the bus has its own template (task 8.1).
-- `commandBus.nats.url` points at an external server and needs its own credential
-  from `commandBus.nats.auth.user` and `password`, or `commandBus.nats.auth.existingSecret`.
-- The dedicated bundle and the URL are mutually exclusive.
-- `memory` is refused with more than one manager replica.
-- The manager reports not ready while the bus is unreachable.
+After a reconnect it offers again exactly the messages never acknowledged, so there is no cursor and no `Last-Event-ID`. Any other adapter asking for the stream gets `404` and polls.
 
-### D-14: Tests are three tiers, and the conformance suite is the first
+The console's thread id is assigned by the manager when it enqueues
+`ensure-topic` (`console-<conversation uid>`), so no result travels back. It
+applies to any receipt adapter by configuration.
 
-| Tier | Decides |
-|---|---|
-| Unit | the conformance suite against `memory` and against an in-process `nats-server`, the bench, handlers against `memory`, the chart's render and guard tests |
-| System | what a cluster decides: the bundle, credential projection, the NetworkPolicy, a claim on one replica completed on another, restart durability, ordering under parallel consumers, backoff into a dead letter |
-| End-to-end | full flows through the real HTTP surface with the task stream observed, in the full tier |
+**As built.** One bus declaration field, `Policy.DeliveryTTL`, makes a queue a hand-over queue: a claim is the acknowledgement, its lease runs the delivery TTL, and a lapse or a failure is final (dead, never retrying).
 
-The end-to-end flows are listed in the tasks. The repo's docs-task guard fixes
-unit, system and documentation as the last three sections, so the end-to-end
-section sits just before unit.
+New `Bus.Peek` (read, no entry) and `Bus.Acknowledge` (idempotent claim by command id, conditional on the key's last entry, so two replicas hand over once). The `ack` reply field `deliveryTtlSeconds` replaces the old `reclaimAfterSeconds`.
+
+A reconnecting adapter is a fresh GET, so nothing replays.
 
 ## Risks / Trade-offs
 
@@ -463,12 +440,19 @@ section sits just before unit.
 
 ## Migration Plan
 
-1. Upgrade the chart. A default install renders the bus bundle. The manager
-   starts when the bus is reachable.
+1. Upgrade the chart. A default install on the `nats` state store shares that
+   bundle, and one on `kube` renders the dedicated bus bundle. The manager starts
+   when the bus is reachable.
 2. The log starts empty. Ops owed at the moment of upgrade are re-derived by
    the reconciler, as they are after any restart today.
 3. Requests in flight at the upgrade finish under the old manager. New ones
    are accepted by the new one.
+
+4. The wire contract of the channel adapters changed (D-17). A channel adapter
+   image is upgraded together with the manager, since one that never
+   acknowledges would be offered the same message forever.
+5. The tasks, ids and dead buckets an earlier build of this change left on the
+   server are inert and may be deleted.
 
 Rollback: select `commandBus.backend: memory` on one replica, or the previous
 chart. Accepted but unprocessed tasks are lost on the rollback. The docs name

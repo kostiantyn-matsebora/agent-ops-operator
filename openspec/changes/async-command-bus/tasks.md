@@ -25,16 +25,16 @@ Why the fallback, past check 4's own failure:
   to use its ack-based `pkg/nats` subscriber instead.
 - `Publisher.Publish` sends to `configureStream(topic).Name`, not the topic
   argument. A stream name can't hold the dots the queue inventory's own names
-  (`in.signal`, `out.<type>`) use.
+  (`in.signal`, `out.<channel>`) use.
 - Its lease is the message ack, the shape D-2 rejects for cross-replica
-  completion. The ledger's CAS-over-KV claim and watch feed still have to be
+  completion. The log's conditional claim and change feed still have to be
   hand-written against `nats.go` regardless of the library.
 - Adopting it forces `nats.go` from 1.39.1 to 1.52.0 for a thin wrapper
   around `nats.go`'s own JetStream client, for a dependency tree task 3
   does not otherwise need.
 
 `go.mod`/`go.sum` end this task as they started. The `nats` backend (task 3)
-builds directly on `nats.go` JetStream KV, its already-assumed fallback
+builds directly on `nats.go` JetStream, its already-assumed fallback
 shape. The spike (a throwaway module outside the repo) is deleted.
 
 ## 2. Contract, `memory` backend, conformance suite — backend-developer
@@ -48,10 +48,10 @@ shape. The spike (a throwaway module outside the repo) is deleted.
 
 ## 3. `nats` backend — backend-developer
 
-- [x] 3.1 SUPERSEDED by 14.1 (queues are append-only, design D-2). Implement the ledger over JetStream KV buckets (`tasks`, `ids`, `dead`), each created with the configured replica count and a prefix of its own.
-- [x] 3.2 SUPERSEDED by 14.2. Claim by compare-and-swap on the task revision, with the claim-time ordering rule over the ordered feed (design D-2).
+- [x] 3.1 SUPERSEDED by 11.1 (queues are append-only, design D-2). The first build kept one mutable record per task in JetStream KV buckets (`tasks`, `ids`, `dead`). Those buckets are inert on an install that ran it.
+- [x] 3.2 SUPERSEDED by 11.2. The first build claimed by compare-and-swap on the task record.
 - [x] 3.3 A watch-fed local mirror for pending and settled ids, so reconcile never reads the server.
-- [x] 3.4 Sweeps: parked-id release, TTL expiry, ledger and dead-letter retention caps.
+- [x] 3.4 Sweeps: parked-id release, TTL expiry, queue-log and dead-letter retention caps.
 - [x] 3.5 Pass the conformance suite and bench against the in-process server.
 - [x] 3.6 Extend the static import test to name `internal/state/nats` and `commandbus/nats` as the only importers of `nats.go`.
 
@@ -115,87 +115,41 @@ suite now passes (`go test ./internal/integration/...`).
 
 ## 6. `OpQueue` migration — backend-developer
 
-- [x] 6.1 Re-implement `OpQueue` over the bus as `out.<channelType>`, keyed by conversation and channel, keeping `Enqueue*`, `Claim`, `Complete`, `Settled`, `Pending` and `Stats`.
-- [x] 6.2 Keep the dedup rule: a stable id is suppressed while pending, retrying, parked or settled. A failure never suppresses its own recovery.
-- [x] 6.3 Keep `Complete`'s handlers synchronous before the `200`. A failing handler releases the id.
+- [x] 6.1 Re-implement `OpQueue` over the bus as the `out.<channel>` queues, keyed by conversation, keeping `Enqueue*`, `Settled`, `Pending` and `Stats`. Its adapter-facing read, hand-over and report calls are section 13.
+- [x] 6.2 Keep the dedup rule: a stable id is suppressed while pending, parked or settled. A failure never suppresses its own recovery.
+- [x] 6.3 Keep `Complete`'s handlers synchronous before the `200`. A failing handler fails the message, final, and reconciliation re-derives it after the cool-off.
 - [x] 6.4 Give ephemeral sends their short TTL and `delete-conversation` a TTL of the finalizer's grace, never parked.
-- [x] 6.5 Run in-process providers as a consumer over `out.<type>`.
+- [x] 6.5 Run in-process providers as a consumer over `out.<channel>`.
 - [x] 6.6 Keep `/api/queues` working from the per-queue statistics.
 
-**Claim stays non-blocking over a blocking `Bus.Claim`.**
-`handleChannelOps` already owns the long poll. `OpQueue.Claim` gives
-`Bus.Claim` a short, non-zero deadline and reads `context.DeadlineExceeded`
-as "nothing claimable".
+**This section built the first facade and is superseded in part by sections 10 to 13.**
+`OpQueue.Claim` and `Complete`'s retry-on-failure behaviour gave way to `Read`,
+`Acknowledge` and `Complete` under the hand-over contract (design D-17). What
+this section still decides:
 
-Not literally zero: the nats backend's own mirror-readiness wait ties a
-zero deadline against an already-ready channel. Go's `select` breaks that
-tie at random. Proven against both backends
-(`TestClaimOnAnEmptyQueueReturnsPromptly`/
-`TestClaimWithAShortDeadlineStillFindsAnEligibleTask` in
-`internal/commandbus/memory` and `internal/commandbus/nats`).
-
-**`commandbus.QueueStats` gained five fields**: `OldestPendingID`,
-`OldestPendingKey`, `OldestRunningAge`, `OldestRunningID`,
-`OldestRunningKey`. `Stats()`'s own identity fields need an op's identity,
-not only a count, and the bus carried none. Both backends and the
-conformance suite extended together (`testPerQueueStatistics`).
-
-**The claimed-op to bus-task bridge is a small local index**:
-`OpQueue.claimed`, keyed by the PUBLISHED op id, holding the lease token
-and the attempt/maxAttempts pair `resultingStateAfterFail` needs. Claim
-populates it. Complete consumes it.
-
-**Complete's old release-on-failure hack is retired.** The bus's own
-attempts and backoff (design D-5) give a failed stable op its next chance
-now. Complete calls `Fail`.
-
-`CodeUnavailable` is for an adapter's own reported error.
-`CodeInternal` is for the manager's own write failing despite the
-adapter's success. Either way the bus decides retry vs dead.
-
-One narrow exception, found and fixed along the way.
-`out.deleteConversation`'s own `DedupWindow` is declared `0`
-(deliberately, conformance-tested). That offers the bus no suppression at
-all the instant after a success.
-
-`finalizeClose` (`internal/controller`) re-enqueues every pass regardless.
-`OpQueue.enqueue` now checks its own local "settled" mirror (success only,
-never Dead) before ever asking the bus.
-
-This restores the old queue's "stays completed" behaviour for this one
-op, without touching the already-examined inventory value.
-
-**In-process providers run via a real `consumer.Pool`**, one per
-`Registry`-registered channel type, started from `OpQueue.Run`.
-
-This is a new `manager.RunnableFunc`, registered unconditionally from
-`cmd/manager` — it also carries the watch-fed Pending/Settled/Stats
-mirror, needed regardless of whether any type is registered.
-
-`Registry` gained `Types()` to list what to start pools for.
-
-No channel type is registered in production today (`platform/console` is
-an external adapter). This path is exercised by tests only, and the
-mechanism is real and unchanged by that.
-
-**A real, now-twice-found commandbus gap, left open.** `Bus` has no "list
-every queue in use" call.
-
-`OpQueue.Stats()` works around it with its own `channelTypes` set,
-populated from this process's own enqueues and claims, and from
-`watchMirror`'s Feed consumption of every `out.*` queue it observes.
-
-That is sufficient for every test and for `/api/queues`. A fresh replica
-with no local history will not list a channel type until its own Feed
-watch, or a local enqueue or claim, has seen one.
-
-Left to a future change if the gap matters beyond this.
+- `OpQueue` keeps its `Enqueue*`, `Settled`, `Pending` and `Stats` surface over
+  the bus, and its dedup rule (6.2) and synchronous completion handlers (6.3).
+- **In-process providers run via a real `consumer.Pool`**, one per
+  `Registry`-registered channel type, started from `OpQueue.Run`. That is a
+  `manager.RunnableFunc` registered unconditionally from `cmd/manager`. It also
+  carries the watch-fed Pending, Settled and Stats mirror. No channel type is
+  registered in production today, since `platform/console` is an external
+  adapter, so this path is exercised by tests only.
+- `commandbus.QueueStats` gained `OldestPendingID`, `OldestPendingKey`,
+  `OldestRunningAge`, `OldestRunningID` and `OldestRunningKey`, because
+  `Stats()` needs an op's identity and not only a count.
+- `out.deleteConversation` keeps a `DedupWindow` of `0`, so `OpQueue.enqueue`
+  checks its local settled mirror (success only, never dead) before asking the
+  bus. `finalizeClose` re-enqueues on every pass regardless.
+- A known gap, left open. `Bus` has no call to list every queue in use, so
+  `OpQueue.Stats()` learns channel queues from this process's own enqueues and
+  from `watchMirror`. A fresh replica lists a channel only after it has seen one.
 
 ## 7. Leader proxy and claim placeholder — backend-developer
 
 - [x] 7.1 Exempt `/channel/ops`, `/channel/ops/{id}/done`, `/state/tasks*` and `/state/dead-letters` from the leader proxy. Accept endpoints still proxy.
 - [x] 7.2 Stop writing `status.threads[].claim` and ignore a value found there. The five-minute lease is owned by the bus, and `claimStalenessSeconds` is inert.
-- [x] 7.3 Add the retired-vocabulary entry for `status.threads[].claim` in this change's apply, when the field stops being written. Doing it at proposal time would fail the guard on the published `durable-chat-ops-broker` spec, which still describes the field until archive. Run `retired-vocabulary-guard.py`.
+- [ ] 7.3 Add the retired-vocabulary entry for `status.threads[].claim` and `OpClaim` in the change that deletes the field from the CRD and the `OpClaim` Go type. Today the field is no longer written but the type and the CRD field remain for display, so an entry now would retire a name still in use. The published `durable-chat-ops-broker` spec also still describes the field until archive.
 
 ## 8. Chart — deployment-engineer
 
@@ -225,7 +179,7 @@ Left to a future change if the gap matters beyond this.
     `commandBusConsumerConcurrency()` in `cmd/manager/commandbus.go` reads it.
     Both `OpQueue.Run`'s pool and `httpapi`'s registration in `main.go` call it.
   - NOT DONE for the per-queue declarations: attempts, backoff, TTL, dedup window, park cool-off, in-flight cap.
-  - NOT DONE for the retention caps: sweep interval, ledger retention, dead-letter max age and count.
+  - NOT DONE for the retention caps: sweep interval, queue-log retention, dead-letter max age and count.
   - The cause is a Go-side gap, not a chart oversight.
     The binary reads only five command bus variables: `COMMANDBUS_BACKEND`, `COMMANDBUS_NATS_URL`, `COMMANDBUS_NATS_USER`, `COMMANDBUS_NATS_PASSWORD` and `COMMANDBUS_CONSUMER_CONCURRENCY`.
     The `Option`s in `internal/commandbus/nats/bus.go` exist, but `commandBusNatsOptions` is `nil` in production.
@@ -321,7 +275,7 @@ role did not run. Left for whoever dispatches the cluster tier.
   renders at the chart default `commandBus.backend: nats`
   (`chart/values.yaml`). `install.go` never overrides it —
   `SYSTEM_STATE_BACKEND` pins the DIFFERENT conversation/signal state
-  store, not the command bus. So the ledger and lease (design D-2) live
+  store, not the command bus. So the log and lease (design D-2) live
   in the bus's own NATS server, never the manager process. The test
   therefore asserts the STRONGER of the two claims the task text allows:
   the SAME task UID the old manager minted is the one that later
@@ -331,93 +285,94 @@ role did not run. Left for whoever dispatches the cluster tier.
 - [ ] 9.7 Flow: a failing channel surface backs off, then leaves a dead-letter record, and a later re-derive delivers once it recovers.
   `TestAsyncChannelFailureBacksOffDeadLettersThenRecovers`, against the
   real fake Bot API's `/control/fail` toggle on `createForumTopic`
-  (ensure-topic, `KindOutStable`: 8 attempts, 5s-5m jittered backoff).
-  **DECISION on duration and recovery path:** waits out the real backoff
-  to a real `dead` state and a real `GET /state/dead-letters` listing
-  (bounded 15 minutes, past the ~10m25s deterministic worst case) rather
-  than asserting only the first couple of retries, since reaching dead
-  IS this flow's own subject. Recovery is proven through a close+reopen
-  once the surface is healthy again — `EnqueueEnsureTopic` mints a FRESH
-  `CommandID` per reopen count, so the reopen's own re-derive is a
-  genuinely unsuppressed submission — rather than waiting out the
-  natural 5-minute park cool-off for the SAME `CommandID` to unsuppress:
-  that cool-off's own timing is already pinned at the unit tier by the
-  commandbus conformance suite (task 2.6, "park then release"), so
-  re-proving it here too would cost every full-tier run several more
-  real minutes for a fact this lane does not uniquely decide.
+  (ensure-topic).
+  **STALE AGAINST D-17, TO BE REWRITTEN BEFORE IT IS RUN.** It was written for
+  the bus retrying channel messages with backoff. A channel message now has no
+  bus retry: the adapter retries until the delivery TTL and a failure is final.
+  The rewritten flow asserts a failed `ensure-topic` is not redelivered, reaches
+  `/state/dead-letters`, and is derived again once its id is released.
+  **DECISION on recovery path:** recovery is proven through a close and reopen
+  once the surface is healthy again. `EnqueueEnsureTopic` mints a fresh
+  `CommandID` per reopen count, so the reopen's re-derive is an unsuppressed
+  submission. That avoids waiting out the park cool-off for the same
+  `CommandID`, whose timing the conformance suite already pins (task 2.6,
+  "park then release").
 
-## 13. Per-channel queues, one fan-out point, console feed — backend-developer
+## 10. Per-channel queues and one fan-out point — backend-developer
 
-- [x] 13.1 Key the `out` family per Channel resource, `out.<channel>`, keyed by conversation. An adapter drains the queues of every Channel that names it, so `/channel/ops?adapter=` is unchanged.
-- [x] 13.2 Add one fan-out function recording a thread entry and enqueueing it to each bound channel's queue in causal order, less the surface that displayed it.
-- [x] 13.3 Route inputs, run replies, escalations and notices through it. Remove the separate producers in the reconcile pass and the stopgap flush of run replies before later inputs. The reconciler stays the backstop and calls the same function.
-- [x] 13.4 SUPERSEDED by 14.4 (a command id is the cursor, no sequence field). Give each entry a per-channel sequence, and serve the console channel's queue over its one SSE stream in queue order.
-- [x] 13.5 SUPERSEDED by 14.4. Resume: a reconnect naming the last acknowledged sequence replays every later entry. Acknowledgement is the existing `/channel/ops/{id}/done`, and an unacknowledged entry stays queued.
-- [x] 13.6 Move the console to the stream. Telegram keeps its long-poll over the same per-channel queue.
+- [x] 10.1 Key the `out` family per Channel resource, `out.<channel>`, keyed by conversation. An adapter drains the queues of every Channel that names it, so `/channel/ops?adapter=` is unchanged.
+- [x] 10.2 Add one fan-out function, `chat.FanOutThread`, recording a thread entry and enqueueing it to each bound channel's queue in causal order, less the surface that displayed it.
+- [x] 10.3 Route inputs, run replies, escalations and notices through it. Remove the separate producers in the reconcile pass and the stopgap flush of run replies before later inputs. The reconciler stays the backstop and calls the same function.
+- [x] 10.4 SUPERSEDED by 13.0 and 13.7. A per-channel sequence and a resumable console stream were built here and withdrawn (design D-16). Nothing in the bus or the API carries a cursor or a sequence.
+- [x] 10.5 Move the console onto a push stream and leave Telegram on its long-poll over the same per-channel queue. Both now use the one contract of section 13.
 
-## 14. Append-only queues — backend-developer
+## 11. Append-only queues — backend-developer
 
-Measured live: a claim landing between a submit's create and its second write of
-`Order` failed the submit with NATS 10071, so an escalation was lost. Every queue
-becomes an append-only log (design D-2, D-16): nothing is rewritten.
+Measured live: a claim landing between a submit's create and its second write
+failed the submit with NATS 10071, so an escalation was lost. Every queue
+becomes an append-only log (design D-2): nothing is rewritten.
 
-- [x] 14.1 Rebuild the `nats` backend as JetStream streams of immutable entries, subjects `<queue>.<key>.msg` and `.ev`, with a separate `dead` log. Remove the `tasks`/`ids` records, `Task.Order`, `recordOrder` and the second write in `createTask`.
-- [x] 14.2 Claim, complete, fail and dead-letter are appended entries. A claim is appended conditionally on the key's last entry, so only one of two racing claims lands. State is folded from a task's own entries, and a lapsed lease reads as retryable with no write.
-- [x] 14.3 Rebuild the `memory` backend as the same append-only log, so both meet one contract.
-- [x] 14.4 Replace the sequence with the command id as the cursor: the SSE `id:` is the command id, a reconnect naming the last acknowledged id replays every later unacknowledged entry in log order, and an unknown id starts from the oldest unacknowledged entry. Update `ClaimSequenced`, `Resume`, `Bus.Running`, the console `feedCursor` and `StreamOps`.
-- [x] 14.5 Delete a message and its entries when it settles as succeeded (the server removes them, as a regular queue does). Retain an unconsumed message for 7 days by default, then trim it. Dedup after settle rests on the dedup window. The bus performs no other delete.
-- [ ] 14.6 Redeploy the manager and console to the live cluster and repeat the "How is ha doing?" scenario: no escalation fails, the analysis precedes the nudge, and nothing needs a refresh.
+- [x] 11.1 Rebuild the `nats` backend as JetStream streams of immutable entries, subjects `<queue>.<key>.msg` and `.ev`, with a separate `dead` log. Remove the mutable task records, the order field and the second write at submit.
+- [x] 11.2 Claim, complete, fail and dead-letter are appended entries. A claim is appended conditionally on the key's last entry, so only one of two racing claims lands. State is folded from a task's own entries, and a lapsed lease reads as retryable with no write.
+- [x] 11.3 Rebuild the `memory` backend as the same append-only log, so both meet one contract.
+- [x] 11.4 SUPERSEDED. Using the command id as an SSE cursor was withdrawn with the retained feed (design D-16). A task carries no sequence or order, and `/state/tasks/{id}` shows none.
+- [x] 11.5 Delete a message and its entries when it settles as succeeded (the server removes them, as a regular queue does). Retain an unconsumed message for 7 days by default, then trim it. Keep dead letters in a separate log (7 days, 10000). Dedup after settle rests on an in-memory mark per replica for the queue's dedup window.
+- [ ] 11.6 Redeploy the manager and console to the live cluster and repeat the "How is ha doing?" scenario: no escalation fails, the analysis precedes the nudge, and nothing needs a refresh.
 
-## 15. Console as a plain SSE consumer — backend-developer
+## 12. Console as a retained feed — superseded
 
-The claim/lease/acknowledge feed for the console proved fragile (a dead connection's claim stranded ops for a lease; a redelivery rendered twice). The console becomes a standard SSE consumer (design D-16).
+Built and withdrawn (design D-16). A retained log with a cursor and a replay
+window needed render-once bookkeeping and made one lost frame invisible. Section
+13 replaces it, and nothing of it remains in the code or the contract.
 
-- [x] 15.1 Make the console channel's log a retained feed: trimmed by age and count (30s default, declared per queue), not removed on delivery. Telegram's queue keeps claim and acknowledgement.
-- [x] 15.2 `GET /channel/ops/stream` reads the feed by cursor: replays every entry after `Last-Event-ID`/`?since=` (unknown id: from the start of the retained log), then pushes new entries. No claim, lease or acknowledgement. Remove the sweep, `Resume` by lease and the `/done` dependence for the console.
-- [x] 15.3 Run the side effects an acknowledgement used to trigger (run reply delivered, close-topic, delete-conversation) when the frame is written to a live stream.
-- [x] 15.4 The manager assigns the console thread id on `ensure-topic`. The console uses it.
-- [x] 15.5 Console client: reconnect with the last received id, idle watchdog, render once per command id, no `/done` call and no unacked cache.
-- [ ] 15.6 Redeploy and repeat the Tuya scenario and a delete: answers arrive once, in order, without a refresh, and a delete is not held waiting for the console.
+- [x] 12.1 SUPERSEDED by 13.0. The console channel's log as a retained feed trimmed by age and count.
+- [x] 12.2 SUPERSEDED by 13.7. `GET /channel/ops/stream` reading by cursor and `Last-Event-ID`.
+- [x] 12.3 SUPERSEDED by 13.0. Running the delivery side effects when a frame is written, in place of an acknowledgement.
+- [x] 12.4 KEPT, by 13.0. The manager assigns the console's thread id when it enqueues `ensure-topic`, and the console uses it.
+- [x] 12.5 SUPERSEDED by 13.0. The console reconnecting with its last received id and keeping no acknowledgement cache.
+- [ ] 12.6 Redeploy and repeat the Tuya scenario and a delete: answers arrive once, in order, without a refresh, and a delete is not held waiting for the console. Performed with 13.5.
 
-## 16. Adapter-owned delivery (Telegram) — backend-developer
+## 13. Adapter-owned delivery — backend-developer
 
-The same contract for every non-console channel adapter (design D-17). Starts after section 15.
+One contract for every channel adapter (design D-17): read, acknowledge, then
+report done or failed, with a delivery TTL per message kind.
 
-- [x] 16.0 Move the console to the same contract: its ACK is receipt from the manager, no delivery TTL, no report, and the manager deletes the message at the ACK. Replace the retained feed of section 15 and drop its replay window.
-- [x] 16.0a The mechanism is generic: no adapter-name branch or per-adapter inventory entry in the manager or the bus, TTLs per message kind, and the console exception is purely configuration. A test runs the full contract for a made-up adapter name with no code change.
-- [x] 16.1 Add the three-step contract to the channel adapter API: read without change, acknowledge as hand-over (starts the delivery TTL, the manager never resends), report done or failed. Declare a delivery TTL per message kind.
-- [x] 16.2 Remove the lease redelivery for acknowledged ops. The manager fails a message with no report at its TTL as a backstop.
-- [x] 16.3 Move `channels/telegram` to it: retry against the gateway until the TTL, then report failed. The `ensure-topic` topic id travels back in the done report.
-- [x] 16.4 Keep the manager's delivery markers and the close and delete gating driven by the done and failed reports.
-- [ ] 16.5 Redeploy and confirm Telegram delivery, a delivery failure ending as failed at its TTL, and an adapter restart not duplicating a message.
+- [x] 13.0 Move the console to the same contract: its acknowledgement is receipt from the manager, with no delivery TTL and no report, and the manager deletes the message at the acknowledgement. Remove the retained feed of section 12 and its replay window.
+- [x] 13.0a The mechanism is generic: no adapter-name branch or per-adapter inventory entry in the manager or the bus, TTLs per message kind, and the console exception is purely configuration (`CHANNEL_RECEIPT_ADAPTERS`). A test runs the full contract for a made-up adapter name with no code change.
+- [x] 13.1 Add the three-step contract to the channel adapter API: `GET /channel/ops` reads without change, `POST /channel/ops/{id}/ack` hands over and starts the delivery TTL, `POST /channel/ops/{id}/done` reports done or failed. Declare a delivery TTL per message kind (stable, ephemeral, topic, `delete-conversation`), set by `CHANNEL_DELIVERY_TTL_*`.
+- [x] 13.2 Remove the lease redelivery for acknowledged ops and the `reclaimAfterSeconds` field. The manager fails a message with no report at its TTL as a backstop.
+- [x] 13.3 Move `channels/telegram` to it: retry against the gateway until the TTL less a report margin, then report failed. The `ensure-topic` topic id travels back in the done report.
+- [x] 13.4 Keep the manager's delivery markers and the close and delete gating driven by the done and failed reports.
+- [ ] 13.5 Redeploy and confirm Telegram delivery, a delivery failure ending as failed at its TTL, and an adapter restart not duplicating a message.
+- [x] 13.6 Fix the console's receipt of a message to answer `consumed: true` at the acknowledgement, so the manager performs the side effects and deletes the message with no later report.
+- [x] 13.7 `GET /channel/ops/stream` pushes each unacknowledged message once per connection to a receipt adapter, re-offers only never-acknowledged ones after a reconnect, has no cursor, and answers `404` to any other adapter.
+- [ ] 13.8 Chart: `commandBus.channelReceiptAdapters` and `commandBus.deliveryTtl.{stable,ephemeral,topic,deleteConversation}` render `CHANNEL_RECEIPT_ADAPTERS` and `CHANNEL_DELIVERY_TTL_{STABLE,EPHEMERAL,TOPIC,DELETE_CONVERSATION}`. Owned by the chart lane, ticked once its render tests pass.
 
-## 10. Unit tests
+## 14. Unit tests
 
-Audited across the whole repo, not just re-run. Everything else audited
-was already real, already passing, and left alone. Three gaps closed:
+Audited across the whole repo, not just re-run. Three gaps closed:
 
-- An `ErrorCode.Retryable()`/`ParseErrorCode` table test (10.4).
+- An `ErrorCode.Retryable()` and `ParseErrorCode` table test (14.4).
 - A `TestCommandBusCredentialPrecedence` test mirroring the state-store
-  bundle's own (10.5).
-- A test-coverage regression found along the way. Section 7's own commit
-  deleted `TestActivityProxiesToLeaderWhenReachable` as collateral damage
-  alongside the `/channel/ops` test it meant to retire. Restored verbatim
-  in `internal/integration/activity_leaderproxy_test.go`.
+  bundle's own (14.5).
+- `TestActivityProxiesToLeaderWhenReachable`, deleted as collateral by section
+  7 and restored in `internal/integration/activity_leaderproxy_test.go`.
 
-- [x] 10.1 `go test ./...` in `platform/manager`, including the conformance suite and bench against `memory` and against the in-process `nats-server`.
-- [x] 10.2 Handler tests for every verb in the inventory against the `memory` backend: accept replies, accept-time refusals, idempotent redelivery, the escalate decomposition, the cascade re-check.
-- [x] 10.3 `OpQueue` facade tests: the dedup rule after a failure, synchronous completion handlers, ephemeral TTL, in-process providers.
-- [x] 10.4 The static import test, the error-code derivation table test and the leader-proxy exemption test.
-- [x] 10.5 The chart's render and guard tests for every permutation: default, URL, `memory`, each contradiction, credential precedence, `--is-upgrade`.
-- [x] 10.6 `go test` in every other module still passes, and `python3 .github/scripts/publication-guard.py` is clean.
-- [x] 10.7 Unit-test the single fan-out point: an entry reaches each bound channel once less the displaying surface, and a run reply is enqueued before the corrective input its turn caused.
-- [x] 10.8 Unit-test the per-channel queues: one channel not acknowledging never delays another channel of the same adapter type.
-- [x] 10.9 Unit-test the console feed: entries arrive in queue order with their sequence, a reconnect replays after the last acknowledged sequence, and an acknowledged entry is not delivered again.
+- [x] 14.1 `go test ./...` in `platform/manager`, including the conformance suite and bench against `memory` and against the in-process `nats-server`.
+- [x] 14.2 Handler tests for every verb in the inventory against the `memory` backend: accept replies, accept-time refusals, idempotent redelivery, the escalate decomposition, the cascade re-check.
+- [x] 14.3 `OpQueue` facade tests: the dedup rule after a failure, synchronous completion handlers, ephemeral TTL, in-process providers.
+- [x] 14.4 The static import test, the error-code derivation table test and the leader-proxy exemption test.
+- [x] 14.5 The chart's render and guard tests for every permutation: default, URL, `memory`, each contradiction, credential precedence, `--is-upgrade`.
+- [x] 14.6 `go test` in every other module still passes, and `python3 .github/scripts/publication-guard.py` is clean.
+- [x] 14.7 Unit-test the single fan-out point (`fanout_test.go`): an entry reaches each bound channel once less the displaying surface, and a run reply is enqueued before the corrective input its turn caused.
+- [x] 14.8 Unit-test the per-channel queues (`channelqueue_test.go`): one channel not acknowledging never delays another channel of the same adapter type.
+- [x] 14.9 Unit-test the receipt stream (`channelstream_test.go`): messages are pushed in queue order once per connection, a reconnect is offered only what was never acknowledged on any replica, a dead connection strands nothing, and an acknowledgement consumes the message and runs its side effects.
+- [ ] 14.9a Unit-test the console client (`platform/console/opstream_test.go`): it applies then acknowledges each message in order and reports no done, a failed acknowledgement is offered again and rendered once, and a silent connection is reconnected. Not run in this session, since `go test` in `platform/console` fails setup without a built `ui/dist`.
+- [x] 14.10 Conformance, walked for both backends: no entry is ever written twice, a submit succeeds when a consumer claims at once (the 10071 regression, 200 submits against a racing consumer), state folds from entries, and a lapsed lease redelivers with no write.
+- [x] 14.11 Unit-test the three-step contract (`handover_helpers_test.go`, `generic_contract_test.go`, bus `conformance/handover.go`): a read changes nothing, an acknowledgement is idempotent and never resent, a message with no report fails at its TTL, a reported failure is final, a restart after the acknowledgement does not duplicate, and a made-up adapter name gets the full contract with the receipt exception purely configured.
+- [x] 14.12 Unit-test the Telegram adapter's delivery (`channels/telegram`): read, acknowledge, deliver, report, no delivery of an op the manager will not hand over, and a delivery that cannot finish inside the TTL reports failed.
 
-- [x] 10.10 Conformance, walked for both backends: no entry is ever written twice, a submit succeeds when a consumer claims at once (the 10071 regression, 200 submits against a racing consumer), state folds from entries, and a lapsed lease redelivers with no write.
-- [x] 10.11 Unit-test the resume by command id: a reconnect replays only unacknowledged later entries in log order, and an unknown id starts from the oldest unacknowledged.
-
-## 11. System tests
+## 15. System tests
 
 **WRITTEN, COMPILES, NOT RUN — no cluster in this environment.** Same
 constraint section 9's own end-to-end flows recorded. Every lane below is
@@ -432,169 +387,96 @@ go build ./... && go vet ./...                                # clean
 KUBEBUILDER_ASSETS=~/.envtest/k8s/1.31.0-linux-amd64 go test ./... -count=1   # all ok, incl. internal/integration
 ```
 
-None of this is a pass of the lanes themselves — that needs the real k3d
-cluster, images and chart `system-full.yml` provisions, which this role
-did not run. Left for whoever dispatches the cluster tier (11.8).
+None of this is a pass of the lanes themselves. That needs the real k3d
+cluster, images and chart `system-full.yml` provisions, which this role did not
+run. A cluster-less session records the tier as not performed and dispatches it
+(15.8), as `remote-session.md` requires.
 
-- [ ] 11.1 Add lanes to `platform/manager/test/system/`, run against THIS working copy's chart and images, not the default branch's.
+- [ ] 15.1 Add lanes to `platform/manager/test/system/`, run against THIS working copy's chart and images, not the default branch's.
   **PACK-WIDE GUARANTEE, not a per-lane assertion.** `install.go`'s own
-  `Install` always renders `filepath.Join(repoRoot(), "chart")` — this
-  checkout's own working tree, never a fetched ref — and `valuesYAML()`
-  always pins `image: agentops-manager tag: e2e`, the tag `images.go`'s
-  `BuildAndImport` just built from this commit and `Import`ed directly
-  into the node (never pulled). The one named exception:
-  `commandBus.nats.image` (`chart/values.yaml`) is a pinned THIRD-PARTY
-  image (`nats:2.10-alpine` by digest) genuinely unrelated to "this
-  working copy," unlike `agentops-manager`, which carries every line
-  sections 1-8 wrote.
-- [ ] 11.2 Lane: the bundle comes up, the credential is projected by the kubelet, and the NetworkPolicy admits only the manager.
+  `Install` always renders `filepath.Join(repoRoot(), "chart")`, this
+  checkout's working tree, never a fetched ref. `valuesYAML()` pins
+  `image: agentops-manager tag: e2e`, the tag `images.go`'s
+  `BuildAndImport` just built from this commit and imported into the node.
+  The one named exception is `commandBus.nats.image` (`chart/values.yaml`), a
+  pinned third-party image (`nats:2.10-alpine` by digest).
+- [ ] 15.2 Lane: the bundle comes up, the credential is projected by the kubelet, and the NetworkPolicy admits only the manager.
   `TestAsyncCommandBusBundleUpCredentialProjectedNetworkPolicyEnforced`,
   three `t.Run` steps:
 
   | Step | Asserts |
   |---|---|
   | bundle up | the StatefulSet at its chart default of 3 ready replicas |
-  | credential | `COMMANDBUS_NATS_USER`/`PASSWORD` on the manager pod as `valueFrom.secretKeyRef` against `agentops-commandbus-credentials`, never a literal. The manager's own Available status stands in for "the kubelet-resolved connection already succeeded" — its image is distroless, with no shell to exec a probe from |
-  | NetworkPolicy | the FIRST live enforcement lane in this package (the existing `internal/integration/charttemplate_networkpolicy_test.go` is a chart-render test only). Enables `global.agentops.networkPolicy.enabled`, execs `wget` from a non-manager pod (the state store's own nats bundle) against the bus's client port, and asserts the real CNI (k3s's bundled network-policy controller, never disabled by `EnsureCluster`) drops it, while the manager itself stays Available through its own admitted rule |
-- [ ] 11.3 Lane: a claim on one manager replica completes on another, and a lapsed lease is redelivered.
-  `TestAsyncClaimOnOneReplicaCompletesOnAnother`. **DOCUMENTED DECISION**
-  (the same kind of call 9.7 already makes): nothing this pack exposes
-  names which replica's own goroutine holds a task's claim —
-  `consumer.Pool`'s own `ConsumerID` defaults to the queue's name, never
-  `POD_NAME`, so `/state/tasks`' `lease.holder` reads identically on
-  every replica, and `taskClose`/`taskDelete` are too fast to reliably
-  catch strictly between "claimed" and "settled" from outside the
-  process without a double this task's scope has no mandate to extend.
-  So the lane pins what it CAN control deterministically: scales to
-  exactly one replica first (the sole possible claimant), adds a live
-  sibling, then force-deletes the original mid-accept and waits past the
-  lease's own 5-minute worst case (8 minutes) for the SAME task UID to
-  settle exactly once, with the accept endpoint never going down (a
-  sibling stays Ready throughout, unlike 9.6's full-process restart).
-- [ ] 11.4 Lane: ordering holds under parallel consumers across two replicas.
-  `TestAsyncOrderingHoldsAcrossTwoReplicasUnderParallelConsumers`. Two
-  live manager replicas, five inbound messages submitted in rapid
-  succession against ONE conversation (one Key), observed on the task
-  stream to settle in submission order — design D-2's own claim-time
-  rule ("the next is not claimable until the previous has settled"),
-  watched directly rather than assumed.
-- [ ] 11.5 Lane: a manager restart and a bus-server rolling restart lose no accepted task.
-  `TestAsyncManagerRestartAndBusServerRestartLoseNoAcceptedTask`, two
-  `t.Run` halves. Manager half reuses 9.6's own
-  `restartManagerSchedulable`/`postInboundDuringRestart` mechanism
-  (the same fact, asked for again at the system tier by design D-14's
-  own table). Bus-server half rolls the bundle's own 3 StatefulSet pods
-  one at a time (captured ordinals, never re-listed mid-roll), each
-  interleaved with a newly-accepted task, asserting every one still
-  succeeds — no claim-timing race to document here, since the ledger
-  itself is a 3-way replicated JetStream store, same shape as
-  `state_nats_test.go`'s own
-  `TestNatsServerPodDeletionMidConversationCompletes`.
-- [ ] 11.6 Lane: backoff into a dead letter against a surface that really fails.
-  `TestAsyncBackoffIntoADeadLetterAgainstARealFailure`. Section 9.7
-  already proves this shape against `test/fakebotapi`'s own cooperating
-  `/control/fail` toggle. This lane instead repoints `telegram.apiBase`
-  (a plain chart value) at a cluster-internal host nothing answers, so
-  every outbound call fails with a genuine DNS/connection error the
-  kubelet's own network stack produces — the thing only a real cluster
-  decides, per design D-14's own table — through the same backoff,
-  dead-letter and `/state/dead-letters` listing checks 9.7 already uses.
-- [ ] 11.7 System lane: drop the console stream while entries are produced, reconnect with the last acknowledged command id, and confirm nothing is lost, duplicated or reordered, against the full tier.
-- [ ] 11.8 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
-  **NOT PERFORMED — no cluster in this environment.** Left for whoever
-  opens the pull request to dispatch, per `.github/routines/
-  implement-issue.md`'s own step 6:
+  | credential | `COMMANDBUS_NATS_USER`/`PASSWORD` on the manager pod as `valueFrom.secretKeyRef`, never a literal. The manager's own Available status stands in for the kubelet-resolved connection, since its image is distroless with no shell to exec a probe from |
+  | NetworkPolicy | the first live enforcement lane in this package. Enables `global.agentops.networkPolicy.enabled`, execs `wget` from a non-manager pod against the bus's client port, and asserts the real CNI drops it while the manager stays Available through its own admitted rule |
+- [ ] 15.3 Lane: a claim on one manager replica completes on another, and a lapsed lease is redelivered.
+  `TestAsyncClaimOnOneReplicaCompletesOnAnother`. **DOCUMENTED DECISION:**
+  nothing this pack exposes names which replica holds a task's claim, and
+  `taskClose`/`taskDelete` are too fast to catch between claimed and settled.
+  So the lane scales to exactly one replica first, adds a live sibling, then
+  force-deletes the original mid-accept and waits past the lease's 5-minute
+  worst case (8 minutes) for the same task UID to settle exactly once, with the
+  accept endpoint never going down.
+- [ ] 15.4 Lane: ordering holds under parallel consumers across two replicas.
+  `TestAsyncOrderingHoldsAcrossTwoReplicasUnderParallelConsumers`. Two live
+  replicas, five inbound messages in rapid succession against one conversation
+  (one key), observed on the task stream to settle in submission order.
+- [ ] 15.5 Lane: a manager restart and a bus-server rolling restart lose no accepted task.
+  `TestAsyncManagerRestartAndBusServerRestartLoseNoAcceptedTask`, two halves.
+  The manager half reuses 9.6's restart mechanism. The bus-server half rolls
+  the bundle's 3 StatefulSet pods one at a time, each interleaved with a
+  newly accepted task, asserting every one still succeeds.
+- [ ] 15.6 Lane: a channel failure against a surface that really fails.
+  `TestAsyncBackoffIntoADeadLetterAgainstARealFailure` repoints
+  `telegram.apiBase` at a cluster-internal host nothing answers.
+  **STALE AGAINST D-17, TO BE REWRITTEN BEFORE IT IS RUN.** It was written for bus
+  retry with backoff. The rewritten lane asserts the adapter retries until the
+  delivery TTL, reports failed, the message is not redelivered, and it reaches
+  `/state/dead-letters`.
+- [ ] 15.7 Lane: drop the console stream while messages are produced and reconnect, then confirm nothing is lost, duplicated or reordered.
+  `TestAsyncConsoleStreamResumesAfterADropWithoutLossOrDuplicates`.
+  **STALE AGAINST D-17, TO BE REWRITTEN BEFORE IT IS RUN.** It asserts a strictly
+  increasing sequence read by cursor. The rewritten lane reads
+  `GET /channel/ops/stream` as the console, drops it before acknowledging some
+  messages, reconnects, and asserts it is offered exactly the unacknowledged
+  ones, none twice, in queue order.
+- [ ] 15.8 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
+  **NOT PERFORMED — no cluster in this environment.** Left for whoever opens
+  the pull request to dispatch:
   ```sh
   gh workflow run system-smoke.yml --ref change/async-command-bus
   ```
 
-## 12. Documentation
+## 16. Documentation
 
-Written against the ACTUAL shipped state of sections 1-11, not the design
-doc's aspirational target.
-
-The named deviations are stated plainly in `contracts.md`,
-`configuration.md`, `concepts.md`, the guide and the changelog, never
-glossed over:
+Written against the as-built state of sections 1 to 15, not the design's
+aspirational target. The named deviations are stated plainly in
+`contracts.md`, `configuration.md`, `concepts.md`, the guide and the changelog.
 
 - `/signal/inbound` stays synchronous.
 - A plain `/close` and a caused `escalate` stay wholesale inside one task.
-- Per-queue tuning has no chart value.
+- Per-queue tuning has no chart value. The channel delivery TTLs and receipt adapters do.
 - `claimStalenessSeconds` is inert.
-- `GET /state/tasks` serves the per-(queue,kind) `Stats`, not a flat list of the ledger's tasks, because `commandbus.Bus` exposes no such method.
+- `GET /state/tasks` serves per-queue statistics, not a flat list of tasks.
 
-Two already-stale spots unrelated to this task's own prose were fixed along
-the way. `contracts.md`'s "`/channel/ops` still requires the leader proxy"
-line and `invariants.md`'s matching row were both wrong once section 7
-landed. `concepts.md`'s state-restart table still described
-`status.threads[].claim` as live.
+### 16.1 Reference docs
 
-### 12.1 Reference docs
+- [x] 16.1.1 `docs/concepts.md`: where work and state live, what a reply means, the per-channel queues and the one fan-out point, and the restart matrix rows for an op and the queue logs.
+- [x] 16.1.2 `docs/contracts.md`: the accept semantics of each endpoint, `/state/tasks` (no order field) and `/state/dead-letters`, the channel ops endpoints and the leader-proxy exemptions.
+- [x] 16.1.3 `docs/configuration.md`: `commandBus.*`, including `channelReceiptAdapters` and `deliveryTtl.*`.
+- [ ] 16.1.4 `docs/security.md`: the new trust boundary and its control, then re-run `threat-model.py`.
+- [x] 16.1.5 `docs/testing.md`: the bus conformance suite, the new lanes and the end-to-end flows.
+- [x] 16.1.6 `docs/CHANGELOG.md`: the breaking changes and upgrade notes, newest first. The tasks, ids and dead buckets of an earlier build are inert and may be deleted, and channel adapter images upgrade together with the manager.
+- [x] 16.1.7 A `docs/guides/` page for the bundle, `docs/guides/command-bus.md`, in `_data/nav.yml`.
+- [x] 16.1.8 `.claude/rules/structure.md`, `invariants.md` and `gotchas.md`: the append-only logs, the get, ack, done contract, a claim and ack contract on a push stream stranding ops, and the 10071 submit race. `terminology.md` is untouched, since task, invocation and dead letter are new words, not renamed old ones.
+- [x] 16.1.9 Re-run `python3 .github/scripts/docs-generate.py --check`, because chart values changed.
+- [x] 16.1.10 `docs/contracts/channel-adapter.md`: the get, ack, done-or-failed contract with the delivery TTL as a new major version, and the console as the receipt-only exception.
+- [ ] 16.1.11 `.github/retired-vocabulary.json`: the retired channel-delivery words, and `retired-vocabulary-guard.py` and `publication-guard.py` clean.
 
-- [x] 12.1.1 `docs/concepts.md`: where work and state live, and what a reply means.
-  Added the command bus ledger as a third declared bounded/lossy state home,
-  retired the `claim` sub-bullet and table row, added the accepted-work
-  table row, and a pointer from "Ending a conversation" to the new
-  accept/process split.
-- [x] 12.1.2 `docs/contracts.md`: the accept semantics of each endpoint, `/state/tasks` and `/state/dead-letters`.
-  New "Accept and process" section with the full per-endpoint table, the
-  new `/state/tasks*`/`/state/dead-letters` rows, and the leader-proxy
-  exemption fix above.
-- [x] 12.1.3 `docs/configuration.md`: `commandBus.*`.
-  New "Command bus" subsection mirroring "State store"'s own shape, plus
-  fixes to the now-stale `replicas` and `claimStalenessSeconds` rows under
-  Capacity.
-- [x] 12.1.4 `docs/security.md`: the new trust boundary and its control, then re-run `threat-model.py`.
-  New "Command bus isolation" subsection, folded into crossing 7 (same
-  shape as the state store's own) rather than minting a new numbered
-  crossing. Diagram regenerated and screenshotted to confirm the relabeled
-  "state & bus servers" node still fits its box.
-- [x] 12.1.5 `docs/testing.md`: the bus conformance suite, the new lanes and the end-to-end flows.
-  Two new sections mirroring the state store's own "conformance suite" /
-  "system lanes" pair, naming both test files from sections 9 and 11 and
-  stating plainly that neither has run against a real cluster yet.
-- [x] 12.1.6 `docs/CHANGELOG.md`: the semantic change and upgrade notes, newest first.
-  Added to the existing `[Unreleased]` entry's `Added`/`Changed`/`Upgrade`
-  sections — this change ships alongside others already accumulated there,
-  not as its own version.
-- [x] 12.1.7 A `docs/guides/` page for the bundle.
-  `docs/guides/command-bus.md`, new (no existing guide was bundle-shaped to
-  mirror — every other guide page is about a CRD kind). Added to
-  `_data/nav.yml`. Its own `next` points at the configuration reference,
-  not into the guide sequence, since this is an operational topic rather
-  than a learning-order step.
-- [x] 12.1.8 `.claude/rules/structure.md`, `invariants.md`, `gotchas.md`, `terminology.md`.
-  Added `internal/commandbus/` to `structure.md`'s package table. Fixed
-  `invariants.md`'s stale leader-proxy row and added two new invariant rows
-  (the ledger as a third state home, accept-means-accepted). Added five new
-  rows to `gotchas.md` (the `selfSeq` mirror race, the Watermill spike
-  finding, the dot-named-queue restriction, the nil-Bus harness panic, the
-  coordinate-close authorization-ordering bug). **`terminology.md` left
-  untouched, deliberately**: its table is retirements-with-replacements,
-  and task/invocation/ledger/dead-letter are new vocabulary, not a renamed
-  old term — they belong in the files that define them, which they already
-  are.
-- [x] 12.1.9 Re-run `python3 .github/scripts/docs-generate.py`, because chart values changed.
-  Clean both before and after — the new guide's `renders bundle=commandbus`
-  block generated correctly on the first pass.
-- [ ] 12.1.12 `docs/contracts/channel-adapter.md`: the get, ack, done-or-failed contract and the delivery TTL, and the console as a plain SSE consumer.
-- [ ] 12.1.11 Reference docs: `docs/contracts.md`, `docs/concepts.md` and `.claude/rules/{gotchas,invariants}.md` state that every bus queue is an append-only log, a command id is a cursor and never an order, and drop the ledger/`Order` wording. Add the 10071 submit race to `gotchas.md`. Then `docs-generate.py --check`.
-- [ ] 12.1.10 `docs/contracts/channel-adapter.md` and `docs/contracts.md`: the per-channel queue, the console stream with resume by command id. Then `docs/concepts.md` for the single fan-out point.
+### 16.2 Adopter site
 
-### 12.2 Adopter site
-
-- [x] 12.2.1 `docs/installation.md`: the new workload and volumes, and uninstall residue.
-  Added the bus bundle to the same "next release" paragraph describing the
-  state-store bundle's own arrival, a storage-class row, and the bundle's
-  volumes to the `helm uninstall` residue paragraph.
-- [x] 12.2.2 `docs/getting-started.md`, `docs/introduction.md` and the landing page, wherever they say a close or delete returns when the work is done.
-  Searched all three directly. None describes a close/delete/reset-context
-  call's reply as meaning the work finished — nothing to change.
-- [x] 12.2.3 `README.md`: the component list, within its line budget.
-  README's component list never goes past top-level directories
-  (`platform/manager/` etc.). No new top-level directory was added —
-  nothing to change.
-- [ ] 12.2.4 The console moves to the stream, so re-run `npm run screenshots` and `npm run demo` in `platform/console/ui` and screenshot the live thread.
-  Confirmed with `git diff --stat` from this change's own branch point —
-  zero files under `platform/console/ui/` touched by any of this change's
-  own commits.
+- [x] 16.2.1 `docs/installation.md`: the new workload and volumes, uninstall residue, and the adapter-image upgrade note.
+- [x] 16.2.2 `docs/getting-started.md`, `docs/introduction.md` and the landing page, wherever they say a close or delete returns when the work is done. Searched all three directly. None describes a reply as meaning the work finished, so nothing changes.
+- [x] 16.2.3 `README.md`: the component list. It never goes past top-level directories and no new one was added, so nothing changes.
+- [ ] 16.2.4 The console moves to the stream, so `npm run screenshots` and `npm run demo` in `platform/console/ui` are re-run and the live thread screenshotted. Zero files under `platform/console/ui/` are touched by this change's own commits, so this is a cluster-tier check.
+- [ ] 16.3 At archive, when the published base specs `channel-adapter-contract`, `contract-conformance-suite` and `telegram-channel-adapter` are rewritten, add the retired-vocabulary entries `channel-reclaim-after` (`reclaimAfterSeconds`) and `channel-claim-window` (`claim window`). They are deferred because the base specs still carry both terms until archive and the guard would stay red.

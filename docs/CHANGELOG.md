@@ -87,15 +87,22 @@ for the source and the reference material beside this file.
 - A new read-only surface: `GET /state/tasks` (per-queue statistics),
   `GET /state/tasks/{id}`, `GET /state/tasks/stream` and
   `GET /state/dead-letters`, on the existing `/state/*` token scheme.
-- `GET /channel/ops` and `POST /channel/ops/{id}/done` are now answered by
-  any manager replica. Both used to proxy to the leader.
-- A new optional endpoint, `GET /channel/ops/stream`: the same ops as the
-  long-poll, pushed over one server-sent-events connection in queue order,
-  each with a stable sequence, and resumable after a drop through
-  `Last-Event-ID` on any manager replica. The console now consumes it, so a
-  dropped connection or a rollout no longer leaves it stale until a refresh,
-  and falls back to the long-poll against a manager without it. Telegram keeps
-  the long-poll. Additive: the long-poll and `/done` are unchanged.
+- Every channel adapter now takes an outbound op in three steps: a read that
+  changes nothing, an acknowledgement that hands it over, and a report. See
+  the breaking change below. The channel operations endpoints are
+  `GET /channel/ops`, `POST /channel/ops/{id}/ack` and
+  `POST /channel/ops/{id}/done`, and any manager replica answers each. They
+  used to proxy to the leader.
+- A new endpoint, `GET /channel/ops/stream`, for receipt-only adapters (the
+  console): the ops pushed over one server-sent-events connection in queue
+  order. It only reads. After a reconnect it pushes again exactly what was
+  never acknowledged, with no cursor. The console consumes it, so a dropped
+  connection or a rollout no longer leaves it stale until a refresh.
+- Two chart values for the channel delivery contract:
+  `commandBus.channelReceiptAdapters` (default `[console]`) and
+  `commandBus.deliveryTtl.{stable,ephemeral,topic,deleteConversation}`
+  (default 10m, 2m, 5m and 5m). They render `CHANNEL_RECEIPT_ADAPTERS` and
+  `CHANNEL_DELIVERY_TTL_*`.
 
 ### Changed
 
@@ -180,6 +187,18 @@ for the source and the reference material beside this file.
   `/coordinate/close` outside its caller's widened bound, used to answer
   `409`/`403` immediately. Both now accept and the task dies with
   `precondition_failed` or `forbidden`.
+- **BREAKING (channel adapters): a channel adapter reads, acknowledges, then
+  reports.** `GET /channel/ops` no longer takes the op. `POST
+  /channel/ops/{id}/ack` hands it over, after which the manager never sends it
+  again and a delivery TTL starts. `POST /channel/ops/{id}/done` reports done,
+  or failed with an `error`. An op with no report by its TTL is failed by the
+  manager, and a failure is final. The `reclaimAfterSeconds` field and the
+  claim window are removed. The channel adapter specification moves to 2.0.0.
+- A channel op's failure is final, not retried by the manager. What is still
+  owed is derived again from the conversation after a cool-off.
+- Every command-bus queue is an append-only log. A message that succeeded is
+  removed, and one never consumed is kept 7 days. Dead letters are kept in a
+  log of their own (7 days, 10000 records).
 - `status.threads[].claim` is no longer written. The command bus's own
   dedup makes the reconciler-level dispatch claim unnecessary. A value a
   pre-upgrade record still carries is ignored, never trusted.
@@ -261,18 +280,26 @@ or a `202` body as confirmation the work finished must instead read
 `/state/tasks/{id}` for the outcome, using the `taskIds` the same response
 now also carries.
 
-The command bus renders its own three-server bundle by default
-(`commandBus.backend: nats`), three more pods and volumes beyond the state
-store's own. Pin `commandBus.backend: memory` on a single manager replica
-to avoid them, at the cost of losing every accepted task across a restart.
+**BREAKING: upgrade every channel adapter image together with the manager.** The wire contract of `/channel/ops` changed. An adapter that never calls the acknowledgement is offered the same op forever and delivers nothing.
+
+The shipped `channels/telegram` and the console move with this release. A hand-built adapter follows the [channel adapter specification](contracts/channel-adapter.md), 2.0.0.
+
+With the state store on `nats` (the default), the command bus shares its three-server bundle and credential, adding nothing to render. With the `kube` store it renders its own three-server bundle, three more pods and volumes.
+
+Pin `commandBus.backend: memory` on a single manager replica to avoid them, at the cost of losing every accepted task across a restart.
 
 **Rollback** is the same shape as the state store's own: set
 `commandBus.backend: memory` on one replica, or roll back the chart.
 Accepted but unprocessed tasks are lost either way.
 
-The ledger starts empty on first install. Work owed at the moment of
+The queue log starts empty on first install. Work owed at the moment of
 upgrade is re-derived by the reconciler, exactly as after any restart
 today.
+
+An install that ran a pre-release build of the command bus holds KV buckets
+named `tasks`, `ids` and `dead` (under the bus's scope prefix) on its NATS
+server. The release reads none of them, and they may be deleted. Its streams are
+`cmdbus_log` and `cmdbus_dead`.
 
 ## [18.0.1] — 2026-10-25
 
