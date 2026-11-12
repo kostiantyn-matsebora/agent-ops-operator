@@ -4068,6 +4068,49 @@ func TestCommandBusEnvWiresToItsOwnSecret(t *testing.T) {
 	}
 }
 
+// TestCommandBusCredentialPrecedence mirrors TestNatsCredentialPrecedence
+// exactly, over commandBus.nats.auth.* and agentops-commandbus-credentials
+// (section 8's own "commandbus.credential" helper, task 8.1's renamed
+// sibling of the state store's "nats.credential") — section 10's own named
+// gap (section 8's hand-back: spot-checked by hand via `helm template`, never
+// turned into a committed test). Same four facts, same order: explicit wins
+// over an existing Secret's value, which wins over generation; generation
+// happens on install only; a cluster-less upgrade with neither fails loudly;
+// an explicit value still renders on upgrade.
+func TestCommandBusCredentialPrecedence(t *testing.T) {
+	explicit := secretDoc(helmTemplate(t, "--set", "commandBus.nats.auth.user=pinned-user", "--set", "commandBus.nats.auth.password=pinned-pass"),
+		"agentops-commandbus-credentials")
+	if explicit == "" {
+		t.Fatal("agentops-commandbus-credentials not rendered")
+	}
+	if want := "user: " + base64.StdEncoding.EncodeToString([]byte("pinned-user")); !strings.Contains(explicit, want) {
+		t.Fatalf("explicit commandBus.nats.auth.user must be rendered:\n%s", explicit)
+	}
+	if want := "password: " + base64.StdEncoding.EncodeToString([]byte("pinned-pass")); !strings.Contains(explicit, want) {
+		t.Fatalf("explicit commandBus.nats.auth.password must be rendered:\n%s", explicit)
+	}
+
+	out := helmTemplate(t, "--set", "commandBus.nats.auth.existingSecret=my-commandbus-secret")
+	if secretDoc(out, "agentops-commandbus-credentials") != "" {
+		t.Fatal("no Secret may be generated when an existing one is supplied")
+	}
+
+	install := secretDoc(helmTemplate(t), "agentops-commandbus-credentials")
+	if install == "" {
+		t.Fatal("the default credential must be generated on install")
+	}
+	if !strings.Contains(install, "helm.sh/resource-policy: keep") {
+		t.Fatalf("the generated credential must carry the keep policy:\n%s", install)
+	}
+
+	if doc := secretDoc(helmTemplate(t, "--is-upgrade"), "agentops-commandbus-credentials"); doc != "" {
+		t.Fatalf("a cluster-less upgrade with no explicit value must mint no credential, got:\n%s", doc)
+	}
+	if secretDoc(helmTemplate(t, "--is-upgrade", "--set", "commandBus.nats.auth.password=rotated"), "agentops-commandbus-credentials") == "" {
+		t.Fatal("an explicit value must still render on upgrade")
+	}
+}
+
 // COMMANDBUS_CONSUMER_CONCURRENCY sizes every consumer.Pool the manager
 // runs (cmd/manager/commandbus.go, commandBusConsumerConcurrencyEnv) —
 // rendered regardless of backend, unlike the COMMANDBUS_NATS_* trio.

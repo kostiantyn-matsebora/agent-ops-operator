@@ -345,12 +345,23 @@ role did not run. Left for whoever dispatches the cluster tier.
 
 ## 10. Unit tests
 
-- [ ] 10.1 `go test ./...` in `platform/manager`, including the conformance suite and bench against `memory` and against the in-process `nats-server`.
-- [ ] 10.2 Handler tests for every verb in the inventory against the `memory` backend: accept replies, accept-time refusals, idempotent redelivery, the escalate decomposition, the cascade re-check.
-- [ ] 10.3 `OpQueue` facade tests: the dedup rule after a failure, synchronous completion handlers, ephemeral TTL, in-process providers.
-- [ ] 10.4 The static import test, the error-code derivation table test and the leader-proxy exemption test.
-- [ ] 10.5 The chart's render and guard tests for every permutation: default, URL, `memory`, each contradiction, credential precedence, `--is-upgrade`.
-- [ ] 10.6 `go test` in every other module still passes, and `python3 .github/scripts/publication-guard.py` is clean.
+Audited across the whole repo, not just re-run. Everything else audited
+was already real, already passing, and left alone. Three gaps closed:
+
+- An `ErrorCode.Retryable()`/`ParseErrorCode` table test (10.4).
+- A `TestCommandBusCredentialPrecedence` test mirroring the state-store
+  bundle's own (10.5).
+- A test-coverage regression found along the way. Section 7's own commit
+  deleted `TestActivityProxiesToLeaderWhenReachable` as collateral damage
+  alongside the `/channel/ops` test it meant to retire. Restored verbatim
+  in `internal/integration/activity_leaderproxy_test.go`.
+
+- [x] 10.1 `go test ./...` in `platform/manager`, including the conformance suite and bench against `memory` and against the in-process `nats-server`.
+- [x] 10.2 Handler tests for every verb in the inventory against the `memory` backend: accept replies, accept-time refusals, idempotent redelivery, the escalate decomposition, the cascade re-check.
+- [x] 10.3 `OpQueue` facade tests: the dedup rule after a failure, synchronous completion handlers, ephemeral TTL, in-process providers.
+- [x] 10.4 The static import test, the error-code derivation table test and the leader-proxy exemption test.
+- [x] 10.5 The chart's render and guard tests for every permutation: default, URL, `memory`, each contradiction, credential precedence, `--is-upgrade`.
+- [x] 10.6 `go test` in every other module still passes, and `python3 .github/scripts/publication-guard.py` is clean.
 
 ## 11. System tests
 
