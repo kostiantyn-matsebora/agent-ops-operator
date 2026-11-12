@@ -193,7 +193,7 @@ spec:
         resources:
           requests:
             storage: {{ $v.persistence.size | default "10Gi" | quote }}
-{{ include "agentops.storageClassName" $v.persistence | indent 8 }}
+{{- include "agentops.storageClassName" $v.persistence | indent 6 }}
 {{- end -}}
 
 {{- define "commandbus.services" -}}

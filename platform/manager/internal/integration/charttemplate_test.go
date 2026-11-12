@@ -4179,3 +4179,19 @@ func TestManagerReplicasEnvMatchesSpecReplicas(t *testing.T) {
 		t.Fatalf("MANAGER_REPLICAS must match spec.replicas:\n%s", deploy)
 	}
 }
+
+// A NATS volume claim template carries its storage class beside `resources`
+// (the StatefulSet spec's own field), never under it: nested there the API
+// server drops it as an unknown field and every upgrade then fails on a
+// forbidden volumeClaimTemplates change.
+func TestNatsVolumeClaimTemplatesPlaceStorageClassOnTheSpec(t *testing.T) {
+	out := helmTemplate(t, "--set", "nats.persistence.storageClassName=longhorn",
+		"--set", "commandBus.nats.enabled=true", "--set", "commandBus.nats.persistence.storageClassName=longhorn-fast")
+	for name, class := range map[string]string{"agentops-nats": "longhorn", "agentops-commandbus": "longhorn-fast"} {
+		sts := findDocByKindAndMetaName(out, "StatefulSet", name)
+		want := "            storage: \"10Gi\"      \n        storageClassName: \"" + class + "\""
+		if !strings.Contains(sts, want) {
+			t.Fatalf("%s: storageClassName must sit at the spec's own indent, beside resources:\n%s", name, sts)
+		}
+	}
+}
