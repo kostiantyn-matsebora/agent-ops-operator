@@ -247,13 +247,101 @@ Left to a future change if the gap matters beyond this.
 
 ## 9. End-to-end tests — testing-specialist
 
+**WRITTEN, COMPILES, NOT RUN — no cluster in this environment.** Same
+constraint section 8's own chart dispatch recorded for 9/11: this
+environment has no k3d/docker-backed cluster `platform/manager/test/
+system/` can install against. Every flow below is added to
+`platform/manager/test/system/async_e2e_test.go`, calls `fullTier(t)`
+after `requireEnv(t)`, and is verified by:
+
+```sh
+cd platform/manager
+go vet -tags system ./test/system/...                        # clean
+go test -tags system -c -o /tmp/system.test ./test/system/    # builds
+go build ./... && go vet ./...                                # clean
+KUBEBUILDER_ASSETS=~/.envtest/k8s/1.31.0-linux-amd64 go test ./... -count=1   # all ok, incl. internal/integration
+```
+
+None of this is a pass of the flows themselves — that needs the real
+k3d cluster, images and chart `system-full.yml` provisions, which this
+role did not run. Left for whoever dispatches the cluster tier.
+
 - [ ] 9.1 Add the end-to-end flows to the full tier of the system pack, through the real HTTP surface with the task stream observed.
+  Six flows added (9.2-9.7 below), each opening `/state/tasks/stream`
+  (or polling `/state/tasks/{id}`/`GET /state/dead-letters`) rather than
+  inferring success from the eventual Kubernetes-object side effect
+  alone, the way `lanes_test.go`'s existing lanes do.
 - [ ] 9.2 Flow: signal, conversation, close, delete, with every task reaching `succeeded` in order.
+  `TestAsyncLifecycleSignalCloseDeleteTasksSucceedInOrder`. Named in its
+  own doc comment: `/signal/inbound`'s own accept is NOT a task (task
+  5.6's deferral, still synchronous), so the two tasks observed in order
+  on one stream connection are the chat `/close` and the delete.
 - [ ] 9.3 Flow: a bulk close of N conversations as N tasks sharing one invocation, each settling independently.
+  `TestAsyncBulkCloseEachConversationGetsItsOwnInvocation`.
+  **FINDING: this task's own premise does not hold.** Production code's
+  bulk close (`platform/console/convapi.go`'s `handleBulkClose`) is, by
+  its own doc comment, "a FAN-OUT of `/close`, deliberately, and not a
+  manager-side batch verb" — one independent `POST /channel/inbound` per
+  target, each minting its OWN `invocationId` at `accept.go`'s
+  `acceptAndEnqueue`. The only place this change shares one
+  `invocationId` across more than one `SubmitRequest` is a CASCADE
+  (design D-7, task 9.4) — one root's own `causedBy` subtree, never N
+  conversations a person multi-selected. The test instead proves the
+  true, weaker statement — each of N targets gets its own distinct
+  `invocationId`, settling independently — and fails loudly (naming the
+  contradiction) if a future change ever makes a plain bulk close share
+  one, so the assumption stays checked rather than stale.
 - [ ] 9.4 Flow: a cascade delete of a coordination, members before the parent.
+  `TestAsyncCascadeDeleteSettlesMembersBeforeParent`. A genuinely
+  TWO-level `causedBy` chain (root -> member1 -> member2, member1 itself
+  invoking member2 — `handleCoordinateInvoke`'s own doc comment confirms
+  a plain member caller, not only a root, may invoke), going beyond
+  `coordinator_test.go`'s existing one-level
+  `TestCoordinatorCloseAndDeleteCascadeThroughConsole` (which proves
+  eventual full deletion only). This flow additionally asserts the
+  task-stream ARRIVAL ORDER of the three delete tasks' own `succeeded`
+  events matches `deleteCascadeRequests`/`convtask.CascadeOrder`'s
+  deepest-first, root-last order exactly.
 - [ ] 9.5 Flow: an inbound chat message delivered through the Telegram fake Bot API lane and through the console channel.
+  `TestAsyncInboundChatThroughTelegramFakeAndConsole`. Telegram half: a
+  reply fed through the real fake Bot API carrying
+  `is_topic_message`+`message_thread_id` on an already-bound topic, which
+  `gateway-telegram`/`channel-telegram` forward to `/channel/inbound` —
+  observed on the task stream (no HTTP response reaches this test for
+  that call). Console half: posted directly against the manager's own
+  `/channel/inbound`, the same call the console's backend makes
+  internally, which is what makes the raw `202`/`invocationId`/`taskIds`
+  shape observable directly, ahead of the reply.
 - [ ] 9.6 Flow: a manager restart with work in flight loses nothing and duplicates nothing.
+  `TestAsyncManagerRestartLosesNothingDuplicatesNothing`.
+  **DECISION on the claim's strength:** this pack's command bus always
+  renders at the chart default `commandBus.backend: nats`
+  (`chart/values.yaml`). `install.go` never overrides it —
+  `SYSTEM_STATE_BACKEND` pins the DIFFERENT conversation/signal state
+  store, not the command bus. So the ledger and lease (design D-2) live
+  in the bus's own NATS server, never the manager process. The test
+  therefore asserts the STRONGER of the two claims the task text allows:
+  the SAME task UID the old manager minted is the one that later
+  settles — not merely the same eventual effect under a new one — and
+  that exactly one more outbound call (the farewell) lands on the bound
+  Telegram thread, no duplicate.
 - [ ] 9.7 Flow: a failing channel surface backs off, then leaves a dead-letter record, and a later re-derive delivers once it recovers.
+  `TestAsyncChannelFailureBacksOffDeadLettersThenRecovers`, against the
+  real fake Bot API's `/control/fail` toggle on `createForumTopic`
+  (ensure-topic, `KindOutStable`: 8 attempts, 5s-5m jittered backoff).
+  **DECISION on duration and recovery path:** waits out the real backoff
+  to a real `dead` state and a real `GET /state/dead-letters` listing
+  (bounded 15 minutes, past the ~10m25s deterministic worst case) rather
+  than asserting only the first couple of retries, since reaching dead
+  IS this flow's own subject. Recovery is proven through a close+reopen
+  once the surface is healthy again — `EnqueueEnsureTopic` mints a FRESH
+  `CommandID` per reopen count, so the reopen's own re-derive is a
+  genuinely unsuppressed submission — rather than waiting out the
+  natural 5-minute park cool-off for the SAME `CommandID` to unsuppress:
+  that cool-off's own timing is already pinned at the unit tier by the
+  commandbus conformance suite (task 2.6, "park then release"), so
+  re-proving it here too would cost every full-tier run several more
+  real minutes for a fact this lane does not uniquely decide.
 
 ## 10. Unit tests
 
