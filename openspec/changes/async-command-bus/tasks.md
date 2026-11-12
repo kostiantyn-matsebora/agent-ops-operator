@@ -1,10 +1,41 @@
 ## 1. Spike the transport — backend-developer
 
-- [ ] 1.1 Against the test-only `nats-server` the state backend already vendors, show that a publish returns only once JetStream has stored it and that a repeated id is suppressed.
-- [ ] 1.2 Show that a claim made through one connection completes through another and that a lapsed lease returns the task (design D-3, check 2).
-- [ ] 1.3 Show delayed redelivery with a bounded attempt count ending in a dead record.
-- [ ] 1.4 Build the candidate library's required `nats.go` version into the manager module and run the state backend's conformance suite and bench unchanged against it.
-- [ ] 1.5 Record the verdict in the task, numbers included. Choose the library under the transport or `nats.go` KV directly, per design D-3. Delete the spike code.
+- [x] 1.1 Against the test-only `nats-server` the state backend already vendors, show that a publish returns only once JetStream has stored it and that a repeated id is suppressed.
+- [x] 1.2 Show that a claim made through one connection completes through another and that a lapsed lease returns the task (design D-3, check 2).
+- [x] 1.3 Show delayed redelivery with a bounded attempt count ending in a dead record.
+- [x] 1.4 Build the candidate library's required `nats.go` version into the manager module and run the state backend's conformance suite and bench unchanged against it.
+- [x] 1.5 Record the verdict in the task, numbers included. Choose the library under the transport or `nats.go` KV directly, per design D-3. Delete the spike code.
+
+**Verdict: `nats.go` KV directly, not Watermill-as-transport.** The candidate
+(`github.com/ThreeDotsLabs/watermill-nats/v2` v2.2.0, JetStream module)
+cleared checks 1-3 against an in-process `nats-server` v2.10.26. Check 4
+failed as stated, and the weight it adds exceeds what it saves once D-2
+already owns the lease.
+
+| Check | Measured |
+|---|---|
+| 1.1 publish ack-on-store, dedup | First publish returned in 212µs, stream already at 1 message. A repeated command id raised no error, stream stayed at 1 message |
+| 1.2 cross-connection claim, lease lapse | Connection A claimed the task, never acked. Connection B, same durable consumer, received the redelivery at +1.40s against a 700ms lease, acked it. `NumAckPending` reached 0 |
+| 1.3 delayed bounded retry to dead | Three Naks at +0ms/+151ms/+302ms. The library's own `NakDelay`/`MaxRetryDelay` termed the message on the third. No further redelivery. `NumAckPending`/`NumPending` both 0 |
+| 1.4 `nats.go` 1.52.0 vs the state suite | Broke `scriptedKV.Create` in `internal/state/nats/failure_paths_test.go` (`jetstream.KeyValue.Create` gained a variadic `opts` param). Patched, the suite passed (8.04s vs 8.12s baseline). Bench stayed inside n=3 sample noise: Conversations 931µs→728µs, Runs 2.11ms→2.32ms |
+
+Why the fallback, past check 4's own failure:
+
+- The `jetstream` package still calls itself beta and tells production callers
+  to use its ack-based `pkg/nats` subscriber instead.
+- `Publisher.Publish` sends to `configureStream(topic).Name`, not the topic
+  argument. A stream name can't hold the dots the queue inventory's own names
+  (`in.signal`, `out.<type>`) use.
+- Its lease is the message ack, the shape D-2 rejects for cross-replica
+  completion. The ledger's CAS-over-KV claim and watch feed still have to be
+  hand-written against `nats.go` regardless of the library.
+- Adopting it forces `nats.go` from 1.39.1 to 1.52.0 for a thin wrapper
+  around `nats.go`'s own JetStream client, for a dependency tree task 3
+  does not otherwise need.
+
+`go.mod`/`go.sum` end this task as they started. The `nats` backend (task 3)
+builds directly on `nats.go` JetStream KV, its already-assumed fallback
+shape. The spike (a throwaway module outside the repo) is deleted.
 
 ## 2. Contract, `memory` backend, conformance suite — backend-developer
 
