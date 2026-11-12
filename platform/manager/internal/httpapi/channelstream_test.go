@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -224,11 +225,13 @@ func TestChannelOpsStreamResumeReplaysOnlyUnacknowledgedOpsAfterTheCommandID(t *
 	r.expectQuiet(300 * time.Millisecond)
 	r.cancel()
 
-	// ?since= wins over the header: ops 0 and 1 are acknowledged and absent
-	// whatever the cursor, op 2 is the cursor so only later ops follow it.
+	// The cursor is advisory: ?since= or the header, every unacknowledged op
+	// is re-sent and acknowledged ones never are.
 	q := openStream(t, srv.URL, streamQuery()+"&since="+url.QueryEscape(ids[2]), ids[0])
-	if _, op := q.next(); op.ID != ids[3] {
-		t.Fatalf("since=%s replayed %q, want only %q", ids[2], op.ID, ids[3])
+	for _, want := range []string{ids[2], ids[3], late[0]} {
+		if _, op := q.next(); op.ID != want {
+			t.Fatalf("since=%s replayed %q, want %q", ids[2], op.ID, want)
+		}
 	}
 }
 
@@ -401,5 +404,75 @@ func TestChannelOpsStreamHeldOpsAreNotHandedToAnotherClaimant(t *testing.T) {
 	c.cancel()
 	if op := s.Ops.Claim(streamAdapter); op != nil {
 		t.Fatalf("an op pushed and not acknowledged was claimed by someone else: %+v", op)
+	}
+}
+
+// openZombieStream opens a stream whose client then never reads or closes: the
+// shape of a consumer behind a path that dropped without a FIN. The manager's
+// handler stays alive, claims, and writes into a connection nobody reads.
+func openZombieStream(t *testing.T, base string) {
+	t.Helper()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(base, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	fmt.Fprintf(conn, "GET /channel/ops/stream?%s HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer bus-test-master\r\n\r\n", streamQuery())
+	time.Sleep(200 * time.Millisecond) // the handler is registered and polling
+}
+
+// An op claimed by a stream nobody reads is leased to it for the whole lease
+// (and everything behind it on its key waits). The live stream must deliver it
+// without waiting for the lease to lapse.
+func TestChannelOpsStreamDeliversOpsAZombieStreamClaimed(t *testing.T) {
+	prev := channelStreamSweep
+	channelStreamSweep = 100 * time.Millisecond
+	t.Cleanup(func() { channelStreamSweep = prev })
+	s, _, _ := busServer(t)
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+
+	openZombieStream(t, srv.URL)
+	live := openStream(t, srv.URL, streamQuery(), "")
+	want := map[string]bool{}
+	for _, id := range enqueueStreamOps(t, s.Ops, "zombie", 6) {
+		want[id] = true
+	}
+	deadline := time.After(8 * time.Second)
+	for len(want) > 0 {
+		select {
+		case ev := <-live.events:
+			if ev.event == "op" {
+				delete(want, ev.id)
+			}
+		case <-deadline:
+			t.Fatalf("%d ops never reached the live stream; they sit leased to a dead one", len(want))
+		}
+	}
+}
+
+// A reconnect names the last op acknowledged. An op claimed earlier whose frame
+// the consumer never saw (and so never acknowledged) sits BEFORE that cursor in
+// the log, and must still be re-sent.
+func TestChannelOpsStreamResumeIgnoresTheCursorForUnacknowledgedOps(t *testing.T) {
+	s, _, _ := busServer(t)
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	ids := enqueueStreamOps(t, s.Ops, "skip", 4)
+
+	c := openStream(t, srv.URL, streamQuery(), "")
+	for range ids {
+		c.next()
+	}
+	// Frames 0 and 1 were lost on the way: only 2 and 3 are acknowledged.
+	ackOp(t, srv.URL, ids[2])
+	ackOp(t, srv.URL, ids[3])
+	c.cancel()
+
+	r := openStream(t, srv.URL, streamQuery(), ids[3])
+	for _, want := range ids[:2] {
+		if _, op := r.next(); op.ID != want {
+			t.Fatalf("replayed %q, want %q", op.ID, want)
+		}
 	}
 }

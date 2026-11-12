@@ -822,25 +822,27 @@ func (q *OpQueue) ClaimSequenced(adapter string) (SequencedOp, bool) {
 }
 
 // Resume returns every op of adapter that is claimed under a lease still in
-// force and was appended after the op named by after, in log order, and makes
-// THIS replica able to acknowledge each: the claim (uid and lease token) is
-// read back from the bus, so a reconnect that lands on a replica which never
-// made the claim still completes it. after is the command id of the last op the
-// consumer acknowledged (design D-16); "" or an id the bus does not know
-// resumes from the oldest unacknowledged op. Nothing is claimed afresh, so the
-// lease the op already holds is the only one, and the op cannot be handed to
-// anyone else while the consumer has it. ReclaimAfter is what that lease has
-// left, not a fresh window.
+// force, in log order, and makes THIS replica able to acknowledge each: the
+// claim (uid and lease token) is read back from the bus, so a reconnect that
+// lands on a replica which never made the claim still completes it. Nothing is
+// claimed afresh, so the lease the op already holds is the only one, and the op
+// cannot be handed to anyone else while the consumer has it. ReclaimAfter is
+// what that lease has left, not a fresh window.
 //
-// An acknowledged op is Succeeded and never Running, so it is never listed. An
-// op pushed but not acknowledged is Running and is listed again.
-func (q *OpQueue) Resume(ctx context.Context, adapter, after string) []SequencedOp {
+// There is NO cursor. A consumer's last acknowledged op says nothing about an
+// op claimed before it whose frame never arrived (a claim made by a handler
+// whose connection was dead), and such an op sits earlier in the log than the
+// cursor: filtering on it left the op leased until the lease lapsed. An
+// acknowledged op is Succeeded and never Running, so listing every Running op
+// re-sends nothing the consumer has finished; one it executed but could not
+// acknowledge is re-acknowledged from its own cache.
+func (q *OpQueue) Resume(ctx context.Context, adapter string) []SequencedOp {
 	channels := q.channelsOf(adapter)
 	queues := make([]commandbus.Queue, len(channels))
 	for i, channel := range channels {
 		queues[i] = commandbus.OutQueue(channel)
 	}
-	tasks, err := q.Bus.Running(ctx, queues, commandbus.CommandID(after))
+	tasks, err := q.Bus.Running(ctx, queues, "")
 	if err != nil {
 		log.FromContext(ctx).Error(err, "list running channel ops for a stream resume", "adapter", adapter)
 		return nil
@@ -1049,11 +1051,18 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 		if detail == "" && handlerErr != nil {
 			detail = handlerErr.Error()
 		}
-		_ = q.Bus.Fail(ctx, entry.uid, entry.token, code, detail)
+		if err := q.Bus.Fail(ctx, entry.uid, entry.token, code, detail); err != nil {
+			// The op stays leased and is redelivered when the lease lapses: say so.
+			log.FromContext(ctx).Error(err, "record a failed channel op; it will be redelivered when its lease lapses", "op", id, "task", entry.uid)
+			return
+		}
 		q.markFromState(id, resultingStateAfterFail(code, entry.attempt, entry.maxAttempts))
 		return
 	}
-	_ = q.Bus.Settle(ctx, entry.uid, entry.token)
+	if err := q.Bus.Settle(ctx, entry.uid, entry.token); err != nil {
+		log.FromContext(ctx).Error(err, "acknowledge a channel op; it will be redelivered when its lease lapses", "op", id, "task", entry.uid)
+		return
+	}
 	q.markFromState(id, commandbus.StateSucceeded)
 }
 

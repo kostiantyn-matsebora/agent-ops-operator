@@ -206,3 +206,42 @@ func TestAKeyIsReusableAfterItsEntriesWereRemoved(t *testing.T) {
 		t.Fatalf("log holds %d entries after every task was consumed, want none", got)
 	}
 }
+
+// A claim made on one replica is acknowledged on another, over one key whose
+// earlier entries the first replica already removed: the second replica's
+// belief about the key's last entry is stale, and the acknowledgement must
+// still land (a rejected append re-learns the truth) rather than leave the task
+// leased until it lapses.
+func TestSettleOnAnotherReplicaAfterRemovalsOnTheKey(t *testing.T) {
+	scope := newScope(t)
+	open := func() *Bus {
+		b, err := Open(context.Background(), testConn, scope, WithSettledGrace(0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(b.Close)
+		return b
+	}
+	a, b := open(), open()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for i := range 4 {
+		if _, err := a.Submit(ctx, commandbus.SubmitRequest{Queue: "conv", CommandID: commandbus.CommandID(fmt.Sprintf("op%d", i)), Key: "chat-k"}); err != nil {
+			t.Fatalf("Submit %d: %v", i, err)
+		}
+		task, err := a.Claim(ctx, "conv", "stream")
+		if err != nil {
+			t.Fatalf("Claim %d: %v", i, err)
+		}
+		running, err := b.Running(ctx, []commandbus.Queue{"conv"}, "")
+		if err != nil || len(running) != 1 || running[0].UID != task.UID {
+			t.Fatalf("Running on the other replica = %v, %v; want the claim", running, err)
+		}
+		if err := b.Settle(ctx, task.UID, running[0].Lease.Token); err != nil {
+			t.Fatalf("Settle %d on the other replica: %v", i, err)
+		}
+	}
+	if left, _ := a.Running(ctx, []commandbus.Queue{"conv"}, ""); len(left) != 0 {
+		t.Fatalf("%d tasks still leased after every acknowledgement", len(left))
+	}
+}

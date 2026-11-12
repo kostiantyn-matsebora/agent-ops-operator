@@ -2,6 +2,11 @@ package chat
 
 import (
 	"context"
+	"errors"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"strings"
 	"testing"
 )
 
@@ -40,7 +45,7 @@ func TestClaimsResumeAfterACommandIDAndCompleteOnASecondQueue(t *testing.T) {
 		Registry: NewRegistry(), Bus: bus,
 		ChannelsFor: func(context.Context, string) []string { return []string{"ui-a", "ui-b"} },
 	}
-	all := second.Resume(ctx, "console", "")
+	all := second.Resume(ctx, "console")
 	if len(all) != 3 {
 		t.Fatalf("resume with no cursor returned %d ops, want all 3 unacknowledged", len(all))
 	}
@@ -50,19 +55,13 @@ func TestClaimsResumeAfterACommandIDAndCompleteOnASecondQueue(t *testing.T) {
 			t.Fatalf("resume must return ops in log order, op %d carries %q, want %q", i, got, want)
 		}
 	}
-	if got := second.Resume(ctx, "console", all[1].Op.ID); len(got) != 1 || got[0].Op.ID != all[2].Op.ID {
-		t.Fatalf("resume after the second returned %+v, want only the third", got)
-	}
-	if got := second.Resume(ctx, "console", "an-id-no-op-ever-had"); len(got) != 3 {
-		t.Fatalf("an unknown cursor must resume from the oldest unacknowledged op, got %d ops", len(got))
-	}
 	if all[0].ReclaimAfter <= 0 || all[0].ReclaimAfter > ReclaimAfter {
 		t.Fatalf("a replayed op reports what its lease has left, got %v", all[0].ReclaimAfter)
 	}
 
 	// Acknowledged on the replica that did NOT claim it.
 	second.Complete(ctx, all[0].Op.ID, OpResult{})
-	if got := second.Resume(ctx, "console", ""); len(got) != 2 {
+	if got := second.Resume(ctx, "console"); len(got) != 2 {
 		t.Fatalf("an acknowledged op must leave the resume set, got %d", len(got))
 	}
 	// An acknowledgement of an op nothing runs under is the tolerated duplicate.
@@ -72,7 +71,36 @@ func TestClaimsResumeAfterACommandIDAndCompleteOnASecondQueue(t *testing.T) {
 	third.noteChannel("ui-a", "console")
 	third.noteChannel("ui-b", "console")
 	third.Complete(ctx, all[1].Op.ID, OpResult{})
-	if got := third.Resume(ctx, "console", ""); len(got) != 1 {
+	if got := third.Resume(ctx, "console"); len(got) != 1 {
 		t.Fatalf("a bare acknowledgement on a replica that never saw the claim must settle it, left %d", len(got))
+	}
+}
+
+// settleFailingBus is a bus whose acknowledgement always fails.
+type settleFailingBus struct{ commandbus.Bus }
+
+func (settleFailingBus) Settle(context.Context, string, string) error {
+	return errors.New("bus unreachable")
+}
+
+// A failed acknowledgement is logged, never swallowed, and the op is not
+// reported settled: it will be redelivered when its lease lapses.
+func TestCompleteLogsAFailedSettle(t *testing.T) {
+	bus := testBus()
+	q := &OpQueue{Registry: NewRegistry(), Bus: settleFailingBus{bus}}
+	var lines []string
+	ctx := logr.NewContext(context.Background(), funcr.New(func(prefix, args string) { lines = append(lines, args) }, funcr.Options{}))
+	tid := "t"
+	q.EnqueueInputDelivery(ctx, testChannel("ui-a", "console"), crRec(testConv("c1")), "i", &tid, Notice("1"))
+	so, ok := q.ClaimSequenced("console")
+	if !ok {
+		t.Fatal("nothing claimed")
+	}
+	q.Complete(ctx, so.Op.ID, OpResult{})
+	if len(lines) != 1 || !strings.Contains(lines[0], "bus unreachable") {
+		t.Fatalf("log = %q, want one line carrying the settle error", lines)
+	}
+	if q.Settled(so.Op.ID) {
+		t.Fatal("an op whose acknowledgement failed must not read as settled")
 	}
 }

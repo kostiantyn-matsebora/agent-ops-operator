@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,14 @@ import (
 // The same cadence as the long-poll's own wait loop: the bus has no push to a
 // non-blocking claim.
 const channelStreamPoll = time.Second
+
+// channelStreamSweep is how often a stream re-sends the adapter's ops that are
+// leased but were never pushed on THIS connection: a claim made by a handler
+// whose client is gone without a FIN keeps writing into a dead socket for as
+// long as TCP takes to notice, and its op would otherwise sit leased (with
+// everything behind it on its key) until the lease lapsed. A variable so a test
+// can shorten it.
+var channelStreamSweep = 5 * time.Second
 
 // lastEventIDHeader is the SSE reconnect header a browser-style client sends.
 const lastEventIDHeader = "Last-Event-ID"
@@ -30,13 +39,13 @@ const lastEventIDHeader = "Last-Event-ID"
 // acknowledges with POST /channel/ops/{id}/done, and an op it never
 // acknowledges is redelivered when its lease lapses.
 //
-// RESUME. A reconnect names the command id of the last op the consumer
-// acknowledged (the Last-Event-ID header, or ?since=). Before anything new, the
-// stream re-sends every op of the adapter still claimed under a live lease that
-// was appended after it, in log order (OpQueue.Resume), reading the claim back
-// from the bus, so the reconnect may land on any replica. An id the bus does
-// not know starts from the oldest unacknowledged op. An acknowledged op is
-// settled and never re-sent.
+// RESUME AND SWEEP. Before anything new, the stream re-sends every op of the
+// adapter still claimed under a live lease (OpQueue.Resume), reading the claim
+// back from the bus so the reconnect may land on any replica, and repeats that
+// every channelStreamSweep for ops not pushed on this connection (a claim made
+// by a dead connection's handler). The cursor (Last-Event-ID or ?since=) is
+// validated but advisory: an unacknowledged op can sit before it in the log. An
+// acknowledged op is settled and never re-sent.
 func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) {
 	adapter, ok := adapterParam(w, r)
 	if !ok {
@@ -49,8 +58,7 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 	if !contractOK(w, r) {
 		return
 	}
-	since, ok := resumeCursor(w, r)
-	if !ok {
+	if _, ok := resumeCursor(w, r); !ok {
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -70,14 +78,21 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 	// follow until the next op exists.
 	flusher.Flush()
 
+	// pushed holds the ops this connection has written, so the sweep re-sends
+	// only what some other (dead) claimant holds.
+	pushed := map[string]struct{}{}
 	send := func(so chat.SequencedOp) bool {
-		return writeOpFrame(w, flusher, so) == nil
-	}
-	for _, so := range s.Ops.Resume(ctx, adapter, since) {
-		if !send(so) {
-			return
+		if writeOpFrame(w, flusher, so) != nil {
+			return false
 		}
+		pushed[so.Op.ID] = struct{}{}
+		return true
 	}
+	if !s.resendOutstanding(ctx, adapter, pushed, send) {
+		return
+	}
+	sweep := time.NewTicker(channelStreamSweep)
+	defer sweep.Stop()
 
 	poll := time.NewTicker(channelStreamPoll)
 	defer poll.Stop()
@@ -98,6 +113,10 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 		select {
 		case <-ctx.Done():
 			return
+		case <-sweep.C:
+			if !s.resendOutstanding(ctx, adapter, pushed, send) {
+				return
+			}
 		case <-keepAlive.C:
 			if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
 				return
@@ -114,6 +133,31 @@ func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	}
+}
+
+// resendOutstanding sends every op of adapter that is leased and not yet pushed
+// on this connection, and forgets pushed ids that are no longer outstanding
+// (acknowledged). False when a write failed.
+func (s *Server) resendOutstanding(ctx context.Context, adapter string, pushed map[string]struct{}, send func(chat.SequencedOp) bool) bool {
+	outstanding := s.Ops.Resume(ctx, adapter)
+	live := make(map[string]struct{}, len(outstanding))
+	for _, so := range outstanding {
+		live[so.Op.ID] = struct{}{}
+	}
+	for id := range pushed {
+		if _, ok := live[id]; !ok {
+			delete(pushed, id)
+		}
+	}
+	for _, so := range outstanding {
+		if _, done := pushed[so.Op.ID]; done {
+			continue
+		}
+		if !send(so) {
+			return false
+		}
+	}
+	return true
 }
 
 // maxCursorLen bounds a resume cursor: a command id is a short derived string,
