@@ -149,9 +149,12 @@ spec:
               port: monitor
             initialDelaySeconds: {{ ($v.probes | default dict).initialDelaySeconds | default 5 }}
             periodSeconds: {{ ($v.probes | default dict).periodSeconds | default 10 }}
+          # Liveness asks only whether JetStream is enabled. The full /healthz
+          # also fails while quorum is lost, and restarting the one server
+          # that is still up would turn a survivable outage into a longer one.
           livenessProbe:
             httpGet:
-              path: /healthz
+              path: /healthz?js-enabled-only=true
               port: monitor
             initialDelaySeconds: {{ ($v.probes | default dict).initialDelaySeconds | default 5 }}
             periodSeconds: {{ ($v.probes | default dict).periodSeconds | default 10 }}

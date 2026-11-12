@@ -85,4 +85,13 @@ out=$(bash "$FLOOR" "$dir/iso.out" 2>&1); status=$?
 assert_status 1 "$status"
 assert_contains "$out" "usage: coverage-floor.sh"
 
+it "matches the fragment up to a path boundary on the right too"
+out=$(bash "$FLOOR" "$dir/iso.out" "internal/oth" 90 2>&1); status=$?
+assert_status 1 "$status"
+assert_contains "$out" "package not found"
+
+it "treats a fragment given without its trailing slash as the same package"
+out=$(bash "$FLOOR" "$dir/iso.out" "internal/other" 90 2>&1); status=$?
+assert_status 0 "$status"
+
 summary

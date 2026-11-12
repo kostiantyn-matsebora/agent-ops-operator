@@ -3775,6 +3775,11 @@ func TestNatsBundleRendersByDefault(t *testing.T) {
 	if secretDoc(out, "agentops-nats-credentials") == "" {
 		t.Fatal("agentops-nats-credentials Secret not generated on install")
 	}
+	// Liveness must not fail with quorum: the full health check does, and a
+	// restart of the one server still up would lengthen a survivable outage.
+	if !strings.Contains(sts, "/healthz?js-enabled-only=true") {
+		t.Fatalf("the liveness probe must check only that JetStream is enabled:\n%s", sts)
+	}
 	// An uninstall keeps the volumes: the StatefulSet must not ask Kubernetes
 	// to delete its claims, which is what the default (retain) policy avoids.
 	if strings.Contains(sts, "persistentVolumeClaimRetentionPolicy") {

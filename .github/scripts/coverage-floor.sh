@@ -8,14 +8,16 @@
 # profile lists a block once per binary. Summing the lines reads a fully covered
 # package as covered by 1/N of the binaries. A block is covered when ANY line for
 # it has a count above zero, and weighs its statement count.
-# <path-fragment> matches from a path boundary: "internal/state/nats/" names that
-# package and no other directory merely ending the same way.
+# <path-fragment> matches whole path segments: "internal/state/nats" and
+# "internal/state/nats/" both name that package and no directory that merely
+# starts or ends the same way.
 set -euo pipefail
 if [ "$#" -ne 3 ]; then
   echo "usage: coverage-floor.sh <profile> <path-fragment> <floor-percent>"
   exit 1
 fi
 profile=$1 frag=$2 floor=$3
+case "$frag" in */) ;; *) frag="$frag/" ;; esac
 
 rc=0
 pct=$(awk -v frag="$frag" '
