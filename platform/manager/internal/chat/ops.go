@@ -1075,10 +1075,13 @@ func recordThread(rec *state.ConversationRecord, op *Op, res OpResult, cond stat
 	if cond.Status == state.ConditionTrue {
 		bindThread(rec, op, res)
 	}
-	// The op completed one way or the other, so it is no longer in flight —
-	// clear a claim here too on the FAILURE paths, or a claim that is still
-	// fresh (inside the staleness bound) would make the next reconcile pass wait
-	// it out instead of retrying at once.
+	// async-command-bus design D-11 retires status.threads[].claim — nothing
+	// in this process writes one any more (the BUS's own CommandID dedup
+	// replaces the reconciler-level placeholder this cleared). Left in place
+	// as a harmless no-op rather than removed: it still scrubs a value a
+	// pre-upgrade replica wrote and never released, the one case a value can
+	// still arrive here, and "a value found there is ignored" is true either
+	// way — read or not, this op's own completion is what makes it stale.
 	if b := rec.Thread(op.Channel); b != nil {
 		b.Claim = nil
 	}
@@ -1110,9 +1113,10 @@ func bindThread(rec *state.ConversationRecord, op *Op, res OpResult) {
 		return
 	}
 	// Brand new thread — including a binding that so far carries only a
-	// durable-chat-ops-broker claim, never a real thread id. Treated exactly
-	// as "no binding at all": a claim-only placeholder is bookkeeping about
-	// dispatch, not a prior thread.
+	// leftover claim (pre-async-command-bus-D-11 bookkeeping this process
+	// never writes any more) and never a real thread id. Treated exactly as
+	// "no binding at all": such a placeholder is bookkeeping about dispatch,
+	// not a prior thread.
 	readers := originReaders(rec, op.Channel)
 	if binding == nil {
 		// ReadTracked for EVERY channel, whether or not its adapter reports

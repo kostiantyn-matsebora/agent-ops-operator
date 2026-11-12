@@ -1312,6 +1312,43 @@
         "is gone",
         "gone"
       ]
+    },
+    {
+      "id": "reconciler-op-claim",
+      "pattern": "\\bOpClaim\\b",
+      "says": "the command bus's own CommandID dedup replaces it (async-command-bus design D-11) — no reconciler-level claim is written any more, and a value found on status.threads[].claim is never read for a decision, only displayed",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "ignored",
+        "display only",
+        "display-only",
+        "never decided",
+        "never read",
+        "CommandID",
+        "gone"
+      ],
+      "$comment": [
+        "THE PATTERN IS THE GO IDENTIFIER, NOT THE PROSE FIELD PATH. The field",
+        "path `status.threads[].claim` already appears, as a CURRENT claim with",
+        "no allow word nearby, in THREE places this term's own change does not",
+        "touch: openspec/specs/durable-chat-ops-broker/spec.md and",
+        "openspec/specs/state-durability/spec.md (both published specs this",
+        "change's own archive step rewrites, not this term's job), and",
+        "docs/concepts.md's claim/undeliveredReply durability row (section 12's",
+        "job, in the same change). Patterning on the field path today would fail",
+        "this guard on all three. OpClaim is the Go type (state.OpClaim /",
+        "agentopsv1alpha1.OpClaim) naming the same concept, verified absent from",
+        "every scanned path as of this entry's addition — once the three pages",
+        "above are rewritten to describe the retirement, widen this pattern to",
+        "also cover `status\\.threads\\[\\]\\.claim`/`threads\\[\\]\\.claim`."
+      ]
     }
   ]
 }

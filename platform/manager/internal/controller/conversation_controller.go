@@ -172,19 +172,30 @@ type ConversationReconciler struct {
 	// common configuration, and must not require declining the destructive half.
 	AutoDeleteEnabled   bool
 	AutoDeleteClosedAge time.Duration
-	// ReplicaIdentity names THIS process for the claim this reconciler writes
-	// (durable-chat-ops-broker). It needs no relation to the leader-election
-	// Lease's own HolderIdentity string: this reconciler runs ONLY while this
-	// process holds that Lease (controller-runtime gates every reconciler on
-	// it), so any claim this process did not itself write was written by a
-	// FORMER leader, by construction — comparing against "me" is exactly
-	// comparing against "the current leader". Empty is tolerated (tests) and
-	// behaves as a single, unvarying identity.
+	// ReplicaIdentity named THIS process for the status.threads[].claim this
+	// reconciler used to write (durable-chat-ops-broker). async-command-bus
+	// design D-11 retires that claim — EnqueueEnsureTopic's own bus-level
+	// CommandID dedup replaces it — so this field is no longer read by any
+	// decision here. Left wired rather than removed: main.go derives it from
+	// os.Hostname() for httpapi.Server.ReplicaIdentity too (the still-live
+	// leader-proxy identity, a DIFFERENT field on a different struct despite
+	// the shared name), so dropping it here would save nothing. Section 8/12
+	// decide whether a chart-facing trace of it should be deprecated.
 	ReplicaIdentity string
-	// ClaimStaleness bounds how long an ensure-topic claim may sit with no
-	// thread yet before the current leader treats it as abandoned and
-	// re-dispatches — the SAME leader's own claim running legitimately slow,
-	// never a second writer. Zero means DefaultClaimStalenessSeconds.
+	// ClaimStaleness bounded how long an ensure-topic claim may sit with no
+	// thread yet before being treated as abandoned. Retired along with the
+	// claim it bounded (async-command-bus design D-11): nothing reads this
+	// field any more. Left wired, not removed — the chart's own
+	// claimStalenessSeconds value still feeds it via CLAIM_STALENESS_SECONDS
+	// (main.go), and D-11's own text ("the lease defaults to five minutes
+	// through the existing claimStalenessSeconds") was investigated and found
+	// to describe chat.ReclaimAfter/the bus's own hardcoded 5-minute
+	// LeaseDuration (commandbus/memory, commandbus/nats — deliberately kept
+	// equal to ReclaimAfter, not sourced from this chart value, whose own
+	// default of 90s does not even match "five minutes"), not an instruction
+	// to repurpose this field into that lease's configuration. No Go wiring
+	// change follows from it; section 8/12 decide whether the now-inert
+	// chart value should be deprecated or kept.
 	ClaimStaleness time.Duration
 	// Bus is the command bus (async-command-bus task 5.4): when set, the
 	// idle timer's auto-close and the deadline budget edge ENQUEUE a "conv"
@@ -195,21 +206,12 @@ type ConversationReconciler struct {
 	Bus commandbus.Bus
 }
 
-// DefaultClaimStalenessSeconds is the fallback claim staleness bound when the
-// chart's claimStalenessSeconds value is unset. Sized with margin over a
-// measured ensure-topic round-trip against the slowest shipped adapter
-// (Telegram, forum-topic creation): comfortably longer than any observed
-// single call, short enough that a genuinely abandoned claim (the leader that
-// wrote it crashed, rather than merely answering slowly) does not leave a
-// conversation topic-less for long.
+// DefaultClaimStalenessSeconds was the fallback claim staleness bound when
+// the chart's claimStalenessSeconds value was unset. Retired with
+// ClaimStaleness (async-command-bus design D-11, see that field's own
+// comment) — kept defined only because it is still the value the field's
+// doc comment and any pre-upgrade chart render refer to.
 const DefaultClaimStalenessSeconds = 90
-
-func (r *ConversationReconciler) claimStaleness() time.Duration {
-	if r.ClaimStaleness > 0 {
-		return r.ClaimStaleness
-	}
-	return DefaultClaimStalenessSeconds * time.Second
-}
 
 // Reconcile implements the reconciliation loop.
 func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -1209,22 +1211,14 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *state.C
 			continue
 		}
 		pending = true
-		// durable-chat-ops-broker: only a channel binding with no LIVE claim —
-		// none at all, one held by a former leader, or one of this leader's own
-		// gone stale — is dispatched this pass. One already claimed and fresh is
-		// an op genuinely in flight with an adapter; re-enqueuing it here would
-		// not change what the in-memory queue already holds, but it would race
-		// the claim write against nothing, for no reason. See claimEnsureTopic.
-		claimed, err := r.claimEnsureTopic(ctx, conv.Name, ref)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if !claimed {
-			continue
-		}
+		// async-command-bus design D-11: dispatch unconditionally, every pass.
+		// The reconciler-level claim this used to gate on (durable-chat-ops-
+		// broker's status.threads[].claim) is retired — OpQueue.EnqueueEnsureTopic
+		// derives a stable per-conversation×channel CommandID (ops.go), and the
+		// BUS dedups a resubmission while one is pending/running/retrying/
+		// recently-succeeded. A second writer racing a claim write was the thing
+		// the old placeholder guarded against; the bus's own dedup window makes
+		// that guard redundant rather than merely harmless to skip.
 		d := r.topicDescriptor(ctx, conv)
 		if existing != nil {
 			d.PreviousThreadID = *existing
@@ -1234,65 +1228,14 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *state.C
 	return pending, firstErr
 }
 
-// claimEnsureTopic writes (or refreshes) THIS leader's claim on one channel
-// binding's ensure-topic dispatch, so a crashed leader's in-flight work is
-// recoverable from the Conversation's own status rather than from a second,
-// hand-rolled heartbeat (durable-chat-ops-broker).
-//
-// Returns claimed=true when the caller should (re-)dispatch the op now: no
-// claim existed, the existing one belongs to a replica that is not this one
-// (a former leader — this reconciler runs only while its process holds the
-// leader-election Lease, so any claim it did not itself write is by
-// construction a former leader's), or this leader's own claim has sat past
-// the staleness bound with no thread yet. Returns false when a live claim
-// already held by this leader is outstanding — the op is genuinely in flight
-// with an adapter and nothing new is dispatched this pass.
-//
-// Does its own fresh read-and-swap retry rather than reusing the caller's
-// (possibly several-reconcile-functions-old) copy: every other writer in this
-// file that touches the conversation does the same, for the same
-// optimistic-concurrency reason (see finishEnsureTopic, markDelivered).
-func (r *ConversationReconciler) claimEnsureTopic(ctx context.Context, name, channel string) (bool, error) {
-	claimed := false
-	_, err := state.Mutate(ctx, r.Conversations, state.Key(name), func(conv *state.ConversationRecord) error {
-		claimed = false
-		if r.holdsLiveClaim(conv, channel) {
-			return nil
-		}
-		r.setClaim(conv, channel)
-		claimed = true
-		return nil
-	})
-	if err != nil {
-		if errors.Is(err, state.ErrConflict) {
-			return false, fmt.Errorf("conflict claiming ensure-topic for %s on conversation %s: %w", channel, name, err)
-		}
-		return false, state.IgnoreNotFound(err)
-	}
-	return claimed, nil
-}
-
-// holdsLiveClaim reports whether THIS replica's claim on the channel's
-// ensure-topic is still inside the staleness bound.
-func (r *ConversationReconciler) holdsLiveClaim(conv *state.ConversationRecord, channel string) bool {
-	existing := conv.Thread(channel)
-	if existing == nil || existing.Claim == nil {
-		return false
-	}
-	return existing.Claim.Holder == r.ReplicaIdentity &&
-		time.Since(existing.Claim.ClaimedAt) <= r.claimStaleness()
-}
-
-// setClaim stamps this replica's claim on the channel's binding, creating the
-// binding when none exists yet.
-func (r *ConversationReconciler) setClaim(conv *state.ConversationRecord, channel string) {
-	claim := &state.OpClaim{Holder: r.ReplicaIdentity, ClaimedAt: time.Now().UTC()}
-	if binding := conv.Thread(channel); binding != nil {
-		binding.Claim = claim
-		return
-	}
-	conv.Threads = append(conv.Threads, state.ThreadBinding{Channel: channel, Claim: claim})
-}
+// claimEnsureTopic, holdsLiveClaim and setClaim — the reconciler-level
+// status.threads[].claim placeholder that used to gate dispatch above — are
+// RETIRED (async-command-bus design D-11): OpQueue.EnqueueEnsureTopic's own
+// stable per-conversation×channel CommandID is what the bus now dedups a
+// resubmission against, so a second writer racing a claim write is no
+// longer a thing dispatch here needs to guard against. A value still found
+// in status.threads[].claim on upgrade (or written by a pre-upgrade
+// replica) is never read for a decision again.
 
 // deliverEscalation posts the digest an `escalate` call snapshotted
 // (status.escalationMessage) into every bound channel's already-open thread

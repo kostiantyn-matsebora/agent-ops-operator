@@ -179,12 +179,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// durable-chat-ops-broker: this process's own identity for the claims its
-	// reconciler writes. Needs no relation to the leader-election Lease's own
-	// HolderIdentity — see ConversationReconciler.ReplicaIdentity's comment.
-	// The hostname is the pod name in Kubernetes, which is enough: a claim
-	// surviving a same-pod container restart is exactly what the separate
-	// staleness bound (ClaimStaleness) exists to still catch.
+	// This process's own identity. Fed to httpapi.Server.ReplicaIdentity
+	// below, which is STILL live: leaderProxyMiddleware's isLeader() compares
+	// it (prefix-matched) against the leader-election Lease's own
+	// HolderIdentity to decide which replica answers an accept-step
+	// endpoint. Also fed to ConversationReconciler.ReplicaIdentity, which is
+	// NOT live any more (async-command-bus design D-11 retired the claim it
+	// used to write) — see that field's own comment for why it stays wired
+	// anyway. The hostname is the pod name in Kubernetes either way.
 	replicaIdentity, err := os.Hostname()
 	if err != nil {
 		replicaIdentity = "unknown"
@@ -384,14 +386,21 @@ func main() {
 		// a test builds without one, which keeps calling the Router inline
 		// exactly as it always has.
 		Bus: bus,
-		// durable-chat-ops-broker: this reconciler runs only while this process
-		// holds the leader-election Lease, so any claim written under a
-		// DIFFERENT identity is, by construction, a former leader's — there is
-		// no need to read the Lease's own HolderIdentity to know that.
+		// Retired (async-command-bus design D-11): the claim ReplicaIdentity
+		// used to let this reconciler write and reclaim is gone, and nothing
+		// here reads it any more. Still wired because os.Hostname() above is
+		// needed for httpapi.Server's OWN ReplicaIdentity regardless (the
+		// still-live leader-proxy identity below) — removing it here would
+		// save nothing. See ConversationReconciler.ReplicaIdentity's own
+		// comment.
 		ReplicaIdentity: replicaIdentity,
-		// A chart value, never a compiled-in constant: an install with a
-		// slower transport can raise it. Zero (unset) falls back to
-		// controller.DefaultClaimStalenessSeconds.
+		// Retired along with ReplicaIdentity above (same D-11) — nothing
+		// reads ConversationReconciler.ClaimStaleness any more. Still wired
+		// from the chart's claimStalenessSeconds value because investigating
+		// D-11's own text found no instruction to repurpose it (see
+		// ClaimStaleness's own doc comment) — this env var and the chart
+		// value behind it are now genuinely inert, left for a later change to
+		// deprecate.
 		ClaimStaleness: envSeconds("CLAIM_STALENESS_SECONDS"),
 		// Both OFF by default and independent: autoclose with autodelete off —
 		// a lane that tidies itself and keeps its record — is the common

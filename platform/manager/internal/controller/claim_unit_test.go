@@ -2,18 +2,14 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
@@ -78,171 +74,73 @@ func claimTestConv(name string) *agentopsv1alpha1.Conversation {
 	}
 }
 
-// claimStaleness defers to the configured bound when one is set, and to
-// DefaultClaimStalenessSeconds — never zero — when it is not.
-func TestClaimStalenessFallsBackToTheDefaultWhenUnset(t *testing.T) {
-	r := &ConversationReconciler{}
-	if got, want := r.claimStaleness(), DefaultClaimStalenessSeconds*time.Second; got != want {
-		t.Fatalf("claimStaleness() = %v, want the default %v", got, want)
-	}
-
-	r.ClaimStaleness = 5 * time.Minute
-	if got, want := r.claimStaleness(), 5*time.Minute; got != want {
-		t.Fatalf("claimStaleness() = %v, want the configured %v", got, want)
-	}
-}
-
-// No binding at all for the channel: claimEnsureTopic claims it and writes
-// this replica's identity.
-func TestClaimEnsureTopicClaimsWhenNoBindingExists(t *testing.T) {
-	conv := claimTestConv("conv-1")
-	c := fakeClaimClient(t, conv).Build()
-	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me"}
-
-	claimed, err := r.claimEnsureTopic(context.Background(), "conv-1", "c1")
-	if err != nil || !claimed {
-		t.Fatalf("claimed=%v err=%v, want claimed", claimed, err)
-	}
-
-	var got agentopsv1alpha1.Conversation
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: claimTestNS, Name: "conv-1"}, &got); err != nil {
-		t.Fatal(err)
-	}
-	binding := got.Status.Thread("c1")
-	if binding == nil || binding.Claim == nil || binding.Claim.Holder != "me" {
-		t.Fatalf("binding = %+v, want a fresh claim held by me", binding)
-	}
-}
-
-// This leader's own claim, still inside the staleness bound, is left alone:
-// the op is genuinely in flight and nothing new is dispatched.
-func TestClaimEnsureTopicSkipsALiveClaimHeldByThisLeader(t *testing.T) {
-	conv := claimTestConv("conv-1")
-	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{
-		Channel: "c1",
-		Claim:   &agentopsv1alpha1.OpClaim{Holder: "me", ClaimedAt: metav1.Time{Time: time.Now()}},
-	}}
-	c := fakeClaimClient(t, conv).Build()
-	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me"}
-
-	claimed, err := r.claimEnsureTopic(context.Background(), "conv-1", "c1")
-	if err != nil || claimed {
-		t.Fatalf("claimed=%v err=%v, want not claimed", claimed, err)
-	}
-}
-
-// A claim held by a DIFFERENT identity is, by construction, a former
-// leader's — this leader reclaims it at once rather than waiting it out.
-func TestClaimEnsureTopicReclaimsAFormerLeadersClaim(t *testing.T) {
-	conv := claimTestConv("conv-1")
-	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{
-		Channel: "c1",
-		Claim:   &agentopsv1alpha1.OpClaim{Holder: "old-leader", ClaimedAt: metav1.Time{Time: time.Now()}},
-	}}
-	c := fakeClaimClient(t, conv).Build()
-	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me"}
-
-	claimed, err := r.claimEnsureTopic(context.Background(), "conv-1", "c1")
-	if err != nil || !claimed {
-		t.Fatalf("claimed=%v err=%v, want claimed (former leader's claim)", claimed, err)
-	}
-
-	var got agentopsv1alpha1.Conversation
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: claimTestNS, Name: "conv-1"}, &got); err != nil {
-		t.Fatal(err)
-	}
-	if binding := got.Status.Thread("c1"); binding == nil || binding.Claim.Holder != "me" {
-		t.Fatalf("binding = %+v, want the claim overwritten to me", binding)
-	}
-}
-
-// This leader's OWN claim, past the staleness bound with no thread yet, is
-// treated as abandoned and reclaimed — the slow-answering case, not a second
-// writer.
-func TestClaimEnsureTopicReclaimsItsOwnStaleClaim(t *testing.T) {
-	conv := claimTestConv("conv-1")
-	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{
-		Channel: "c1",
-		Claim:   &agentopsv1alpha1.OpClaim{Holder: "me", ClaimedAt: metav1.Time{Time: time.Now().Add(-5 * time.Minute)}},
-	}}
-	c := fakeClaimClient(t, conv).Build()
-	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me", ClaimStaleness: time.Minute}
-
-	claimed, err := r.claimEnsureTopic(context.Background(), "conv-1", "c1")
-	if err != nil || !claimed {
-		t.Fatalf("claimed=%v err=%v, want claimed (stale)", claimed, err)
-	}
-}
-
-// A conversation gone by the time the claim is attempted is tolerated.
-func TestClaimEnsureTopicToleratesAMissingConversation(t *testing.T) {
-	c := fakeClaimClient(t).Build()
-	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me"}
-
-	claimed, err := r.claimEnsureTopic(context.Background(), "conv-1", "c1")
-	if err != nil || claimed {
-		t.Fatalf("claimed=%v err=%v, want not claimed, no error", claimed, err)
-	}
-}
-
-// A non-conflict error claiming the binding is returned rather than
-// retried.
-func TestClaimEnsureTopicReturnsANonConflictPatchError(t *testing.T) {
-	conv := claimTestConv("conv-1")
-	boom := errors.New("boom")
-	c := fakeClaimClient(t, conv).WithInterceptorFuncs(interceptor.Funcs{
-		SubResourceUpdate: func(ctx context.Context, cli client.Client, subResourceName string,
-			obj client.Object, opts ...client.SubResourceUpdateOption) error {
-			return boom
-		},
-	}).Build()
-	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me"}
-
-	claimed, err := r.claimEnsureTopic(context.Background(), "conv-1", "c1")
-	if err == nil || !errors.Is(err, boom) || claimed {
-		t.Fatalf("claimed=%v err=%v, want the patch error returned, not retried", claimed, err)
-	}
-}
-
-// Every retry conflicting is the abandoned-after-5-attempts case.
-func TestClaimEnsureTopicGivesUpAfterRepeatedConflicts(t *testing.T) {
-	conv := claimTestConv("conv-1")
-	c := fakeClaimClient(t, conv).WithInterceptorFuncs(interceptor.Funcs{
-		SubResourceUpdate: func(ctx context.Context, cli client.Client, subResourceName string,
-			obj client.Object, opts ...client.SubResourceUpdateOption) error {
-			return apierrors.NewConflict(schema.GroupResource{Resource: "conversations"}, "conv-1", errors.New("stale"))
-		},
-	}).Build()
-	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me"}
-
-	claimed, err := r.claimEnsureTopic(context.Background(), "conv-1", "c1")
-	if err == nil || claimed {
-		t.Fatalf("claimed=%v err=%v, want a conflict-exhausted error", claimed, err)
-	}
-}
-
-// An error claiming the binding (here, every patch conflicting) is surfaced
-// through ensureTopics as its own firstErr, and does not stop the channel
-// loop from running (there being only one channel here, nothing further to
-// observe beyond the error itself).
-func TestEnsureTopicsSurfacesAClaimError(t *testing.T) {
+// async-command-bus design D-11: status.threads[].claim is retired.
+// ensureTopics dispatches unconditionally on every pass; it is
+// EnqueueEnsureTopic's own stable per-conversation×channel CommandID that
+// the BUS dedups a resubmission against, not a reconciler-level claim. A
+// second pass before the first op is even claimed must not have dispatched
+// a second one, and the binding must never carry a claim at all.
+func TestEnsureTopicsDispatchesUnconditionallyDedupedByTheBus(t *testing.T) {
 	conv := claimTestConv("conv-1")
 	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "c1"}}
 	ch := &agentopsv1alpha1.Channel{ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: claimTestNS}}
 	ch.Spec.Adapter = "slack"
-	c := fakeClaimClient(t, conv, ch).WithInterceptorFuncs(interceptor.Funcs{
-		SubResourceUpdate: func(ctx context.Context, cli client.Client, subResourceName string,
-			obj client.Object, opts ...client.SubResourceUpdateOption) error {
-			return apierrors.NewConflict(schema.GroupResource{Resource: "conversations"}, "conv-1", errors.New("stale"))
-		},
-	}).Build()
+	c := fakeClaimClient(t, conv, ch).Build()
 	r := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "me", Ops: &chat.OpQueue{Registry: chat.NewRegistry(), Bus: memory.Open()}}
 
-	if _, err := r.ensureTopics(context.Background(), claimRec(t, r.Conversations, "conv-1")); err == nil {
-		t.Fatal("want the claim error surfaced")
+	rec := claimRec(t, r.Conversations, "conv-1")
+	if pending, err := r.ensureTopics(context.Background(), rec); err != nil || !pending {
+		t.Fatalf("pending=%v err=%v, want pending on the first pass", pending, err)
+	}
+	if pending, err := r.ensureTopics(context.Background(), rec); err != nil || !pending {
+		t.Fatalf("pending=%v err=%v, want still pending on the second pass (no thread landed yet)", pending, err)
+	}
+
+	if op := r.Ops.Claim("slack"); op == nil {
+		t.Fatal("the first pass's op must be claimable")
 	}
 	if op := r.Ops.Claim("slack"); op != nil {
-		t.Fatalf("a channel whose claim errored must not be dispatched: %+v", op)
+		t.Fatalf("a second pass must not have dispatched a second op — the bus must have deduped it: %+v", op)
+	}
+
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: claimTestNS, Name: "conv-1"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if binding := got.Status.Thread("c1"); binding != nil && binding.Claim != nil {
+		t.Fatalf("status.threads[].claim must never be written, got %+v", binding.Claim)
+	}
+}
+
+// Even a DIFFERENT replica identity reconciling makes no difference now —
+// there is no claim ownership left to contest. Both passes dispatch through
+// the SAME bus, which is what dedups them, independent of who is "the
+// leader".
+func TestEnsureTopicsDispatchIsIndifferentToReplicaIdentity(t *testing.T) {
+	conv := claimTestConv("conv-1")
+	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "c1"}}
+	ch := &agentopsv1alpha1.Channel{ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: claimTestNS}}
+	ch.Spec.Adapter = "slack"
+	c := fakeClaimClient(t, conv, ch).Build()
+	bus := memory.Open()
+	ops := &chat.OpQueue{Registry: chat.NewRegistry(), Bus: bus}
+
+	leaderA := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "leader-a", Ops: ops}
+	leaderB := &ConversationReconciler{Client: c, Conversations: claimStore(c), Runs: claimRunsCollection(c), Namespace: claimTestNS, ReplicaIdentity: "leader-b", Ops: ops}
+
+	rec := claimRec(t, leaderA.Conversations, "conv-1")
+	if _, err := leaderA.ensureTopics(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := leaderB.ensureTopics(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+
+	if op := ops.Claim("slack"); op == nil {
+		t.Fatal("one op must be claimable, from whichever replica dispatched it")
+	}
+	if op := ops.Claim("slack"); op != nil {
+		t.Fatalf("the second replica's pass must not have added a second op: %+v", op)
 	}
 }
 
@@ -269,8 +167,10 @@ func TestEnsureTopicsCarriesThePreviousThreadIDOnReopen(t *testing.T) {
 	}
 }
 
-// A claim-only placeholder binding (durable-chat-ops-broker's own
-// setClaim, written before ensure-topic completes) carries no ThreadID.
+// A binding with no ThreadID yet — carrying only a Claim, which a
+// pre-upgrade replica could still have written before async-command-bus
+// design D-11 retired it (this reconciler itself never writes one any
+// more; the field here models leftover state, and is otherwise ignored).
 // deliverRunReplies must not treat it as a topic to deliver into: doing so
 // would hand the adapter an empty thread id, which parks the reply on a
 // channel-level pseudo-thread and marks it delivered PERMANENTLY — the real

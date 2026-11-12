@@ -49,9 +49,8 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 	// gotcha), and a hop the RECONCILER emitted only ever lands in the
 	// LEADER's own buffer, since reconciliation is leader-elected. Reaching
 	// this line means that attempt failed (or this replica IS the leader),
-	// so — unlike /channel/ops — serve from THIS replica's own buffer rather
-	// than refuse: a partial view is strictly better than none for
-	// telemetry.
+	// so serve from THIS replica's own buffer rather than refuse: a partial
+	// view is strictly better than none for telemetry.
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	events, resync := s.Activity.Since(r.URL.Query().Get("since"), limit)
 	if events == nil {

@@ -252,21 +252,33 @@ func (s *Server) Handler() http.Handler {
 // route around, and the next endpoint nobody thought to check is the one
 // that breaks next.
 //
-// /healthz is the one exemption — it answers liveness/readiness for THIS
-// pod, and proxying it would report on a different pod's health entirely.
-// /state/ joins it (design D-7): a store read is backend-consistent, not
-// leader-affine — Get/List/Watch answer the same from any replica, so
-// proxying would only drop the console's and housekeeping's feeds during a
-// leader rollout for no correctness gain.
+// /healthz is the one exemption answering about THIS pod specifically — it
+// answers liveness/readiness for THIS pod, and proxying it would report on a
+// different pod's health entirely. /state/ joins it (design D-7): a store
+// read is backend-consistent, not leader-affine — Get/List/Watch answer the
+// same from any replica, so proxying would only drop the console's and
+// housekeeping's feeds during a leader rollout for no correctness gain. This
+// already covers /state/tasks* and /state/dead-letters (async-command-bus
+// task 5.8), since both are registered under the /state/ prefix.
+//
+// /channel/ops and /channel/ops/{id}/done join them too (async-command-bus
+// design D-11): OpQueue is now bus-backed (sections 5/6), not an in-memory
+// structure only the leader ever populated, so a claim/poll/complete reads
+// or writes the bus consistently from any replica. The leader-only
+// restriction that used to keep these two off this list was a property of
+// the old in-memory queue, not of the endpoint itself, and is retired along
+// with it.
 //
 // A handler reached despite this (the proxy attempt failed, or none applied)
-// falls through to its OWN local behavior unchanged — for `/channel/ops`
-// that is still the leader-only refusal `durable-chat-ops-broker` requires;
-// for everything else it is ordinary, replica-safe handling that needed no
-// leader at all.
+// falls through to its OWN local behavior unchanged — ordinary,
+// replica-safe handling that needed no leader at all.
 func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/state/") || s.isLeader(r.Context()) {
+		if r.URL.Path == "/healthz" ||
+			r.URL.Path == "/channel/ops" ||
+			isChannelOpDonePath(r.URL.Path) ||
+			strings.HasPrefix(r.URL.Path, "/state/") ||
+			s.isLeader(r.Context()) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -282,6 +294,16 @@ func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
 		restore(held)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isChannelOpDonePath reports whether path is a POST /channel/ops/{id}/done
+// completion, the one other leader-exempt /channel/ops route (D-11). {id} is
+// an opaque bus-assigned identifier, never a further path segment, so a
+// prefix/suffix check is exact without needing the mux's own pattern match.
+func isChannelOpDonePath(path string) bool {
+	const prefix, suffix = "/channel/ops/", "/done"
+	return strings.HasPrefix(path, prefix) && strings.HasSuffix(path, suffix) &&
+		len(path) > len(prefix)+len(suffix)
 }
 
 // maxHeldBody bounds the copy kept for a fall-through. A body past it cannot
@@ -1257,36 +1279,17 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	//
 	// Computed ONCE per request, before the wait: it is a read of the informer
 	// cache, and recomputing it every second of a 30-second poll would buy
-	// nothing an adapter can act on any sooner. Set before the leader check
-	// below too — the revision rides EVERY poll response, a rejected one
-	// included, since the manager cannot dial an otherwise-idle adapter any
+	// nothing an adapter can act on any sooner. The revision rides EVERY poll
+	// response, since the manager cannot dial an otherwise-idle adapter any
 	// other way.
 	s.setVocabularyRevision(r.Context(), w)
 
-	// durable-chat-ops-broker: a claim is written only by the current leader
-	// (the Conversation reconciler, leader-gated by construction), so a
-	// non-leader has no safe way to answer this poll from its own state —
-	// its in-memory OpQueue was never populated for ops this process did not
-	// claim.
-	//
-	// A non-leader is a DUMB PROXY to whoever the Lease says is leader, not a
-	// second decision-maker: it does no claiming, no deriving, it just
-	// forwards the request and relays the response byte for byte. The leader
-	// keeps being the ONLY process that ever touches OpQueue or writes a
-	// claim — this changes who answers the HTTP request, not who does the
-	// work.
-	//
-	// Falls back to the 503-and-retry a conforming adapter already tolerates
-	// only when the leader is unknown or unreachable from here (a handoff in
-	// progress, a network blip) — never by silently serving from this
-	// replica's own, unpopulated state. The proxy ATTEMPT itself now happens
-	// one layer up, in leaderProxyMiddleware, uniformly for every route —
-	// reaching this check at all already means that attempt failed.
-	if !s.isLeader(r.Context()) {
-		w.Header().Set("Retry-After", "0")
-		writeJSON(w, 503, map[string]string{"error": "this replica is not the current leader, and the leader could not be reached"})
-		return
-	}
+	// async-command-bus design D-11: OpQueue is bus-backed (sections 5/6),
+	// not an in-memory structure only the leader ever populated, so ANY
+	// replica claims consistently from the same backing store — the old
+	// leader-only refusal here (and leaderProxyMiddleware's proxy attempt
+	// for this route) is retired along with it. s.Ops.Claim below reads the
+	// bus directly; no leader check is needed before it.
 
 	deadline := time.Now().Add(time.Duration(wait) * time.Second)
 	for {
