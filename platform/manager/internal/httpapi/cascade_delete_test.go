@@ -7,12 +7,14 @@ import (
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/convtask"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
@@ -165,3 +167,24 @@ func TestDeleteCascadeRequestsReportsADescendantsFailure(t *testing.T) {
 	}
 }
 
+
+// A name reused by a later conversation must not have its delete swallowed as
+// a repeat of the previous one's: the command id carries the record's ID.
+func TestDeleteCommandIDDiffersAcrossTwoLivesOfOneName(t *testing.T) {
+	idFor := func(uid string) commandbus.CommandID {
+		conv := causedConv("root", "")
+		conv.UID = types.UID(uid)
+		c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(conv).Build()
+		s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"),
+			Namespace: "agent-ops", Router: routerFor(t, c, "agent-ops")}
+		reqs, err := s.deleteCascadeRequests(context.Background(), "root")
+		if err != nil || len(reqs) != 1 {
+			t.Fatalf("requests: %v %v", reqs, err)
+		}
+		return reqs[0].CommandID
+	}
+	first, second := idFor("life-one"), idFor("life-two")
+	if first == second {
+		t.Fatalf("two lives of one name share the delete id %q", first)
+	}
+}

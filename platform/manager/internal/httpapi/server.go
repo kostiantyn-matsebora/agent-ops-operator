@@ -1554,11 +1554,26 @@ func (s *Server) deleteCascadeRequests(ctx context.Context, rootName string) ([]
 		return nil, err
 	}
 	names := deleteCascadeOrder(rootName, descendants)
+	// A name is reused by a later conversation, and the queue suppresses a
+	// repeated command id for its dedup window. The record's ID is new for
+	// every life of a name, so a delete of the next conversation under the
+	// same name is never swallowed as a repeat of the previous one's.
+	ids := map[string]string{}
+	for i := range descendants {
+		ids[descendants[i].Name] = descendants[i].ID
+	}
+	if root, _, err := s.Conversations.Get(ctx, state.Key(rootName)); err == nil {
+		ids[rootName] = root.ID
+	}
 	reqs := make([]commandbus.SubmitRequest, 0, len(names))
 	for _, name := range names {
+		id := "delete:" + name
+		if ids[name] != "" {
+			id += ":" + ids[name]
+		}
 		reqs = append(reqs, commandbus.SubmitRequest{
 			Queue:     ConvQueue,
-			CommandID: commandbus.CommandID("delete:" + name),
+			CommandID: commandbus.CommandID(id),
 			Key:       commandbus.Key(rootName),
 			Payload:   convtask.Payload{Verb: convtask.VerbDelete, Conversation: name}.Encode(),
 		})
