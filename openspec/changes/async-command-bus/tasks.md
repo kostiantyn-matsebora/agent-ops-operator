@@ -173,7 +173,7 @@ this section still decides:
   objects named `agentops-commandbus` and friends throughout), rendered from
   `chart/templates/commandbus.yaml` mirroring `templates/nats.yaml`'s own
   structure and doc comment.
-- [ ] 8.2 Add `commandBus.backend`, `commandBus.nats.url`, `commandBus.nats.auth.*`, per-queue declarations and the dead-letter retention caps as values.
+- [x] 8.2 Add `commandBus.backend`, `commandBus.nats.url`, `commandBus.nats.auth.*`, per-queue declarations and the dead-letter retention caps as values.
   - DONE for `commandBus.backend`, `commandBus.nats.url`, `.enabled`, `.auth.*`, `.replicas`, `.image`, `.persistence`, `.probes` and `.podDisruptionBudget`.
   - DONE for `commandBus.consumerConcurrency`, wiring `COMMANDBUS_CONSUMER_CONCURRENCY`.
     `commandBusConsumerConcurrency()` in `cmd/manager/commandbus.go` reads it.
@@ -346,7 +346,7 @@ report done or failed, with a delivery TTL per message kind.
 - [ ] 13.5 Redeploy and confirm Telegram delivery, a delivery failure ending as failed at its TTL, and an adapter restart not duplicating a message.
 - [x] 13.6 Fix the console's receipt of a message to answer `consumed: true` at the acknowledgement, so the manager performs the side effects and deletes the message with no later report.
 - [x] 13.7 `GET /channel/ops/stream` pushes each unacknowledged message once per connection to a receipt adapter, re-offers only never-acknowledged ones after a reconnect, has no cursor, and answers `404` to any other adapter.
-- [ ] 13.8 Chart: `commandBus.channelReceiptAdapters` and `commandBus.deliveryTtl.{stable,ephemeral,topic,deleteConversation}` render `CHANNEL_RECEIPT_ADAPTERS` and `CHANNEL_DELIVERY_TTL_{STABLE,EPHEMERAL,TOPIC,DELETE_CONVERSATION}`. Owned by the chart lane, ticked once its render tests pass.
+- [x] 13.8 Chart: `commandBus.channelReceiptAdapters` and `commandBus.deliveryTtl.{stable,ephemeral,topic,deleteConversation}` render `CHANNEL_RECEIPT_ADAPTERS` and `CHANNEL_DELIVERY_TTL_{STABLE,EPHEMERAL,TOPIC,DELETE_CONVERSATION}`. Owned by the chart lane, ticked once its render tests pass.
 
 ## 14. Unit tests
 
