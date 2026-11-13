@@ -15,6 +15,11 @@ Instead the manager SHALL close it with the supplied message as its
 `closeReason` and its result. That result reaches its PARENT as an ordinary
 member-result input (coordination-loop).
 
+That SHALL be ONE `escalate` task on the escalating conversation's own key.
+
+Its command id SHALL be derived from the conversation, never from the clock,
+so a redelivery closes the member and reports to the parent once.
+
 A member binds no channel of its own — unchanged. It has nothing to post
 into, and nothing for `escalate` to bind.
 
@@ -25,6 +30,10 @@ into, and nothing for `escalate` to bind.
 #### Scenario: The bubble may repeat
 - **WHEN** a parent receiving a bubbled escalation is itself nested and calls `escalate` again
 - **THEN** the same closure-and-report happens one level further up, until a call reaches the uncaused root
+
+#### Scenario: A redelivered escalation reports once
+- **WHEN** a member's `escalate` task is delivered twice
+- **THEN** the parent holds one copy of the result
 
 ### Requirement: Close and drop record why
 
@@ -56,6 +65,10 @@ ever escalates.
 Escalating SHALL post the agent's message into those already-open threads.
 It SHALL NOT bind anything, since there is nothing left to bind.
 
+On the root that SHALL be one `escalate` task. It SHALL perform one patch
+setting `status.escalatedAt` and the message. The patch SHALL be a no-op when
+the conversation is already escalated.
+
 Escalation SHALL read no Coordinator, so it works after the Coordinator is
 edited or deleted. `status.escalatedAt` marks the moment it happened, for
 display and for idempotency — a second `escalate` call on an
@@ -71,7 +84,7 @@ the ordinary rule. Nothing about an input's timing relative to
 
 #### Scenario: Escalate posts the digest into the open thread
 - **WHEN** an uncaused root escalates with a message
-- **THEN** that message posts into every one of its already-bound channels as the digest
+- **THEN** that message posts into every one of its already-bound channels as the message
 - **AND** no channel is newly bound by the call
 - **AND** no earlier member result is replayed into it
 
@@ -82,3 +95,7 @@ the ordinary rule. Nothing about an input's timing relative to
 #### Scenario: A member result reaches an already-open thread
 - **WHEN** a member reports its result to an uncaused root before that root has ever escalated
 - **THEN** the result is delivered to the root's bound channels the same way it would be after escalation
+
+#### Scenario: A repeated escalate task is a no-op
+- **WHEN** an `escalate` task is delivered to a root already carrying `escalatedAt`
+- **THEN** it succeeds, changes nothing and posts nothing a second time

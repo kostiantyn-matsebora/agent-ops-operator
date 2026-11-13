@@ -1330,6 +1330,44 @@
         "is now",
         "withdrawn"
       ]
+    },
+    {
+      "id": "channel-reclaim-after",
+      "pattern": "\\breclaimAfterSeconds\\b",
+      "says": "the op's hand-over: an adapter acknowledges, then reports done or failed within a delivery TTL (async-command-bus design D-17), with no reclaim timer on the op",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "formerly",
+        "no longer",
+        "is gone",
+        "gone",
+        "deleted",
+        "replaced",
+        "superseded",
+        "is now",
+        "withdrawn"
+      ]
+    },
+    {
+      "id": "channel-claim-window",
+      "pattern": "(?i)\\bclaim window\\b",
+      "says": "the delivery TTL, the time an adapter has from acknowledging an op to report it done (async-command-bus design D-17)",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "formerly",
+        "no longer",
+        "is gone",
+        "gone",
+        "deleted",
+        "replaced",
+        "superseded",
+        "is now",
+        "withdrawn"
+      ]
     }
   ]
 }

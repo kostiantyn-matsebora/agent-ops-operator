@@ -79,26 +79,31 @@ Kubernetes state after a manager restart. A run whose result is recorded in
 `Conversation.status` but not yet delivered to a bound thread SHALL be
 re-enqueued by reconciliation.
 
-The in-memory operation queue SHALL remain the hot path. The record of what
-is currently claimed, and of what is owed, SHALL be the Conversation's own
-`status`, not the in-memory queue.
+The command bus SHALL be the hot path. The record of what is owed SHALL be
+the Conversation's own `status`, not the bus. The bus's logs are bounded
+telemetry and SHALL NOT be the only place an owed operation is recorded.
 
-Re-derivation SHALL NOT depend on a restart. The manager's completed-operation
-window exists to suppress duplicates, and SHALL therefore record operations
-that **succeeded**, never operations that were merely **attempted**.
+Re-derivation SHALL NOT depend on a restart. The bus's deduplication SHALL
+record operations that **succeeded**, never operations that were merely
+**attempted**.
 
-When a derivable operation completes with an error, the manager SHALL
-release that operation's dedup entry. The next reconciliation then
+While a derivable operation is unread, or acknowledged and within its delivery
+TTL, its id SHALL stay pending, so a re-derive is suppressed. The adapter, not the
+bus, retries delivery against its surface until that TTL.
+
+When the operation fails, whether the adapter reports it or its delivery TTL
+passes with no report, the failure is final: the bus SHALL park its id for a
+cool-off and then release it. The next reconciliation after the release
 re-derives it.
 
-An operation whose failure leaves its id in the window is
+An operation whose failure leaves its id suppressed forever is
 indistinguishable from one that was delivered. That would convert a
 transient transport error into permanent, unrecoverable loss of a reply
 the CR still records as owed.
 
 `delete-conversation` SHALL keep its terminal semantics: it is not regenerated,
 because the object that would carry the obligation is being deleted. It is the
-only exemption.
+only exemption. It SHALL never be parked.
 
 `close-topic` SHALL NOT be exempt. It once was, because closing a
 conversation used to delete it. The object now survives its close, and
@@ -129,19 +134,23 @@ that thread, cleared when delivery succeeds.
 
 #### Scenario: Failed reply is re-derived without a restart
 - **WHEN** an adapter reports a `send` op for a run reply as failed and the manager keeps running
-- **THEN** the operation's dedup entry is released and the next reconciliation re-enqueues the same stable op id, so the reply reaches the thread without operator intervention
+- **THEN** the failure is final, the op's id is parked and then released, and reconciliation re-derives the reply so it reaches the thread without operator intervention
+
+#### Scenario: A dead reply is re-derived after its cool-off
+- **WHEN** a `send` op for a run reply fails, by a report or by its delivery TTL
+- **THEN** its id is parked, then released, and reconciliation re-enqueues the same stable op id while the reply is still owed
 
 #### Scenario: Failed opening card is re-derived without a restart
-- **WHEN** an adapter reports a conversation's input `signal` card op as failed
-- **THEN** the card is re-derived on the next reconciliation, because a card is derivable from the conversation's inputs and carries no CR-side delivery marker of its own
+- **WHEN** an adapter's input `signal` card op fails
+- **THEN** the card is re-derived once its id is released, because a card is derivable from the conversation's inputs and carries no CR-side delivery marker of its own
 
 #### Scenario: Rate-limited burst leaves no thread permanently empty
 - **WHEN** a transport rejects a batch of `ensure-topic` and `send` operations with a retryable error and later accepts them
 - **THEN** every created thread eventually carries both its opening card and its run replies, and no conversation is left with a thread that has a recorded result but no posted message
 
 #### Scenario: Failed close-topic is re-derived like any other operation
-- **WHEN** a `close-topic` op completes with an error and its conversation still exists
-- **THEN** the dedup entry is released and reconciliation re-derives the op, because the thread is still owed an archive
+- **WHEN** a `close-topic` op fails and its conversation still exists
+- **THEN** its id is released after the cool-off and reconciliation re-derives the op, because the thread is still owed an archive
 
 #### Scenario: Failed delete-conversation is still not regenerated
 - **WHEN** a `delete-conversation` op completes with an error while the conversation's finalizer is releasing
@@ -152,8 +161,12 @@ that thread, cleared when delivery succeeds.
 - **THEN** the Conversation reports the undelivered thread in `status.threads[].undeliveredReply`, so an empty chat thread can be diagnosed without reading manager logs
 
 #### Scenario: A claim held only in a dead process's memory is not the record of anything
-- **WHEN** a manager replica claims an `ensure-topic` op and then crashes before the adapter completes it
-- **THEN** the claim persists on the Conversation's own `status`, and the next leader reads it there, clears it as held by a former leader and re-dispatches the op
+- **WHEN** an adapter reads an `ensure-topic` op and the adapter or a manager replica dies before the acknowledgement
+- **THEN** the op was never handed over, and the next read on any replica offers it again
+
+#### Scenario: An acknowledged message whose adapter dies is failed at its TTL
+- **WHEN** an adapter acknowledges an `ensure-topic` op and dies before reporting
+- **THEN** the manager does not send it again, fails it when its delivery TTL passes, and reconciliation re-derives it once its id is released
 
 ### Requirement: Cooldown windows survive a manager restart
 Cooldown state keyed on `initiationId` SHALL be durable for the lifetime of its
@@ -186,7 +199,7 @@ nothing happened.
 - **THEN** conversations, deliveries and suppression are unaffected and only history is missing
 
 ### Requirement: A restart-resilience matrix is documented and maintained
-The documentation SHALL carry a matrix naming every component, the state it
+The documentation, in `docs/concepts.md`, SHALL carry a matrix naming every component, the state it
 holds, that state's declared home, and what a restart of that component costs.
 Adding state to a component SHALL require adding its row.
 
@@ -194,9 +207,15 @@ A row whose home is the state store SHALL say what each shipped backend does
 on a restart of the backend itself, since that is a restart the Kubernetes
 API never had.
 
-The matrix SHALL name `status.threads[].claim` and
-`status.threads[].undeliveredReply`: state store records, surviving every
-restart, with a claim held by a former leader cleared on recovery.
+The matrix SHALL name `status.threads[].undeliveredReply`: a state store
+record, surviving every restart.
+
+The matrix SHALL name a channel op as a message in the command bus's log, and its
+acknowledgement as the hand-over that starts its delivery TTL. For it the matrix SHALL say:
+
+- the log is bounded telemetry
+- a message nobody acknowledged is offered again after a manager restart, and an acknowledged one is failed when its delivery TTL passes
+- what a restart of the bus server itself costs under each shipped bus backend
 
 The matrix SHALL name the `Signal` record — its spec, its claimants and its processing state (`status.attempts`, `status.consumedBy`):
 
@@ -209,11 +228,11 @@ The matrix SHALL name the `Signal` record — its spec, its claimants and its pr
 - **THEN** the answer is read from the documented matrix rather than inferred from code
 
 #### Scenario: Claim and owed-reply state have rows
-- **WHEN** an operator asks what a manager restart does to a claimed op or an undelivered reply
-- **THEN** the matrix names both as conversation records in the state store, surviving the restart
+- **WHEN** an operator asks what a manager restart does to an acknowledged op or an undelivered reply
+- **THEN** the matrix names the op as a message in the command bus's log, handed over at its acknowledgement, and the reply as a conversation record in the state store, surviving the restart
 
 #### Scenario: A backend restart has a row
-- **WHEN** an operator asks what restarting the state backend costs
+- **WHEN** an operator asks what restarting the state backend or the bus server costs
 - **THEN** the matrix answers per shipped backend, and the `kube` row says
   "the Kubernetes API's own guarantee"
 
@@ -253,3 +272,32 @@ SHALL name it: Kubernetes-API state, surviving every restart.
 #### Scenario: A runtime that reports none costs nothing
 - **WHEN** a runtime completes a run with no `brief` field
 - **THEN** the stored brief is unchanged, and a conversation that never had one is described by `title` alone
+
+### Requirement: The queue logs and dead-letter record are declared bounded lossy telemetry
+The command bus's queue logs and dead-letter record SHALL be classified in
+the deliberately lossy home. They SHALL be documented as lossy and SHALL
+report their gaps.
+
+Their loss SHALL cost task history and work not yet claimed, never
+conversation correctness. Every command's effect SHALL land on a record in the
+state store or the Kubernetes API, and that record SHALL stay the only durable
+truth.
+
+Both SHALL be bounded by retention, in age and size: an unconsumed message is kept 7 days by default, and dead letters 7 days or 10000 records.
+
+A feed consumer whose point was trimmed past SHALL be told to resync and SHALL render the boundary as a gap in history, never as a period in which nothing happened.
+
+The manager SHALL still mount no PersistentVolume. A bus server's own storage
+belongs to the bus server and not to the manager.
+
+#### Scenario: Losing the log costs no correctness
+- **WHEN** the entire task log and dead-letter record are lost
+- **THEN** conversations, deliveries, signals and suppression are unaffected, and only task history and work not yet claimed are missing
+
+#### Scenario: A trimmed feed is reported as a gap
+- **WHEN** a task-stream consumer resumes from a point the log no longer retains
+- **THEN** it is told to resync and shows a gap, not silence
+
+#### Scenario: An accepted command's effect is recoverable from state
+- **WHEN** a task goes dead after its effect partly landed
+- **THEN** the conversation record shows what landed and reconciliation derives what is still owed
