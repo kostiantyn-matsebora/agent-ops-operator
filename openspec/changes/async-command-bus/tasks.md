@@ -464,14 +464,14 @@ aspirational target. The named deviations are stated plainly in
 - [x] 16.1.1 `docs/concepts.md`: where work and state live, what a reply means, the per-channel queues and the one fan-out point, and the restart matrix rows for an op and the queue logs.
 - [x] 16.1.2 `docs/contracts.md`: the accept semantics of each endpoint, `/state/tasks` (no order field) and `/state/dead-letters`, the channel ops endpoints and the leader-proxy exemptions.
 - [x] 16.1.3 `docs/configuration.md`: `commandBus.*`, including `channelReceiptAdapters` and `deliveryTtl.*`.
-- [ ] 16.1.4 `docs/security.md`: the new trust boundary and its control, then re-run `threat-model.py`.
+- [x] 16.1.4 `docs/security.md`: the new trust boundary and its control, then re-run `threat-model.py`. The re-run changed no output file.
 - [x] 16.1.5 `docs/testing.md`: the bus conformance suite, the new lanes and the end-to-end flows.
 - [x] 16.1.6 `docs/CHANGELOG.md`: the breaking changes and upgrade notes, newest first. The tasks, ids and dead buckets of an earlier build are inert and may be deleted, and channel adapter images upgrade together with the manager.
 - [x] 16.1.7 A `docs/guides/` page for the bundle, `docs/guides/command-bus.md`, in `_data/nav.yml`.
 - [x] 16.1.8 `.claude/rules/structure.md`, `invariants.md` and `gotchas.md`: the append-only logs, the get, ack, done contract, a claim and ack contract on a push stream stranding ops, and the 10071 submit race. `terminology.md` is untouched, since task, invocation and dead letter are new words, not renamed old ones.
 - [x] 16.1.9 Re-run `python3 .github/scripts/docs-generate.py --check`, because chart values changed.
 - [x] 16.1.10 `docs/contracts/channel-adapter.md`: the get, ack, done-or-failed contract with the delivery TTL as a new major version, and the console as the receipt-only exception.
-- [ ] 16.1.11 `.github/retired-vocabulary.json`: the retired channel-delivery words, and `retired-vocabulary-guard.py` and `publication-guard.py` clean.
+- [x] 16.1.11 `.github/retired-vocabulary.json`: the retired channel-delivery words, and `retired-vocabulary-guard.py` and `publication-guard.py` clean. Two entries wait for the archive (16.3).
 
 ### 16.2 Adopter site
 
