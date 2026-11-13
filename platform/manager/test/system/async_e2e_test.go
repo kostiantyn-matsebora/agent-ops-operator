@@ -434,29 +434,36 @@ func awaitCloseInvocations(t *testing.T, frames <-chan string, names []string) m
 			if !ok {
 				t.Fatalf("the task stream ended before every close settled: %v", succeeded)
 			}
-			w, ok := taskPut(f)
-			if !ok || w.Queue != "conv" || !slices.Contains(names, w.Key) {
-				continue
-			}
-			if prior, seen := invocationOfTask[w.UID]; seen && prior != w.InvocationID {
-				t.Fatalf("task %s of conversation %s changed invocationId mid-flight: %q then %q", w.UID, w.Key, prior, w.InvocationID)
-			}
-			invocationOfTask[w.UID] = w.InvocationID
-			if w.InvocationID == "" {
-				continue
-			}
-			if prior, seen := invocationOf[w.Key]; seen && prior != w.InvocationID {
-				t.Fatalf("conversation %s was accepted under two invocations: %q and %q", w.Key, prior, w.InvocationID)
-			}
-			invocationOf[w.Key] = w.InvocationID
-			if w.State == "succeeded" {
-				succeeded[w.Key] = true
-			}
+			recordCloseFrame(t, f, names, invocationOfTask, invocationOf, succeeded)
 		case <-deadline:
 			t.Fatalf("not every close settled within the deadline: %v of %v", succeeded, names)
 		}
 	}
 	return invocationOf
+}
+
+// recordCloseFrame folds one task-stream frame into awaitCloseInvocations'
+// bookkeeping, failing on an invocationId that changes.
+func recordCloseFrame(t *testing.T, f string, names []string, invocationOfTask, invocationOf map[string]string, succeeded map[string]bool) {
+	t.Helper()
+	w, ok := taskPut(f)
+	if !ok || w.Queue != "conv" || !slices.Contains(names, w.Key) {
+		return
+	}
+	if prior, seen := invocationOfTask[w.UID]; seen && prior != w.InvocationID {
+		t.Fatalf("task %s of conversation %s changed invocationId mid-flight: %q then %q", w.UID, w.Key, prior, w.InvocationID)
+	}
+	invocationOfTask[w.UID] = w.InvocationID
+	if w.InvocationID == "" {
+		return
+	}
+	if prior, seen := invocationOf[w.Key]; seen && prior != w.InvocationID {
+		t.Fatalf("conversation %s was accepted under two invocations: %q and %q", w.Key, prior, w.InvocationID)
+	}
+	invocationOf[w.Key] = w.InvocationID
+	if w.State == "succeeded" {
+		succeeded[w.Key] = true
+	}
 }
 
 // ---- 9.4 ------------------------------------------------------------------
