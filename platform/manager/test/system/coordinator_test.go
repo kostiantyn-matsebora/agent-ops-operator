@@ -238,8 +238,29 @@ func TestCoordinatorSelfHealSurveyExcludesAncestorRoot(t *testing.T) {
 	// closing the root that invoked it").
 	ownCode, ownOut := e.coordinateCall(t, "/coordinate/close", reaperToken,
 		map[string]any{"conversation": reaperName, "target": cronRoot.Name, "reason": "trying to close my own root"})
-	if ownCode != 403 {
-		t.Fatalf("want 403 closing the reaper's own ancestor root, got %d %v", ownCode, ownOut)
+	// The scope check runs INSIDE the queued task (async-command-bus), so the
+	// call is accepted and the refusal is the task's own terminal outcome: it
+	// goes dead, never retried, and the root is never closed.
+	if ownCode != 200 {
+		t.Fatalf("want the close of the reaper's own ancestor root accepted (200) and refused by its task, got %d %v", ownCode, ownOut)
+	}
+	ids, _ := ownOut["taskIds"].([]any)
+	if len(ids) != 1 {
+		t.Fatalf("want one task for the accepted close, got %v", ownOut)
+	}
+	ownTask, _ := ids[0].(string)
+	dead := waitTaskState(t, e, bearerPrefix+e.Values.AdapterToken, ownTask, "dead", 2*time.Minute)
+	if dead.Attempt > 1 {
+		t.Fatalf("a refusal on scope is terminal and must not be retried, task ran %d attempts: %+v", dead.Attempt, dead)
+	}
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
+		c, err := e.K.Conversation(ctx, cronRoot.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+			t.Fatalf("the reaper closed its own ancestor root %s", cronRoot.Name)
+		}
 	}
 }
 

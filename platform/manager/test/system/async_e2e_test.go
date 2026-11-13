@@ -416,11 +416,15 @@ func TestAsyncBulkCloseEachConversationGetsItsOwnInvocation(t *testing.T) {
 	}
 }
 
-// awaitCloseInvocations reads the task stream until every named
-// conversation's close task (queue "conv") has succeeded, returning each one's invocationId
-// and failing if a task's invocationId changes mid-flight.
+// awaitCloseInvocations reads the task stream until each named conversation's
+// accepted close task (queue "conv", carrying an invocationId) has succeeded,
+// returning each one's invocationId. A task's invocationId must never change
+// between its own frames. Tasks of the same conversation that were not
+// accepted over HTTP (the reconciler's own auto-close, for one) carry no
+// invocationId and are not the bulk close, so they are skipped.
 func awaitCloseInvocations(t *testing.T, frames <-chan string, names []string) map[string]string {
 	t.Helper()
+	invocationOfTask := map[string]string{}
 	invocationOf := map[string]string{}
 	succeeded := map[string]bool{}
 	deadline := time.After(3 * time.Minute)
@@ -431,11 +435,18 @@ func awaitCloseInvocations(t *testing.T, frames <-chan string, names []string) m
 				t.Fatalf("the task stream ended before every close settled: %v", succeeded)
 			}
 			w, ok := taskPut(f)
-			if !ok || !slices.Contains(names, w.Key) {
+			if !ok || w.Queue != "conv" || !slices.Contains(names, w.Key) {
+				continue
+			}
+			if prior, seen := invocationOfTask[w.UID]; seen && prior != w.InvocationID {
+				t.Fatalf("task %s of conversation %s changed invocationId mid-flight: %q then %q", w.UID, w.Key, prior, w.InvocationID)
+			}
+			invocationOfTask[w.UID] = w.InvocationID
+			if w.InvocationID == "" {
 				continue
 			}
 			if prior, seen := invocationOf[w.Key]; seen && prior != w.InvocationID {
-				t.Fatalf("conversation %s's close task changed invocationId mid-flight: %q then %q", w.Key, prior, w.InvocationID)
+				t.Fatalf("conversation %s was accepted under two invocations: %q and %q", w.Key, prior, w.InvocationID)
 			}
 			invocationOf[w.Key] = w.InvocationID
 			if w.State == "succeeded" {

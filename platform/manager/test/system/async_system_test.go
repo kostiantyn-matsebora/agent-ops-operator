@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
@@ -586,9 +586,9 @@ func assertBusServerRollingRestartLosesNoAcceptedTask(t *testing.T, ctx context.
 //
 // `telegram.apiBase` is a plain chart value (install.go's own valuesYAML
 // already sets it to the fake Bot API's real address), so repointing it
-// is an ordinary `e.Upgrade` — no anti-affinity, no
-// restartManagerSchedulable-style dance, unlike a manager-affecting
-// upgrade.
+// is an UpgradeManager: the helm upgrade rolls the manager, whose hard
+// anti-affinity leaves the new ReplicaSet Pending on this one-node cluster
+// (observed: available=2 updated=1 replicas=3 for the whole wait).
 func TestAsyncBackoffIntoADeadLetterAgainstARealFailure(t *testing.T) {
 	fullTier(t)
 	e := requireEnv(t)
@@ -597,11 +597,11 @@ func TestAsyncBackoffIntoADeadLetterAgainstARealFailure(t *testing.T) {
 	auth := bearerPrefix + e.Values.AdapterToken
 
 	t.Cleanup(func() {
-		if err := e.Upgrade(context.Background()); err != nil {
+		if err := e.UpgradeManager(context.Background()); err != nil {
 			t.Errorf("restoring the real telegram apiBase: %v", err)
 		}
 	})
-	if err := e.Upgrade(ctx, "telegram.apiBase=http://agentops-nonexistent-bot-api.agent-ops.svc.cluster.local:8081"); err != nil {
+	if err := e.UpgradeManager(ctx, "telegram.apiBase=http://agentops-nonexistent-bot-api.agent-ops.svc.cluster.local:8081"); err != nil {
 		t.Fatalf("repointing the gateway at an address nothing answers: %v", err)
 	}
 
@@ -675,22 +675,20 @@ const consoleStreamMark = "e2e-async-console-stream"
 // adapter). The stream has no cursor and no Last-Event-ID: every connection is
 // pushed exactly the messages not yet acknowledged, and the acknowledgement is
 // what consumes a message. The live console is scaled to zero for the lane so
-// this test is the only consumer of the console channel's queue, then reads
-// and acknowledges over the SAME endpoints the console uses, as the master
-// token.
+// this test is the only consumer of the console channel's queue while it is
+// held away, then reads and acknowledges over the SAME endpoints the console
+// uses, as the master token, and finally lets the real console return.
 //
-// WRITTEN, COMPILES, NOT RUN — no cluster in this environment. One
-// assumption it cannot check here: that the ChannelAdapter reconciler leaves
-// `spec.replicas` of the console Deployment alone (gotchas.md says it
-// re-applies `spec.image`, which is a different field). If it does not, the
-// scale-down never holds and this lane fails at its first read, naming that.
+// The console is held away with a NetworkPolicy, since the ChannelAdapter
+// reconciler undoes a scale to zero (observed: it never reached zero in 2m).
+// If the isolation did not hold, the first read fails naming the console.
 func TestAsyncConsoleStreamResumesAfterADropWithoutLossOrDuplicates(t *testing.T) {
 	fullTier(t)
 	e := requireEnv(t)
 	stamp := fmt.Sprint(time.Now().UnixNano())
 	auth := bearerPrefix + e.Values.AdapterToken
 
-	stopConsoleConsumer(t, context.Background(), e)
+	restore := stopConsoleConsumer(t, context.Background(), e)
 
 	// Three conversations: each opens with an ensure-topic op on the console
 	// channel, on its own key, so none is serialized behind another.
@@ -716,17 +714,12 @@ func TestAsyncConsoleStreamResumesAfterADropWithoutLossOrDuplicates(t *testing.T
 		}
 	}
 
-	// Everything seen so far is acknowledged; a reconnect is pushed none of it.
-	acked := map[string]bool{first[0].OpID: true}
-	for _, f := range replay {
-		ackConsoleOp(t, e, auth, f)
-		acked[f.OpID] = true
-	}
-	for _, f := range readConsoleOpStream(t, e, auth, 0, 15*time.Second, time.Minute) {
-		if acked[f.OpID] {
-			t.Fatalf("acknowledged op %s was delivered again after a reconnect: %+v", f.OpID, f)
-		}
-	}
+	// The console comes back: it is pushed the two still unacknowledged and
+	// acknowledges them, so none is left to push again.
+	restore()
+	waitFor(t, "the returned console to acknowledge every op held for it, leaving none to push again", 3*time.Minute, func() (bool, error) {
+		return len(readConsoleOpStream(t, e, auth, 0, 10*time.Second, time.Minute)) == 0, nil
+	})
 }
 
 func opIDs(frames []consoleOpFrame) []string {
@@ -743,35 +736,66 @@ func sortedCopy(in []string) []string {
 	return out
 }
 
-// stopConsoleConsumer scales the console Deployment to zero and restores it
-// when the test ends.
-func stopConsoleConsumer(t *testing.T, ctx context.Context, e *Env) {
+// consoleIsolation is the NetworkPolicy that cuts the console adapter off from
+// every destination, the manager included.
+const consoleIsolation = "e2e-console-isolated"
+
+// stopConsoleConsumer holds the console adapter away from the manager, and lifts
+// the hold (restore) when the test calls it or ends. The ChannelAdapter
+// reconciler pins the console Deployment to one replica, so a scale to zero is
+// undone at once; cutting its egress with a NetworkPolicy holds, and the pod is
+// replaced so its already-open stream (an established connection outlives a
+// policy) is dropped. The adapter stays up and keeps retrying its stream, which
+// is exactly the adapter that went away and comes back.
+func stopConsoleConsumer(t *testing.T, ctx context.Context, e *Env) (restore func()) {
 	t.Helper()
-	const name = "agentops-adapter-console"
-	var dep appsv1.Deployment
-	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: name}, &dep); err != nil {
-		t.Fatal(err)
+	const selector = "agentops.dev/adapter=console"
+	policy := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: consoleIsolation},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"agentops.dev/adapter": "console"}},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+		},
 	}
-	orig := fmt.Sprint(derefOr(dep.Spec.Replicas, 1))
-	scale := func(n string) error {
-		out, err := e.Cluster.Kubectl(context.Background(), "-n", Namespace, "scale", "deploy/"+name, "--replicas="+n)
+	replacePods := func(ctx context.Context) error {
+		pods, err := e.K.Pods(ctx, selector)
 		if err != nil {
-			return fmt.Errorf("%w\n%s", err, out)
+			return err
+		}
+		for i := range pods {
+			if err := e.K.Delete(ctx, &pods[i]); err != nil && !apierrors.IsNotFound(err) {
+				return err
+			}
 		}
 		return nil
 	}
-	// Registered BEFORE the scale-down, as scaleManagerReplicas does.
-	t.Cleanup(func() { _ = scale(orig) })
-	if err := scale("0"); err != nil {
-		t.Fatalf("scaling the console consumer to zero: %v", err)
-	}
-	waitFor(t, "the console consumer to stop", 2*time.Minute, func() (bool, error) {
-		var d appsv1.Deployment
-		if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: name}, &d); err != nil {
-			return false, err
+	done := false
+	restore = func() {
+		if done {
+			return
 		}
-		return d.Status.Replicas == 0, nil
-	})
+		done = true
+		bg := context.Background()
+		if err := e.K.Delete(bg, policy); err != nil && !apierrors.IsNotFound(err) {
+			t.Errorf("lifting the console isolation: %v", err)
+		}
+		// Replaced so it reconnects at once instead of after its own backoff.
+		if err := replacePods(bg); err != nil {
+			t.Errorf("replacing the console pod: %v", err)
+		}
+		if err := e.K.WaitDeploymentAvailable(bg, "agentops-adapter-console", 3*time.Minute); err != nil {
+			t.Errorf("the console adapter must come back: %v", err)
+		}
+	}
+	// Registered BEFORE the risky call, as scaleManagerReplicas does.
+	t.Cleanup(restore)
+	if err := e.K.Create(ctx, policy); err != nil && !apierrors.IsAlreadyExists(err) {
+		t.Fatalf("isolating the console adapter: %v", err)
+	}
+	if err := replacePods(ctx); err != nil {
+		t.Fatalf("replacing the console pod under the isolation: %v", err)
+	}
+	return restore
 }
 
 // readConsoleOpStream opens GET /channel/ops/stream as the console adapter and

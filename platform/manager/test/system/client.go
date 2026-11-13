@@ -299,6 +299,11 @@ func (k *Kube) deleteStored(ctx context.Context, names []string) error {
 		}
 	}
 	for _, n := range live {
+		// A caused member binds no channel of its own, so no surface may name
+		// it in a delete: its root's delete cascades to it.
+		if channels[n] == "" {
+			continue
+		}
 		if err := k.managerPost(ctx, "/channel/conversations/"+url.PathEscape(n)+"/delete", map[string]any{"channel": channels[n]}); err != nil {
 			return fmt.Errorf("delete %s: %w", n, err)
 		}
