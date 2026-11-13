@@ -18,11 +18,9 @@ The accept step SHALL be synchronous and cheap. It SHALL do, in order:
 1. authenticate the caller and check its adapter or state scope
 2. check the shape of the body
 3. refuse an unknown channel or source
-4. for a signal, refuse for the `Wired=False` and attribute-filter reasons
-5. for a signal, record the activity "signal received" receipt
-6. for a coordinator verb, stamp the move
-7. mint an invocation id and durably enqueue the tasks
-8. reply `202` with the invocation id and the task ids, except that a coordinator verb keeps the `200` and body it returns today and gains the same two fields
+4. for a coordinator verb, stamp the move
+5. mint an invocation id and durably enqueue the tasks
+6. reply `202` with the invocation id and the task ids, except that a coordinator verb keeps the `200` and body it returns today and gains the same two fields
 
 Everything else SHALL be the process step. The accept step SHALL NOT perform
 the command's effect.
@@ -58,14 +56,13 @@ Every asynchronous command SHALL map to one queue and one ordering key:
 | `delete` | `conv` | the root conversation of the target |
 | `reset-context` | `conv` | the root conversation of the target |
 | `escalate` | `conv` | the root conversation of the target |
-| `ingest-signal` | `in.signal` | the source and the `initiationId` |
 | `ensure-topic`, `send`, `close-topic`, `delete-conversation` | `out.<channel>` | the conversation |
 
 What the commands cover:
 
 - `ingest-chat` covers an inbound chat message. A console send SHALL go through it.
 - The typed commands `/close`, `/exit` and `/reopen` arrive as `ingest-chat`, and the processor turns them into the tasks above.
-- `ingest-signal` covers every signal adapter, a console start (a chat signal) and chat origination.
+- Inbound signals are not a command of this capability. `/signal/inbound` stays synchronous, and a follow-up change moves it onto the bus.
 - `send` covers an input card, a run reply, a notice, a farewell, a reopen notice and an escalation message.
 
 #### Scenario: Two closes under one root are serialized
@@ -115,7 +112,7 @@ SHALL be enqueued for it.
 - **THEN** it is refused or reported unwired as today and no task exists for it
 
 ### Requirement: Inbound commands are idempotent by a key the caller can repeat
-An inbound signal SHALL keep its `initiationId` as its deduplication key. An
+An inbound signal SHALL keep its `initiationId` as its deduplication key, on its own synchronous path. An
 inbound chat message SHALL use an `Idempotency-Key` header when the caller
 sends one. Absent the header, the key SHALL be derived from the channel, the
 thread, the text and the sender.

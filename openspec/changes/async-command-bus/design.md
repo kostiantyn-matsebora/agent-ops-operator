@@ -155,13 +155,12 @@ change them. Each is a chart value.
 | Queue | Key | Attempts | Backoff | TTL | Notes |
 |---|---|---|---|---|---|
 | `conv` | root conversation | 5 | 1s to 30s, jitter | none | in-flight cap per invocation paces a bulk batch |
-| `in.signal` | source + `initiationId` | 5 | 1s to 30s, jitter | none | |
 | `out.<channel>` stable | conversation | hand-over | none | queue none, delivery 10m | run reply, input card, farewell |
 | `out.<channel>` ephemeral | conversation | hand-over | none | queue 2m, delivery 2m | acks and notices |
 | `out.<channel>` topic | conversation | hand-over | none | delivery 5m | ensure-topic, close-topic |
 | `out.<channel>` delete-conversation | conversation | hand-over | none | queue 5m, delivery 5m | never parked |
 
-`conv` and `in.signal` are lease-and-retry queues. The `out.<channel>` kinds are
+`conv` is a lease-and-retry queue. The `out.<channel>` kinds are
 hand-over queues (D-17): the bus does not retry them, because the adapter
 retries against its own surface until the delivery TTL, so they declare no
 attempts and no backoff.
@@ -237,17 +236,17 @@ The accept step runs, in order:
 
 1. Authentication, adapter or state scope, body shape.
 2. Unknown channel or source.
-3. For signals: the Wired reason and the attribute-filter reason.
-4. For signals: the activity "signal received" receipt.
-5. For coordinator verbs: the move stamp.
-6. For inbound chat: the thread-to-conversation lookup that yields the key.
-7. Mint the `invocationId`, enqueue durably, reply `202` with
+3. For coordinator verbs: the move stamp.
+4. For inbound chat: the thread-to-conversation lookup that yields the key.
+5. Mint the `invocationId`, enqueue durably, reply `202` with
    `{invocationId, taskIds}`, added to whatever the endpoint returned before.
 
 Refusals that depend only on a cheap read stay immediate. `delete` of a
 conversation that is not Closed stays a `409` at accept.
 
-Inbound dedup: a signal keeps its `initiationId`. A channel message uses an
+Inbound signals are out of scope: `/signal/inbound` stays synchronous, keeps its `initiationId` dedup and its Wired and attribute-filter refusals, and a follow-up change moves it onto the bus.
+
+Inbound dedup: a channel message uses an
 optional `Idempotency-Key` header, and absent that a key derived from channel,
 thread, text and sender. No adapter has to change.
 

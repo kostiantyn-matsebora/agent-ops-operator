@@ -14,7 +14,7 @@ a cluster the conformance suite does not run:
 3. **Ordering under parallel consumers.** Tasks sharing an ordering key run one
    at a time in submission order while tasks of other keys run alongside, with
    more than one consumer replica claiming.
-4. **Backoff, then dead letter.** A `conv` or `in.signal` task whose handler
+4. **Backoff, then dead letter.** A `conv` task whose handler
    always fails retryably is retried with growing gaps and then goes dead. It
    appears in the dead-letter listing, and its id is resubmittable after the
    cool-off.

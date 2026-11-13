@@ -54,7 +54,7 @@ capability that does not depend on where state is kept.
     completed on another.
   - The log is declared bounded, lossy telemetry. The conversation record
     stays the only durable truth.
-- **Bus-owned retry on `conv` and `in.signal`.** Attempts are bounded, with backoff and jitter per kind.
+- **Bus-owned retry on `conv`.** Attempts are bounded, with backoff and jitter per kind.
   - After the last attempt a task goes `dead`, leaves a read-only dead-letter
     record, and its id is parked for a cool-off.
   - Failures use a closed error-code vocabulary.
@@ -66,7 +66,8 @@ capability that does not depend on where state is kept.
 - **These operations become asynchronous:**
   - `close`: console single and bulk, chat, coordinated, the idle timer, a member's `escalate` and budget-exceeded.
   - `exit`, `reopen`, `delete`, `reset-context` and `escalate`.
-  - Inbound chat messages and inbound signals.
+  - Inbound chat messages.
+  - Inbound signals stay synchronous here: `/signal/inbound` keeps its handler, and a separate follow-up change moves it onto the bus.
 - **Each returns `202`** with an `invocationId` and task ids. A coordinator verb
   keeps the `200` and body it returns today and gains the same two fields. It first
   validates and durably enqueues. The work then runs on a manager consumer, on

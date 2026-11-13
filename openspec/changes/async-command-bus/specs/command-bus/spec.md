@@ -422,7 +422,6 @@ a contract change with a conformance scenario.
 | Queue | Ordering key |
 |---|---|
 | `conv` | the root conversation of the `causedBy` tree |
-| `in.signal` | the source and the `initiationId` |
 | `out.<channel>` | the conversation |
 
 The `out.<channel>` queues SHALL declare four kinds, each a complete declaration of its own and each a hand-over queue: `stable` (replies and inputs, delivery TTL 10 minutes), `ephemeral` (acks and notices, 2 minutes), `topic` (`ensure-topic` and `close-topic`, 5 minutes) and `delete-conversation` (5 minutes).
