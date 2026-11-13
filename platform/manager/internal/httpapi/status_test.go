@@ -127,6 +127,41 @@ func TestLeaderIdentityReadsTheLeaseHolder(t *testing.T) {
 	}
 }
 
+// An unset ReplicaIdentity disables the check entirely — every existing
+// test, and any Server wired with no leader election behind it, answers
+// exactly as it always has.
+func TestIsLeaderIsTrueWhenReplicaIdentityIsUnset(t *testing.T) {
+	s := &Server{Reader: fake.NewClientBuilder().WithScheme(stateTestScheme(t)).Build(), Namespace: "agent-ops"}
+	if !s.isLeader(context.Background()) {
+		t.Fatal("no ReplicaIdentity configured must always answer leader=true")
+	}
+}
+
+// controller-runtime's own leaderelection.NewResourceLock mints the real
+// Lease's HolderIdentity as os.Hostname()+"_"+a per-process uuid, never the
+// bare ReplicaIdentity this process compares against. An exact-string
+// match would have missed the bug that actually shipped: every leader-gated
+// poll 503'd forever, even for the real leader (hardcode-manager-replicas).
+// A prefix match recognizes it; it must not widen into matching a different
+// replica whose name happens to be a prefix of this one's.
+func TestIsLeaderMatchesTheUUIDSuffixedHolderIdentity(t *testing.T) {
+	suffixed := "replica-b_f47ac10b-58cc-4372-a567-0e02b2c3d479"
+	lease := &coordinationv1.Lease{}
+	lease.Name, lease.Namespace = LeaseName, "agent-ops"
+	lease.Spec.HolderIdentity = &suffixed
+	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(lease).Build()
+
+	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops", ReplicaIdentity: "replica-b"}
+	if !s.isLeader(context.Background()) {
+		t.Fatal("a uuid-suffixed holder identity must still match the bare ReplicaIdentity it was derived from")
+	}
+
+	other := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops", ReplicaIdentity: "replica-a"}
+	if other.isLeader(context.Background()) {
+		t.Fatal("a different replica's suffixed identity must not match — prefix, not substring")
+	}
+}
+
 // handlePipelineResolved is the console's ONE way to see the composed
 // allowlist without reimplementing composition itself — every branch here is
 // a way that composition can be partial: a ref that resolves, one that

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strconv"
@@ -14,13 +15,16 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/consumer"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
@@ -150,6 +154,25 @@ func commandFromEnv() []string {
 	return cmd
 }
 
+// channelsForAdapter answers which Channels name an adapter, from the informer
+// cache. A failed list is logged and answers none.
+func channelsForAdapter(c client.Client, namespace string) func(ctx context.Context, adapter string) []string {
+	return func(ctx context.Context, adapter string) []string {
+		var list agentopsv1alpha1.ChannelList
+		if err := c.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+			ctrl.Log.WithName("setup").Error(err, "list channels for the adapter's queues", "adapter", adapter)
+			return nil
+		}
+		var names []string
+		for i := range list.Items {
+			if list.Items[i].Spec.Adapter == adapter {
+				names = append(names, list.Items[i].Name)
+			}
+		}
+		return names
+	}
+}
+
 func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(false)))
 	setupLog := ctrl.Log.WithName("setup")
@@ -165,12 +188,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	// durable-chat-ops-broker: this process's own identity for the claims its
-	// reconciler writes. Needs no relation to the leader-election Lease's own
-	// HolderIdentity — see ConversationReconciler.ReplicaIdentity's comment.
-	// The hostname is the pod name in Kubernetes, which is enough: a claim
-	// surviving a same-pod container restart is exactly what the separate
-	// staleness bound (ClaimStaleness) exists to still catch.
+	// The command bus's backend (async-command-bus design D-1) is resolved
+	// and validated here too, before anything connects to a cluster: a name
+	// this binary does not carry, or memory selected above one replica
+	// (design D-13, task 4.4), is a deployment mistake that must stop the
+	// process now, independent of STATE_BACKEND above — an install may run
+	// the kube state store with the nats command bus, or the reverse.
+	commandBusBackend, err := commandBusBackendFromEnv()
+	if err != nil {
+		setupLog.Error(err, "command bus backend")
+		os.Exit(1)
+	}
+
+	// This process's own identity. Fed to httpapi.Server.ReplicaIdentity
+	// below, which is STILL live: leaderProxyMiddleware's isLeader() compares
+	// it (prefix-matched) against the leader-election Lease's own
+	// HolderIdentity to decide which replica answers an accept-step
+	// endpoint. Also fed to ConversationReconciler.ReplicaIdentity, which is
+	// NOT live any more (async-command-bus design D-11 retired the claim it
+	// used to write) — see that field's own comment for why it stays wired
+	// anyway. The hostname is the pod name in Kubernetes either way.
 	replicaIdentity, err := os.Hostname()
 	if err != nil {
 		replicaIdentity = "unknown"
@@ -197,6 +234,21 @@ func main() {
 		setupLog.Error(err, "state store", "backend", backend)
 		os.Exit(1)
 	}
+
+	// Opening the command bus itself needs mgr, for the nats backend's
+	// readiness check (task 4.3) — the backend name and the replica refusal
+	// were already settled above, before mgr even existed. The returned Bus
+	// is captured and handed to both the HTTP API (its accept handlers'
+	// Submit side) and the "conv" queue's consumer.Pool (its own Claim/
+	// Settle/Fail side, registered once api.HandleConvTask exists below) —
+	// task 5's wiring. The "in.signal" queue carries no producer or
+	// consumer yet: no accept handler in this change enqueues onto it — see
+	// this change's hand-back report for why.
+	bus, err := newCommandBus(mgr, namespace, commandBusBackend)
+	if err != nil {
+		setupLog.Error(err, "command bus", "backend", commandBusBackend)
+		os.Exit(1)
+	}
 	// Channel plumbing: built-in channel types register in-process providers
 	// here; every other type is served by an external adapter consuming the op
 	// queue over /channel/*. The manager reads no secrets — adapter auth
@@ -208,9 +260,31 @@ func main() {
 	acts := activity.New(envInt("ACTIVITY_BUFFER", activity.DefaultSize))
 
 	registry := chat.NewRegistry()
-	ops := &chat.OpQueue{Conversations: stores.Conversations, Runs: stores.Runs, Registry: registry, Activity: acts}
+	// async-command-bus task 6: OpQueue's own Enqueue*/Claim/Complete are now
+	// thin wrappers over the SAME Bus the "conv" consumer.Pool below claims
+	// from — Concurrency sizes OpQueue.Run's own in-process consumer.Pool(s)
+	// (registered below), reusing the one knob every pool in this process
+	// already shares.
+	ops := &chat.OpQueue{
+		Conversations: stores.Conversations, Runs: stores.Runs, Registry: registry, Activity: acts,
+		Bus: bus, Concurrency: commandBusConsumerConcurrency(), ReceiptAdapters: channelReceiptAdapters(),
+	}
+	// One queue per Channel resource (design D-10): an adapter's poll drains the
+	// queue of every Channel naming it. The informer cache answers which, so a
+	// replica that has just restarted claims at once instead of waiting for the
+	// bus feed to show it a channel.
+	ops.ChannelsFor = channelsForAdapter(mgr.GetClient(), namespace)
 	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: namespace, Ops: ops, Activity: acts}
 	controlURL := env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080")
+
+	// OpQueue.Run (task 6): the watch-fed Pending/Settled/Stats mirror, plus
+	// one consumer.Pool per Registry-registered in-process channel type —
+	// on EVERY replica, never gated on leader election, the same posture
+	// the "conv" pool below already has.
+	if err := mgr.Add(manager.RunnableFunc(ops.Run)); err != nil {
+		setupLog.Error(err, "channel op queue")
+		os.Exit(1)
+	}
 
 	// ChannelAdapter lifecycle: adapters are plugged in as CRs; the reconciler
 	// owns their Deployments (zero-RBAC SA, derived contract token, projected
@@ -332,14 +406,27 @@ func main() {
 		// The timer closes through the SAME path /close does, which is why the
 		// reconciler holds the router at all.
 		Router: router,
-		// durable-chat-ops-broker: this reconciler runs only while this process
-		// holds the leader-election Lease, so any claim written under a
-		// DIFFERENT identity is, by construction, a former leader's — there is
-		// no need to read the Lease's own HolderIdentity to know that.
+		// async-command-bus (task 5.4): the idle timer's auto-close and the
+		// deadline budget edge enqueue a "conv" task instead of calling the
+		// Router directly when this is set — nil here only for a reconciler
+		// a test builds without one, which keeps calling the Router inline
+		// exactly as it always has.
+		Bus: bus,
+		// Retired (async-command-bus design D-11): the claim ReplicaIdentity
+		// used to let this reconciler write and reclaim is gone, and nothing
+		// here reads it any more. Still wired because os.Hostname() above is
+		// needed for httpapi.Server's OWN ReplicaIdentity regardless (the
+		// still-live leader-proxy identity below) — removing it here would
+		// save nothing. See ConversationReconciler.ReplicaIdentity's own
+		// comment.
 		ReplicaIdentity: replicaIdentity,
-		// A chart value, never a compiled-in constant: an install with a
-		// slower transport can raise it. Zero (unset) falls back to
-		// controller.DefaultClaimStalenessSeconds.
+		// Retired along with ReplicaIdentity above (same D-11) — nothing
+		// reads ConversationReconciler.ClaimStaleness any more. Still wired
+		// from the chart's claimStalenessSeconds value because investigating
+		// D-11's own text found no instruction to repurpose it (see
+		// ClaimStaleness's own doc comment) — this env var and the chart
+		// value behind it are now genuinely inert, left for a later change to
+		// deprecate.
 		ClaimStaleness: envSeconds("CLAIM_STALENESS_SECONDS"),
 		// Both OFF by default and independent: autoclose with autodelete off —
 		// a lane that tidies itself and keeps its record — is the common
@@ -489,9 +576,33 @@ func main() {
 		// channel-ops poll (503) instead of answering from an OpQueue the
 		// leader-gated reconciler never populated on this process.
 		ReplicaIdentity: replicaIdentity,
+		// async-command-bus (task 5.1): every accept handler's Submit side,
+		// and HandleConvTask below is the "conv" queue's own consumer.Pool
+		// Handler.
+		Bus: bus,
 	}
 	if err := mgr.Add(api); err != nil {
 		setupLog.Error(err, "http api")
+		os.Exit(1)
+	}
+
+	// The "conv" queue's consumer.Pool (async-command-bus task 5.1-5.3/5.5/
+	// 5.6): runs on EVERY replica, never gated on the leader-election Lease
+	// the chat/signal reconcilers still use — that is the whole point of
+	// moving this work off a leader-only path. Concurrency is the one knob
+	// commandBusConsumerConcurrency already resolves for every pool this
+	// process runs (cmd/manager/commandbus.go, task 4.2's own wiring,
+	// unused until now).
+	convPool, err := consumer.New(consumer.Config{
+		Bus: bus, Queue: httpapi.ConvQueue, Handler: api.HandleConvTask,
+		Concurrency: commandBusConsumerConcurrency(),
+	})
+	if err != nil {
+		setupLog.Error(err, "conv task consumer")
+		os.Exit(1)
+	}
+	if err := mgr.Add(manager.RunnableFunc(convPool.Run)); err != nil {
+		setupLog.Error(err, "conv task consumer")
 		os.Exit(1)
 	}
 

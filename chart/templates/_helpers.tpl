@@ -294,6 +294,141 @@ interactive one. */ -}}
 {{- end -}}
 {{- end -}}
 
+{{- /* THE COMMAND BUS BACKEND (design async-command-bus D-1/D-13).
+
+Independent of `agentops.stateBackend` above — an install may run the
+`kube` state store with the `nats` command bus, or the reverse. `nats` is
+the default, matching the manager's own `COMMANDBUS_BACKEND` default
+(cmd/manager/commandbus.go: unset resolves to `memory` there ONLY because
+a direct run outside this chart has no bundle to point at — the chart
+always states its choice explicitly, so a rendered install is never
+silently "unset"). */ -}}
+{{- define "agentops.commandBusBackend" -}}
+{{- (.Values.commandBus | default dict).backend | default "nats" -}}
+{{- end -}}
+
+{{- /* WHETHER THE COMMAND BUS'S OWN `nats` BUNDLE RENDERS, as opposed to an
+external `commandBus.nats.url`.
+
+`false` outright when the backend is not `nats` — `memory` renders no
+bundle and needs no URL. Otherwise:
+
+  - `commandBus.nats.enabled` HAND-SET (hasKey) wins outright, in either
+    direction — this is what lets `agentops.commandBusGuard` catch an
+    explicit contradiction.
+  - Left unset, the bundle renders exactly when no `commandBus.nats.url`
+    is given — the default D-13 names ("the default renders a bundle"),
+    with a URL as the opt-out an adopter states by setting ONE value
+    rather than two.
+*/ -}}
+{{- define "agentops.commandBusNatsBundleEnabled" -}}
+{{- $backend := include "agentops.commandBusBackend" . -}}
+{{- $nats := (.Values.commandBus | default dict).nats | default dict -}}
+{{- $urlSet := ne ($nats.url | default "") "" -}}
+{{- if ne $backend "nats" -}}
+{{- "false" -}}
+{{- else if hasKey $nats "enabled" -}}
+{{- if $nats.enabled -}}true{{- else -}}false{{- end -}}
+{{- else if eq (include "agentops.commandBusNatsShared" .) "true" -}}
+{{- "false" -}}
+{{- else -}}
+{{- if $urlSet -}}false{{- else -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* THE DEFAULT: THE COMMAND BUS SHARES THE STATE STORE'S NATS. No
+second server, no second set of volumes, no value to set. True exactly when
+the backend is `nats`, nothing was hand-set (`commandBus.nats.enabled`
+absent, `commandBus.nats.url` empty) and the state store's own `nats` bundle
+renders. The two keep independent bucket scopes on the one server (design
+D-1), and the manager reaches it with the state store's own connection facts.
+Setting `commandBus.nats.enabled: true` opts into a dedicated bundle,
+`commandBus.nats.url` into an external server. */ -}}
+{{- define "agentops.commandBusNatsShared" -}}
+{{- $nats := (.Values.commandBus | default dict).nats | default dict -}}
+{{- if and (eq (include "agentops.commandBusBackend" .) "nats") (not (hasKey $nats "enabled")) (eq ($nats.url | default "") "") (eq (include "agentops.stateBackend" .) "nats") -}}
+{{- "true" -}}
+{{- else -}}
+{{- "false" -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* THE SECRET THE MANAGER READS THE COMMAND BUS CREDENTIAL FROM: the state
+store's own when shared, the command bus's otherwise. */ -}}
+{{- define "agentops.commandBusCredentialSecret" -}}
+{{- if eq (include "agentops.commandBusNatsShared" .) "true" -}}
+{{- include "nats.credentialSecretName" (dict "nats" .Values.nats) -}}
+{{- else -}}
+{{- include "commandbus.credentialSecretName" (dict "commandbus" .Values.commandBus.nats) -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* THE COMMAND BUS CONNECTION URL the manager is wired with
+(templates/deployment.yaml's own COMMANDBUS_NATS_URL) — the rendered
+bundle's client Service when it renders, else the explicit
+`commandBus.nats.url` the guard has already confirmed is the only other
+option. */ -}}
+{{- define "agentops.commandBusNatsURL" -}}
+{{- if eq (include "agentops.commandBusNatsShared" .) "true" -}}
+{{- printf "nats://agentops-nats-client.%s.svc:4222" .Release.Namespace -}}
+{{- else if eq (include "agentops.commandBusNatsBundleEnabled" .) "true" -}}
+{{- printf "nats://agentops-commandbus-client.%s.svc:4222" .Release.Namespace -}}
+{{- else -}}
+{{- ((.Values.commandBus | default dict).nats | default dict).url | default "" -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* THE COMMAND BUS GUARD (design D-13). Fails the render, naming the
+exact value, on:
+
+  (a) `commandBus.backend` neither `memory` nor `nats`.
+  (b) backend `nats` with BOTH a URL and the bundle resolving enabled —
+      "exactly one of a rendered bundle or a URL".
+  (c) backend `nats` with NEITHER a URL nor the bundle resolving enabled —
+      the same "exactly one" requirement, from the other side.
+  (d) backend `nats` with a URL set and no credential of its own
+      (`commandBus.nats.auth.user`/`.password`/`.existingSecret` all
+      empty) — "a URL needs its own credential".
+  (e) backend `memory` with `.Values.replicas` above 1 — mirrors the
+      manager's OWN runtime refusal of the identical contradiction
+      (cmd/manager/commandbus.go's `commandBusBackendFromEnv`), as a
+      faster, cluster-less failure: `helm template`/`--dry-run` catches it
+      before a pod ever crash-loops. Two different failure points by
+      design (D-13 does not have the chart call the manager, or the
+      reverse), so the wording is this chart's own, not imported.
+
+IT READS NO CLUSTER, so it protects a GitOps render exactly as it protects
+an interactive one — same posture as `agentops.stateStoreGuard` above. */ -}}
+{{- define "agentops.commandBusGuard" -}}
+{{- $backend := include "agentops.commandBusBackend" . -}}
+{{- if not (has $backend (list "memory" "nats")) -}}
+{{- fail (printf "commandBus.backend=%q is not a known command bus backend (known: memory, nats)" $backend) -}}
+{{- end -}}
+{{- if eq $backend "memory" -}}
+{{- $replicas := int (.Values.replicas | default 1) -}}
+{{- if gt $replicas 1 -}}
+{{- fail (printf "commandBus.backend=memory is refused with replicas=%d: the memory backend keeps its tasks in one process's heap, invisible to every other replica. Set commandBus.backend to nats for a multi-replica install, or replicas to 1." $replicas) -}}
+{{- end -}}
+{{- else -}}
+{{- $nats := (.Values.commandBus | default dict).nats | default dict -}}
+{{- $url := $nats.url | default "" -}}
+{{- $urlSet := ne $url "" -}}
+{{- $bundleEnabled := eq (include "agentops.commandBusNatsBundleEnabled" .) "true" -}}
+{{- if and $urlSet $bundleEnabled -}}
+{{- fail (printf "commandBus.backend=nats needs exactly one of a rendered bundle or commandBus.nats.url: both commandBus.nats.url=%q and the bundle (commandBus.nats.enabled=true) are set. Set commandBus.nats.enabled: false to use the URL, or clear commandBus.nats.url to use the bundle." $url) -}}
+{{- end -}}
+{{- if and (not $urlSet) (not $bundleEnabled) (ne (include "agentops.commandBusNatsShared" .) "true") -}}
+{{- fail "commandBus.backend=nats needs exactly one of a rendered bundle or commandBus.nats.url: commandBus.nats.enabled=false and commandBus.nats.url is empty, so neither is set. Set one of them." -}}
+{{- end -}}
+{{- if $urlSet -}}
+{{- $auth := $nats.auth | default dict -}}
+{{- if not (or $auth.user $auth.password $auth.existingSecret) -}}
+{{- fail (printf "commandBus.nats.url=%q needs its own credential: set commandBus.nats.auth.user and .password, or commandBus.nats.auth.existingSecret." $url) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- /* THE DEFAULT-RUNTIME GUARD.
 
 `default` is the name a Pipeline declaring no `runtimeRef` resolves to. WHERE

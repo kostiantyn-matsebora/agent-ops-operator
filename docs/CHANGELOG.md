@@ -74,6 +74,35 @@ for the source and the reference material beside this file.
   credential guarding `/state/*` for a caller that is not an adapter —
   today, housekeeping. Generated the same way as `adapterAuth` and
   `controlPlaneAuth`, and refused at render if it equals either.
+- A new command bus, `platform/manager/internal/commandbus/`, independent of
+  the state store: accepts work durably, runs it later on any replica, and
+  records what became of it. Two backends, `nats` and `memory`, pass one
+  conformance suite and bench.
+- A new `commandBus.backend` values key (default `nats`). By default the
+  bus shares the state store's NATS server and credential, so nothing is
+  added or configured. `commandBus.nats.enabled: true` renders a dedicated
+  three-server bundle (`commandBus.nats.*`) and `commandBus.nats.url` points
+  at an external one, each independent of `stateStore.backend`. `memory` is for
+  tests and local development, refused above one manager replica.
+- A new read-only surface: `GET /state/tasks` (per-queue statistics),
+  `GET /state/tasks/{id}`, `GET /state/tasks/stream` and
+  `GET /state/dead-letters`, on the existing `/state/*` token scheme.
+- Every channel adapter now takes an outbound op in three steps: a read that
+  changes nothing, an acknowledgement that hands it over, and a report. See
+  the breaking change below. The channel operations endpoints are
+  `GET /channel/ops`, `POST /channel/ops/{id}/ack` and
+  `POST /channel/ops/{id}/done`, and any manager replica answers each. They
+  used to proxy to the leader.
+- A new endpoint, `GET /channel/ops/stream`, for receipt-only adapters (the
+  console): the ops pushed over one server-sent-events connection in queue
+  order. It only reads. After a reconnect it pushes again exactly what was
+  never acknowledged, with no cursor. The console consumes it, so a dropped
+  connection or a rollout no longer leaves it stale until a refresh.
+- Two chart values for the channel delivery contract:
+  `commandBus.channelReceiptAdapters` (default `[console]`) and
+  `commandBus.deliveryTtl.{stable,ephemeral,topic,deleteConversation}`
+  (default 10m, 2m, 5m and 5m). They render `CHANNEL_RECEIPT_ADAPTERS` and
+  `CHANNEL_DELIVERY_TTL_*`.
 
 ### Changed
 
@@ -146,6 +175,35 @@ for the source and the reference material beside this file.
   A route granting none sees none. Per-call enforcement is unchanged.
 - The `aops` tool descriptions say which tools are moves and which are reads.
 - A cascading close closes descendants before the ancestor.
+- **BREAKING (semantic): `close`, `exit`, `reopen`, `delete`, `reset-context`
+  and `escalate` now mean accepted, not performed.** `POST
+  /channel/conversations/{name}/reset-context` moves from `200` to `202`.
+  Every other converted endpoint keeps its existing status and gains
+  `invocationId`/`taskIds` in its body. A caller that needs the outcome
+  reads `/state/tasks/{id}`.
+- `delete` now cascades deepest-first as one task per conversation, instead
+  of one request walking the whole subtree inline.
+- A reopen naming a conversation with a missing profile, and a
+  `/coordinate/close` outside its caller's widened bound, used to answer
+  `409`/`403` immediately. Both now accept and the task dies with
+  `precondition_failed` or `forbidden`.
+- **BREAKING (channel adapters): a channel adapter reads, acknowledges, then
+  reports.** `GET /channel/ops` no longer takes the op. `POST
+  /channel/ops/{id}/ack` hands it over, after which the manager never sends it
+  again and a delivery TTL starts. `POST /channel/ops/{id}/done` reports done,
+  or failed with an `error`. An op with no report by its TTL is failed by the
+  manager, and a failure is final. The `reclaimAfterSeconds` field and the
+  claim window are removed. The channel adapter specification moves to 2.0.0.
+- A channel op's failure is final, not retried by the manager. What is still
+  owed is derived again from the conversation after a cool-off.
+- Every command-bus queue is an append-only log. A message that succeeded is
+  removed, and one never consumed is kept 7 days. Dead letters are kept in a
+  log of their own (7 days, 10000 records).
+- `status.threads[].claim` is no longer written. The command bus's own
+  dedup makes the reconciler-level dispatch claim unnecessary. A value a
+  pre-upgrade record still carries is ignored, never trusted.
+- `POST /signal/inbound` is unchanged by this release — it still validates,
+  stores and replies synchronously, despite the command bus's arrival.
 
 ### Fixed
 
@@ -194,9 +252,10 @@ Secret and no explicit value fails the render. The error names the Secret and `n
 
 The new manager starts and finds the empty `nats` buckets and the `kube`
 records. The replica that wins the leader lease imports them and reports
-ready once the import finishes. Verify through the console or `/state/conversations` before trusting it, then
-delete the old custom resources yourself once you have — the import never
-does:
+ready once the import finishes.
+
+Verify through the console or `/state/conversations` before trusting it.
+Then delete the old custom resources yourself — the import never does:
 
 ```sh
 kubectl -n agent-ops delete conversations,conversationinputs,signals --all
@@ -214,6 +273,33 @@ on reading conversations through the Kubernetes API.
 anything written to `nats` since the first upgrade — every conversation
 opened or continued after it is lost. Snapshot (`nats stream snapshot`)
 first if that matters.
+
+**BREAKING: `close`, `exit`, `reopen`, `delete`, `reset-context` and
+`escalate` now mean accepted, not performed.** A caller that read a `200`
+or a `202` body as confirmation the work finished must instead read
+`/state/tasks/{id}` for the outcome, using the `taskIds` the same response
+now also carries.
+
+**BREAKING: upgrade every channel adapter image together with the manager.** The wire contract of `/channel/ops` changed. An adapter that never calls the acknowledgement is offered the same op forever and delivers nothing.
+
+The shipped `channels/telegram` and the console move with this release. A hand-built adapter follows the [channel adapter specification](contracts/channel-adapter.md), 2.0.0.
+
+With the state store on `nats` (the default), the command bus shares its three-server bundle and credential, adding nothing to render. With the `kube` store it renders its own three-server bundle, three more pods and volumes.
+
+Pin `commandBus.backend: memory` on a single manager replica to avoid them, at the cost of losing every accepted task across a restart.
+
+**Rollback** is the same shape as the state store's own: set
+`commandBus.backend: memory` on one replica, or roll back the chart.
+Accepted but unprocessed tasks are lost either way.
+
+The queue log starts empty on first install. Work owed at the moment of
+upgrade is re-derived by the reconciler, exactly as after any restart
+today.
+
+An install that ran a pre-release build of the command bus holds KV buckets
+named `tasks`, `ids` and `dead` (under the bus's scope prefix) on its NATS
+server. The release reads none of them, and they may be deleted. Its streams are
+`cmdbus_log` and `cmdbus_dead`.
 
 ## [18.0.1] — 2026-10-25
 

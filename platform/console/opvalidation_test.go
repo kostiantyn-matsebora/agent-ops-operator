@@ -45,64 +45,33 @@ func TestCloseTopicWithoutThreadIDErrors(t *testing.T) {
 // TestDeleteConversationLeavesAReadableArchivedTranscript (bulkdelete_test.go)
 // already pin the threadId-present path for both ops.
 
-// B5: ensure-topic always answers `console-<uid>`, resolving a cache miss
-// through the watch client rather than falling back to a name-based id.
+// The manager assigns the console thread's id when it enqueues ensure-topic and
+// nothing travels back: the console uses the id it is given, and an ensure-topic
+// that carries none is an error it logs rather than an id it invents.
 
-func TestEnsureTopicResolvesUIDOnACacheMiss(t *testing.T) {
+func TestEnsureTopicUsesTheThreadIDTheManagerAssigned(t *testing.T) {
 	f := newFakeManager(t)
-	cache := staticCache() // empty: the conversation is NOT in the watch cache yet
-	src := cache.src.(*fakeSource)
-	src.gets = map[string]*Object{
-		"conversations/late-arrival": obj("conversations", "late-arrival", "5", "{}", "{}"),
-	}
 	tr := NewTranscripts()
-	adapter := NewAdapter(NewManager(f.server.URL, "token"), cache, tr, "console")
+	adapter := NewAdapter(NewManager(f.server.URL, "token"), staticCache(), tr, "console")
+	tid := "console-uid-late-arrival"
 
 	threadID, opErr := adapter.execute(context.Background(), &Op{
-		ID: "topic:late-arrival:console", Kind: "ensure-topic", Conversation: "late-arrival",
+		ID: "topic:late-arrival:console", Kind: "ensure-topic", Conversation: "late-arrival", ThreadID: &tid,
 	})
-	if opErr != "" {
-		t.Fatalf("a resolvable cache miss must not error: %s", opErr)
-	}
-	if want := "console-uid-late-arrival"; threadID != want {
-		t.Fatalf("threadID = %q, want %q", threadID, want)
-	}
-	// The resolved object converges into the cache, so a second ensure-topic
-	// for the same conversation does not need another live fetch.
-	if cache.Get("conversations", "late-arrival") == nil {
-		t.Fatal("a live-fetched object must be applied to the cache")
+	if opErr != "" || threadID != tid {
+		t.Fatalf("threadID = %q (%q), want the assigned %q", threadID, opErr, tid)
 	}
 }
 
-func TestEnsureTopicErrorsWhenTheUIDCannotBeResolved(t *testing.T) {
+func TestEnsureTopicWithoutAnAssignedThreadIDErrors(t *testing.T) {
 	f := newFakeManager(t)
-	cache := staticCache() // empty, and the fake source answers every Get with 404
-	tr := NewTranscripts()
-	adapter := NewAdapter(NewManager(f.server.URL, "token"), cache, tr, "console")
-
-	threadID, opErr := adapter.execute(context.Background(), &Op{
-		ID: "topic:gone:console", Kind: "ensure-topic", Conversation: "gone",
-	})
-	if opErr == "" {
-		t.Fatal("an unresolvable conversation must error, so the manager's redelivery retries")
-	}
-	if threadID != "" {
-		t.Fatalf("an errored ensure-topic reports no thread id: %q", threadID)
-	}
-}
-
-// The old name-based fallback must never be produced again, present or absent
-// from the cache.
-func TestEnsureTopicNeverProducesTheRetiredNameBasedID(t *testing.T) {
-	f := newFakeManager(t)
-	conv := obj("conversations", "task-xyz", "1", "{}", "{}")
-	conv.Metadata.UID = "" // a conversation the cache has seen but with no UID yet
-	adapter, _, _ := consoleUnderTest(t, f, conv)
-
-	_, opErr := adapter.execute(context.Background(), &Op{
-		ID: "topic:task-xyz:console", Kind: "ensure-topic", Conversation: "task-xyz",
-	})
-	if opErr == "" {
-		t.Fatal("a UID-less conversation must error rather than fall back to a name-based id")
+	adapter, _, _ := consoleUnderTest(t, f)
+	for _, tid := range []*string{nil, new(string)} {
+		threadID, opErr := adapter.execute(context.Background(), &Op{
+			ID: "topic:gone:console", Kind: "ensure-topic", Conversation: "gone", ThreadID: tid,
+		})
+		if opErr == "" || threadID != "" {
+			t.Fatalf("an ensure-topic with no thread id must error and report none: %q %q", threadID, opErr)
+		}
 	}
 }

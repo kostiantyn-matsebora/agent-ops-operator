@@ -28,7 +28,7 @@ func coordFixtureIntercepting(t *testing.T, funcs interceptor.Funcs, objs ...cli
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(objs...).
 		WithInterceptorFuncs(funcs).Build()
-	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 	return &Router{Client: c, Reader: c, Conversations: newTestStore(c), Runs: newTestRuns(c), Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}, c
 }
 
@@ -607,6 +607,36 @@ func TestEscalateMemberBubblesToItsParentInsteadOfOpeningAThread(t *testing.T) {
 	}
 	if gotRoot.Status.EscalatedAt != nil {
 		t.Fatal("a bubble must never open a thread on the parent")
+	}
+}
+
+// async-command-bus design D-8: the member-escalate append id used to embed
+// time.Now().UnixNano(), so a REDELIVERY of the same escalate call — a
+// retried /work/done report, or a re-claimed commandbus task once this
+// path is enqueued — minted a fresh id every time and the dedup check in
+// appendInputIdempotent never matched anything, landing the same result on
+// the parent twice. Escalate twice in a row, before the parent has
+// processed (and pruned) the first append, and the second must be a no-op.
+func TestEscalateMemberRedeliveryAppendsTheResultOnlyOnce(t *testing.T) {
+	root := coordinatorRoot("root-1", "co-a")
+	member := causedMember("member-1", root.Name, "worker")
+	r, c := coordFixture(t, testCoordinator("co-a"), root, member)
+
+	if err := r.Escalate(context.Background(), recOf(t, r.Conversations, member.Name), "stuck"); err != nil {
+		t.Fatal(err)
+	}
+	// The redelivery: the member is already Closed (closeWithCascade no-ops
+	// on it), but the append must still be attempted and must still dedup.
+	if err := r.Escalate(context.Background(), recOf(t, r.Conversations, member.Name), "stuck"); err != nil {
+		t.Fatal(err)
+	}
+	var gotRoot agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: root.Name}, &gotRoot); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotRoot.Spec.Inputs) != 1 {
+		t.Fatalf("a redelivered escalate must append its result once, got %d inputs: %+v",
+			len(gotRoot.Spec.Inputs), gotRoot.Spec.Inputs)
 	}
 }
 

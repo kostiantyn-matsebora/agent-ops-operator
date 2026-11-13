@@ -1,13 +1,15 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 
 	"k8s.io/apimachinery/pkg/types"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/convtask"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
@@ -31,66 +33,50 @@ import (
 // A MANAGER VERB whose reach is the BINDING, exactly as reopen and delete are:
 // the caller is authorised against the channels the conversation is bound to,
 // read off the conversation and never off the request.
+//
+// async-command-bus (design D-9): the binding check above is the one cheap
+// read accept keeps — everything this verb used to do synchronously (the
+// patch, the announcement) now runs inside the "conv" queue's task
+// (convtasks.go's taskResetContext). BREAKING: this reply used to be `200`;
+// it is `202` now, the same accepted-not-performed semantics reopen and
+// delete already carried (task 5.9: docs/contracts/channel-adapter.md names
+// no status code for this endpoint specifically, so this is additive, not a
+// spec conflict — see this change's hand-back report).
 func (s *Server) handleContextReset(w http.ResponseWriter, r *http.Request) {
 	conv, ok := s.reachConversation(w, r)
 	if !ok {
 		return
 	}
-
-	had := conv.ContextID()
-	if had == "" {
-		// Nothing to clear. Reported as success rather than as an error: the
-		// caller wanted a conversation with no stale handle, and that is what
-		// they have.
-		writeJSON(w, 200, map[string]any{
-			"ok": true, "cleared": false,
-			"detail": "conversation carries no context handle; nothing to reset",
-		})
-		return
-	}
-
-	err := state.Patch(r.Context(), s.Conversations, conv, func(c *state.ConversationRecord) {
-		c.RuntimeContextID = ""
-		// The retired spelling is cleared too. Leaving it would let the dual-read
-		// that exists for upgrades resurrect the handle this call just removed.
-		c.SessionID = ""
-		c.ContextCheckpoint = nil
-		c.SetCondition(state.Condition{
-			Type:   controller.ConditionContextContinuity,
-			Status: state.ConditionFalse,
-			Reason: "ResetByOperator",
-			Message: "an operator reset this conversation's context; its previous memory is " +
-				"gone and the next run starts fresh",
-		})
+	resp, err := s.acceptAndEnqueue(r.Context(), commandbus.SubmitRequest{
+		Queue:     ConvQueue,
+		CommandID: commandbus.CommandID("reset-context:" + conv.Name),
+		Key:       commandbus.Key(conv.Name),
+		Payload:   convtask.Payload{Verb: convtask.VerbResetContext, Conversation: conv.Name}.Encode(),
 	})
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-
-	// SAY SO, on every bound thread. A conversation that silently resumed
-	// without its memory is the failure this verb exists to make impossible,
-	// so the announcement is part of the verb rather than the caller's job.
-	s.announceContextReset(r, conv)
-
-	writeJSON(w, 200, map[string]any{"ok": true, "cleared": true})
+	writeJSON(w, 202, map[string]any{"ok": true, "invocationId": resp.InvocationID, "taskIds": resp.TaskIDs})
 }
 
-// announceContextReset posts a notice to each bound thread.
+// announceContextReset posts a notice to each bound thread — called from
+// taskResetContext (convtasks.go), after the patch it announces has
+// actually landed.
 //
 // A TYPED message, never rendered text: the manager composes meaning and the
 // adapter composes presentation, so no transport dialect appears here.
-func (s *Server) announceContextReset(r *http.Request, conv *state.ConversationRecord) {
+func (s *Server) announceContextReset(ctx context.Context, conv *state.ConversationRecord) {
 	if s.Ops == nil {
 		return
 	}
 	for _, ref := range conv.ChannelRefs {
 		var ch agentopsv1alpha1.Channel
 		key := types.NamespacedName{Namespace: s.Namespace, Name: ref}
-		if err := s.Reader.Get(r.Context(), key, &ch); err != nil {
+		if err := s.Reader.Get(ctx, key, &ch); err != nil {
 			continue // channel gone: nobody left to tell
 		}
-		s.Ops.EnqueueMessage(r.Context(), &ch, conv, conv.ThreadFor(ref), chat.Warn(
+		s.Ops.EnqueueMessage(ctx, &ch, conv, conv.ThreadFor(ref), chat.Warn(
 			"This conversation's stored context was reset by an operator. "+
 				"Its previous memory is gone, and the next message starts fresh."))
 	}

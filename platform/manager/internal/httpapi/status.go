@@ -148,22 +148,25 @@ func (s *Server) leaderIdentity(ctx context.Context) string {
 }
 
 // isLeader reports whether THIS replica currently holds the leader-election
-// Lease, for /channel/ops's durable-chat-ops-broker gate.
+// Lease, for leaderProxyMiddleware's own gate on every accept-step endpoint
+// still routed to the leader (async-command-bus D-11 retired the one
+// /channel/ops used to need this for — OpQueue is bus-backed now, reachable
+// correctly from any replica).
 //
 // ReplicaIdentity unset disables the check entirely (every existing test, and
 // any Server wired with no leader election behind it) — that Server answers
 // exactly as it always has. Once set, an UNREADABLE lease answers false, the
 // same conservative direction leaderIdentity's own "best effort" takes:
-// a replica that cannot tell whether it is the leader cannot safely claim an
-// op on one either, and the adapter contract already tolerates retrying a 503
-// immediately.
+// a replica that cannot tell whether it is the leader cannot safely serve a
+// leader-only endpoint either, and the proxy/503-and-retry path already
+// tolerates that.
 //
 // A PREFIX match, never a bare equality: controller-runtime's own
 // leaderelection.NewResourceLock mints the Lease's HolderIdentity as
 // os.Hostname() + "_" + a per-process uuid, while ReplicaIdentity is the bare
 // hostname (main.go, deliberately — the claims this process writes need no
 // relation to that uuid). An exact-equality check here never matched, even
-// for the real leader, so every /channel/ops poll 503'd forever: measured
+// for the real leader, so every leader-gated poll 503'd forever: measured
 // live in the system pack, where ensure-topic/send never completed for any
 // channel. Hostnames are unique per pod, so a prefix match is exact enough.
 func (s *Server) isLeader(ctx context.Context) bool {
@@ -182,9 +185,10 @@ const managerPodLabel = "app.kubernetes.io/name"
 const managerPodLabelValue = "agentops-manager"
 
 // leaderProxyTarget resolves "host:port" for the pod currently holding the
-// leader-election Lease, so /channel/ops can reverse-proxy a non-leader's
-// poll there instead of rejecting it. Empty when the leader is unknown, or
-// its pod cannot be found with an IP yet.
+// leader-election Lease, so leaderProxyMiddleware can reverse-proxy a
+// non-leader's request to one of the endpoints still routed to the leader,
+// instead of rejecting it. Empty when the leader is unknown, or its pod
+// cannot be found with an IP yet.
 //
 // Every replica runs the identical image on the identical listen address, so
 // the leader's port is simply this process's own (Server.Addr) — only the

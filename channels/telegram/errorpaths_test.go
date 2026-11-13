@@ -79,7 +79,7 @@ func TestOffsetGetReturnsBadGatewayOnAFailedRead(t *testing.T) {
 	}
 }
 
-// opAndFailingComplete returns a Manager whose NextOp succeeds once with op
+// opAndFailingComplete returns a Manager whose NextOp and AckOp succeed with op
 // and whose CompleteOp always fails -- exercises pollOnce's two "complete
 // op" error branches (the ordinary path and the redelivered one), neither
 // reachable from opsLoop's own tests since the loop never returns.
@@ -89,6 +89,10 @@ func opAndFailingComplete(t *testing.T, op Op) *Manager {
 		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/channel/ops") {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(op)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/ack") {
+			_, _ = w.Write([]byte(`{"ok":true,"deliveryTtlSeconds":60}`))
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
@@ -200,6 +204,7 @@ func TestPollOnceDoesNotSleepOnANonLeaderRejection(t *testing.T) {
 }
 
 func TestPollOnceLogsAndSwallowsAFailedCompleteOp(t *testing.T) {
+	fastReports(t)
 	op := Op{ID: "op-2", Channel: "not-served", Kind: "send"}
 	a := &adapter{
 		mgr: opAndFailingComplete(t, op), pace: newPacer(), completed: newCompletedOps(16),
@@ -211,6 +216,7 @@ func TestPollOnceLogsAndSwallowsAFailedCompleteOp(t *testing.T) {
 }
 
 func TestPollOnceLogsAndSwallowsAFailedCompleteOnARedeliveredOp(t *testing.T) {
+	fastReports(t)
 	op := Op{ID: "op-1", Channel: "not-served", Kind: "send"}
 	a := &adapter{
 		mgr: opAndFailingComplete(t, op), pace: newPacer(), completed: newCompletedOps(16),

@@ -175,6 +175,7 @@ checkouts, and is off by default because agents re-clone instead.
 | `persistence.context.accessModes` | `[]` — the chart picks | `ReadWriteMany`, or `ReadWriteOnce` in demo mode where `local-path` refuses RWX. Set it yourself and your value wins |
 | `persistence.context.storageClassName` | `""` | empty uses the cluster's default provisioner. To bind a volume you made yourself, see [pointing a volume at existing storage](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#pointing-a-volume-at-storage-the-chart-did-not-create) |
 | `nats.persistence.storageClassName` | `""` | the storage class of the state servers' volumes. Empty uses the cluster's default provisioner. Fixed once the claims exist |
+| `commandBus.nats.persistence.storageClassName` | `""` | the same, only when you opt into a dedicated command bus server. By default the bus shares the state servers' volumes |
 
 Set the access mode before you install. A claim cannot be edited once it
 exists, so changing your mind means deleting it and starting again.
@@ -260,10 +261,34 @@ An existing install upgrading from `kube` imports its records into `nats` on
 the manager's first start. The steps are in the
 [changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
 
-`helm uninstall` removes the workloads but leaves the CRDs, the context claim
-and — under the default `nats` backend — the state server's three volumes, so
-reinstalling finds your data where it was. Under the `kube` backend it also
-leaves every Conversation custom resource.
+**The same release adds the command bus.** On the default `nats` state store it shares that server and adds nothing to run.
+
+Under the `kube` store it renders a clustered server of its own, three more pods and three more volumes. See [Accept work durably]({{ '/guides/command-bus/' | relative_url }}).
+
+**Upgrade your channel adapter images with the manager.** The wire contract of
+`/channel/ops` changed: an adapter now acknowledges each op it reads. The
+shipped Telegram adapter and the console move with the release, and a
+hand-built adapter must follow the
+[channel adapter specification](contracts/channel-adapter.md).
+
+`close`, `exit`, `reopen`, `delete`, `reset-context` and `escalate` now
+accept and run later instead of performing the work inline. Read
+[the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
+before you upgrade a caller that reads a `200`/`202` as confirmation the
+work finished.
+
+`helm uninstall` removes the workloads but leaves the CRDs and the context
+claim. Under the default `nats` backends it also leaves both the state
+store's server volumes, and the command bus's where it has a server of its own, so reinstalling finds your
+data where it was.
+
+A restarted command bus starts with empty queue logs either way. They are
+declared bounded and lossy telemetry, never the durable record. The buckets of
+a pre-release build of the bus (`tasks`, `ids`, `dead`) are inert and may be
+deleted.
+
+Under the `kube` state-store backend it also leaves every Conversation
+custom resource.
 
 Helm never deletes CRDs that came from a chart's `crds/` directory, so this is
 not something the chart decides. Removing them means deleting them yourself,

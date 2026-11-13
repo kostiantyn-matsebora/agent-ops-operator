@@ -84,6 +84,8 @@ groups:
         url: /guides/agent-runtime/
       - title: "Coordinate agents"
         url: /guides/coordinate-agents/
+      - title: "Accept work durably"
+        url: /guides/command-bus/
   - title: Specifications
     entries:
       - title: AgentRuntime

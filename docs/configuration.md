@@ -671,6 +671,67 @@ Every value here, and the rest the dependency takes, is in
 [`chart/charts/nats/values.yaml`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/chart/charts/nats/values.yaml)
 — this section names only what you are likely to set.
 
+### Command bus
+
+Where the manager accepts work durably and runs it later, on any replica —
+independent of the state store above.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `commandBus.backend` | `nats` | `nats` keeps the queue logs on a clustered server. `memory` keeps them in one process's heap — tests and local development only, refused above one `replicas` |
+| `commandBus.consumerConcurrency` | `4` | consumers per queue, per replica |
+| `commandBus.channelReceiptAdapters` | `[console]` | the channel adapters whose acknowledgement is only their receipt of an op: no delivery TTL, no report, and the manager deletes the op at the acknowledgement. Renders `CHANNEL_RECEIPT_ADAPTERS`. An empty list means none, so every adapter must report |
+| `commandBus.deliveryTtl.stable` | `10m` | how long an adapter has, from acknowledging a reply or an input card, to report it done. With no report the manager fails it, final. Renders `CHANNEL_DELIVERY_TTL_STABLE` |
+| `commandBus.deliveryTtl.ephemeral` | `2m` | the same for an ack or a notice. `CHANNEL_DELIVERY_TTL_EPHEMERAL` |
+| `commandBus.deliveryTtl.topic` | `5m` | the same for `ensure-topic` and `close-topic`. `CHANNEL_DELIVERY_TTL_TOPIC` |
+| `commandBus.deliveryTtl.deleteConversation` | `5m` | the same for `delete-conversation`. `CHANNEL_DELIVERY_TTL_DELETE_CONVERSATION` |
+
+**Raise a delivery TTL only if a surface is slow.** An adapter spends its TTL retrying against the surface, so a longer one lets a rate-limited surface be ridden out for longer.
+
+It also holds a conversation's later messages longer behind a message the adapter lost.
+
+**Other per-queue tuning has no value here.** Attempts, backoff, TTL, the dedup
+window and the park cool-off are compiled-in starting values, one set per
+queue, with no chart or environment override yet.
+
+#### The command bus's NATS
+
+**By default, with the state store on `nats`, the command bus uses its NATS server and credential, and you set nothing.** Its buckets are separate from the state store's, on the same server.
+
+With the `kube` state store there is no server to share, so the default renders the dedicated bundle.
+
+The keys below only matter if you opt into a dedicated server (`commandBus.nats.enabled: true`) or an external one (`commandBus.nats.url`).
+
+The dedicated bundle comes from `chart/charts/commandbus/values.yaml` — not a second copy of the state store's `nats` bundle above, since every object in that bundle is named by a literal no second instance could share.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `commandBus.nats.enabled` | `null` | unset shares the state store's NATS. `true` renders a dedicated bundle |
+| `commandBus.nats.url` | `""` | an external server instead of the shared or dedicated one. Mutually exclusive with a dedicated bundle |
+| `commandBus.nats.replicas` | `3` | servers in the cluster. Chart-time only — the manager always opens every bucket at its own compiled-in replica count, regardless of this value |
+| `commandBus.nats.persistence.size` | `10Gi` | each server's own store directory |
+| `commandBus.nats.persistence.storageClassName` | `""` | the cluster's default provisioner |
+| `commandBus.nats.auth.user` | `""` | an explicit username |
+| `commandBus.nats.auth.password` | `""` | an explicit password. Left empty, the chart generates one |
+| `commandBus.nats.auth.existingSecret` | `""` | a Secret you already made, read before the chart generates anything |
+| `commandBus.nats.podDisruptionBudget.maxUnavailable` | `1` | servers the budget allows down at once |
+
+The credential resolves in the same order as the state store's own: an
+explicit value, then an existing Secret, then generation on install only.
+
+**The render refuses a contradiction, naming the value:**
+
+- `commandBus.backend` outside `{memory, nats}`.
+- Both a dedicated bundle and `commandBus.nats.url` set, or `enabled: false` with no URL.
+- `commandBus.nats.url` set with no credential.
+- `commandBus.backend: memory` with `replicas` above `1`.
+
+A URL needs its own credential the same way the bundle does —
+`commandBus.nats.auth.user`/`.password`, or `.existingSecret`.
+
+Every value here, and the rest the dependency takes, is in
+[`chart/charts/commandbus/values.yaml`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/chart/charts/commandbus/values.yaml).
+
 ### Capacity
 
 | Key | Default | Consequence |
@@ -678,14 +739,14 @@ Every value here, and the rest the dependency takes, is in
 | `maxActiveConversations` | `5` | how many agents hold a pod at once. Over-cap work waits in `Pending` with no pod and no thread |
 | `maxQueuedConversations` | `50` | the backlog bound. `0` queues nothing. Past it, a chat message is declined and the sender is told. A machine signal stays `Pending` and routes when the backlog drains |
 | `global.agentops.runtimeDefaults.idleTtlMinutes` | `1` | how long a finished agent keeps its pod. Raise it for expensive startup |
-| `replicas` | `2` | how many manager pods run. Safe above 1: an ensure-topic op is claimed on the Conversation CR by the current leader, never served from an in-memory queue a non-leader never populated |
+| `replicas` | `2` | how many manager pods run. Safe above 1: every channel op is bus-backed and visible to every replica, never served from an in-memory queue only the leader populated |
 | `signalConsumerConcurrency` | `4` | how many consumers route stored signals at once on the leader. Messages of one `(source, initiationId)` still run one at a time, in arrival order |
 | `signalRetryDeadline` | `1h` | how long a claimant may sit `Routing` before the leader marks it `Failed`, measured from the signal's first attempt |
 | `maxSignalsPerSource` | `200` | the cap on non-terminal `Signal`s per source. Over it the leader evicts the oldest |
 | `signalTtlRouted` | `8h` | how long a `Routed` signal is kept, from `status.completedAt` |
 | `signalTtlDropped` | `4h` | the same for `Dropped` |
 | `signalTtlFailed` | `72h` | the same for `Failed` |
-| `claimStalenessSeconds` | `90` | how long a claimed-but-undelivered thread may sit before the leader treats it as abandoned and retries. Raise it for a slower transport |
+| `claimStalenessSeconds` | `90` | **retired, kept rendering, no longer read.** Used to bound a reconciler-held dispatch claim the command bus's own dedup now makes unnecessary |
 
 ### The agent's power
 

@@ -11,7 +11,6 @@ package chat
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -759,6 +758,18 @@ func (r *Router) cascadeCloseMembers(ctx context.Context, parentName, reason str
 	return nil
 }
 
+// CloseConversationReason closes EXACTLY ONE conversation — no cascade —
+// idempotent on an already-Closed target. Exported for the command-bus
+// close cascade's own accept-time decomposition (async-command-bus design
+// D-7, internal/convtask.CloseMemberRequests): a cascade's member tasks
+// close only themselves through this method, never closeWithCascade/
+// cascadeCloseMembers — the recursion those two perform now happens once,
+// at accept time, as the ordered task list itself, rather than inside any
+// one task.
+func (r *Router) CloseConversationReason(ctx context.Context, conv *state.ConversationRecord, reason string) error {
+	return r.closeConversationReason(ctx, conv, reason)
+}
+
 // closeConversationReason is closeConversation plus a stamped CloseReason —
 // required from a coordinator's own close (conversation-close), absent from
 // an ordinary `/close`.
@@ -801,8 +812,17 @@ func (r *Router) Escalate(ctx context.Context, conv *state.ConversationRecord, m
 		if err := r.closeWithCascade(ctx, conv, message); err != nil {
 			return err
 		}
-		return r.AppendMemberResult(ctx, conv.CausedBy, conv.Name,
-			"escalate:"+conv.Name+":"+strconv.FormatInt(time.Now().UnixNano(), 36), message)
+		// STABLE, not clock-based (async-command-bus design D-8): a member
+		// escalates at most once in its lifetime — closeWithCascade above
+		// makes it inert the moment this runs — so the append id needs
+		// nothing finer than the member's own name to stay unique, and
+		// unlike time.Now().UnixNano() it is IDENTICAL on a redelivery of
+		// this same call (a retried /work/done report, a re-claimed
+		// commandbus task), which is what makes appendInputIdempotent's
+		// dedup actually dedup rather than append the result twice. The bug
+		// this replaces: the old id embedded time.Now(), so every redelivery
+		// minted a fresh id and the dedup check never matched anything.
+		return r.AppendMemberResult(ctx, conv.CausedBy, conv.Name, "escalate:"+conv.Name, message)
 	}
 	if conv.EscalatedAt != nil {
 		return nil // already escalated: no replayed digest

@@ -12,6 +12,8 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 )
 
 // mkMember creates a plain capabilityRef-shaped member: causedBy set, no
@@ -124,16 +126,30 @@ func TestCoordinateCloseWidenedBoundOverTheRealAPI(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("close sibling root: %d %s", rec.Code, rec.Body.String())
 	}
+	// async-command-bus: /coordinate/close only ACCEPTS synchronously now;
+	// the close itself runs inside the "conv" queue's own task
+	// (taskCloseCoordinated).
+	drainConvTasks(t)
 	if got := getConv(t, sibling.Name); got.Status.Phase != agentopsv1alpha1.ConversationClosed {
 		t.Fatalf("the sibling root must close, got %s", got.Status.Phase)
 	}
 
 	// Refused: the reaper's own ancestor root, even named directly.
+	//
+	// async-command-bus (design D-6/D-9): CloseCoordinated's own widened-scope
+	// check is no longer cheap enough to answer inline (closeCascadeRequests'
+	// own doc comment), so it is deferred into taskCloseCoordinated — the
+	// accept step itself cannot refuse on this, and replies 200 like any
+	// other close. The refusal now surfaces on the TASK (forbidden, terminal,
+	// never retried).
 	recOwn := postCoordinateReq(t, srv, "/coordinate/close", token,
 		map[string]any{"conversation": reaper.Name, "target": root.Name, "reason": "trying to close my own root"})
-	if recOwn.Code != 403 {
-		t.Fatalf("want 403 closing the reaper's own ancestor root, got %d %s", recOwn.Code, recOwn.Body.String())
+	if recOwn.Code != 200 {
+		t.Fatalf("close accept must still succeed synchronously, got %d %s", recOwn.Code, recOwn.Body.String())
 	}
+	ownTaskIDs := acceptedTaskIDs(t, recOwn)
+	drainConvTasks(t)
+	assertLastTaskForbidden(t, srv, ownTaskIDs)
 	if got := getConv(t, root.Name); got.Status.Phase == agentopsv1alpha1.ConversationClosed {
 		t.Fatal("the reaper must never close its own ancestor root")
 	}
@@ -141,10 +157,32 @@ func TestCoordinateCloseWidenedBoundOverTheRealAPI(t *testing.T) {
 	// Refused: a member, even one within the caller's own Coordinator's tree.
 	recMember := postCoordinateReq(t, srv, "/coordinate/close", token,
 		map[string]any{"conversation": reaper.Name, "target": siblingMember.Name, "reason": "trying to reach a member"})
-	if recMember.Code != 403 {
-		t.Fatalf("want 403 closing a member through the widened bound, got %d %s", recMember.Code, recMember.Body.String())
+	if recMember.Code != 200 {
+		t.Fatalf("close accept must still succeed synchronously, got %d %s", recMember.Code, recMember.Body.String())
 	}
+	memberTaskIDs := acceptedTaskIDs(t, recMember)
+	drainConvTasks(t)
+	assertLastTaskForbidden(t, srv, memberTaskIDs)
 	if got := getConv(t, siblingMember.Name); got.Status.Phase == agentopsv1alpha1.ConversationClosed {
 		t.Fatal("a member must never be reached by the widened bound")
+	}
+}
+
+// assertLastTaskForbidden reads back the LAST task of a close's own taskIDs
+// (closeCascadeRequests appends the top-level request last, after every
+// cascade-member task — convtask.CloseMemberRequests' own doc comment) and
+// requires it to have gone dead as commandbus.CodeForbidden — the widened-
+// scope refusal, now recorded on the task rather than in the HTTP response.
+func assertLastTaskForbidden(t *testing.T, srv *httpapi.Server, taskIDs []string) {
+	t.Helper()
+	if len(taskIDs) == 0 {
+		t.Fatal("close must enqueue at least one task")
+	}
+	task, err := srv.Bus.GetTask(context.Background(), taskIDs[len(taskIDs)-1])
+	if err != nil {
+		t.Fatalf("get close task: %v", err)
+	}
+	if task.State != commandbus.StateDead || task.Code != commandbus.CodeForbidden {
+		t.Fatalf("want a forbidden, dead task, got state=%q code=%q detail=%q", task.State, task.Code, task.Detail)
 	}
 }

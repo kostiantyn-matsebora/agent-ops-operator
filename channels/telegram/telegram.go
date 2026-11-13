@@ -68,8 +68,7 @@ type tgResponse struct {
 type retryBudgetKey struct{}
 
 // defaultRetryBudget applies when the manager advertised no reclaim interval —
-// an older manager. Deliberately well under the 5-minute ReclaimAfter that has
-// been the constant for as long as there has been one.
+// an older manager, or one that answered no delivery TTL.
 const defaultRetryBudget = 60 * time.Second
 
 // transientBackoff is spent on a call that failed with nothing TELLING us how
@@ -83,9 +82,9 @@ const transientBackoff = 2 * time.Second
 // charges its wait, its retries and its own HTTP round trip against this SAME
 // deadline, which is what makes the budget PER OPERATION rather than per call.
 //
-// THE INEQUALITY THAT MATTERS: d must stay strictly below the manager's
-// reclaim interval. Overrun it and the manager hands the op to a second
-// claimant while we are still working on it, and the message posts twice.
+// d must stay below the op's delivery TTL, which the manager's acknowledgement
+// states: with no report by then the manager fails the op, so the retries stop
+// early enough to still report FAILED ourselves (Op.RetryBudget).
 func WithRetryBudget(ctx context.Context, d time.Duration) context.Context {
 	return context.WithValue(ctx, retryBudgetKey{}, time.Now().Add(d))
 }

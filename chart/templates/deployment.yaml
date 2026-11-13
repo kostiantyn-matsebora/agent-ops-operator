@@ -1,4 +1,5 @@
 {{- include "agentops.stateStoreGuard" . }}
+{{- include "agentops.commandBusGuard" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -83,6 +84,58 @@ spec:
                   name: {{ include "nats.credentialSecretName" (dict "nats" .Values.nats) }}
                   key: password
             {{- end }}
+            # async-command-bus D-1: an INDEPENDENT selector from
+            # STATE_BACKEND above — the guard above has already refused a
+            # backend this manager does not carry, and `memory` above one
+            # replica.
+            - name: COMMANDBUS_BACKEND
+              value: {{ include "agentops.commandBusBackend" . | quote }}
+            {{- if eq (include "agentops.commandBusBackend" .) "nats" }}
+            # The command bus's OWN connection variables — never NATS_URL/
+            # NATS_USER/NATS_PASSWORD above (design D-1: "it never reads
+            # NATS_*"), though by default they NAME the same server and
+            # Secret: the command bus shares the state store's nats bundle
+            # unless commandBus.nats.enabled or .url says otherwise.
+            - name: COMMANDBUS_NATS_URL
+              value: {{ include "agentops.commandBusNatsURL" . | quote }}
+            - name: COMMANDBUS_NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agentops.commandBusCredentialSecret" . }}
+                  key: user
+            - name: COMMANDBUS_NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agentops.commandBusCredentialSecret" . }}
+                  key: password
+            {{- end }}
+            # Sizes every consumer.Pool the manager runs, independent of
+            # which backend answers it — same shape as
+            # SIGNAL_CONSUMER_CONCURRENCY below.
+            - name: COMMANDBUS_CONSUMER_CONCURRENCY
+              value: {{ .Values.commandBus.consumerConcurrency | quote }}
+            # Receipt-only adapters (the console) and the per-kind delivery
+            # TTLs. An empty list renders an explicitly empty value: the
+            # manager treats a SET-but-empty variable as none, and an unset
+            # one as its default.
+            - name: CHANNEL_RECEIPT_ADAPTERS
+              value: {{ join "," (.Values.commandBus.channelReceiptAdapters | default list) | quote }}
+            - name: CHANNEL_DELIVERY_TTL_STABLE
+              value: {{ .Values.commandBus.deliveryTtl.stable | quote }}
+            - name: CHANNEL_DELIVERY_TTL_EPHEMERAL
+              value: {{ .Values.commandBus.deliveryTtl.ephemeral | quote }}
+            - name: CHANNEL_DELIVERY_TTL_TOPIC
+              value: {{ .Values.commandBus.deliveryTtl.topic | quote }}
+            - name: CHANNEL_DELIVERY_TTL_DELETE_CONVERSATION
+              value: {{ .Values.commandBus.deliveryTtl.deleteConversation | quote }}
+            # design D-13: the manager itself refuses `memory` above one
+            # replica at startup — the SAME contradiction
+            # agentops.commandBusGuard already fails at render time,
+            # faster. Read from the SAME value that already sets this
+            # Deployment's own spec.replicas, never a second,
+            # independently-settable number.
+            - name: MANAGER_REPLICAS
+              value: {{ .Values.replicas | quote }}
             - name: MAX_ACTIVE_CONVERSATIONS
               value: {{ .Values.maxActiveConversations | quote }}
             - name: MAX_QUEUED_CONVERSATIONS

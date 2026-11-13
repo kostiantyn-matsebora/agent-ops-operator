@@ -132,8 +132,9 @@ def render(p):
     # picture because crossing 1 is about what ANY pod can reach.
     s.append(boundary(12, 84, 736, 364, "your cluster", p))
     s.append(node(520, 100, 214, "any other pod", "in the cluster", p))
-    # The state servers, because crossing 7 is the same neighbour reaching them.
-    s.append(node(28, 100, 250, "state servers", "credential required", p))
+    # The state and command-bus servers, because crossing 7 is the same
+    # neighbour reaching either one.
+    s.append(node(28, 100, 250, "state & bus servers", "credential required", p))
 
     # The runtime pod — where model output actually executes — beside the
     # operator's own namespace, because crossing 2 goes between them.

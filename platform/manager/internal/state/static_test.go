@@ -740,31 +740,39 @@ func TestStaticCheckGuardsTheAdapterStateAnnotationPrefix(t *testing.T) {
 // dependency must stay exactly as contained as the types it maps.
 const natsGoImportPrefix = "github.com/nats-io/nats.go"
 
-// natsBackendDir is the one package the guard excludes, test files included:
-// a leaked import in a _test.go file is the same bypass as one in ordinary
-// code, since go test still builds and links it.
+// natsBackendDir is the state store's own nats backend — one of the two
+// packages the guard excludes, test files included: a leaked import in a
+// _test.go file is the same bypass as one in ordinary code, since go test
+// still builds and links it.
 const natsBackendDir = "internal/state/nats"
 
-// TestOnlyTheNatsBackendImportsTheNatsClientLibrary is the static check task
-// 2.1 of nats-state-store-default asks for: nothing outside
-// internal/state/nats may import nats.go or one of its subpackages.
+// commandbusNatsBackendDir is the command bus's own nats backend (design
+// D-1 of async-command-bus/): the second, and last, package the guard
+// excludes. Neither of the two imports the other — the guard only keeps
+// everything ELSE from reaching nats.go.
+const commandbusNatsBackendDir = "internal/commandbus/nats"
+
+// TestOnlyTheNatsBackendImportsTheNatsClientLibrary is the static check
+// task 2.1 of nats-state-store-default asks for, extended by task 3.6 of
+// async-command-bus: nothing outside internal/state/nats or
+// internal/commandbus/nats may import nats.go or one of its subpackages.
 func TestOnlyTheNatsBackendImportsTheNatsClientLibrary(t *testing.T) {
 	root := filepath.Join("..", "..")
-	found, err := findNatsGoImports(root, natsBackendDir)
+	found, err := findNatsGoImports(root, natsBackendDir, commandbusNatsBackendDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(found) > 0 {
-		t.Fatalf("only %s may import %s (design D-1 of nats-state-store-default):\n  %s",
-			natsBackendDir, natsGoImportPrefix, strings.Join(found, "\n  "))
+		t.Fatalf("only %s and %s may import %s (design D-1 of nats-state-store-default and of async-command-bus):\n  %s",
+			natsBackendDir, commandbusNatsBackendDir, natsGoImportPrefix, strings.Join(found, "\n  "))
 	}
 }
 
 // findNatsGoImports walks every .go file under root (test files included,
 // vendor-equivalent dirs skipped by a module-only repo having none) and
-// reports each file outside exemptDir that imports natsGoImportPrefix or one
-// of its subpackages.
-func findNatsGoImports(root, exemptDir string) ([]string, error) {
+// reports each file outside every exemptDirs entry that imports
+// natsGoImportPrefix or one of its subpackages.
+func findNatsGoImports(root string, exemptDirs ...string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -773,7 +781,7 @@ func findNatsGoImports(root, exemptDir string) ([]string, error) {
 		rel, _ := filepath.Rel(root, path)
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
-			if rel == exemptDir || strings.HasPrefix(rel, exemptDir+"/") {
+			if isExemptDir(rel, exemptDirs) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -792,6 +800,19 @@ func findNatsGoImports(root, exemptDir string) ([]string, error) {
 	})
 	sort.Strings(out)
 	return out, err
+}
+
+// isExemptDir reports whether rel names, or is nested under, one of
+// exemptDirs — a prefix match on a path separator, never a bare string
+// prefix, so "internal/state/nats-other" is not mistaken for nested under
+// "internal/state/nats".
+func isExemptDir(rel string, exemptDirs []string) bool {
+	for _, dir := range exemptDirs {
+		if rel == dir || strings.HasPrefix(rel, dir+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // natsGoImportsOf returns the nats client-library import paths a parsed file carries.
@@ -827,9 +848,17 @@ func TestStaticCheckGuardsTheNatsClientLibraryImport(t *testing.T) {
 	write("internal/chat/bad_test.go", "package p\nimport \""+natsGoImportPrefix+"\"\nvar _ = nats.ErrInvalidArg\n")
 	write("internal/state/nats/ok.go", "package nats\nimport \""+natsGoImportPrefix+"\"\nvar _ = nats.ErrInvalidArg\n")
 	write("internal/state/nats/ok_test.go", "package nats\nimport \""+natsGoImportPrefix+"\"\nvar _ = nats.ErrInvalidArg\n")
+	// commandbus/nats is the second exempt package (task 3.6 of
+	// async-command-bus); commandbus itself and any OTHER commandbus
+	// subpackage are not, and a bad import there must still be caught —
+	// the exact way a bad import under internal/state (outside
+	// internal/state/nats) already is.
+	write("internal/commandbus/nats/ok.go", "package nats\nimport \""+natsGoImportPrefix+"\"\nvar _ = nats.ErrInvalidArg\n")
+	write("internal/commandbus/bad.go", "package commandbus\nimport \""+natsGoImportPrefix+"\"\nvar _ = nats.ErrInvalidArg\n")
+	write("internal/commandbus/memory/bad.go", "package memory\nimport \""+natsGoImportPrefix+"\"\nvar _ = nats.ErrInvalidArg\n")
 	write("internal/chat/ok_other.go", "package p\nimport \"github.com/nats-io/nuid\"\nvar _ = nuid.Next\n")
 
-	found, err := findNatsGoImports(root, natsBackendDir)
+	found, err := findNatsGoImports(root, natsBackendDir, commandbusNatsBackendDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -838,8 +867,11 @@ func TestStaticCheckGuardsTheNatsClientLibraryImport(t *testing.T) {
 		files = append(files, strings.SplitN(v, " ", 2)[0])
 	}
 	sort.Strings(files)
-	want := []string{"internal/chat/bad.go", "internal/chat/bad_sub.go", "internal/chat/bad_test.go"}
+	want := []string{
+		"internal/chat/bad.go", "internal/chat/bad_sub.go", "internal/chat/bad_test.go",
+		"internal/commandbus/bad.go", "internal/commandbus/memory/bad.go",
+	}
 	if strings.Join(files, ",") != strings.Join(want, ",") {
-		t.Fatalf("flagged %v, want %v (the backend's own files and the unrelated nuid import must not be)", files, want)
+		t.Fatalf("flagged %v, want %v (both backends' own files and the unrelated nuid import must not be)", files, want)
 	}
 }

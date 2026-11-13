@@ -154,8 +154,8 @@ because they fail differently:
 
 - **Work queue** — conversations waiting for a runtime slot, and inputs waiting
   behind an inflight run (dispatch is strictly serial per conversation).
-- **Delivery queue** — channel ops waiting for an adapter to claim them, and ops
-  claimed but never completed. This exists in **no Kubernetes object**. Without
+- **Delivery queue** — channel ops waiting for an adapter to acknowledge them, and ops
+  acknowledged but never reported. This exists in **no Kubernetes object**. Without
   the manager's `/status` it is reported unavailable rather than rendered empty.
 
 Every row carries an age, and stuck items are flagged with the cause, because

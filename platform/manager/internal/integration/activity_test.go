@@ -505,7 +505,7 @@ func TestStatusReportsOpQueueState(t *testing.T) {
 
 	// claim it and leave it uncompleted: the other failure mode, which looks
 	// identical from outside and must not
-	if op := srv.Ops.Claim("status-adapter"); op == nil {
+	if op := claimOp(srv.Ops, "status-adapter"); op == nil {
 		t.Fatal("claim returned nothing")
 	}
 	st = getStatus(t, srv)

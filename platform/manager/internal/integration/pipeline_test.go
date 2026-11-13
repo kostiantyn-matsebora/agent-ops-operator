@@ -287,8 +287,13 @@ func claimTopic(t *testing.T, srv *httpapi.Server, convName, chanType, threadID 
 	}
 }
 
-// expectSend answers a pending send op for chanType, asserting it targets
-// threadID and its body contains contains.
+// expectSend claims a pending send op for chanType, asserting it targets
+// threadID and its body contains contains, then COMPLETES it: design D-2
+// serializes every op sharing one conversation×channel Key strictly, and
+// this test calls expectSend more than once against the SAME key (a
+// conversation's reply, then its acks, on one channel) — leaving an
+// earlier one claimed-but-unsettled would block every later one bound for
+// the same thread.
 func expectSend(t *testing.T, srv *httpapi.Server, chanType, threadID, contains string) chat.Op {
 	t.Helper()
 	rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=2&wait=0", nil, "test-adapter-token")
@@ -299,6 +304,9 @@ func expectSend(t *testing.T, srv *httpapi.Server, chanType, threadID, contains 
 	_ = json.Unmarshal(rec.Body.Bytes(), &op)
 	if op.Kind != chat.OpSend || op.ThreadID == nil || *op.ThreadID != threadID || !strings.Contains(opBody(op), contains) {
 		t.Fatalf("%s send op: %+v", chanType, op)
+	}
+	if rec := adapterReq(srv, "POST", fmt.Sprintf("/channel/ops/%s/done", op.ID), chat.OpResult{}, "test-adapter-token"); rec.Code != 200 {
+		t.Fatalf("%s complete send op: %d", chanType, rec.Code)
 	}
 	return op
 }
@@ -368,6 +376,9 @@ func mirroringAssertThreadedReplyRelaysAndAcksBoth(t *testing.T, ctx context.Con
 	if rec.Code != 202 {
 		t.Fatalf("threaded reply: %d %s", rec.Code, rec.Body.String())
 	}
+	// async-command-bus: the reply and its relay land once the "conv" queue's
+	// own task (taskInboundMessage) has run.
+	drainConvTasks(t)
 	var bound agentopsv1alpha1.Conversation
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: convName}, &bound)
 	n := len(bound.Spec.Inputs)

@@ -128,9 +128,7 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	// every bound channel, which is a decision, not something a stray "thanks"
 	// in an archived topic should trigger.
 	if conv.Phase == state.PhaseClosed {
-		r.Ops.EnqueueMessage(ctx, ch, conv, msg.ThreadID, Notice(
-			"This conversation is closed, so nothing here reaches the agent. "+
-				"Reopen it from the console to continue with its history."))
+		r.Ops.EnqueueMessage(ctx, ch, conv, msg.ThreadID, ClosedConversationNotice())
 		return nil
 	}
 	// /exit releases the runtime and keeps the conversation. Intercepted for the
@@ -175,7 +173,7 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	// and buys the ORDER a thread reads in — somebody's message, then the ack
 	// that answers it. Composed by the one implementation both callers share.
 	if fresh, err := r.conversation(ctx, conv.Name); err == nil {
-		DeliverInputs(ctx, r.env(), r.Ops, fresh)
+		r.FanOutThread(ctx, fresh)
 	}
 	ack := "🔧 On it…"
 	if busy {
@@ -495,20 +493,6 @@ func (r *Router) validateRefs(ctx context.Context, conv *state.ConversationRecor
 	return nil
 }
 
-// FanOutReopenNotice tells every bound thread the conversation is live again.
-//
-// Enqueued by the reconciler AFTER topics are ensured, not by the reopen verb
-// itself: a reopened thread may still be archived on its transport, and ops are
-// FIFO per adapter, so letting ensure-topic go first is what makes this land in
-// a thread that can receive it.
-func (r *Router) FanOutReopenNotice(ctx context.Context, conv *state.ConversationRecord) {
-	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
-		r.Ops.EnqueueReopenNotice(ctx, ch, conv, tid, Notice(
-			"↩️ Conversation reopened — this thread is live again, with everything above it intact. "+
-				"Reply here to continue."))
-	})
-}
-
 // boundChannels resolves the channel set a new conversation binds to, with the
 // originating channel guaranteed included (it is where the user is looking).
 //
@@ -753,6 +737,24 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 	return conv, nil
 }
 
+// ClosedConversationNotice is the fixed reply a message into a Closed
+// conversation's thread gets — read-only, no state change, which is what
+// lets httpapi's accept step (async-command-bus design D-9) answer it
+// immediately, with no task, exactly as HandleMessage's own closed branch
+// does when it reaches the same state on a race.
+func ClosedConversationNotice() Message {
+	return Notice("This conversation is closed, so nothing here reaches the agent. " +
+		"Reopen it from the console to continue with its history.")
+}
+
+// ConversationByThread is convByThread's public entry: the thread-to-
+// conversation lookup an async accept step (design D-9 step 6) needs BEFORE
+// enqueuing, to learn the task's own Key and to make the cheap refusals
+// (self-input, a closed thread) immediate rather than deferred.
+func (r *Router) ConversationByThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string) (*state.ConversationRecord, error) {
+	return r.convByThread(ctx, ch, threadID)
+}
+
 // convByThread resolves a (channel, thread) pair to its conversation. Thread
 // ids are opaque strings scoped per channel — no cross-channel collisions.
 func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string) (*state.ConversationRecord, error) {
@@ -786,31 +788,15 @@ func (r *Router) FanOutSend(ctx context.Context, conv *state.ConversationRecord,
 	})
 }
 
-// FanOutRunReply posts ONE RUN'S ANSWER to every bound thread that has not
-// already received it. Unlike FanOutSend it is DERIVABLE: the op id is stable
-// per conversation×channel×run and delivery is recorded on the run, so both the
-// `/work/done` fast path and the reconciler backstop can call it and the second
-// caller is a no-op.
-//
-// A thread already marked delivered is skipped before the queue is even asked —
-// the queue's dedup window is bounded, and after a restart it is empty, so the
-// CR is the only thing that can tell an undelivered reply from a delivered one.
-func (r *Router) FanOutRunReply(ctx context.Context, conv *state.ConversationRecord, runID string, msg Message) {
-	var run *state.Run
+// FanOutThread enqueues every thread entry the conversation owes, in the order
+// they happened, by reading the record's runs and calling the one function
+// every producer shares (FanOutThread). Both fast paths use it — an input just
+// appended, a run just recorded — and the reconciler calls the same function
+// as the backstop, so the second caller is a no-op. A run list that cannot be
+// read delivers the entries that need none; the reconcile re-derives the rest.
+func (r *Router) FanOutThread(ctx context.Context, conv *state.ConversationRecord) map[string]bool {
 	runs, _ := r.Runs.List(ctx, state.Key(conv.Name))
-	for i := range runs {
-		if runs[i].RunID == runID {
-			run = &runs[i]
-			break
-		}
-	}
-	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
-		if run != nil && run.DeliveredTo(ch.Name) {
-			SettleDeliveredNote(ctx, r.Conversations, conv, ch.Name, runID)
-			return
-		}
-		r.Ops.EnqueueRunReply(ctx, ch, conv, runID, tid, msg)
-	})
+	return FanOutThread(ctx, r.env(), r.Ops, conv, runs)
 }
 
 // SettleDeliveredNote clears a thread's undelivered-reply note when it names
@@ -862,7 +848,7 @@ func (r *Router) conversation(ctx context.Context, name string) (*state.Conversa
 
 // env is what the delivery helpers read through.
 func (r *Router) env() Env {
-	return Env{Reader: r.Reader, Blobs: r.Blobs, Namespace: r.Namespace}
+	return Env{Reader: r.Reader, Blobs: r.Blobs, Conversations: r.Conversations, Namespace: r.Namespace}
 }
 
 // appendInput queues item on the conversation, re-reading the record on a lost

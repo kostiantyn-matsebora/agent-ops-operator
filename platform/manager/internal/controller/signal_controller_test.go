@@ -22,6 +22,7 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/signalroute"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
@@ -62,7 +63,7 @@ func newSigEnv(t *testing.T, objs ...client.Object) *sigEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ops := &chat.OpQueue{Conversations: backend.Stores.Conversations, Runs: backend.Stores.Runs, Registry: chat.NewRegistry(), Activity: acts}
+	ops := &chat.OpQueue{Conversations: backend.Stores.Conversations, Runs: backend.Stores.Runs, Registry: chat.NewRegistry(), Activity: acts, Bus: memory.Open()}
 	e := &sigEnv{t: t, c: c, acts: acts, ops: ops, now: time.Now()}
 	e.r = &SignalReconciler{
 		Client: c, Reader: c, Namespace: sigNS, Activity: acts, Ops: ops, Cooldowns: ingest.NewCooldownBook(),
@@ -378,7 +379,7 @@ func runChatDropCase(t *testing.T, tc chatDropCase) {
 	if e.events(activity.KindSignalDropped, tc.code) != 1 {
 		t.Fatalf("want one %s drop event", tc.code)
 	}
-	op := e.ops.Claim(ch.Spec.Adapter)
+	op := claimOp(e.ops, ch.Spec.Adapter)
 	if op == nil || op.Message == nil || !strings.Contains(op.Message.Body, tc.notice) {
 		t.Fatalf("the surface must be told %q, got %+v", tc.notice, op)
 	}
@@ -498,7 +499,7 @@ func TestConsumerAddressedChatTakesTheNamedTargetAsItsOneClaimant(t *testing.T) 
 	if convs[0].Spec.OriginReader == nil || convs[0].Spec.OriginReader.Channel != "surface" {
 		t.Fatalf("the person who typed it is owed the read mark: %+v", convs[0].Spec.OriginReader)
 	}
-	if op := e.ops.Claim(ch.Spec.Adapter); op != nil {
+	if op := claimOp(e.ops, ch.Spec.Adapter); op != nil {
 		t.Fatalf("a routed message tells the surface nothing: %+v", op)
 	}
 }

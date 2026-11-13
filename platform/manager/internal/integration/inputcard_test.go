@@ -309,6 +309,10 @@ func TestAnswerFansOutAsOneSemanticMessagePerChannel(t *testing.T) {
 		if m.Kind != chat.MsgAnswer || m.Status != "succeeded" || m.Body != "**restarted** `api`" {
 			t.Fatalf("%s: each channel gets the same SEMANTIC answer to render itself: %+v", adapter, m)
 		}
+		// Complete it: design D-2 serializes every op sharing this
+		// conversation×channel Key, so the second run's own notice below
+		// (the SAME channel) is not claimable until this one settles.
+		completeOps(t, srv, ops)
 	}
 
 	// a failed run is a notice, not an empty answer

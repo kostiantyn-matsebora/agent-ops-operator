@@ -7,7 +7,7 @@ that chain — see below.
 | Tier | Runs | Decides | Cannot decide |
 |---|---|---|---|
 | **Unit and envtest** | every module's `go test`, and the operator's suite against a real API server | rendering, parsing, scheduling, and what a reconciler writes to a CR | anything the kubelet, the scheduler, a CSI driver or a live authorizer decides — envtest runs none of them |
-| **Contract conformance** | every adapter's and runtime's **built binary**, black-box, against a fake manager | that an adapter speaks the adapter contracts — long-poll, `contract=`, ack-once, inbound push, listing, status, no relay loop, a visible-or-error thread-less send, an act-or-error `delete-conversation`, and a retry budget bounded by the reclaim window for a channel adapter, and normalized emission, bearer auth and a surfaced rejected post for a signal adapter — plus, for a runtime, allowlist composition, `turns[]`/`toolCalls[]` bounds trimming, and the idle-TTL exit | anything about the cluster |
+| **Contract conformance** | every adapter's and runtime's **built binary**, black-box, against a fake manager | that an adapter speaks the adapter contracts — read, acknowledge, report, `contract=`, inbound push, listing, status, no relay loop, a visible-or-error thread-less send, an act-or-error `delete-conversation`, and a retry budget bounded by the delivery TTL for a channel adapter, and normalized emission, bearer auth and a surfaced rejected post for a signal adapter — plus, for a runtime, allowlist composition, `turns[]`/`toolCalls[]` bounds trimming, and the idle-TTL exit | anything about the cluster |
 | **System** | the chart from the working tree on a real single-node cluster (k3s under k3d), images built from the same commit | the substrate: credential projection by the kubelet, RBAC as the authorizer enforces it, informer liveness, context continuity across a pod restart, admission FIFO on a real pod DELETE, the signal loop breaker under a runtime that really cannot start, and — for the default `nats` state backend — a server pod loss, and quorum loss, and the import from `kube` racing an old replica | answer *quality* — that is an eval harness, a different project |
 | **Console browser e2e** (`e2e-live`, nightly) | Playwright driving a real browser against the full tier's own cluster and console — or any already-running install, by hand | real K8s API behavior none of the three above actually exercises (see below), and what a real browser renders for a real signal through the real console | anything the tiers above already gate — it is read-only verification, never a substitute for them |
 
@@ -214,6 +214,65 @@ deletion and across that same `kube`-to-`nats` upgrade.
 
 **Both tiers run against the default install.** The default is the thing
 tested, not an opt-in configuration a lane reaches for once.
+
+## The command bus conformance suite
+
+The manager accepts work durably and runs it later through its own generic
+contract (`internal/commandbus`), independent of the state store above.
+
+A conformance suite and bench (`internal/commandbus/conformance`) walk the
+closed queue inventory once each, exactly as the state store's own suite
+walks `Stores` — failing, and naming the queue, if one is declared with no
+matching coverage.
+
+| Decides | Cannot decide |
+|---|---|
+| durable accept, idempotent submit, dedup across every task state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-lapse redelivery, bounded retry into dead, TTL expiry counting as settled, the hand-over (a peek changes nothing, an idempotent acknowledgement, a final failure), no entry written twice and a submit that survives a racing claim, a gap-free resumable feed, dead-letter listing, per-queue statistics | latency or throughput under load, or anything only a real server decides |
+
+- **Both backends run the same suite.** `commandbus/memory` runs it in its
+  own package. `commandbus/nats` runs it against an in-process JetStream
+  server. Both are part of the ordinary `go test ./...`.
+- **The bench prints real round-trip numbers for each**, same convention as
+  the state store's own: `go test -bench=. ./internal/commandbus/...`.
+
+## The command bus's system lanes
+
+What a real cluster decides about the bus is the system tier's job
+(`test/system/async_system_test.go`), never unit tests: credential
+projection, network policy, a claim completed on a different replica,
+ordering under parallel consumers, restart durability, a genuine channel
+failure ending as a final failure in a dead letter.
+
+| Lane | Decides |
+|---|---|
+| The bundle comes up | the credential is kubelet-projected and the NetworkPolicy admits only the manager |
+| A replica is force-deleted mid-accept | the claim it held completes on a surviving replica once the lease lapses |
+| Two replicas, one conversation | ordering holds — settlement order matches submission order on that key |
+| A manager restart, and a rolling bus-server restart | neither loses an accepted task or duplicates its side effect |
+| A channel surface that genuinely fails (DNS-unreachable, not mocked) | the adapter reports failed, the message is not redelivered, and it is listed on `/state/dead-letters` |
+
+**Full-tier end-to-end flows** (`test/system/async_e2e_test.go`) cover the
+same ground from the HTTP surface inward rather than the cluster outward.
+
+- A signal opens a conversation through its close and delete, every task
+  observed reaching `succeeded` in order.
+- A cascade delete settles members before the parent.
+- Inbound chat arrives through both the Telegram fake Bot API and the
+  console channel.
+- The restart-survival and backoff-to-dead-letter shapes the system lanes
+  decide are proven end to end too.
+
+Both files were written against this change's own working copy. They
+compile under the `system` build tag.
+
+**Verify their actual pass/fail by dispatching the cluster tier**, rather
+than trusting a local run with no cluster to run them against:
+
+```sh
+gh workflow run system-smoke.yml --ref change/async-command-bus
+```
+
+Or the full tier, for the lanes above.
 
 ## The oracle split
 

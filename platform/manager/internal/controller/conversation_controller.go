@@ -33,6 +33,8 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/convtask"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
@@ -170,37 +172,46 @@ type ConversationReconciler struct {
 	// common configuration, and must not require declining the destructive half.
 	AutoDeleteEnabled   bool
 	AutoDeleteClosedAge time.Duration
-	// ReplicaIdentity names THIS process for the claim this reconciler writes
-	// (durable-chat-ops-broker). It needs no relation to the leader-election
-	// Lease's own HolderIdentity string: this reconciler runs ONLY while this
-	// process holds that Lease (controller-runtime gates every reconciler on
-	// it), so any claim this process did not itself write was written by a
-	// FORMER leader, by construction — comparing against "me" is exactly
-	// comparing against "the current leader". Empty is tolerated (tests) and
-	// behaves as a single, unvarying identity.
+	// ReplicaIdentity named THIS process for the status.threads[].claim this
+	// reconciler used to write (durable-chat-ops-broker). async-command-bus
+	// design D-11 retires that claim — EnqueueEnsureTopic's own bus-level
+	// CommandID dedup replaces it — so this field is no longer read by any
+	// decision here. Left wired rather than removed: main.go derives it from
+	// os.Hostname() for httpapi.Server.ReplicaIdentity too (the still-live
+	// leader-proxy identity, a DIFFERENT field on a different struct despite
+	// the shared name), so dropping it here would save nothing. Section 8/12
+	// decide whether a chart-facing trace of it should be deprecated.
 	ReplicaIdentity string
-	// ClaimStaleness bounds how long an ensure-topic claim may sit with no
-	// thread yet before the current leader treats it as abandoned and
-	// re-dispatches — the SAME leader's own claim running legitimately slow,
-	// never a second writer. Zero means DefaultClaimStalenessSeconds.
+	// ClaimStaleness bounded how long an ensure-topic claim may sit with no
+	// thread yet before being treated as abandoned. Retired along with the
+	// claim it bounded (async-command-bus design D-11): nothing reads this
+	// field any more. Left wired, not removed — the chart's own
+	// claimStalenessSeconds value still feeds it via CLAIM_STALENESS_SECONDS
+	// (main.go), and D-11's own text ("the lease defaults to five minutes
+	// through the existing claimStalenessSeconds") was investigated and found
+	// to describe chat.ReclaimAfter/the bus's own hardcoded 5-minute
+	// LeaseDuration (commandbus/memory, commandbus/nats — deliberately kept
+	// equal to ReclaimAfter, not sourced from this chart value, whose own
+	// default of 90s does not even match "five minutes"), not an instruction
+	// to repurpose this field into that lease's configuration. No Go wiring
+	// change follows from it; section 8/12 decide whether the now-inert
+	// chart value should be deprecated or kept.
 	ClaimStaleness time.Duration
+	// Bus is the command bus (async-command-bus task 5.4): when set, the
+	// idle timer's auto-close and the deadline budget edge ENQUEUE a "conv"
+	// task instead of calling Router.AutoCloseConversation/
+	// CloseBudgetExceeded inline. Nil (tests, a reconciler built without
+	// one) keeps today's exact inline behaviour — this field only adds a
+	// path, it never removes the old one.
+	Bus commandbus.Bus
 }
 
-// DefaultClaimStalenessSeconds is the fallback claim staleness bound when the
-// chart's claimStalenessSeconds value is unset. Sized with margin over a
-// measured ensure-topic round-trip against the slowest shipped adapter
-// (Telegram, forum-topic creation): comfortably longer than any observed
-// single call, short enough that a genuinely abandoned claim (the leader that
-// wrote it crashed, rather than merely answering slowly) does not leave a
-// conversation topic-less for long.
+// DefaultClaimStalenessSeconds was the fallback claim staleness bound when
+// the chart's claimStalenessSeconds value was unset. Retired with
+// ClaimStaleness (async-command-bus design D-11, see that field's own
+// comment) — kept defined only because it is still the value the field's
+// doc comment and any pre-upgrade chart render refer to.
 const DefaultClaimStalenessSeconds = 90
-
-func (r *ConversationReconciler) claimStaleness() time.Duration {
-	if r.ClaimStaleness > 0 {
-		return r.ClaimStaleness
-	}
-	return DefaultClaimStalenessSeconds * time.Second
-}
 
 // Reconcile implements the reconciliation loop.
 func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -247,7 +258,7 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if budget := conv.Budget; budget != nil && budget.Deadline != nil && r.Router != nil {
 		if !budget.Deadline.After(time.Now()) {
 			digest := fmt.Sprintf("budget-exceeded: deadline (%s) passed", budget.Deadline.Format(time.RFC3339))
-			return ctrl.Result{}, r.Router.CloseBudgetExceeded(ctx, &conv, digest)
+			return ctrl.Result{}, r.closeBudgetExceeded(ctx, &conv, digest)
 		}
 		deadlineRequeue = time.Until(*budget.Deadline)
 	}
@@ -378,28 +389,17 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			logger.Error(err, "ensureTopics enqueue (continuing chat-less)")
 		}
 		topicPending = waiting
-		// A reopened conversation announces itself on every bound thread. After
-		// ensureTopics on purpose: ops are FIFO per adapter, so the un-archive
-		// is claimed before this notice and it lands somewhere that can take
-		// it. The op id is stable per reopen, so re-deriving it every pass is
-		// what makes it survive a restart mid-reopen without saying it twice.
-		if conv.Reopens > 0 && r.Router != nil {
-			r.Router.FanOutReopenNotice(ctx, &conv)
-		}
-		// The escalation digest (design D-D): the ensure-topic enqueue above and
-		// the topic actually existing are two different moments, so this waits
-		// for a thread before posting — same ordering reason as the reopen
-		// notice, and the op id is stable so re-deriving it every pass posts the
-		// digest once.
-		r.deliverEscalation(ctx, &conv)
-		// Input delivery, PARALLEL to dispatch rather than sequenced with it:
-		// the human reads the event while the agent is already working, and a
-		// run that hangs or dies still leaves the thread saying what happened.
-		chat.DeliverInputs(ctx, chat.Env{Reader: r.Client, Blobs: r.Blobs, Namespace: r.Namespace}, r.Ops, &conv)
-		// The BACKSTOP that makes a reply derivable rather than queue-resident.
-		if err := r.deliverRunReplies(ctx, &conv, runs); err != nil {
-			logger.Error(err, "re-deriving undelivered run replies")
-		}
+		// Every thread entry — the reopen notice, the escalation digest, each
+		// input and each run's reply — goes through ONE function, in the order
+		// it happened (design D-15). After ensureTopics on purpose: the
+		// un-archive is claimed before a notice, so it lands somewhere that can
+		// take it. Input delivery is PARALLEL to dispatch rather than sequenced
+		// with it: the human reads the event while the agent is already
+		// working, and a run that hangs or dies still leaves the thread saying
+		// what happened. The op ids are stable, so re-deriving everything on
+		// every pass is the BACKSTOP that makes a delivery derivable rather
+		// than queue-resident.
+		r.fanOutThread(ctx, &conv, runs)
 	}
 	// The BACKSTOP for a member's result reaching its parent
 	// (coordination-loop): the FAST PATH in `/work/done` marks a run
@@ -481,7 +481,75 @@ func (r *ConversationReconciler) autoClose(ctx context.Context, conv *state.Conv
 	}
 	log.FromContext(ctx).Info("auto-closing an idle finished conversation",
 		"conversation", conv.Name, "idleFor", idle.Round(time.Minute), "window", r.AutoCloseIdleAge)
-	return ctrl.Result{}, r.Router.AutoCloseConversation(ctx, conv, idle)
+	return ctrl.Result{}, r.autoCloseConversation(ctx, conv, idle)
+}
+
+// closeBudgetExceeded and autoCloseConversation (async-command-bus task
+// 5.4) ENQUEUE a close CASCADE when r.Bus is set, falling back to calling
+// chat.Router directly, inline, exactly as this reconciler always has, when
+// it is not (nil: every existing test, and any install that has not wired
+// one). Each enqueues one CascadeMember task per LIVE causedBy descendant
+// (task 5.3, design D-7: "members go before the parent"), deepest-first,
+// ahead of the SAME top-level request the earlier, simpler version of this
+// change submitted alone — the exact cascade chat.Router.
+// CloseBudgetExceeded/AutoCloseConversation already perform, re-run
+// unchanged as that final request, which is what gives the ancestor's own
+// task its run-time re-check of stragglers for free. All share the
+// conversation's own name as Key, consistent with every other "conv" verb
+// (internal/httpapi/accept.go's own table).
+func (r *ConversationReconciler) closeBudgetExceeded(ctx context.Context, conv *state.ConversationRecord, digest string) error {
+	if r.Bus == nil {
+		return r.Router.CloseBudgetExceeded(ctx, conv, digest)
+	}
+	rootReq := commandbus.SubmitRequest{
+		Queue:     convtask.Queue,
+		CommandID: commandbus.CommandID("budget-exceeded:" + conv.Name),
+		Key:       commandbus.Key(conv.Name),
+		Payload: convtask.Payload{
+			Verb: convtask.VerbClose, Conversation: conv.Name,
+			CloseKind: convtask.CloseBudgetExceeded, Reason: digest,
+		}.Encode(),
+	}
+	return r.submitCloseCascade(ctx, conv.Name, "budget-exceeded", rootReq)
+}
+
+func (r *ConversationReconciler) autoCloseConversation(ctx context.Context, conv *state.ConversationRecord, idle time.Duration) error {
+	if r.Bus == nil {
+		return r.Router.AutoCloseConversation(ctx, conv, idle)
+	}
+	rootReq := commandbus.SubmitRequest{
+		Queue:     convtask.Queue,
+		CommandID: commandbus.CommandID("auto-close:" + conv.Name),
+		Key:       commandbus.Key(conv.Name),
+		Payload: convtask.Payload{
+			Verb: convtask.VerbClose, Conversation: conv.Name,
+			CloseKind: convtask.CloseAuto, IdleForMS: idle.Milliseconds(),
+		}.Encode(),
+	}
+	// A plain auto-close's cascade members carry no reason verbatim either
+	// (closeConversation's own cascadeCloseMembers call never did) — "" to
+	// match.
+	return r.submitCloseCascade(ctx, conv.Name, "", rootReq)
+}
+
+// submitCloseCascade lists rootName's own causedBy subtree
+// (chat.Router.Descendants) and submits one CascadeMember task per LIVE
+// descendant (convtask.CloseMemberRequests) ahead of rootReq, in order —
+// this reconciler's own analogue of httpapi's closeCascadeRequests, over
+// the same commandbus.Bus.Submit loop since there is no accept-time
+// invocationId to mint here (nothing is reporting back to an HTTP caller).
+func (r *ConversationReconciler) submitCloseCascade(ctx context.Context, rootName, reason string, rootReq commandbus.SubmitRequest) error {
+	descendants, err := r.Router.Descendants(ctx, rootName)
+	if err != nil {
+		return err
+	}
+	reqs := append(convtask.CloseMemberRequests(rootName, reason, descendants), rootReq)
+	for _, req := range reqs {
+		if _, err := r.Bus.Submit(ctx, req); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // finished reports whether a conversation has nothing left to do. It gates
@@ -1132,22 +1200,14 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *state.C
 			continue
 		}
 		pending = true
-		// durable-chat-ops-broker: only a channel binding with no LIVE claim —
-		// none at all, one held by a former leader, or one of this leader's own
-		// gone stale — is dispatched this pass. One already claimed and fresh is
-		// an op genuinely in flight with an adapter; re-enqueuing it here would
-		// not change what the in-memory queue already holds, but it would race
-		// the claim write against nothing, for no reason. See claimEnsureTopic.
-		claimed, err := r.claimEnsureTopic(ctx, conv.Name, ref)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if !claimed {
-			continue
-		}
+		// async-command-bus design D-11: dispatch unconditionally, every pass.
+		// The reconciler-level claim this used to gate on (durable-chat-ops-
+		// broker's status.threads[].claim) is retired — OpQueue.EnqueueEnsureTopic
+		// derives a stable per-conversation×channel CommandID (ops.go), and the
+		// BUS dedups a resubmission while one is pending/running/retrying/
+		// recently-succeeded. A second writer racing a claim write was the thing
+		// the old placeholder guarded against; the bus's own dedup window makes
+		// that guard redundant rather than merely harmless to skip.
 		d := r.topicDescriptor(ctx, conv)
 		if existing != nil {
 			d.PreviousThreadID = *existing
@@ -1157,103 +1217,14 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *state.C
 	return pending, firstErr
 }
 
-// claimEnsureTopic writes (or refreshes) THIS leader's claim on one channel
-// binding's ensure-topic dispatch, so a crashed leader's in-flight work is
-// recoverable from the Conversation's own status rather than from a second,
-// hand-rolled heartbeat (durable-chat-ops-broker).
-//
-// Returns claimed=true when the caller should (re-)dispatch the op now: no
-// claim existed, the existing one belongs to a replica that is not this one
-// (a former leader — this reconciler runs only while its process holds the
-// leader-election Lease, so any claim it did not itself write is by
-// construction a former leader's), or this leader's own claim has sat past
-// the staleness bound with no thread yet. Returns false when a live claim
-// already held by this leader is outstanding — the op is genuinely in flight
-// with an adapter and nothing new is dispatched this pass.
-//
-// Does its own fresh read-and-swap retry rather than reusing the caller's
-// (possibly several-reconcile-functions-old) copy: every other writer in this
-// file that touches the conversation does the same, for the same
-// optimistic-concurrency reason (see finishEnsureTopic, markDelivered).
-func (r *ConversationReconciler) claimEnsureTopic(ctx context.Context, name, channel string) (bool, error) {
-	claimed := false
-	_, err := state.Mutate(ctx, r.Conversations, state.Key(name), func(conv *state.ConversationRecord) error {
-		claimed = false
-		if r.holdsLiveClaim(conv, channel) {
-			return nil
-		}
-		r.setClaim(conv, channel)
-		claimed = true
-		return nil
-	})
-	if err != nil {
-		if errors.Is(err, state.ErrConflict) {
-			return false, fmt.Errorf("conflict claiming ensure-topic for %s on conversation %s: %w", channel, name, err)
-		}
-		return false, state.IgnoreNotFound(err)
-	}
-	return claimed, nil
-}
-
-// holdsLiveClaim reports whether THIS replica's claim on the channel's
-// ensure-topic is still inside the staleness bound.
-func (r *ConversationReconciler) holdsLiveClaim(conv *state.ConversationRecord, channel string) bool {
-	existing := conv.Thread(channel)
-	if existing == nil || existing.Claim == nil {
-		return false
-	}
-	return existing.Claim.Holder == r.ReplicaIdentity &&
-		time.Since(existing.Claim.ClaimedAt) <= r.claimStaleness()
-}
-
-// setClaim stamps this replica's claim on the channel's binding, creating the
-// binding when none exists yet.
-func (r *ConversationReconciler) setClaim(conv *state.ConversationRecord, channel string) {
-	claim := &state.OpClaim{Holder: r.ReplicaIdentity, ClaimedAt: time.Now().UTC()}
-	if binding := conv.Thread(channel); binding != nil {
-		binding.Claim = claim
-		return
-	}
-	conv.Threads = append(conv.Threads, state.ThreadBinding{Channel: channel, Claim: claim})
-}
-
-// deliverEscalation posts the digest an `escalate` call snapshotted
-// (status.escalationMessage) into every bound channel's already-open thread
-// (coordinator-unconditional-channels: a coordinator root's channels are
-// bound at creation, so this is no longer a thread's opening post, merely
-// the decision made visible on one already running). A conversation that
-// never escalated, or whose threads are not established yet, gets nothing —
-// Ops itself is what makes a second delivery a no-op.
-func (r *ConversationReconciler) deliverEscalation(ctx context.Context, conv *state.ConversationRecord) {
-	if conv.EscalatedAt == nil || r.Ops == nil {
-		return
-	}
-	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
-		r.Ops.EnqueueEscalationMessage(ctx, ch, conv, tid, chat.Notice(conv.EscalationMessage))
-	})
-}
-
-// eachBoundThread mirrors chat.Router's own helper of the same shape: every
-// bound channel that already has a thread, so a send to one that does not
-// exist yet is never queued.
-func (r *ConversationReconciler) eachBoundThread(ctx context.Context, conv *state.ConversationRecord,
-	skip string, fn func(ch *agentopsv1alpha1.Channel, threadID *string)) {
-
-	for _, ref := range conv.ChannelRefs {
-		if ref == skip {
-			continue
-		}
-		tid := conv.ThreadFor(ref)
-		if tid == nil {
-			continue
-		}
-		var ch agentopsv1alpha1.Channel
-		if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &ch); err != nil {
-			continue
-		}
-		fn(&ch, tid)
-	}
-}
+// claimEnsureTopic, holdsLiveClaim and setClaim — the reconciler-level
+// status.threads[].claim placeholder that used to gate dispatch above — are
+// RETIRED (async-command-bus design D-11): OpQueue.EnqueueEnsureTopic's own
+// stable per-conversation×channel CommandID is what the bus now dedups a
+// resubmission against, so a second writer racing a claim write is no
+// longer a thing dispatch here needs to guard against. A value still found
+// in status.threads[].claim on upgrade (or written by a pre-upgrade
+// replica) is never read for a decision again.
 
 // topicDescriptor describes a conversation's thread for the adapter to NAME.
 // The manager supplies facts — route, source, title, labels, lane — and no
@@ -1290,82 +1261,37 @@ func (r *ConversationReconciler) inferredPipeline(ctx context.Context, conv *sta
 	return ""
 }
 
-// deliverRunReplies re-derives the answer for every completed run that a bound
-// thread has not received. It is the backstop that makes `send` derivable:
-// `POST /work/done` enqueues the reply on the fast path, but the queue is
-// in-memory, so without this a manager restart in the window between recording
-// the result and an adapter claiming the op would lose the answer permanently —
-// durably written to status.runs[].result and delivered to nobody.
+// fanOutThread is the reconciler's call into the one thread fan-out point
+// (chat.FanOutThread), plus the two pieces of bookkeeping only it owns: the
+// DeliveryPending condition naming the channels still owed an answer, and the
+// backfill of runs a pre-tracking manager wrote.
 //
 // Two facts keep it safe to run on EVERY reconcile:
 //
-//   - the op id is stable per conversation×channel×run, so re-enqueues dedup
-//     against the pending map and the completed window, and the CR's markers
-//     cover the window after a restart, when both are empty;
+//   - the op id is stable per conversation, input or run, and channel, so
+//     re-enqueues dedup against the bus's pending and settled window, and the
+//     CR's markers cover the window after a restart, when both are empty;
 //   - a run written by a manager that did NOT track delivery is BACKFILLED as
 //     delivered rather than sent (see RunStatus.DeliveryTracked). That is the
 //     one migration hazard: without it, upgrading would re-post every recent
 //     answer to every bound thread.
-func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *state.ConversationRecord,
-	runs []state.Run) error {
-
+func (r *ConversationReconciler) fanOutThread(ctx context.Context, conv *state.ConversationRecord, runs []state.Run) {
+	owed := chat.FanOutThread(ctx, chat.Env{Reader: r.Client, Blobs: r.Blobs, Conversations: r.Conversations, Namespace: r.Namespace}, r.Ops, conv, runs)
 	if len(conv.ChannelRefs) == 0 || len(runs) == 0 {
-		return nil
-	}
-	// Threads, not channelRefs: a channel whose topic does not exist yet has
-	// nowhere to receive the reply, and the reconcile its binding triggers will
-	// come back here.
-	var backfill []string
-	owed := map[string]bool{}
-	for i := range runs {
-		run := &runs[i]
-		if !run.DeliveryTracked {
-			backfill = append(backfill, run.RunID)
-			continue
-		}
-		r.enqueueRunReply(ctx, conv, run, owed)
+		return
 	}
 	r.setDeliveryPendingCondition(ctx, conv, owed)
-	if len(backfill) == 0 {
-		return nil
+	var backfill []string
+	for i := range runs {
+		if !runs[i].DeliveryTracked {
+			backfill = append(backfill, runs[i].RunID)
+		}
 	}
-	return r.backfillDelivered(ctx, conv, backfill, runs)
-}
-
-// enqueueRunReply enqueues one tracked run's reply to every bound thread that
-// has not received it, and records in owed each channel still owing it.
-func (r *ConversationReconciler) enqueueRunReply(ctx context.Context, conv *state.ConversationRecord, run *state.Run, owed map[string]bool) {
-	msg := chat.RunReplyMessage(run)
-	for _, t := range conv.Threads {
-		if !conv.BoundTo(t.Channel) {
-			continue
-		}
-		if run.DeliveredTo(t.Channel) {
-			// A crash between markDelivered's run write and its note
-			// write leaves the note naming a delivered run; this
-			// backstop is the only pass that visits it.
-			chat.SettleDeliveredNote(ctx, r.Conversations, conv, t.Channel, run.RunID)
-			continue
-		}
-		owed[t.Channel] = true
-		// durable-chat-ops-broker: a binding carrying only a claim — no
-		// ThreadID yet — is bookkeeping about a dispatch in flight, not a
-		// topic. EnqueueRunReply would still accept the empty id and the
-		// adapter would park the reply on a channel-level pseudo-thread,
-		// marking it delivered there PERMANENTLY: once DeliveredTo is
-		// true this run is never re-enqueued, so the real thread
-		// ensureTopics creates moments later would never receive the
-		// answer the person is waiting for. Leaving it owed (above) is
-		// what brings this reconcile back once the thread exists.
-		if t.ThreadID == "" {
-			continue
-		}
-		ch := r.servingChannel(ctx, t.Channel)
-		if ch == nil {
-			continue
-		}
-		tid := t.ThreadID
-		r.Ops.EnqueueRunReply(ctx, ch, conv, run.RunID, &tid, msg)
+	if len(backfill) == 0 {
+		return
+	}
+	if err := r.backfillDelivered(ctx, conv, backfill, runs); err != nil {
+		log.FromContext(ctx).Error(err, "re-deriving undelivered run replies")
 	}
 }
 

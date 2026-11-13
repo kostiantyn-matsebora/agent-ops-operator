@@ -485,6 +485,14 @@ func TestDefaultIdleTTLReachesThePod(t *testing.T) {
 
 // findOp drains an adapter's queue until it sees the op it is looking for, so
 // a test asserting on one kind is not tripped by another kind queued earlier.
+//
+// Every op it passes over (not the match) is completed on the spot, as a
+// success — design D-2 serializes ops sharing one Key (conversation ×
+// channel) strictly, so leaving an earlier, non-matching op claimed-but-
+// unsettled would make it block every later op bound for the same thread,
+// including the very one this helper is looking for. The MATCH itself is
+// left claimed, exactly as before, for a caller that completes it by hand
+// (e.g. POSTing /channel/ops/{id}/done to pin the response code).
 func findOp(t *testing.T, srv *httpapi.Server, adapter string, kind chat.OpKind, conversation string) *chat.Op {
 	t.Helper()
 	for {
@@ -498,6 +506,18 @@ func findOp(t *testing.T, srv *httpapi.Server, adapter string, kind chat.OpKind,
 		}
 		if op.Kind == kind && (conversation == "" || op.Conversation == conversation) {
 			return &op
+		}
+		// A bare empty body means "done, nothing to report" for most kinds,
+		// but ensure-topic reads a THREAD ID's absence as the adapter itself
+		// failing (finishEnsureTopic) — fail that op instead of settling it,
+		// and it would still block this very Key. A fabricated thread id is
+		// enough to settle it here; no test downstream of findOp reads it.
+		var body any = chat.OpResult{}
+		if op.Kind == chat.OpEnsureTopic {
+			body = chat.OpResult{ThreadID: "findop-" + op.ID}
+		}
+		if rec := adapterReq(srv, "POST", fmt.Sprintf("/channel/ops/%s/done", op.ID), body, testMasterToken); rec.Code != 200 {
+			t.Fatalf("findOp: completing a passed-over op: %d %s", rec.Code, rec.Body.String())
 		}
 	}
 }

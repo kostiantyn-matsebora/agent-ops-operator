@@ -44,7 +44,10 @@ func closeFixture(t *testing.T, objs ...client.Object) (*Router, *OpQueue, clien
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(objs...).Build()
-	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry()}
+	// async-command-bus task 6: OpQueue is bus-backed now, even in a test
+	// that never touches the bus directly — a fresh, unshared memory bus per
+	// fixture, exactly like every other OpQueue test in this package.
+	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 	return &Router{Client: c, Reader: c, Conversations: newTestStore(c), Runs: newTestRuns(c), Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}, q, c
 }
 
@@ -74,6 +77,26 @@ func drain(q *OpQueue, adapter string) []*Op {
 			return out
 		}
 		out = append(out, op)
+	}
+}
+
+// drainCompleting is drain, but Completes each op (an empty, successful
+// OpResult) before claiming the next — a well-behaved adapter's own loop,
+// needed by a test that enqueues more than one op sharing a Key
+// (conversation × channel): design D-2 serializes those strictly, so the
+// second is not claimable until the first settles. Plain drain stays the
+// default because several tests depend on the opposite — observing state
+// AFTER a claim but BEFORE any completion (e.g. an undelivered-reply note
+// that must survive re-derivation, not just re-queueing).
+func drainCompleting(q *OpQueue, adapter string) []*Op {
+	var out []*Op
+	for {
+		op := q.Claim(adapter)
+		if op == nil {
+			return out
+		}
+		out = append(out, op)
+		q.Complete(context.Background(), op.ID, OpResult{})
 	}
 }
 
@@ -293,10 +316,16 @@ func TestReopenNoticeReachesEveryBoundThread(t *testing.T) {
 	conv.Status.Reopens = 1
 	r, q, _ := closeFixture(t, nsChannel("c1", "slack"), nsChannel("c2", "teams"), conv)
 
-	r.FanOutReopenNotice(context.Background(), crRec(conv))
+	r.FanOutThread(context.Background(), crRec(conv))
 
+	// drainCompleting: each reopen notice shares its own conversation×
+	// channel Key with whatever the SAME reopen count re-derives later in
+	// this test (design D-2) — completing here is what lets that later
+	// re-derive be claimable at all, and does not weaken the dedup check
+	// below (a Succeeded task still suppresses a fresh Submit within its
+	// window, design D-4).
 	for _, tc := range []struct{ adapter, thread string }{{"slack", "thread-c1"}, {"teams", "thread-c2"}} {
-		ops := drain(q, tc.adapter)
+		ops := drainCompleting(q, tc.adapter)
 		if len(ops) != 1 {
 			t.Fatalf("%s: want one reopen notice, got %d", tc.adapter, len(ops))
 		}
@@ -310,13 +339,13 @@ func TestReopenNoticeReachesEveryBoundThread(t *testing.T) {
 
 	// Re-derived on every reconcile, so it must dedup — and a SECOND reopen
 	// must get its own.
-	r.FanOutReopenNotice(context.Background(), crRec(conv))
+	r.FanOutThread(context.Background(), crRec(conv))
 	if again := drain(q, "slack"); len(again) != 0 {
 		t.Fatalf("a re-derived notice must dedup: %d", len(again))
 	}
 	conv.Status.Reopens = 2
-	r.FanOutReopenNotice(context.Background(), crRec(conv))
-	if second := drain(q, "slack"); len(second) != 1 {
+	r.FanOutThread(context.Background(), crRec(conv))
+	if second := drainCompleting(q, "slack"); len(second) != 1 {
 		t.Fatalf("a second reopen is owed its own notice, got %d", len(second))
 	}
 }
@@ -337,7 +366,11 @@ func listingBody(t *testing.T, r *Router, q *OpQueue, text string) string {
 	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	ops := drain(q, "slack")
+	// drainCompleting: a caller invoking this more than once against the
+	// same q/r (TestListingAnswersBothNamesIdentically) shares one Key
+	// (design D-2) across both calls, so the first reply must settle
+	// before the second is claimable.
+	ops := drainCompleting(q, "slack")
 	if len(ops) != 1 {
 		t.Fatalf("%q: want one reply, got %d", text, len(ops))
 	}

@@ -14,6 +14,8 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/convtask"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
@@ -33,7 +35,7 @@ func memberWorkReportServer(t *testing.T, parent *agentopsv1alpha1.Conversation,
 		WithObjects(member, parent).
 		WithStatusSubresource(member, parent).Build()
 	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
-	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry()}
+	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: memory.Open()}
 	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
 	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Activity: activity.New(64), Router: router}, member
 }
@@ -146,7 +148,7 @@ func rootWorkReportServer(t *testing.T, root *agentopsv1alpha1.Conversation) *Se
 		WithObjects(root, co).
 		WithStatusSubresource(root).Build()
 	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
-	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry()}
+	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: memory.Open()}
 	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
 	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Activity: activity.New(64), Router: router}
 }
@@ -231,6 +233,42 @@ func rootTurnCases() []rootTurnCase {
 			root: judgedRoot(false, correctiveInput(), inputOf("i2", agentopsv1alpha1.OriginSignal)), status: "succeeded", wantManager: 2},
 		{name: "a second miss on an already escalated root is logged and changes nothing",
 			root: escalated, status: "succeeded", wantManager: 1, wantEscalated: true},
+	}
+}
+
+// async-command-bus task 5.4: with s.Bus set, reaching maxTurns ENQUEUES a
+// "conv" close/budget-exceeded task instead of closing inline — the
+// conversation is still open right after the response, exactly as every
+// other accept-then-process verb in this change behaves.
+func TestHandleWorkDoneEnqueuesBudgetExceededWhenBusIsSet(t *testing.T) {
+	parent := &agentopsv1alpha1.Conversation{}
+	parent.Name, parent.Namespace = "root-1", "agent-ops"
+	budget := &agentopsv1alpha1.ConversationBudget{MaxTurns: 2, Turns: 1}
+	s, member := memberWorkReportServer(t, parent, budget)
+	bus := memory.Open()
+	s.Bus = bus
+
+	rec := postWorkDone(t, s, map[string]any{
+		"convo": member.Name, "runId": "r1", "status": "succeeded", "result": "ok",
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got agentopsv1alpha1.Conversation
+	s.Reader.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: member.Name}, &got)
+	if got.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		t.Fatal("with a Bus set, the close must be deferred to a task, not performed inline")
+	}
+	task, err := bus.Claim(context.Background(), ConvQueue, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := convtask.Decode(task.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Verb != convtask.VerbClose || p.CloseKind != convtask.CloseBudgetExceeded || p.Conversation != member.Name {
+		t.Fatalf("want a close/budget-exceeded task for %s, got %+v", member.Name, p)
 	}
 }
 

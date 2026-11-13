@@ -6,9 +6,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	commandbusmemory "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
+
+// testBus is a fresh, unshared in-memory command bus (async-command-bus
+// task 6) — OpQueue is bus-backed now, so every fixture in this package
+// that used to build a bare &OpQueue{} needs one, exactly as cmd/manager
+// wires a real backend in. Unshared: two tests sharing one Backing would
+// leak dedup/backoff state between them.
+func testBus() commandbus.Bus { return commandbusmemory.Open() }
 
 // newTestStore is the unit tier's Conversations collection: the kube backend
 // over the test's fake client, so a test that seeds Conversations into the

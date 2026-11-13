@@ -107,34 +107,64 @@ func NewAdapter(mgr *Manager, cache *Cache, transcripts *Transcripts, adapterNam
 	}
 }
 
-// Run refreshes the served channel list, then long-polls for ops until ctx ends.
+// Run refreshes the served channel list, then serves ops until ctx ends, from the
+// manager's push stream.
 //
-// It waits for the watch cache first: thread ids are derived from conversation
-// UIDs, so serving an ensure-topic before the cache is warm would mint an id
-// from the fallback path for no reason.
+// It waits for the watch cache first, so the first events are applied against a
+// warm view of the conversations.
 func (a *Adapter) Run(ctx context.Context) {
 	a.cache.WaitForSync(ctx)
 	a.adoptProjectedCredentials()
 	a.refreshChannels(ctx)
 	go a.refreshLoop(ctx)
+	a.serveOps(ctx)
+}
+
+// Stream reconnect pacing. Variables so a test can shorten them.
+var (
+	streamBackoffInitial = time.Second
+	streamBackoffMax     = 30 * time.Second
+)
+
+// serveOps feeds the console from the manager's push stream. Each op is applied
+// to the console's own state and then acknowledged, which is the console's
+// receipt of it. After a drop the manager offers again whatever was not
+// acknowledged, so there is no cursor to keep, and an op's id is rendered once
+// however often it arrives.
+func (a *Adapter) serveOps(ctx context.Context) {
+	backoff := streamBackoffInitial
 	for ctx.Err() == nil {
-		op, revision, err := a.mgr.NextOp(ctx, a.adapterName, 25)
-		a.noteVocabularyRevision(revision)
-		if err != nil {
-			if ctx.Err() == nil {
-				log.Printf("ops poll: %v", err)
-				sleepCtx(ctx, 5*time.Second)
-			}
-			continue
+		delivered := false
+		err := a.mgr.StreamOps(ctx, a.adapterName, a.noteVocabularyRevision, func(op *Op) error {
+			delivered = true
+			return a.receive(ctx, op)
+		})
+		if err != nil && ctx.Err() == nil {
+			log.Printf("ops stream: %v; reconnecting", err)
 		}
-		if op == nil {
-			continue
+		if delivered {
+			backoff = streamBackoffInitial
 		}
-		threadID, opErr := a.execute(ctx, op)
-		if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
-			log.Printf("complete op %s: %v", op.ID, err)
+		if ctx.Err() == nil {
+			sleepCtx(ctx, backoff)
+			backoff = min(backoff*2, streamBackoffMax)
 		}
 	}
+}
+
+// receive applies one op to the console's own state, then acknowledges it. An op
+// that cannot be applied is logged and still acknowledged: the manager keeps
+// nothing to redeliver for it, and a replay would fail the same way. A failed
+// acknowledgement drops the connection, so the reconnect is offered the op
+// again, and applying it twice is harmless because the transcript dedups by id.
+func (a *Adapter) receive(ctx context.Context, op *Op) error {
+	if _, opErr := a.execute(ctx, op); opErr != "" {
+		log.Printf("op %s (%s): %s", op.ID, op.Kind, opErr)
+	}
+	if err := a.mgr.AckOp(ctx, a.adapterName, op.ID); err != nil {
+		return fmt.Errorf("acknowledge op %s: %w", op.ID, err)
+	}
+	return nil
 }
 
 // refreshLoop re-reads the served channels: FAST while none have resolved,
@@ -382,18 +412,27 @@ func (a *Adapter) ThreadFor(conversation string) (channel, thread string, ok boo
 	return "", "", false
 }
 
+// sendThread names the thread a send op lands in. A channel-level notice with
+// no thread (e.g. an /agents reply) is parked on the channel's own
+// pseudo-thread so it is still visible, and the transcript API serves this
+// back as the channel's general feed.
+func sendThread(op *Op) string {
+	if op.ThreadID != nil && *op.ThreadID != "" {
+		return *op.ThreadID
+	}
+	return "channel:" + op.Channel
+}
+
 // execute performs one op.
 func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) {
 	switch op.Kind {
 	case "ensure-topic":
-		tid, err := a.threadID(ctx, op.Conversation)
-		if err != nil {
-			// Redelivery is the recovery path here: the manager retries an
-			// ensure-topic it never got a threadId for, and a cache miss the
-			// watch has not caught up with yet is exactly the condition a
-			// retry outlives.
-			return "", err.Error()
+		// The manager assigns the thread's id when it enqueues ensure-topic, and
+		// nothing travels back: the console uses the one it is given.
+		if op.ThreadID == nil || *op.ThreadID == "" {
+			return "", "ensure-topic carries no thread id"
 		}
+		tid := *op.ThreadID
 		// A REOPEN arrives as an ordinary ensure-topic, and this console's
 		// thread id is deterministic, so the reopened conversation lands back
 		// in the thread it already had. Clearing the archived flag is what
@@ -407,18 +446,7 @@ func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		if op.Message == nil {
 			return "", "send without a message"
 		}
-		thread := ""
-		if op.ThreadID != nil {
-			thread = *op.ThreadID
-		}
-		if thread == "" {
-			// a channel-level notice with no thread (e.g. an /agents reply):
-			// park it on the channel's own pseudo-thread so it is still visible
-			// — the transcript API serves this back as the channel's general
-			// feed (design: "Thread-less console sends surface as the
-			// channel's general feed").
-			thread = "channel:" + op.Channel
-		}
+		thread := sendThread(op)
 		a.transcripts.AppendOp(op.ID, thread, op.Message, op.Channel)
 		return "", ""
 	case "delete-conversation":
@@ -496,28 +524,6 @@ func (a *Adapter) SubscribeVocabulary() (<-chan struct{}, func()) {
 			close(cur)
 		}
 	}
-}
-
-// threadID derives a conversation's console thread id, always `console-<uid>`.
-//
-// Deterministic from the conversation's UID, so the same conversation maps to
-// the same thread across console restarts and a redelivered ensure-topic
-// completes identically. A cache miss resolves the UID through the watch
-// client directly rather than answering a name-based id some other shape:
-// there is exactly one thread-id shape, and a second one invented for "the
-// cache hasn't caught up yet" would let two ensure-topics for the same
-// conversation bind two different threads. A genuinely unresolvable
-// conversation errors, so the manager's at-least-once redelivery retries
-// rather than this console completing an op it could not answer.
-func (a *Adapter) threadID(ctx context.Context, conversation string) (string, error) {
-	obj, err := a.cache.GetOrFetch(ctx, "conversations", conversation)
-	if err != nil {
-		return "", fmt.Errorf("resolving conversation %q UID: %w", conversation, err)
-	}
-	if obj.Metadata.UID == "" {
-		return "", fmt.Errorf("conversation %q has no UID yet", conversation)
-	}
-	return "console-" + obj.Metadata.UID, nil
 }
 
 // Send posts a UI-typed message into the manager's router and records it as

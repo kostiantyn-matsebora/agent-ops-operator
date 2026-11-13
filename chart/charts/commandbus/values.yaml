@@ -1,0 +1,9 @@
+# This subchart carries no values of its own. Unlike chart/charts/nats/
+# (whose dependency NAME is literally "nats", so its own values.yaml is what
+# Helm auto-merges under the parent's `.Values.nats`), this bundle's values
+# live nested under the parent's `commandBus.nats` — a shape Helm's own
+# subchart auto-merge cannot produce for a dependency named "commandbus".
+# The PARENT's chart/values.yaml is the one place `commandBus.*` is
+# documented and defaulted; templates/commandbus.yaml passes that block in
+# explicitly as `(dict "root" $ "commandbus" .Values.commandBus.nats)`,
+# the same explicit-dict pattern templates/nats.yaml already uses.

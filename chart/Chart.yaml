@@ -85,3 +85,13 @@ dependencies:
   - name: nats
     version: 0.1.0
     repository: ""
+  # embedded subchart (chart/charts/commandbus) — the async command bus's
+  # `nats` backend server (design async-command-bus D-13). A renamed
+  # sibling of the `nats` dependency above, not a second instance of it
+  # (task 8.1: every object name there is a hardcoded literal). NO
+  # condition, same reasoning as `nats` above: whether it renders follows
+  # `commandBus.backend` / `commandBus.nats.enabled`, values this subchart
+  # cannot see on its own.
+  - name: commandbus
+    version: 0.1.0
+    repository: ""

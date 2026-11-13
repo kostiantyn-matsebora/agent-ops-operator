@@ -39,22 +39,27 @@ capability that does not depend on where state is kept.
   - Two backends, `nats` and `memory`, pass one conformance suite and a bench.
   - `memory` is for tests and local development only. A production install
     selects `nats`.
-- **Every queue is FIFO**, claimed oldest-eligible first.
+- **Every queue is an append-only log, and FIFO**, offered oldest-eligible first.
+  - A message is appended once and never modified. Claim, failure and settle are further entries, and state is folded from them.
+  - A message that settled as succeeded is removed. One never consumed is retained 7 days.
+  - Dead letters go to a separate log (7 days, 10000 records).
   - A queue may declare an **ordering key**.
   - Tasks sharing a key are serialized. The next is not claimable until the
     previous has settled.
-  - The rule is enforced at claim time through the ledger, never by
+  - The rule is enforced at claim time through the log, never by
     partitioning.
-- **A task ledger** records each attempt (state, attempt, error code, lease)
-  and feeds a gap-free change stream.
-  - The lease is held in the ledger, so a claim made on one replica can be
+- **A queue log** records each attempt (state, attempt, error code, lease)
+  and feeds a gap-free change stream for `/state/tasks/stream`.
+  - A lease is held in the log, so a claim made on one replica can be
     completed on another.
-  - The ledger is declared bounded, lossy telemetry. The conversation record
+  - The log is declared bounded, lossy telemetry. The conversation record
     stays the only durable truth.
-- **Bus-owned retry.** Attempts are bounded, with backoff and jitter per kind.
+- **Bus-owned retry on `conv` and `in.signal`.** Attempts are bounded, with backoff and jitter per kind.
   - After the last attempt a task goes `dead`, leaves a read-only dead-letter
     record, and its id is parked for a cool-off.
   - Failures use a closed error-code vocabulary.
+  - The `out.<channel>` queues are hand-over queues and are never retried by
+    the bus. The adapter retries against its surface until the delivery TTL, and a failure is final.
 
 ### The operations
 
@@ -70,12 +75,25 @@ capability that does not depend on where state is kept.
   - A batch is only an `invocationId` tag shared by its tasks.
   - A cascade enqueues one task per member, members before the parent, on the
     root conversation's key.
-- **`OpQueue` moves onto the bus** as the `out.<channelType>` queues, keyed by
-  conversation and channel.
-  - Its method surface is kept, so the router, reconciler and handlers do not
+- **`OpQueue` moves onto the bus** as one `out.<channel>` queue per Channel
+  resource, keyed by conversation.
+  - A channel's backlog never delays any other channel.
+  - Its enqueue surface is kept, so the router, reconciler and handlers do not
     change.
   - Fire-and-forget sends gain a TTL, so a restart cannot deliver a stale
     notice.
+- **One fan-out point.** Every thread entry (input, run reply, escalation,
+  notice) is recorded once and enqueued from a single function to each bound
+  channel's queue, in causal order. Separate producers raced: the move-per-turn
+  nudge reached the console before the analysis it reacted to.
+- **Adapters own delivery: get, ack, then done or failed.** One generic contract serves every channel adapter.
+  - `GET /channel/ops` reads without changing anything.
+  - `POST /channel/ops/{id}/ack` is the hand-over. The manager never resends after it, and a delivery TTL starts.
+  - `POST /channel/ops/{id}/done` reports done or failed. No report by the TTL is a failure, final.
+  - TTLs are per message kind: stable 10 minutes, ephemeral 2, topic operations 5, `delete-conversation` 5.
+- **The console is the receipt-only exception, by configuration.** It acknowledges on receipt, with no TTL and no report, and the manager deletes the message at the acknowledgement.
+  - `GET /channel/ops/stream` pushes unacknowledged messages once per connection, with no cursor.
+  - The mechanism is generic. A new adapter needs no manager or bus code.
 - **Read surface:** `GET /state/tasks` (with a stream) and
   `GET /state/dead-letters`. Both are read-only and use the existing `/state/*`
   token scheme.
@@ -83,8 +101,10 @@ capability that does not depend on where state is kept.
 ### The chart
 
 - A `commandBus.backend` selector, independent of `stateStore.backend`.
-- Its own connection variables, credential and NetworkPolicy rule.
-- A server bundle choice, recorded in the design.
+- Its own connection variables. With the state store on `nats` it shares that
+  server and credential in buckets of its own. Otherwise it has a dedicated
+  bundle or an external URL, with a credential and NetworkPolicy rule of its own.
+- `commandBus.channelReceiptAdapters` and `commandBus.deliveryTtl.*` for the channel delivery contract.
 
 ### What stays synchronous
 
@@ -92,14 +112,18 @@ capability that does not depend on where state is kept.
 - `invoke` and the coordinator reads.
 - The runtime's `/work*` protocol, including move-per-turn handling inside
   `/work/done`.
-- The consumer ends of `/channel/ops`, adapter state and status, `/activity`.
+- The consumer ends of `/channel/ops` (read, ack, done, stream), adapter state and status, `/activity`.
 - Mark read and mark unread.
 - The accept step of every submit.
 
 ### Boundaries
 
-- **No component changes how it calls the manager API.** The adapter contract
-  and the runtime contract are not edited.
+- **The runtime contract is not edited.** Signal adapters and the runtime call
+  the manager as before.
+- **BREAKING (channel adapters).** A channel adapter reads, acknowledges, then
+  reports. One that never acknowledges is offered the same message forever, so
+  adapter images upgrade together with the manager. The old `reclaimAfterSeconds`
+  field is gone, replaced by the acknowledgement reply.
 - **BREAKING (semantic).** A `200` or `202` from `close`, `exit`, `reopen`,
   `delete`, `reset-context` and `escalate` now means *accepted*, not
   *performed*. A caller that needs the outcome reads the task.
@@ -116,9 +140,9 @@ capability that does not depend on where state is kept.
 - `command-bus`: the contract.
   - Durable accept and idempotent submit.
   - FIFO claim and per-key serialization.
-  - The ledger-held lease.
+  - The log-held lease.
   - Bus-owned backoff, and the dead and parked states.
-  - Per-kind TTL, the ledger feed and per-queue stats.
+  - Per-kind TTL, the log feed and per-queue stats.
   - The closed queue inventory, the `nats` and `memory` backends, the
     conformance suite and the chart selector.
 - `async-operations`: the manager's use of it.
@@ -130,9 +154,9 @@ capability that does not depend on where state is kept.
 
 ### Modified Capabilities
 
-- `durable-chat-ops-broker`: a channel op's claim and lease move from the
-  leader-only in-memory queue and the Conversation's claim placeholder to the
-  bus. Any replica serves the poll.
+- `durable-chat-ops-broker`: a channel op's claim and lease are replaced by
+  the get, ack, done contract with a delivery TTL over the bus's per-channel
+  queues. Any replica serves each step.
 - `conversation-close`: closing, and its cascade, is performed by tasks. The
   reply means accepted.
 - `conversation-exit-command`: `/exit` is a task and is refused mid-run with a
@@ -140,7 +164,7 @@ capability that does not depend on where state is kept.
 - `coordination-escalation`: `escalate` is a task. The member branch is a
   close followed by a result append on one key. The append id is derived from
   the task.
-- `state-durability`: the ledger and dead-letter record are a third declared
+- `state-durability`: the log and dead-letter record are a third declared
   home, bounded and lossy.
 - `component-network-isolation`: adds a requirement. The manager may reach the command-bus server.
   No other component may.
@@ -169,17 +193,18 @@ capability that does not depend on where state is kept.
 
 - `docs/concepts.md`: where work and state live, and what a reply means.
 - `docs/contracts.md`: the accept semantics of each endpoint, `/state/tasks`
-  and `/state/dead-letters`. No `docs/contracts/` page is added. That folder
-  holds contracts with implementers outside the manager, and the bus has none.
-  Its contract is the `command-bus` spec.
+  and `/state/dead-letters`. No `docs/contracts/` page is added for the bus,
+  which has no implementer outside the manager. Its contract is the
+  `command-bus` spec.
+- `docs/contracts/channel-adapter.md`: the get, ack, done contract, a new major version.
 - `docs/configuration.md`: `commandBus.*`.
 - `docs/security.md`: a new trust boundary and its control.
 - `docs/testing.md`: the bus conformance suite and the new lanes.
 - `docs/CHANGELOG.md`: the semantic change and upgrade notes.
 - A `docs/guides/` page for the bundle.
 - `.claude/rules/structure.md`, `invariants.md`, `gotchas.md` and
-  `terminology.md`: the ledger as a declared state home, the ordering and
-  idempotency rules, and the words task, invocation, ledger and dead letter.
+  `terminology.md`: the log as a declared state home, the ordering and
+  idempotency rules, and the words task, invocation, log and dead letter.
 
 ### Adopter site
 
@@ -190,9 +215,9 @@ capability that does not depend on where state is kept.
 
 ### Dependencies
 
-- The bus renders its own server bundle and owns its credential (design D-13).
-  It reuses the NATS chart template that `nats-state-store-default` (PR #471,
-  in final verification) adds. The two bundles are independent installs of one
-  template. Implementation follows that merge.
+- With the state store on `nats` the bus shares its server and credential. Its
+  own bundle (design D-13) is a separate template of the same shape, rendered
+  when the state store is on `kube` or when asked for. It follows the NATS chart
+  that `nats-state-store-default` adds.
 - The change does not depend on the state-store contract. It adds nothing to
   `state.Stores`, and `kube`-store installs can run the bus.

@@ -204,11 +204,13 @@ func TestStateReadTokenOpensStateAndNothingElse(t *testing.T) {
 }
 
 // TestStateSurfaceServedByANonLeaderWithNoProxyDial: design D-7 — /state/
-// joins /healthz in leaderProxyMiddleware's bypass, so a non-leader answers
+// joins /healthz, /channel/ops and /channel/ops/{id}/done (async-command-bus
+// design D-11) in leaderProxyMiddleware's bypass, so a non-leader answers
 // directly. Proven the same way the proxy tests prove the OPPOSITE
-// (TestChannelOpsProxiesToLeaderWhenReachable): a "leader" the follower
-// could proxy to, instrumented to record whether it was ever dialled. A
-// dumb-proxy bug (losing the /state/ exemption) would show up here as a hit.
+// (TestActivityProxiesToLeaderWhenReachable, activity_leaderproxy_test.go):
+// a "leader" the follower could proxy to, instrumented to record whether it
+// was ever dialled. A dumb-proxy bug (losing the /state/ exemption) would
+// show up here as a hit.
 func TestStateSurfaceServedByANonLeaderWithNoProxyDial(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-state-noproxy")

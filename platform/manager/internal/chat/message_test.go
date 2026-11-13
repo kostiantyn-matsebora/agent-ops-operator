@@ -50,7 +50,7 @@ func TestManagerComposesNoTransportMarkup(t *testing.T) {
 // reading a `text` field would find nothing.
 func TestOpsCarryStructuredPayloads(t *testing.T) {
 	ctx := context.Background()
-	q := &OpQueue{Registry: NewRegistry()}
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
 	ch := testChannel("c1", "slack")
 
 	q.EnqueueEnsureTopic(ctx, ch, crRec(testConv("conv-1")), TopicDescriptor{Source: "vm-alerts", Kind: "alert"})
@@ -74,7 +74,7 @@ func TestOpsCarryStructuredPayloads(t *testing.T) {
 // twice is owed two answers.
 func TestInputCardDedupsButOrdinarySendsDoNot(t *testing.T) {
 	ctx := context.Background()
-	q := &OpQueue{Registry: NewRegistry()}
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
 	ch := testChannel("c1", "slack")
 	thread := "t-1"
 	card := SignalMessage("", "vm-alerts", "DiskFull", "", nil, "boom", agentopsv1alpha1.OriginSignal)
@@ -100,12 +100,19 @@ func TestInputCardDedupsButOrdinarySendsDoNot(t *testing.T) {
 	if op := q.Claim("slack"); op == nil {
 		t.Fatal("a second input must get its own card")
 	}
-	// ordinary sends are never suppressed
+	// ordinary sends are never suppressed. Both share one Key (conversation
+	// × channel, design D-2 — here "" × "c1"), so the first must settle
+	// before the second is claimable; that per-key ordering is orthogonal
+	// to dedup, which is the only thing this test is pinning.
 	q.EnqueueMessage(ctx, ch, crRec(nil), &thread, Notice("same words"))
 	q.EnqueueMessage(ctx, ch, crRec(nil), &thread, Notice("same words"))
 	firstNotice := q.Claim("slack")
+	if firstNotice == nil {
+		t.Fatal("repeated notices must both be delivered")
+	}
+	q.Complete(ctx, firstNotice.ID, OpResult{})
 	secondNotice := q.Claim("slack")
-	if firstNotice == nil || secondNotice == nil {
+	if secondNotice == nil {
 		t.Fatal("repeated notices must both be delivered")
 	}
 }

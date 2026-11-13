@@ -18,6 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	commandbusmemory "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 )
 
 func testChannel(name, typ string) *agentopsv1alpha1.Channel {
@@ -223,8 +225,8 @@ func TestMarkUndeliveredToleratesAMissingConversation(t *testing.T) {
 }
 
 // A non-conflict error writing the undelivered marker is returned rather
-// than retried — and Complete only logs it, since the send-failure itself
-// was already released for re-derivation regardless.
+// than retried — and Complete only logs it, since Complete's own res.Error
+// branch has already decided to Fail the bus task regardless.
 func TestMarkUndeliveredReturnsANonConflictPatchError(t *testing.T) {
 	conv := testConv("conv-1")
 	conv.Namespace = testNS
@@ -239,15 +241,15 @@ func TestMarkUndeliveredReturnsANonConflictPatchError(t *testing.T) {
 				return boom
 			},
 		}).Build()
-	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry()}
+	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry(), Bus: testBus()}
 
 	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
 	if err := q.markUndelivered(context.Background(), op); err == nil || !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the patch error returned, not retried", err)
 	}
 
-	// Complete must not panic when the mark itself fails -- the send-failure's
-	// own release already happened, so this is purely the observable half.
+	// Complete must not panic when the mark itself fails -- the bus task is
+	// Failed regardless, from Complete's own res.Error branch.
 	ch := testChannel("c1", "slack")
 	q.EnqueueRunReply(context.Background(), ch, crRec(testConv("conv-1")), "run-1", nil, AnswerMessage("a", "s"))
 	q.Claim("slack")
@@ -279,7 +281,7 @@ func TestMarkUndeliveredGivesUpAfterRepeatedConflicts(t *testing.T) {
 }
 
 func TestEnsureTopicDedupsByConversation(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
 	q.EnqueueEnsureTopic(ctx, ch, crRec(testConv("conv-1")), TopicDescriptor{})
@@ -304,8 +306,15 @@ func TestEnsureTopicDedupsByConversation(t *testing.T) {
 // sequential tests never got a thread id, because a name-derived-only id
 // collided with the first conversation's entry in the completed-ops dedup
 // window, silently dropping the second's own enqueue forever.
+//
+// The fix is structural — the id embeds conv.ID (the object's own UID), so
+// a reused NAME under a different UID is never the same CommandID to begin
+// with — this test pins that by marking the first id settled directly
+// (the local mirror is whitebox-writable, same package, mirroring the old
+// test's own direct `q.recent[...] = true`) and showing the second
+// conversation's own, structurally distinct id is unaffected either way.
 func TestEnsureTopicDoesNotDedupAcrossDifferentConversationsSharingAName(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
 
@@ -315,11 +324,13 @@ func TestEnsureTopicDoesNotDedupAcrossDifferentConversationsSharingAName(t *test
 	if op == nil {
 		t.Fatal("first conversation's ensure-topic never queued")
 	}
-	// Marks it settled directly, as Complete would, without needing a fake
-	// client wired for finishEnsureTopic's CR patch — irrelevant here.
-	q.mu.Lock()
-	q.recent[op.ID] = true
-	q.mu.Unlock()
+	// Settle the UNDERLYING bus task, not just the local mirror: the first
+	// and second conversation share the SAME Key (conversation NAME,
+	// in the channel's one queue — outKey does not know about conv.ID), so a task left
+	// Running here would block the second one's claim regardless of its
+	// own, structurally distinct CommandID (design D-2's per-key
+	// serialization, same queue).
+	settleClaimed(t, q, op.ID)
 
 	// A second, distinct object (different UID) reuses the exact same name.
 	second := testConv("chat-echo-console")
@@ -330,20 +341,35 @@ func TestEnsureTopicDoesNotDedupAcrossDifferentConversationsSharingAName(t *test
 	}
 }
 
+// Both "one" and "two" are general-surface notices (crRec(nil)) on the SAME
+// channel, so they share one Key — design D-2's per-key serialization means
+// "two" is not claimable until "one" settles, unlike the old in-memory
+// queue's single FIFO list with no such rule. Completing between claims is
+// what proves FIFO order now, not a pair of claims held open at once.
 func TestClaimIsFIFOAndTypeScoped(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
 	ctx := context.Background()
 	slack := testChannel("s", "slack")
 	teams := testChannel("m", "teams")
 	q.EnqueueMessage(ctx, slack, crRec(nil), nil, Notice("one"))
 	q.EnqueueMessage(ctx, slack, crRec(nil), nil, Notice("two"))
 	q.EnqueueMessage(ctx, teams, crRec(nil), nil, Notice("other"))
-	if op := q.Claim("slack"); op == nil || op.Message.Body != "one" {
-		t.Fatalf("fifo: %+v", op)
+
+	first := q.Claim("slack")
+	if first == nil || first.Message.Body != "one" {
+		t.Fatalf("fifo: %+v", first)
 	}
-	if op := q.Claim("slack"); op == nil || op.Message.Body != "two" {
-		t.Fatalf("fifo second: %+v", op)
+	if op := q.Claim("slack"); op != nil {
+		t.Fatalf("a second op sharing the first's Key must not be claimable before it settles: %+v", op)
 	}
+	q.Complete(ctx, first.ID, OpResult{})
+
+	second := q.Claim("slack")
+	if second == nil || second.Message.Body != "two" {
+		t.Fatalf("fifo second: %+v", second)
+	}
+	q.Complete(ctx, second.ID, OpResult{})
+
 	if op := q.Claim("slack"); op != nil {
 		t.Fatalf("teams op leaked into slack: %+v", op)
 	}
@@ -352,28 +378,50 @@ func TestClaimIsFIFOAndTypeScoped(t *testing.T) {
 	}
 }
 
-func TestReclaimAfterTimeout(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+// Claim must return promptly when nothing is claimable — handleChannelOps
+// (server.go) already owns the long-poll wait, calling Claim once a
+// second; a Claim that itself blocked for any real duration would stack on
+// top of that wait instead of standing in for it (design D-2 moved the
+// lease-lapse scan the old in-memory queue hand-rolled into the bus
+// itself, which is what makes a short, bounded Claim correct now).
+func TestClaimIsNonBlockingOnAnEmptyQueue(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
+	start := time.Now()
+	if op := q.Claim("slack"); op != nil {
+		t.Fatalf("empty queue claimed something: %+v", op)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("Claim on an empty queue took %v, want well under a second", elapsed)
+	}
+}
+
+// A hand-over queue never redelivers (design D-17): an acknowledged message
+// whose delivery TTL passes with no report is failed by the bus, and nothing
+// claims it again. The clock stands in for the TTL.
+func TestAcknowledgedOpWithNoReportIsFailedNeverReclaimed(t *testing.T) {
+	backing := commandbusmemory.New()
+	q := &OpQueue{Registry: NewRegistry(), Bus: backing.Bus()}
 	ctx := context.Background()
-	q.EnqueueMessage(ctx, testChannel("s", "slack"), nil, nil, Notice("hello"))
+	q.EnqueueCloseTopic(ctx, testChannel("s", "slack"), "9876", crRec(testConv("conv-1")))
 	op := q.Claim("slack")
 	if op == nil {
 		t.Fatal("claim")
 	}
 	if again := q.Claim("slack"); again != nil {
-		t.Fatalf("claimed op must not be claimable: %+v", again)
+		t.Fatalf("acknowledged op must not be offered: %+v", again)
 	}
-	// age the claim past ReclaimAfter (dead adapter)
-	q.mu.Lock()
-	q.ops[op.ID].claimedAt = time.Now().Add(-ReclaimAfter - time.Minute)
-	q.mu.Unlock()
-	if again := q.Claim("slack"); again == nil || again.ID != op.ID {
-		t.Fatalf("timed-out claim not requeued: %+v", again)
+	backing.Advance(6 * time.Minute) // past a topic operation's 5 minutes
+	if again := q.Claim("slack"); again != nil {
+		t.Fatalf("a lapsed delivery TTL must not redeliver: %+v", again)
+	}
+	dead, err := q.Bus.DeadLetters(ctx, "out.s")
+	if err != nil || len(dead) != 1 {
+		t.Fatalf("the unreported op is a dead letter: %v %v", dead, err)
 	}
 }
 
 func TestCompleteIsIdempotentForSends(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
 	ctx := context.Background()
 	q.EnqueueMessage(ctx, testChannel("s", "slack"), nil, nil, Notice("hello"))
 	op := q.Claim("slack")
@@ -413,7 +461,7 @@ func TestRunReplyOpIDRoundTrips(t *testing.T) {
 // Unlike an ack, a reply is re-derived on every reconcile: it must dedup while
 // pending and after completion, or a conversation reposts its answer forever.
 func TestRunReplyDedupsWhilePendingAndAfterCompletion(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
 	tid := "t1"
@@ -440,7 +488,7 @@ func TestRunReplyDedupsWhilePendingAndAfterCompletion(t *testing.T) {
 }
 
 func TestCloseTopicOpIsEnqueuedPerChannelAndSettlesOnce(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
 	ctx := context.Background()
 	slack := testChannel("c1", "slack")
 	teams := testChannel("c2", "teams")
@@ -474,37 +522,32 @@ func TestCloseTopicOpIsEnqueuedPerChannelAndSettlesOnce(t *testing.T) {
 		t.Fatal("completed close-topic must report settled — the finalizer reads this")
 	}
 	// and it is NOT regenerated: a completed close-topic stays completed
+	// (within the dedup window)
 	q.EnqueueCloseTopic(ctx, slack, "9876", crRec(testConv("conv-1")))
 	if again := q.Claim("slack"); again != nil {
 		t.Fatalf("completed close-topic was regenerated: %+v", again)
 	}
 }
 
-// A failed close-topic is now RE-DERIVABLE, which is the reverse of what this
-// test used to pin — and the reversal is the point of the two-stage lifecycle.
-//
-// close-topic was the one op not derivable from CR state only because it was
-// enqueued while the object was disappearing: there was nothing left to record
-// against, so a failure had to be terminal or deletion would wedge. Closing no
-// longer deletes, so the object survives, status.threadsArchived records what
-// actually got archived, and a failure is simply an archive still owed.
-//
-// The deleting path keeps its old protection from the finalizer's grace, not
-// from this op being terminal.
-func TestFailedCloseTopicIsReDerivable(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+// A failed close-topic is FINAL (design D-17): the adapter retried against its
+// surface until the delivery TTL, so the bus does not retry it. The reconciler
+// re-derives what is still owed once the stable id's park cool-off has passed.
+func TestFailedCloseTopicIsFinalAndReDerivableAfterTheCoolOff(t *testing.T) {
+	backing := commandbusmemory.New()
+	q := &OpQueue{Registry: NewRegistry(), Bus: backing.Bus()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
 	q.EnqueueCloseTopic(ctx, ch, "9876", crRec(testConv("conv-1")))
 	op := q.Claim("slack")
 	q.Complete(ctx, op.ID, OpResult{Error: "closeForumTopic: chat not found"})
-	if q.Pending(op.ID) {
-		t.Fatal("failed close-topic must not stay pending")
+	if q.Pending(op.ID) || q.Settled(op.ID) {
+		t.Fatal("a failed close-topic is final: neither pending nor settled")
 	}
-	q.EnqueueCloseTopic(ctx, ch, "9876", crRec(testConv("conv-1")))
+	backing.Advance(6 * time.Minute)                                // past the park cool-off
+	q.EnqueueCloseTopic(ctx, ch, "9876", crRec(testConv("conv-1"))) // the reconciler's own re-derive
 	again := q.Claim("slack")
 	if again == nil {
-		t.Fatal("a failed close-topic must be re-derivable: the thread is still owed an archive")
+		t.Fatal("a failed close-topic must be re-derivable once the cool-off passes: the thread is still owed an archive")
 	}
 	if again.ID != CloseTopicOpID("conv-1", "c1") {
 		t.Fatalf("re-derived op must keep the stable id: %+v", again)
@@ -529,11 +572,21 @@ func (f *fakeProvider) Send(ctx context.Context, threadID *string, msg Message) 
 	return nil
 }
 
+// In-process delivery is now a real consumer.Pool, started by Run (design
+// D-10's "in-process providers become a consumer consuming out.<channel>"),
+// never a one-shot goroutine fired from inside enqueue — so this test
+// drives Run itself, in the background, for the fake registered type.
 func TestInProcessProviderServesRegisteredType(t *testing.T) {
 	reg := NewRegistry()
 	fake := &fakeProvider{}
 	reg.Register("web", func(ctx context.Context, channelName string) (Provider, error) { return fake, nil })
-	q := &OpQueue{Registry: reg}
+	q := &OpQueue{Registry: reg, Bus: testBus()}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); _ = q.Run(ctx) }()
+
 	q.EnqueueMessage(context.Background(), testChannel("w", "web"), nil, nil, Notice("hi there"))
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -550,8 +603,10 @@ func TestInProcessProviderServesRegisteredType(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	if op := q.Claim("web"); op != nil {
-		t.Fatalf("in-process op leaked to adapter queue: %+v", op)
+		t.Fatalf("in-process op leaked to the external adapter queue: %+v", op)
 	}
+	cancel()
+	<-done
 }
 
 // A close that is RETRIED must say goodbye once, not once per attempt.
@@ -562,7 +617,7 @@ func TestInProcessProviderServesRegisteredType(t *testing.T) {
 // landed in one thread. The farewell still goes first — a thread that stops
 // with no word is indistinguishable from a fault — so the fix is a stable id.
 func TestFarewellIsPostedOncePerClose(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
 	conv := testConv("conv-1")
@@ -571,16 +626,45 @@ func TestFarewellIsPostedOncePerClose(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		q.EnqueueFarewell(ctx, ch, crRec(conv), &tid, Notice("goodbye"))
 	}
-	if ops := len(drainOps(q, "slack")); ops != 1 {
-		t.Fatalf("a retried close must post ONE farewell, got %d", ops)
+	ops := drainOps(q, "slack")
+	if len(ops) != 1 {
+		t.Fatalf("a retried close must post ONE farewell, got %d", len(ops))
+	}
+	// Complete it: design D-2 blocks the NEXT op sharing this conversation×
+	// channel Key (the reopen's own farewell, below) until this one settles.
+	for _, op := range ops {
+		q.Complete(ctx, op.ID, OpResult{})
 	}
 
 	// ...but a conversation closed, REOPENED and closed again is owed a second.
 	conv.Status.Reopens = 1
 	q.EnqueueFarewell(ctx, ch, crRec(conv), &tid, Notice("goodbye again"))
-	if ops := len(drainOps(q, "slack")); ops != 1 {
-		t.Fatalf("a close after a reopen must post its own farewell, got %d", ops)
+	if ops := drainOps(q, "slack"); len(ops) != 1 {
+		t.Fatalf("a close after a reopen must post its own farewell, got %d", len(ops))
 	}
+}
+
+// settleClaimed Settles id's underlying bus task directly, bypassing
+// Complete's own side-effect handlers — for a test that only needs the Key
+// this op occupies released (design D-2's per-key serialization: an
+// unsettled task blocks every later one sharing its Key, regardless of
+// Kind), not the full Complete behaviour (which needs a wired
+// Conversations store for ensure-topic/close-topic/run-reply kinds).
+func settleClaimed(t *testing.T, q *OpQueue, id string) {
+	t.Helper()
+	q.mu.Lock()
+	entry, ok := q.claimed[id]
+	if ok {
+		delete(q.claimed, id)
+	}
+	q.mu.Unlock()
+	if !ok {
+		t.Fatalf("settleClaimed: %q is not currently claimed", id)
+	}
+	if err := q.Bus.Settle(context.Background(), entry.uid, entry.token); err != nil {
+		t.Fatalf("settleClaimed: %v", err)
+	}
+	q.markFromState(id, commandbus.StateSucceeded)
 }
 
 func drainOps(q *OpQueue, adapter string) []*Op {
@@ -594,12 +678,17 @@ func drainOps(q *OpQueue, adapter string) []*Op {
 	}
 }
 
-// THE 2026-08-13 REGRESSION TEST. A rejected send left its stable id in the
-// completed window, so every reconcile-driven re-derivation deduped against it
-// and the answer — already a fact in status.runs[].result — could never be
-// enqueued again. No restart helped: the re-derivation was what was suppressed.
-func TestFailedSendIsReDerivable(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+// THE 2026-08-13 REGRESSION, IN ITS NEW SHAPE. The old queue had no retry of
+// its own, so a rejected send released its stable id by hand so the NEXT
+// reconcile pass could re-derive it; this rewrite replaces that release with
+// the bus's own attempts+backoff (design D-5, out.stable: 8 attempts, 5s→5m
+// jittered) — a failed send is RETRIED, not silently dropped, and the
+// answer in status.runs[].result is never stranded either way. Advancing
+// the clock is what stands in for "the backoff elapsed", the same way it
+// does for close-topic above.
+func TestFailedSendIsFinalAndReDerivableAfterTheCoolOff(t *testing.T) {
+	backing := commandbusmemory.New()
+	q := &OpQueue{Registry: NewRegistry(), Bus: backing.Bus()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
 	tid := "t1"
@@ -611,14 +700,15 @@ func TestFailedSendIsReDerivable(t *testing.T) {
 		t.Fatal("no reply queued")
 	}
 	q.Complete(ctx, op.ID, OpResult{Error: "sendMessage: Too Many Requests: retry after 30"})
-	if q.Pending(op.ID) {
-		t.Fatal("a failed send must not stay pending")
+	if q.Pending(op.ID) || q.Settled(op.ID) {
+		t.Fatal("a failed send is final (design D-17): neither pending nor settled")
 	}
 
+	backing.Advance(6 * time.Minute)                                          // past the park cool-off
 	q.EnqueueRunReply(ctx, ch, crRec(testConv("conv-1")), "run-1", &tid, msg) // the reconciler backstop
 	again := q.Claim("slack")
 	if again == nil {
-		t.Fatal("a failed send must be re-derivable: the answer is still owed to the thread")
+		t.Fatal("a failed send must be re-derivable once its backoff elapses: the answer is still owed to the thread")
 	}
 	if again.ID != op.ID {
 		t.Fatalf("re-derived reply must keep the stable id: %s != %s", again.ID, op.ID)
@@ -637,7 +727,8 @@ func TestFailedSendIsReDerivable(t *testing.T) {
 // both stable sends, but they are derived by different passes, and one covering
 // the other is exactly the assumption that let this bug hide.
 func TestFailedInputCardIsReDerivable(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+	backing := commandbusmemory.New()
+	q := &OpQueue{Registry: NewRegistry(), Bus: backing.Bus()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
 	tid := "t1"
@@ -650,6 +741,7 @@ func TestFailedInputCardIsReDerivable(t *testing.T) {
 	}
 	q.Complete(ctx, op.ID, OpResult{Error: "sendMessage: Too Many Requests: retry after 30"})
 
+	backing.Advance(6 * time.Minute)
 	q.EnqueueInputDelivery(ctx, ch, crRec(testConv("conv-1")), "i1", &tid, card)
 	again := q.Claim("slack")
 	if again == nil {
@@ -660,24 +752,36 @@ func TestFailedInputCardIsReDerivable(t *testing.T) {
 	}
 }
 
-// delete-conversation is the ONE exemption, and for a reason the others lack:
-// its Conversation is being deleted, so there is no object to re-derive from
-// and no marker to gain. The finalizer's grace releases regardless.
-func TestFailedDeleteConversationIsNotReDerivable(t *testing.T) {
-	q := &OpQueue{Registry: NewRegistry()}
+// delete-conversation is declared NEVER PARKED (design D-5) — a deliberate
+// reversal of the old queue's own "stays suppressed forever after one
+// failure" behaviour (there was no object left to re-derive from, so a
+// permanent release-once-and-done was the only safety net available). The
+// bus retries it 3 times with a fixed 5s backoff; once genuinely Dead, the
+// zero park cool-off means the VERY NEXT re-derive is immediately
+// resubmittable — the finalizer's own grace period, not this op's dedup
+// state, is what eventually gives up (OpDeleteConversation's own doc
+// comment).
+func TestFailedDeleteConversationRetriesThenResubmitsImmediatelyOnceDead(t *testing.T) {
+	backing := commandbusmemory.New()
+	q := &OpQueue{Registry: NewRegistry(), Bus: backing.Bus()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
 
 	q.EnqueueDeleteConversation(ctx, ch, "9876", crRec(testConv("conv-1")))
-	op := q.Claim("slack")
-	if op == nil {
-		t.Fatal("no delete-conversation queued")
+	for i := 0; i < 3; i++ {
+		op := q.Claim("slack")
+		if op == nil {
+			t.Fatalf("attempt %d: no delete-conversation queued", i+1)
+		}
+		q.Complete(ctx, op.ID, OpResult{Error: "sendMessage: chat not found"})
+		backing.Advance(6 * time.Second) // past the fixed 5s backoff
+		q.EnqueueDeleteConversation(ctx, ch, "9876", crRec(testConv("conv-1")))
 	}
-	q.Complete(ctx, op.ID, OpResult{Error: "sendMessage: chat not found"})
-
-	q.EnqueueDeleteConversation(ctx, ch, "9876", crRec(testConv("conv-1")))
-	if again := q.Claim("slack"); again != nil {
-		t.Fatalf("a failed delete-conversation is TERMINAL and must stay suppressed: %+v", again)
+	// Three attempts exhausted: the task is now Dead. Never parked, so the
+	// re-derive inside the loop's own last iteration already produced a
+	// fresh, immediately-claimable task.
+	if q.Claim("slack") == nil {
+		t.Fatal("a dead delete-conversation (never parked) must be immediately resubmittable")
 	}
 }
 
@@ -690,22 +794,29 @@ func TestFailedDeleteConversationIsNotReDerivable(t *testing.T) {
 // conv, which must stay empty with no conversation to source it from.
 func TestOpsCarryTheOwningConversationID(t *testing.T) {
 	ctx := context.Background()
-	q := &OpQueue{Registry: NewRegistry()}
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
 	ch := testChannel("c1", "slack")
 
 	withID := testConv("conv-with-id")
 	withID.Spec.ConversationID = "corr-77"
 
+	// Every one of the next three ops shares conv-with-id × c1 as its Key
+	// (design D-2: Key is conversation × channel, the SAME for every op
+	// kind on that pair) — each must settle before the next is claimable.
 	q.EnqueueEnsureTopic(ctx, ch, crRec(withID), TopicDescriptor{Source: "vm-alerts", Kind: "alert"})
-	if op := q.Claim("slack"); op == nil || op.ConversationID != "corr-77" {
+	op := q.Claim("slack")
+	if op == nil || op.ConversationID != "corr-77" {
 		t.Fatalf("ensure-topic must carry the conversationId: %+v", op)
 	}
+	settleClaimed(t, q, op.ID)
 
 	tid := "t-1"
 	q.EnqueueCloseTopic(ctx, ch, tid, crRec(withID))
-	if op := q.Claim("slack"); op == nil || op.ConversationID != "corr-77" || op.Conversation != "conv-with-id" {
+	op = q.Claim("slack")
+	if op == nil || op.ConversationID != "corr-77" || op.Conversation != "conv-with-id" {
 		t.Fatalf("close-topic must carry both the name and the conversationId: %+v", op)
 	}
+	settleClaimed(t, q, op.ID)
 
 	q.EnqueueMessage(ctx, ch, crRec(withID), &tid, Notice("hello"))
 	if op := q.Claim("slack"); op == nil || op.ConversationID != "corr-77" {
@@ -723,5 +834,104 @@ func TestOpsCarryTheOwningConversationID(t *testing.T) {
 	q.EnqueueMessage(ctx, ch, crRec(nil), nil, Notice("unwired source dropped a signal"))
 	if op := q.Claim("slack"); op == nil || op.ConversationID != "" || op.Conversation != "" {
 		t.Fatalf("a conversation-less notice must carry neither name nor conversationId: %+v", op)
+	}
+}
+
+// Complete decides Settle vs Fail from TWO independent facts (design D-10):
+// the adapter's own res.Error, AND whatever the synchronous side-effect
+// handler itself reports. Here the adapter's call SUCCEEDS (res.Error == ""
+// and a thread id comes back) but the manager's own Kubernetes write fails —
+// the task must still be Failed (so the bus retries it), never silently
+// Settled, or the thread binding this op exists to create is lost for good.
+func TestCompleteFailsTheTaskWhenTheHandlerWriteFailsDespiteAdapterSuccess(t *testing.T) {
+	conv := testConv("conv-1")
+	conv.Namespace = testNS
+	boom := errors.New("boom")
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(conv).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceUpdate: func(ctx context.Context, cli client.Client, subResourceName string,
+				obj client.Object, opts ...client.SubResourceUpdateOption) error {
+				return boom
+			},
+		}).Build()
+	q := &OpQueue{Conversations: newTestStore(c), Registry: NewRegistry(), Bus: testBus()}
+	ctx := context.Background()
+	ch := testChannel("c1", "slack")
+
+	q.EnqueueEnsureTopic(ctx, ch, crRec(conv), TopicDescriptor{})
+	op := q.Claim("slack")
+	if op == nil {
+		t.Fatal("no ensure-topic queued")
+	}
+	q.Complete(ctx, op.ID, OpResult{ThreadID: "t1"}) // the adapter succeeded
+
+	if q.Pending(op.ID) {
+		t.Fatal("a handler-write failure must Fail the task (final), not leave it pending")
+	}
+	if q.Settled(op.ID) {
+		t.Fatal("a handler-write failure must not report settled")
+	}
+}
+
+// Stats() aggregates over the three out.<channel> kinds and reports WHICH op
+// and WHICH conversation is oldest in each of the queued/claimed buckets —
+// the identities commandbus.QueueStats gained for exactly this (task 6's
+// own extension to internal/commandbus/stats.go).
+func TestStatsReportsPerAdapterIdentities(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
+	ctx := context.Background()
+	ch := testChannel("c1", "slack")
+
+	// Different conversations -> different Keys, so both can be queued/
+	// claimed independently rather than serializing behind one another.
+	// conv-claimed's op is submitted FIRST, so the one Claim call below
+	// (oldest-first ordering, design D-2) deterministically takes it,
+	// leaving conv-queued's op the only one still sitting in the queue.
+	q.EnqueueMessage(ctx, ch, crRec(testConv("conv-claimed")), nil, Notice("claimed"))
+	q.EnqueueMessage(ctx, ch, crRec(testConv("conv-queued")), nil, Notice("queued"))
+
+	claimed := q.Claim("slack")
+	if claimed == nil || claimed.Conversation != "conv-claimed" {
+		t.Fatalf("expected to claim conv-claimed's op (submitted first): %+v", claimed)
+	}
+
+	stats := q.Stats()
+	var st *QueueStat
+	for i := range stats {
+		if stats[i].Adapter == "slack" {
+			st = &stats[i]
+		}
+	}
+	if st == nil {
+		t.Fatalf("no stats for slack: %+v", stats)
+	}
+	if st.Queued != 1 || st.Claimed != 1 {
+		t.Fatalf("Queued/Claimed = %d/%d, want 1/1: %+v", st.Queued, st.Claimed, st)
+	}
+	if st.OldestQueuedConv != "conv-queued" {
+		t.Fatalf("OldestQueuedConv = %q, want conv-queued: %+v", st.OldestQueuedConv, st)
+	}
+	if st.OldestClaimedConv != "conv-claimed" || st.OldestClaimedOpID != claimed.ID {
+		t.Fatalf("OldestClaimedConv/OpID = %q/%q, want conv-claimed/%q: %+v",
+			st.OldestClaimedConv, st.OldestClaimedOpID, claimed.ID, st)
+	}
+}
+
+// An adapter with nothing outstanding is simply absent from Stats() — the
+// old in-memory map read the same way, and a reader of /api/queues should
+// not have to tell "quiet" from "unheard of" apart.
+func TestStatsOmitsAnAdapterWithNothingOutstanding(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
+	ctx := context.Background()
+	q.EnqueueMessage(ctx, testChannel("s", "slack"), nil, nil, Notice("hi"))
+	op := q.Claim("slack")
+	q.Complete(ctx, op.ID, OpResult{})
+
+	for _, st := range q.Stats() {
+		if st.Adapter == "slack" {
+			t.Fatalf("a settled adapter with nothing outstanding must be absent: %+v", st)
+		}
 	}
 }

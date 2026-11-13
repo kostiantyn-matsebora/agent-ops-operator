@@ -1,0 +1,20 @@
+apiVersion: v2
+name: commandbus
+description: >-
+  The async command bus's `nats` backend server (design async-command-bus
+  D-13): a clustered, three-replica JetStream nats-server with a volume per
+  replica, a PodDisruptionBudget and the chart-managed credential. SAME
+  SHAPE as the state-store `nats` bundle (chart/charts/nats/), a SEPARATE
+  template rather than a second instance of that one — task 8.1 found every
+  object name in chart/charts/nats/templates/_helpers.tpl a hardcoded
+  literal (agentops-nats and friends), so instantiating it twice under an
+  alias would collide on every object it renders. Carries NO Chart.yaml
+  dependency condition — whether it renders is derived from
+  `commandBus.backend` and `commandBus.nats.enabled` (D-13), values this
+  subchart cannot see on its own (only `global.*` is visible to one), so
+  every object it ships is rendered from the PARENT's own
+  templates/commandbus.yaml, which can see both. This directory holds the
+  definitions (templates/_helpers.tpl) only, never bare top-level YAML a
+  subchart-native render would emit regardless of the selector.
+type: application
+version: 0.1.0

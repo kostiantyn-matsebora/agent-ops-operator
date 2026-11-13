@@ -15,7 +15,7 @@ next:
   url: /agent-ops-operator/crds/channel-adapter/
 ---
 
-**Version 1.3.0**
+**Version 2.0.0**
 
 This specification gives everything necessary to build and maintain a
 `ChannelAdapter` — a component agent-ops does not ship, that carries a
@@ -29,7 +29,7 @@ stable ID, prefixed by the section it belongs to:
 
 | Prefix | Section |
 |---|---|
-| `OPS-n` | [GET /channel/ops](#get-channelops) / [POST /channel/ops/{id}/done](#post-channelopsiddone) |
+| `OPS-n` | [GET /channel/ops](#get-channelops) / [the acknowledgement](#acknowledging-an-operation) / [POST /channel/ops/{id}/done](#post-channelopsiddone) / [GET /channel/ops/stream](#get-channelopsstream) |
 | `IN-n` | [POST /channel/inbound](#post-channelinbound) |
 | `READ-n` | [POST /channel/read](#post-channelread) |
 | `MGR-n` | [Manager's provisions](#managers-provisions) |
@@ -44,7 +44,7 @@ stable ID, prefixed by the section it belongs to:
 
 ## GET /channel/ops
 
-Long-polls for this adapter's next outbound operation.
+Long-polls for this adapter's next outbound operation, **without taking it**.
 
 `GET $MANAGER_URL/channel/ops?adapter=<name>&contract=2&wait=25`
 
@@ -56,16 +56,25 @@ Long-polls for this adapter's next outbound operation.
 
 | Status | Body |
 |---|---|
-| `200` | A [claimed op](#the-claim-window), below. |
+| `200` | One [operation](#the-operation-envelope), below. |
 | `204` | No work yet. Not an error. |
 | `400` | `adapter` or `contract` missing or outdated — the message names the version to build against. |
 | `401` | no or wrong bearer token. |
 | `403` | the token's scope names a different adapter. |
-| `503` | this replica is not the current leader, and the leader could not be reached. |
+
+**A read changes nothing.** The operation stays in the manager's queue until
+the adapter [acknowledges](#acknowledging-an-operation) it, so an adapter that dies
+between the read and the acknowledgement is simply offered the same operation
+again. Any manager replica answers.
 
 **Every response carries `X-Agentops-Vocabulary-Revision`** — the `200`
-that delivers an op, the `204` and the `503` alike. See
+that delivers an op and the `204` alike. See
 [GET /channel/vocabulary](#get-channelvocabulary).
+
+| ID | Requirement |
+|---|---|
+| `OPS-18` | An adapter MUST acknowledge an operation before acting on it. It MUST NOT deliver an operation it has not acknowledged. |
+| `OPS-19` | An adapter MUST tolerate being offered an operation it already acknowledged or finished, and MUST treat it as opaque by `id`. |
 
 ### The operation envelope
 
@@ -92,7 +101,7 @@ that delivers an op, the `204` and the `503` alike. See
 | ID | Requirement |
 |---|---|
 | `OPS-1` | An adapter MUST long-poll this endpoint while able to accept ops. `204` is not an error. |
-| `OPS-2` | A `503` MUST be treated exactly like a `204` — retried at once, on a fresh connection, never surfaced as an error. |
+| `OPS-2` | A `503` from a replica or a proxy in front of it MUST be treated exactly like a `204` — retried at once, on a fresh connection, never surfaced as an error. |
 | `OPS-3` | An adapter not implementing a kind MAY complete it with an `error`, or ignore it. |
 | `OPS-9` | Every operation additionally carries `conversationId`, beside the channel and conversation names it already carries. The field is ADDITIVE — an adapter that ignores it MUST remain fully conformant, declaring the same `contract` version. |
 
@@ -108,55 +117,85 @@ conversation content:
 
 | ID | Requirement |
 |---|---|
-| `OPS-10` | Each published shape MUST stay stable across redelivery and manager restarts — it is what makes at-least-once delivery deduplicable. |
+| `OPS-10` | Each published shape MUST stay stable across a repeated offer and manager restarts — it is what lets an adapter recognise an op it already delivered. |
 | `OPS-11` | A consumer MAY parse a published shape. The conversation and channel segments are Kubernetes names, which cannot contain the separator, so the one remaining segment is recovered by position, whatever it contains. |
 | `ADA-15` | An adapter MUST treat an id matching no published shape as opaque — completing the operation by that id verbatim and inferring nothing from its content. An unpublished id can change without breaking anyone. |
 
-### The claim window
+### Acknowledging an operation
 
-It embeds every field of [the operation envelope](#the-operation-envelope),
-plus:
+**The ack is the hand-over.** From it the operation is the adapter's: the
+manager never sends it again, and its delivery TTL starts.
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `reclaimAfterSeconds` | integer | yes | How long the manager leaves this claim with the adapter before returning the op to the queue. |
+`POST $MANAGER_URL/channel/ops/{id}/ack?adapter=<name>`
+
+```
+POST /channel/ops/send:conv-1:tg-ops:run-7/ack?adapter=telegram
+200  {"ok": true, "deliveryTtlSeconds": 600, "consumed": false}
+```
+
+| Status | Body |
+|---|---|
+| `200` | `{"ok": true, "deliveryTtlSeconds": <seconds>, "consumed": <bool>}`. |
+| `400` | `adapter` missing, or an unknown query parameter, refused by name. |
+| `401`, `403` | as for the read. |
+| `404` | the operation is gone: consumed, expired, or never enqueued here. A repeated acknowledgement of a finished op reads as this and is harmless. |
+| `409` | the operation exists but is not being offered: behind an unfinished operation of its conversation, or finished. |
+
+| Reply field | Meaning |
+|---|---|
+| `deliveryTtlSeconds` | how long the adapter has to [report](#post-channelopsiddone) the outcome. `0` when `consumed` is true |
+| `consumed` | `true` when the manager consumed the op at the acknowledgement and nothing is to be reported. Only a [receipt adapter](#the-receipt-only-adapter) sees it |
+
+The delivery TTL is declared per kind, so every adapter gets the same one for
+the same kind of operation:
+
+| Kind | Default delivery TTL |
+|---|---|
+| a reply, an input card | 10 minutes |
+| an ack or a notice | 2 minutes |
+| `ensure-topic`, `close-topic` | 5 minutes |
+| `delete-conversation` | 5 minutes |
 
 | ID | Requirement |
 |---|---|
-| `OPS-4` | An adapter absorbing transport backpressure in-process MUST budget the total wait, retry and timeout of every call ONE operation makes strictly below `reclaimAfterSeconds`, or a second claimant may post the same op again. An adapter exceeding the interval converts the manager's at-least-once redelivery into a duplicate the transport cannot deduplicate, because the message has already been posted. |
-| `OPS-5` | `reclaimAfterSeconds` is ADDITIVE and optional to act on. An adapter that ignores it is fully conformant, falling back to its own conservative default. |
-
-**The claim itself is recorded on the Conversation**, as
-`status.threads[].claim` (`holder`, `claimedAt`), written only by the
-manager's current leader.
-
-A claim older than `claimStalenessSeconds` is cleared and the op
-dispatched again. A claim held by a former leader is cleared at once.
-Neither is the adapter's concern.
+| `OPS-4` | An adapter absorbing transport backpressure in-process MUST budget the total wait, retry and timeout of every call ONE operation makes strictly below `deliveryTtlSeconds`, leaving room to report. An adapter overrunning it is failed by the manager while it may still be delivering, and a failed operation is not offered again. |
+| `OPS-5` | An acknowledgement is idempotent and answers the same on any replica. An adapter MAY repeat it after a lost reply. |
+| `OPS-20` | The manager MUST NOT send an acknowledged operation again, however long the adapter takes inside its delivery TTL. |
+| `OPS-21` | An acknowledged operation with no report when its delivery TTL passes MUST be failed by the manager, and a failure MUST be final: the operation is never redelivered. |
+| `OPS-22` | What is still owed after a failure is derived again from the conversation, with the same stable id, only after a cool-off. A failed operation never comes back by being offered again. |
 
 ## POST /channel/ops/{id}/done
 
-Completes a claimed op.
+Reports the outcome of an acknowledged op, **done or failed**.
 
 `POST $MANAGER_URL/channel/ops/{id}/done`
 
 | Status | Body |
 |---|---|
-| `200` | `{"ok": true}`. Duplicate completions are legal (at-least-once) and always `200`. |
+| `200` | `{"ok": true}`. A duplicate report is legal and always `200`. |
 | `400` | malformed JSON. |
 
-### The completion result
+An empty body reports success, as `close-topic` and `send` do.
+
+```
+POST /channel/ops/topic:conv-1:7c1e:tg-ops/done   {"threadId": "1187"}     # done, with its result
+POST /channel/ops/send:conv-1:tg-ops:run-7/done   {}                       # done
+POST /channel/ops/send:conv-1:tg-ops:run-7/done   {"error": "chat not found"}   # failed
+```
+
+### The report
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `threadId` | string | no | Required for `ensure-topic` — the opaque thread id the adapter minted, in its own id space. |
-| `error` | string | no | Set on failure. Surfaced as a Conversation condition and regenerated, except `close-topic` (below). |
+| `error` | string | no | Set when the delivery failed. The op is FAILED, final, never redelivered. |
 
 | ID | Requirement |
 |---|---|
-| `OPS-6` | An `ensure-topic` completed with no `error` and no `threadId` MUST be treated by the manager as a failure. |
-| `OPS-7` | `close-topic`'s failure MUST be logged rather than written as a condition — its conversation is being deleted, so no object will survive to carry one — and the op MUST NOT be regenerated. |
-| `OPS-8` | `delete-conversation`'s failure is TERMINAL: logged, never a condition, never regenerated. Deletion MUST NOT wait longer than a 2-minute grace, so a down adapter cannot wedge it. An already-closed thread is treated as success. |
+| `OPS-6` | An `ensure-topic` reported with no `error` and no `threadId` MUST be treated by the manager as a failure. |
+| `OPS-7` | `close-topic`'s failure MUST be logged rather than written as a condition — its conversation may be deleted, so no object will survive to carry one. |
+| `OPS-8` | `delete-conversation`'s failure is TERMINAL: logged, never a condition. Deletion MUST NOT wait longer than a 2-minute grace, so a down adapter cannot wedge it. An already-closed thread is treated as success. |
+| `OPS-23` | An adapter MUST report every operation it acknowledged, done or failed, before its delivery TTL passes. It SHOULD retry the report a few times, since a lost report is failed by the manager at the TTL. |
 
 ### Backpressure is the adapter's to absorb
 
@@ -167,11 +206,76 @@ reason retrying cannot fix — is reported at once, never ridden out.
 
 | ID | Requirement |
 |---|---|
-| `ADA-3` | An adapter MUST absorb a retryable backpressure signal inside its claim window, waiting the interval the transport stated rather than a backoff it computed instead. |
-| `ADA-3.1` | An adapter MUST report an op failed only when the condition is terminal, or when riding it out would overrun the claim. |
+| `ADA-3` | An adapter MUST absorb a retryable backpressure signal inside its delivery TTL, waiting the interval the transport stated rather than a backoff it computed instead. |
+| `ADA-3.1` | An adapter MUST report an op failed only when the condition is terminal, or when riding it out would overrun the delivery TTL. |
 | `ADA-3.2` | The retry budget is PER OPERATION, never per transport call. An operation making several calls — a reopen plus a create, one send per chunk, a fallback — MUST charge every call's wait, retry and own timeout against the one budget. |
-| `ADA-3.3` | Reporting a retryable condition as an operation failure is permitted but degrades the system to the manager's recovery path for a condition the adapter could have ridden out. An adapter MUST NOT treat it as the normal path. |
-| `ADA-4` | An adapter MUST pace its own sending so bursts are spread rather than rejected, and MUST gate pacing before it CLAIMS an op, never before it sends. |
+| `ADA-3.3` | A failure is final. Reporting a retryable condition as an operation failure gives up the delivery for a condition the adapter could have ridden out. An adapter MUST NOT treat it as the normal path. |
+| `ADA-4` | An adapter MUST pace its own sending so bursts are spread rather than rejected, and MUST gate pacing before it READS an op, never before it sends and never between the acknowledgement and the send. A delivery waiting on a pacer spends its delivery TTL. |
+
+## GET /channel/ops/stream
+
+**Optional, and for a receipt adapter only.** The same operations as
+[GET /channel/ops](#get-channelops), pushed over one server-sent-events
+connection. It is available to an adapter the manager is configured to treat as
+[receipt-only](#the-receipt-only-adapter), the console by default. Any other
+adapter is answered `404` and reads the long-poll.
+
+`GET $MANAGER_URL/channel/ops/stream?adapter=<name>&contract=2`
+
+| Param | Required | Meaning |
+|---|---|---|
+| `adapter` | yes | This `ChannelAdapter` CR's own name — the routing key. |
+| `contract` | yes | The outbound message contract version this adapter speaks. |
+
+Any other parameter is refused by name. There is no resume point.
+
+| Status | Body |
+|---|---|
+| `200` | `text/event-stream`, below. |
+| `400` | as for the long-poll. |
+| `401`, `403` | as for the long-poll. |
+| `404` | this adapter is not a receipt adapter. Read `GET /channel/ops`. |
+
+The response sets `X-Accel-Buffering: no`, and carries
+`X-Agentops-Vocabulary-Revision` as the long-poll does.
+
+### The stream's events
+
+| Event | `id:` | `data:` |
+|---|---|---|
+| `op` | the op's `id` | an [operation](#the-operation-envelope), byte for byte what the long-poll returns |
+| `vocabulary` | none | `{"revision": "<revision>"}`, sent when the revision changes after the connection opened |
+
+A comment line, `: keep-alive`, is sent when the stream is otherwise idle.
+
+| ID | Requirement |
+|---|---|
+| `OPS-12` | The manager MUST push each unacknowledged operation once per connection, in queue order, and MUST change nothing by pushing it. |
+| `OPS-13` | After a reconnect the manager MUST push again exactly the operations never acknowledged. There is no cursor, no sequence and no `Last-Event-ID`. |
+| `OPS-14` | A consumer MUST acknowledge each operation with [`POST /channel/ops/{id}/ack`](#acknowledging-an-operation). A pushed operation that is not acknowledged stays unacknowledged. |
+| `OPS-15` | Any manager replica MUST serve the stream, and an acknowledgement reaching a replica other than the one that pushed the operation MUST still take it. |
+| `OPS-16` | A consumer MUST tolerate being pushed an operation it already rendered, and MUST render one `id` once. |
+
+A consumer SHOULD treat a stream silent for several keep-alive intervals as
+dead and reconnect with backoff.
+
+### The receipt-only adapter
+
+**The console is the one declared exception to the delivery TTL, by
+configuration.** The manager's `CHANNEL_RECEIPT_ADAPTERS` (default `console`,
+chart value `commandBus.channelReceiptAdapters`) names the adapters whose
+acknowledgement is only their receipt of the operation from the manager.
+
+For such an adapter the manager performs the delivery side effects at the
+acknowledgement, deletes the operation, and answers `consumed: true` with
+`deliveryTtlSeconds: 0`. The adapter reports nothing. It also does not wait for
+its own onward push to a browser, which stays fire-and-forget.
+
+| ID | Requirement |
+|---|---|
+| `OPS-24` | A receipt adapter MUST acknowledge each operation on receipt and MUST NOT call `/done`. |
+| `OPS-25` | The manager assigns a receipt adapter's thread id when it enqueues `ensure-topic` (`console-<conversation uid>`), so the adapter uses the id it is given. No result travels back. |
+| `OPS-26` | The mechanism is generic. A new adapter needs no manager change: it gets the full contract above, and becomes receipt-only by being named in `CHANNEL_RECEIPT_ADAPTERS`. |
 
 ## POST /channel/inbound
 
@@ -442,9 +546,10 @@ All `/channel/*` calls carry `Authorization: Bearer <token>`.
 
 | ID | Obligation |
 |---|---|
-| `ADA-1` | **Consume the `/channel/*` endpoints it needs** — poll, complete, inbound replies, channel listing, cursor state, channel status. |
+| `ADA-1` | **Consume the `/channel/*` endpoints it needs** — read, acknowledge and report operations, inbound replies, channel listing, cursor state, channel status. |
 | `ADA-2` | **Parse the body grammar** — the markdown subset plus the block grammar, under the shared `structured-agent-output` recognition rules. |
-| `ADA-3`/`ADA-3.1`/`ADA-3.2`/`ADA-3.3`/`ADA-4` | **Absorb retryable backpressure inside the claim window, PER OPERATION never per call**, and **own its outbound pacing** — see [Backpressure](#backpressure-is-the-adapters-to-absorb). |
+| `OPS-18`/`OPS-23` | **Acknowledge an operation before acting on it, and report every one acknowledged, done or failed, before its delivery TTL passes** — see [Acknowledging an operation](#acknowledging-an-operation). |
+| `ADA-3`/`ADA-3.1`/`ADA-3.2`/`ADA-3.3`/`ADA-4` | **Absorb retryable backpressure inside the delivery TTL, PER OPERATION never per call**, and **own its outbound pacing** — see [Backpressure](#backpressure-is-the-adapters-to-absorb). |
 | `ADA-5` | **Never re-ingest its own outbound post as inbound.** |
 | `ADA-6` | **Declare `echoesOwnMessages` truthfully**, and decide for itself what its transport can express from the UNFILTERED vocabulary. |
 | `ADA-14` | **Never create, derive, or alter a `conversationId`** — translate it to and from the transport's own thread id, and nothing more. |
@@ -456,10 +561,10 @@ All `/channel/*` calls carry `Authorization: Bearer <token>`.
 |---|---|---|
 | Read reporting | call [`POST /channel/read`](#post-channelread) and track per-reader watermarks | its surface renders unreadness |
 | Config/credential metadata | declare [`spec.configSchema`/`spec.credentialKeys`](#discovering-what-config-needs) | the CR wants its interface machine-checked |
-| Reclaim-aware pacing | budget its own wait inside `reclaimAfterSeconds` (`OPS-5`) | it absorbs backpressure in-process |
 | Thread reopening | honour `previousThreadId` and resume the archived thread (`ADA-7`) | its transport can un-archive a thread |
 | Name translation | translate a vocabulary name on the way out and back (`ADA-6.1`) | its transport rejects the name's own characters |
 | Reset-context | expose [`reset-context`](#acting-on-a-bound-conversation) as a user action | its surface offers that control |
+| Op stream | consume [`GET /channel/ops/stream`](#get-channelopsstream) in place of the long-poll | it is a receipt adapter and wants ops pushed |
 
 An adapter implementing none of these stays fully conformant — see
 [Conformance](#conformance).
@@ -468,15 +573,17 @@ An adapter implementing none of these stays fully conformant — see
 
 | ID | Provision |
 |---|---|
-| `MGR-1` | **The ops long-poll** — `GET /channel/ops?adapter=<name>&contract=<version>&wait=<seconds>`, at-least-once delivery, duplicates tolerated by `id`. |
-| `MGR-2` | **The claim window** — a claimed op carries `reclaimAfterSeconds`, and an op not completed within it returns to the queue for another claimant. |
+| `MGR-1` | **The ops long-poll** — `GET /channel/ops?adapter=<name>&contract=<version>&wait=<seconds>`, a read that changes nothing, served by any replica. |
+| `MGR-2` | **The hand-over and its delivery TTL** — `POST /channel/ops/{id}/ack` hands an op over and starts its delivery TTL. The manager never sends an acknowledged op again, and fails one with no report at its TTL. A failure is final. |
 | `MGR-3` | **Typed operations** — `send`, `ensure-topic`, `close-topic`, `delete-conversation`, each a structured payload, never rendered display text. |
 | `MGR-4` | **The vocabulary revision** — every long-poll response carries the current revision, and `GET /channel/vocabulary` serves the entries to the same authentication. |
 | `MGR-5` | **Derived-token auth** — the master token plus per-adapter tokens derived as `HMAC(masterKey, "adapter:"+name)`, validated by re-derivation, scoped to the adapter's own name. |
 | `MGR-6` | **Delivery recording** — completions land on the Conversation: the thread id in `status.threads[]`, the archive in `status.threadsArchived[]`, read watermarks on the thread bindings. |
 | `MGR-6.1` | **Delivery exclusion** — an input MUST be delivered to every bound channel except the surface it entered on, unless that surface declares `ChannelAdapter.spec.echoesOwnMessages: false`. |
-| `MGR-6.2` | **Idempotent reply ids** — a reply op's id MUST be stable per conversation × channel × run (`send:<conversation>:<channel>:<runId>`), so a manager restart between completion and claim re-derives the answer, appending the channel to `status.runs[].delivered[]`. |
+| `MGR-6.2` | **Idempotent reply ids** — a reply op's id MUST be stable per conversation × channel × run (`send:<conversation>:<channel>:<runId>`), so a manager restart between a run's completion and its delivery re-derives the answer, appending the channel to `status.runs[].delivered[]`. |
 | `MGR-12` | **`conversationId` on every op** — each operation delivered on `/channel/ops` additionally carries the conversation's correlation id, ADDITIVE and opaque to the adapter, absent only on a conversation created before the field existed. |
+| `MGR-13` | **The op stream** — `GET /channel/ops/stream`, the long-poll's ops pushed to a receipt adapter in queue order, on any replica (`OPS-12` to `OPS-16`). OPTIONAL: an adapter that never calls it is unaffected. |
+| `MGR-14` | **The receipt-only exception** — adapters named by `CHANNEL_RECEIPT_ADAPTERS` acknowledge on receipt, with no delivery TTL and no report (`OPS-24` to `OPS-26`). |
 
 ## Enums
 
@@ -511,6 +618,7 @@ its own integer series, unrelated to this document's semver:
 
 | Document version | Wire `contract` value |
 |---|---|
+| 2.0.0 | `2` |
 | 1.3.0 | `2` |
 | 1.2.0 | `2` |
 | 1.1.0 | `2` |
@@ -540,6 +648,7 @@ Both stay fully conformant with this version unchanged.
 
 | Version | Date | Changed |
 |---|---|---|
+| 2.0.0 | 2026-11-13 | **BREAKING.** An outbound operation is taken in three steps: a read that changes nothing, an acknowledgement (`POST /channel/ops/{id}/ack`) that hands it over and starts a per-kind delivery TTL, and a report (`/done`) that is done or failed. The manager never resends an acknowledged op, fails one with no report at its TTL, and a failure is final (`OPS-18` to `OPS-23`, `MGR-2`). `reclaimAfterSeconds` and the claim window are removed. An adapter that never acknowledges is offered the same op forever, so adapter images upgrade together with the manager. Added an optional push stream, `GET /channel/ops/stream`, and the receipt-only exception for the console (`OPS-12` to `OPS-16`, `OPS-24` to `OPS-26`, `MGR-13`, `MGR-14`). The wire `contract` value is unchanged. |
 | 1.3.0 | 2026-10-21 | The retry budget is explicitly PER OPERATION, never per transport call — every call an operation makes charges one total (`ADA-3.2`, `ADA-3.3`, `OPS-4`). Published the two delivery operation id shapes, `send:<conversation>:<channel>:<runId>` and `input:<conversation>:<input>:<channel>` (`OPS-10`, `OPS-11`, `ADA-15`) — any other id stays opaque. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the published shapes stays fully conformant. |
 | 1.2.0 | 2026-10-21 | The typed message's `signal` kind may carry an optional `severity` — one of `critical`, `error`, `warning`, `info`, mirroring the signal adapter contract's own field. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the field stays fully conformant. |
 | 1.1.0 | 2026-10-18 | Every `/channel/ops` operation additionally carries the conversation's `conversationId` (`OPS-9`, `MGR-12`), opaque to the adapter. A channel adapter MUST NOT mint one (`ADA-14`, `IN-4`) — it only translates it to and from the transport's thread id. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the field stays fully conformant. |

@@ -29,5 +29,8 @@ dependencies:
 - name: nats
   repository: ""
   version: 0.1.0
-digest: sha256:c777927ec9730b719d41a78ae53641578fd579908513734383b6e4e2222025c5
-generated: "2026-11-09T20:36:53.496767601+02:00"
+- name: commandbus
+  repository: ""
+  version: 0.1.0
+digest: sha256:21c617638670a33d37a053be33a728edeac5504a56add0f8945e3bc19ee32f74
+generated: "2026-11-13T08:46:41.22604145+02:00"

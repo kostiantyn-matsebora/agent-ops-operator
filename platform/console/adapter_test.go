@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -45,55 +46,34 @@ type fakeManager struct {
 	// repeats), set as the X-Agentops-Vocabulary-Revision response header —
 	// ADA-6, the only way an otherwise-idle adapter learns of a change.
 	vocabRevisions []string
-	vocabCalls     int
+	sent           int // op frames written to the stream
+	acked          []string
+	ackedSet       map[string]bool
 }
 
 func (f *fakeManager) setVocabRevisions(revs ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.vocabRevisions = revs
-	f.vocabCalls = 0
-}
-
-func (f *fakeManager) nextVocabRevision() string {
-	if len(f.vocabRevisions) == 0 {
-		return ""
-	}
-	i := f.vocabCalls
-	if i >= len(f.vocabRevisions) {
-		i = len(f.vocabRevisions) - 1
-	}
-	f.vocabCalls++
-	return f.vocabRevisions[i]
 }
 
 func newFakeManager(t *testing.T, channels ...ChannelInfo) *fakeManager {
 	t.Helper()
-	f := &fakeManager{channels: channels, failInbound: map[string]bool{}, skipReads: map[string]bool{}}
+	f := &fakeManager{channels: channels, failInbound: map[string]bool{}, skipReads: map[string]bool{}, ackedSet: map[string]bool{}}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /channel/ops", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /channel/ops/stream", f.serveStream)
+	// The console's acknowledgement is its receipt of the op. It reports no done:
+	// any call to /done is recorded, and a test asserts there is none.
+	mux.HandleFunc("POST /channel/ops/{id}/ack", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		defer f.mu.Unlock()
-		if rev := f.nextVocabRevision(); rev != "" {
-			w.Header().Set(VocabularyRevisionHeader, rev)
-		}
-		if f.next >= len(f.ops) {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		op := f.ops[f.next]
-		f.next++
-		writeJSON(w, http.StatusOK, op)
+		f.acked = append(f.acked, r.PathValue("id"))
+		f.ackedSet[r.PathValue("id")] = true
+		f.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "consumed": true})
 	})
 	mux.HandleFunc("POST /channel/ops/{id}/done", func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]string
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body == nil {
-			body = map[string]string{}
-		}
-		body["id"] = r.PathValue("id")
 		f.mu.Lock()
-		f.done = append(f.done, body)
+		f.done = append(f.done, map[string]string{"id": r.PathValue("id")})
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -174,12 +154,70 @@ func (f *fakeManager) queue(ops ...Op) {
 	f.ops = append(f.ops, ops...)
 }
 
-func (f *fakeManager) completions() []map[string]string {
+// sentCount is how many op frames the stream has written.
+func (f *fakeManager) sentCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := make([]map[string]string, len(f.done))
-	copy(out, f.done)
-	return out
+	return f.sent
+}
+
+// dones is every /done call received: always none, for the console.
+func (f *fakeManager) dones() []map[string]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]map[string]string(nil), f.done...)
+}
+
+// acknowledged is the id of every op the console acknowledged, in order.
+func (f *fakeManager) acknowledged() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.acked...)
+}
+
+// serveStream is the manager's /channel/ops/stream: every op queued so far that
+// is not yet acknowledged, in order, then each new one, as an SSE event.
+func (f *fakeManager) serveStream(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	revs := f.vocabRevisions
+	f.mu.Unlock()
+	if len(revs) > 0 {
+		w.Header().Set(VocabularyRevisionHeader, revs[0])
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	flusher := w.(http.Flusher)
+	flusher.Flush()
+	for i := 1; i < len(revs); i++ {
+		fmt.Fprintf(w, "event: vocabulary\ndata: {\"revision\":%q}\n\n", revs[i])
+	}
+	flusher.Flush()
+	next := 0
+	f.mu.Lock()
+	acknowledgedAtConnect := map[string]bool{}
+	for id := range f.ackedSet {
+		acknowledgedAtConnect[id] = true
+	}
+	f.mu.Unlock()
+	for r.Context().Err() == nil {
+		f.mu.Lock()
+		var due []Op
+		for ; next < len(f.ops); next++ {
+			if !acknowledgedAtConnect[f.ops[next].ID] {
+				due = append(due, f.ops[next])
+			}
+		}
+		f.mu.Unlock()
+		for _, op := range due {
+			data, _ := json.Marshal(op)
+			fmt.Fprintf(w, "event: op\nid: %s\ndata: %s\n\n", op.ID, data)
+			flusher.Flush()
+			f.mu.Lock()
+			f.sent++
+			f.mu.Unlock()
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func (f *fakeManager) reported() []ReadEntry {
@@ -221,17 +259,6 @@ func consoleUnderTest(t *testing.T, f *fakeManager, objs ...*Object) (*Adapter, 
 	return a, tr, cache
 }
 
-// mustThreadID resolves a thread id for a test fixture already in the cache —
-// the happy path, where threadID never touches the live fallback.
-func mustThreadID(t *testing.T, a *Adapter, conversation string) string {
-	t.Helper()
-	id, err := a.threadID(context.Background(), conversation)
-	if err != nil {
-		t.Fatalf("threadID(%q): %v", conversation, err)
-	}
-	return id
-}
-
 func runUntil(t *testing.T, a *Adapter, cond func() bool) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -247,28 +274,21 @@ func runUntil(t *testing.T, a *Adapter, cond func() bool) {
 	t.Fatal("adapter did not reach the expected state")
 }
 
-func TestEnsureTopicIsDeterministicFromConversationUID(t *testing.T) {
+func TestEnsureTopicUsesTheThreadTheManagerAssignedAcknowledgesAndReportsNothingBack(t *testing.T) {
 	f := newFakeManager(t, ChannelInfo{Name: "console"})
-	conv := obj("conversations", "task-abc", "1", `{"profileRef":{"name":"ops"}}`, "{}")
-	conv.Metadata.UID = "7f3c-uid"
-	a, _, _ := consoleUnderTest(t, f, conv)
+	a, tr, _ := consoleUnderTest(t, f)
 
-	f.queue(Op{ID: "topic:task-abc:console", Channel: "console", Conversation: "task-abc", Kind: "ensure-topic", Topic: &TopicDescriptor{Conversation: "task-abc", Title: "t"}})
-	runUntil(t, a, func() bool { return len(f.completions()) > 0 })
-
-	got := f.completions()[0]
-	if got["threadId"] != "console-7f3c-uid" {
-		t.Fatalf("thread id not derived from the conversation UID: %+v", got)
+	tid := "console-7f3c-uid"
+	f.queue(Op{ID: "topic:task-abc:console", Channel: "console", Conversation: "task-abc", Kind: "ensure-topic", ThreadID: &tid, Topic: &TopicDescriptor{Conversation: "task-abc", Title: "t"}})
+	runUntil(t, a, func() bool { return f.sentCount() == 1 })
+	time.Sleep(50 * time.Millisecond)
+	if got := f.acknowledged(); len(got) != 1 || got[0] != "topic:task-abc:console" {
+		t.Fatalf("the console acknowledges the op it received, got %v", got)
 	}
-	// a fresh console (new process, same cluster) must mint the same id
-	a2, _, _ := consoleUnderTest(t, f, conv)
-	id, err := a2.threadID(context.Background(), "task-abc")
-	if err != nil {
-		t.Fatalf("threadID: %v", err)
+	if reports := f.dones(); len(reports) != 0 {
+		t.Fatalf("the console reports no done, got %+v", reports)
 	}
-	if id != got["threadId"] {
-		t.Fatalf("thread id not stable across restarts: %q vs %q", id, got["threadId"])
-	}
+	_ = tr
 }
 
 func TestRedeliveredSendRendersOnce(t *testing.T) {
@@ -278,7 +298,8 @@ func TestRedeliveredSendRendersOnce(t *testing.T) {
 	send := Op{ID: "send:42", Channel: "console", Kind: "send", ThreadID: &thread, Message: &OpMessage{Kind: "answer", Body: "done"}}
 	f.queue(send, send) // at-least-once: the manager may redeliver
 
-	runUntil(t, a, func() bool { return len(f.completions()) == 2 })
+	runUntil(t, a, func() bool { return f.sentCount() == 2 })
+	time.Sleep(50 * time.Millisecond)
 	if msgs := tr.Thread(thread); len(msgs) != 1 {
 		t.Fatalf("redelivered op must render once, got %d: %+v", len(msgs), msgs)
 	}

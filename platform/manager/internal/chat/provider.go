@@ -65,3 +65,16 @@ func (r *Registry) Resolve(channelType string) ProviderFactory {
 	defer r.mu.RUnlock()
 	return r.factories[channelType]
 }
+
+// Types lists every channel type with a registered in-process factory, a
+// snapshot at call time. OpQueue.Run resolves a learned channel's adapter
+// through Resolve instead, so a type registered afterwards is picked up.
+func (r *Registry) Types() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.factories))
+	for t := range r.factories {
+		out = append(out, t)
+	}
+	return out
+}

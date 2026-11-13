@@ -57,8 +57,8 @@ requirement of its own.
 
 Four pieces:
 
-1. **A container** implementing the channel contract — long-poll for
-   operations, complete each one, push replies back.
+1. **A container** implementing the channel contract — read an operation,
+   acknowledge it, deliver it and report the outcome, push replies back.
 2. **A `ChannelAdapter` resource** — image and workload knobs, plus the
    interface metadata describing what you serve.
 3. **A `Channel` naming it**, with that surface's credentials.
@@ -71,7 +71,7 @@ and no `op.title` — see [The typed message]({{ '/contracts/channel-adapter/' |
 Escaping, length limits, splitting and topic naming belong to the
 component that knows them, which is yours.
 
-## 1. Take operations from the queue
+## 1. Read an operation, then acknowledge it
 
 Long-poll — see [GET /channel/ops]({{ '/contracts/channel-adapter/' | relative_url }}#get-channelops).
 `contract=2` is required, and an absent or outdated version is refused at the
@@ -90,26 +90,37 @@ curl -H "Authorization: Bearer $env:ADAPTER_TOKEN" `
 A `204` means nothing queued — poll again. A delivered op is
 [the operation envelope]({{ '/contracts/channel-adapter/' | relative_url }}#the-operation-envelope),
 one of
-[four typed kinds]({{ '/contracts/channel-adapter/' | relative_url }}#typed-operations),
-carrying
-[a claim window]({{ '/contracts/channel-adapter/' | relative_url }}#the-claim-window):
+[four typed kinds]({{ '/contracts/channel-adapter/' | relative_url }}#typed-operations):
 
 ```json
 {"id":"op-91c3","channel":"my-surface","kind":"send",
- "message":{"kind":"answer","body":"…"},"reclaimAfterSeconds":120}
+ "message":{"kind":"answer","body":"…"}}
 ```
 
-**A `503` means this replica is not the manager's current leader.** Retry at
-once, on a fresh connection, exactly as you already retry an empty `204` —
-never log either as a failure (`OPS-1`, `OPS-2`).
+**A read takes nothing.** Until you acknowledge it the op stays queued, and an
+adapter that dies in between is offered it again. Acknowledge before you act
+(`OPS-18`):
+
+```sh
+curl -X POST -H "Authorization: Bearer $ADAPTER_TOKEN" \
+  "$MANAGER_URL/channel/ops/op-91c3/ack?adapter=$ADAPTER_NAME"
+# {"ok":true,"deliveryTtlSeconds":600,"consumed":false}
+```
+
+**The acknowledgement is the hand-over.** From it the manager never sends the op
+again, and you have `deliveryTtlSeconds` to report it. See
+[Acknowledging an operation]({{ '/contracts/channel-adapter/' | relative_url }}#acknowledging-an-operation).
+
+Retry an empty `204` or a `503` at once, on a fresh connection, and never log
+either as a failure (`OPS-1`, `OPS-2`).
 
 **Verify:** the `curl` above returns `204` against an idle channel, and
 returns an envelope shaped like the one above once a conversation queues
-you work.
+you work. Read it twice without acknowledging and confirm the same op comes back.
 
-## 2. Complete each op
+## 2. Deliver it and report the outcome
 
-Report the outcome to
+Report done, or failed, to
 [POST /channel/ops/{id}/done]({{ '/contracts/channel-adapter/' | relative_url }}#post-channelopsiddone)
 with
 [the completion result]({{ '/contracts/channel-adapter/' | relative_url }}#the-completion-result):
@@ -121,12 +132,13 @@ with
 | `close-topic` | archive the thread | an empty body, or — on failure — just a log line, never a Conversation condition |
 | `delete-conversation` | gone for good — tombstone, archive, rename, your call | an empty body |
 
-**Delivery is at-least-once.** Dedup by `op.id`, and treat an already-closed
-thread as success — redelivery is normal.
+**A failure is final.** Report `{"error":"…"}` only for a condition retrying
+cannot fix. The manager never sends the op again, and it fails an op you never
+report once its delivery TTL passes. Treat an already-closed thread as success.
 
 A transport backpressure signal — `429`, a `retry_after`, a token-bucket
-rejection — is not an operation failure. Absorb it inside your claim window
-and pace your own sending before you claim, never before you send — see
+rejection — is not an operation failure. Absorb it inside your delivery TTL
+and pace your own sending before you read, never before you send — see
 [Backpressure]({{ '/contracts/channel-adapter/' | relative_url }}#backpressure-is-the-adapters-to-absorb).
 
 **Verify:** complete an `ensure-topic` with no `threadId` and no `error`, and
