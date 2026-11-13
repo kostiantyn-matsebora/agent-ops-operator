@@ -63,8 +63,12 @@ func TestRacingClaimsOfOneKeyLandOnce(t *testing.T) {
 	if _, err := first.Submit(ctx, commandbus.SubmitRequest{Queue: "conv", CommandID: "c", Key: "k"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := second.sync(ctx); err != nil {
-		t.Fatal(err)
+	// Both replicas must hold the submit before either plans: a replica's
+	// own mirror is fed by the stream, not by its own Submit returning.
+	for _, bus := range []*Bus{first, second} {
+		if err := bus.sync(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 	now := first.clock.now()
 	planA := first.mirror.log.PlanClaim("conv", "a", now, time.Minute)
