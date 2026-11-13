@@ -43,14 +43,7 @@ func sooner(wait time.Duration, at, now time.Time) time.Duration {
 func (l *Log) Running(queues []commandbus.Queue, after commandbus.CommandID, now time.Time) []commandbus.Task {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	var floor uint64
-	if after != "" {
-		for _, q := range queues {
-			for _, rec := range l.byCmd[cmdRef{q, after}] {
-				floor = max(floor, rec.seq)
-			}
-		}
-	}
+	floor := l.floorAfter(queues, after)
 	var recs []*record
 	for _, q := range queues {
 		for _, rec := range l.live[q] {
@@ -67,6 +60,21 @@ func (l *Log) Running(queues []commandbus.Queue, after commandbus.CommandID, now
 		}
 	}
 	return out
+}
+
+// floorAfter is the sequence of the latest message of command id after on any
+// of queues, or zero when after is empty or unknown. The caller holds l.mu.
+func (l *Log) floorAfter(queues []commandbus.Queue, after commandbus.CommandID) uint64 {
+	var floor uint64
+	if after == "" {
+		return floor
+	}
+	for _, q := range queues {
+		for _, rec := range l.byCmd[cmdRef{q, after}] {
+			floor = max(floor, rec.seq)
+		}
+	}
+	return floor
 }
 
 // DeadTasks lists the dead tasks of queue (every queue when empty), oldest

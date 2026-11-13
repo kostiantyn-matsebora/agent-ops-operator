@@ -62,27 +62,30 @@ func Run(t *testing.T, open func() Backing) {
 		if d.Kind != commandbus.KindDefault {
 			name += "/" + string(d.Kind)
 		}
-		t.Run(name, func(t *testing.T) {
-			queue := sampleQueue(t, d)
-			for _, sc := range declarationScenarios {
-				sc := sc
-				t.Run(sc.name, func(t *testing.T) {
-					if sc.retryOnly && d.Policy.DeliveryTTL > 0 {
-						t.Skip("a hand-over queue (design D-17) has no retry, no backoff and no lease redelivery")
-					}
-					sc.run(t, open, d, queue)
-				})
-			}
-			if d.Policy.DeliveryTTL > 0 {
-				for _, sc := range handoverScenarios {
-					sc := sc
-					t.Run("handover/"+sc.name, func(t *testing.T) { sc.run(t, open, d, queue) })
-				}
-			}
-		})
+		t.Run(name, func(t *testing.T) { runDeclaration(t, open, d) })
 	}
 	t.Run("acknowledge needs a hand-over queue", func(t *testing.T) { testAcknowledgeNeedsHandover(t, open) })
 	t.Run("gap-free resumable feed", func(t *testing.T) { testGapFreeResumableFeed(t, open) })
+}
+
+// runDeclaration drives every scenario that applies to one declared queue.
+func runDeclaration(t *testing.T, open func() Backing, d commandbus.Declaration) {
+	queue := sampleQueue(t, d)
+	for _, sc := range declarationScenarios {
+		sc := sc
+		t.Run(sc.name, func(t *testing.T) {
+			if sc.retryOnly && d.Policy.DeliveryTTL > 0 {
+				t.Skip("a hand-over queue (design D-17) has no retry, no backoff and no lease redelivery")
+			}
+			sc.run(t, open, d, queue)
+		})
+	}
+	if d.Policy.DeliveryTTL > 0 {
+		for _, sc := range handoverScenarios {
+			sc := sc
+			t.Run("handover/"+sc.name, func(t *testing.T) { sc.run(t, open, d, queue) })
+		}
+	}
 }
 
 // sampleQueue names the concrete runtime Queue the suite submits to for

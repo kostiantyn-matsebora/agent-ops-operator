@@ -2,11 +2,28 @@ package chat
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 )
+
+// claimStuckFirst polls until it holds the stuck channel's first op, which it
+// never acknowledges. A live op taken first is acknowledged normally.
+func claimStuckFirst(t *testing.T, q *OpQueue, ctx context.Context) *Op {
+	t.Helper()
+	var held *Op
+	for held == nil || held.Channel != "stuck" {
+		if held = q.Claim("telegram"); held == nil {
+			t.Fatal("the stuck channel's op never became claimable")
+		}
+		if held.Channel == "live" {
+			q.Complete(ctx, held.ID, OpResult{})
+		}
+	}
+	return held
+}
 
 // One queue per Channel resource (design D-10): each op travels on
 // out.<channel>, ordered by its conversation, however many Channels one
@@ -48,15 +65,7 @@ func TestAChannelThatNeverAcknowledgesDelaysNoOtherChannelOfTheAdapter(t *testin
 	}
 
 	// The poll takes stuck's first op and its consumer never acknowledges.
-	var held *Op
-	for held == nil || held.Channel != "stuck" {
-		if held = q.Claim("telegram"); held == nil {
-			t.Fatal("the stuck channel's op never became claimable")
-		}
-		if held.Channel == "live" {
-			q.Complete(ctx, held.ID, OpResult{}) // a live op taken first is acknowledged normally
-		}
-	}
+	held := claimStuckFirst(t, q, ctx)
 
 	var got []string
 	for _, op := range drainCompleting(q, "telegram") {
@@ -70,10 +79,8 @@ func TestAChannelThatNeverAcknowledgesDelaysNoOtherChannelOfTheAdapter(t *testin
 		t.Fatalf("live's entries must all arrive, got %v", got)
 	}
 	// In order among themselves, whichever were taken before stuck's claim.
-	for i := 1; i < len(got); i++ {
-		if got[i-1] >= got[i] {
-			t.Fatalf("live's entries out of order: %v", got)
-		}
+	if !sort.StringsAreSorted(got) {
+		t.Fatalf("live's entries out of order: %v", got)
 	}
 	if !q.Pending(held.ID) {
 		t.Fatal("the unacknowledged op must stay outstanding")

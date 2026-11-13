@@ -267,7 +267,13 @@ func testRunningResumesAfterACommandID(t *testing.T, open func() Backing, d comm
 	ctx, cancel := withTimeout()
 	defer cancel()
 	bus := open().Bus()
-	ids := []commandbus.CommandID{"cmd-after-a", "cmd-after-b", "cmd-after-c", "cmd-after-d"}
+	const (
+		idA commandbus.CommandID = "cmd-after-a"
+		idB commandbus.CommandID = "cmd-after-b"
+		idC commandbus.CommandID = "cmd-after-c"
+		idD commandbus.CommandID = "cmd-after-d"
+	)
+	ids := []commandbus.CommandID{idA, idB, idC, idD}
 	for _, id := range ids {
 		_, err := bus.Submit(ctx, req(queue, d.Kind, id, commandbus.Key("key-"+id)))
 		mustNoErr(t, err, "Submit "+string(id))
@@ -278,7 +284,7 @@ func testRunningResumesAfterACommandID(t *testing.T, open func() Backing, d comm
 		mustNoErr(t, err, "Claim")
 		claimed[task.CommandID] = task
 	}
-	mustNoErr(t, bus.Settle(ctx, claimed["cmd-after-b"].UID, claimed["cmd-after-b"].Lease.Token), "Settle b")
+	mustNoErr(t, bus.Settle(ctx, claimed[idB].UID, claimed[idB].Lease.Token), "Settle b")
 
 	queues := []commandbus.Queue{queue}
 	ofIDs := func(ts []commandbus.Task) []commandbus.CommandID {
@@ -293,14 +299,14 @@ func testRunningResumesAfterACommandID(t *testing.T, open func() Backing, d comm
 		after commandbus.CommandID
 		want  []commandbus.CommandID
 	}{
-		{"no cursor", "", []commandbus.CommandID{"cmd-after-a", "cmd-after-c", "cmd-after-d"}},
-		{"a running entry", "cmd-after-a", []commandbus.CommandID{"cmd-after-c", "cmd-after-d"}},
+		{"no cursor", "", []commandbus.CommandID{idA, idC, idD}},
+		{"a running entry", idA, []commandbus.CommandID{idC, idD}},
 		// A consumed entry is removed from the log, so its id is unknown: the
 		// resume starts from the oldest unacknowledged entry, which is exactly
 		// what is still running.
-		{"an acknowledged entry", "cmd-after-b", []commandbus.CommandID{"cmd-after-a", "cmd-after-c", "cmd-after-d"}},
-		{"the last entry", "cmd-after-d", nil},
-		{"an unknown id", "cmd-never-seen", []commandbus.CommandID{"cmd-after-a", "cmd-after-c", "cmd-after-d"}},
+		{"an acknowledged entry", idB, []commandbus.CommandID{idA, idC, idD}},
+		{"the last entry", idD, nil},
+		{"an unknown id", "cmd-never-seen", []commandbus.CommandID{idA, idC, idD}},
 	} {
 		got, err := bus.Running(ctx, queues, c.after)
 		mustNoErr(t, err, "Running after "+c.name)

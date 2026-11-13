@@ -154,6 +154,25 @@ func commandFromEnv() []string {
 	return cmd
 }
 
+// channelsForAdapter answers which Channels name an adapter, from the informer
+// cache. A failed list is logged and answers none.
+func channelsForAdapter(c client.Client, namespace string) func(ctx context.Context, adapter string) []string {
+	return func(ctx context.Context, adapter string) []string {
+		var list agentopsv1alpha1.ChannelList
+		if err := c.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+			ctrl.Log.WithName("setup").Error(err, "list channels for the adapter's queues", "adapter", adapter)
+			return nil
+		}
+		var names []string
+		for i := range list.Items {
+			if list.Items[i].Spec.Adapter == adapter {
+				names = append(names, list.Items[i].Name)
+			}
+		}
+		return names
+	}
+}
+
 func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(false)))
 	setupLog := ctrl.Log.WithName("setup")
@@ -254,20 +273,7 @@ func main() {
 	// queue of every Channel naming it. The informer cache answers which, so a
 	// replica that has just restarted claims at once instead of waiting for the
 	// bus feed to show it a channel.
-	ops.ChannelsFor = func(ctx context.Context, adapter string) []string {
-		var list agentopsv1alpha1.ChannelList
-		if err := mgr.GetClient().List(ctx, &list, client.InNamespace(namespace)); err != nil {
-			setupLog.Error(err, "list channels for the adapter's queues", "adapter", adapter)
-			return nil
-		}
-		var names []string
-		for i := range list.Items {
-			if list.Items[i].Spec.Adapter == adapter {
-				names = append(names, list.Items[i].Name)
-			}
-		}
-		return names
-	}
+	ops.ChannelsFor = channelsForAdapter(mgr.GetClient(), namespace)
 	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: namespace, Ops: ops, Activity: acts}
 	controlURL := env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080")
 

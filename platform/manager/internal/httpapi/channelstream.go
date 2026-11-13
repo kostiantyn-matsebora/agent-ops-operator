@@ -30,6 +30,32 @@ var streamWriteTimeout = 15 * time.Second
 // D-17). Every other adapter, Telegram among them, reads GET /channel/ops and is
 // told so with a 404.
 //
+// channelStreamPreflight answers every refusal the stream owes before it
+// opens, and reports false once it has written one.
+func (s *Server) channelStreamPreflight(w http.ResponseWriter, r *http.Request) (string, http.Flusher, bool) {
+	adapter, ok := adapterParam(w, r)
+	if !ok {
+		return "", nil, false
+	}
+	if !scopeAllows(r, adapter) {
+		forbidScope(w)
+		return "", nil, false
+	}
+	if !contractOK(w, r) || !onlyParams(w, r, "adapter", "contract") {
+		return "", nil, false
+	}
+	if !s.Ops.IsReceipt(adapter) {
+		writeJSON(w, 404, map[string]string{"error": "adapter " + adapter + " reads its ops from GET /channel/ops, not a stream"})
+		return "", nil, false
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, 500, map[string]string{"error": "streaming unsupported"})
+		return "", nil, false
+	}
+	return adapter, flusher, true
+}
+
 // One SSE event `op` per message, oldest first, `data:` = the op as JSON. The
 // stream only reads: it claims, leases and deletes nothing. A message is the
 // adapter's once it POSTs /channel/ops/{id}/ack, at which point the manager
@@ -38,24 +64,8 @@ var streamWriteTimeout = 15 * time.Second
 // it again; within one connection it is pushed once. The server learns a client
 // is gone from a failed write or the closed request, and simply returns.
 func (s *Server) handleChannelOpsStream(w http.ResponseWriter, r *http.Request) {
-	adapter, ok := adapterParam(w, r)
+	adapter, flusher, ok := s.channelStreamPreflight(w, r)
 	if !ok {
-		return
-	}
-	if !scopeAllows(r, adapter) {
-		forbidScope(w)
-		return
-	}
-	if !contractOK(w, r) || !onlyParams(w, r, "adapter", "contract") {
-		return
-	}
-	if !s.Ops.IsReceipt(adapter) {
-		writeJSON(w, 404, map[string]string{"error": "adapter " + adapter + " reads its ops from GET /channel/ops, not a stream"})
-		return
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeJSON(w, 500, map[string]string{"error": "streaming unsupported"})
 		return
 	}
 	ctx := r.Context()

@@ -158,7 +158,7 @@ func (a *Adapter) serveOps(ctx context.Context) {
 // acknowledgement drops the connection, so the reconnect is offered the op
 // again, and applying it twice is harmless because the transcript dedups by id.
 func (a *Adapter) receive(ctx context.Context, op *Op) error {
-	if _, opErr := a.execute(context.Background(), op); opErr != "" {
+	if _, opErr := a.execute(ctx, op); opErr != "" {
 		log.Printf("op %s (%s): %s", op.ID, op.Kind, opErr)
 	}
 	if err := a.mgr.AckOp(ctx, a.adapterName, op.ID); err != nil {
@@ -412,6 +412,17 @@ func (a *Adapter) ThreadFor(conversation string) (channel, thread string, ok boo
 	return "", "", false
 }
 
+// sendThread names the thread a send op lands in. A channel-level notice with
+// no thread (e.g. an /agents reply) is parked on the channel's own
+// pseudo-thread so it is still visible, and the transcript API serves this
+// back as the channel's general feed.
+func sendThread(op *Op) string {
+	if op.ThreadID != nil && *op.ThreadID != "" {
+		return *op.ThreadID
+	}
+	return "channel:" + op.Channel
+}
+
 // execute performs one op.
 func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) {
 	switch op.Kind {
@@ -435,18 +446,7 @@ func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		if op.Message == nil {
 			return "", "send without a message"
 		}
-		thread := ""
-		if op.ThreadID != nil {
-			thread = *op.ThreadID
-		}
-		if thread == "" {
-			// a channel-level notice with no thread (e.g. an /agents reply):
-			// park it on the channel's own pseudo-thread so it is still visible
-			// — the transcript API serves this back as the channel's general
-			// feed (design: "Thread-less console sends surface as the
-			// channel's general feed").
-			thread = "channel:" + op.Channel
-		}
+		thread := sendThread(op)
 		a.transcripts.AppendOp(op.ID, thread, op.Message, op.Channel)
 		return "", ""
 	case "delete-conversation":

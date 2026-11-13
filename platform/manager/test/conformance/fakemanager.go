@@ -33,7 +33,9 @@ import (
 const (
 	headerContentType = "Content-Type"
 	mimeEventStream   = "text/event-stream"
-	errRejected       = "rejected by the conformance fake"
+	mimeJSON          = "application/json"
+	headerVocabulary  = "X-Agentops-Vocabulary-Revision"
+	errRejected      = "rejected by the conformance fake"
 )
 
 // ChannelInfo is one served channel, as GET /channel/channels lists it.
@@ -454,13 +456,13 @@ func (f *FakeManager) handleOps(w http.ResponseWriter, r *http.Request) {
 	if f.rejectOpsAsNonLeader > 0 {
 		f.rejectOpsAsNonLeader--
 		f.mu.Unlock()
-		w.Header().Set("X-Agentops-Vocabulary-Revision", "r1")
+		w.Header().Set(headerVocabulary, "r1")
 		w.Header().Set("Retry-After", "0")
 		w.WriteHeader(503)
 		return
 	}
 	f.mu.Unlock()
-	w.Header().Set("X-Agentops-Vocabulary-Revision", "r1")
+	w.Header().Set(headerVocabulary, "r1")
 	wait := req.Wait
 	if wait > 30 {
 		wait = 30
@@ -489,7 +491,7 @@ func (f *FakeManager) handleOps(w http.ResponseWriter, r *http.Request) {
 	// A read changes nothing: the op stays offered until acknowledged.
 	raw := f.queue[0]
 	f.mu.Unlock()
-	w.Header().Set(headerContentType, "application/json")
+	w.Header().Set(headerContentType, mimeJSON)
 	w.WriteHeader(200)
 	_, _ = w.Write(raw)
 }
@@ -557,7 +559,7 @@ func (f *FakeManager) handleOpsStream(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(503)
 		return
 	}
-	w.Header().Set("X-Agentops-Vocabulary-Revision", "r1")
+	w.Header().Set(headerVocabulary, "r1")
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.WriteHeader(200)
 	flusher := w.(http.Flusher)
@@ -648,7 +650,7 @@ func (f *FakeManager) handleWork(w http.ResponseWriter, r *http.Request) {
 	raw := f.workQueue[0]
 	f.workQueue = f.workQueue[1:]
 	f.mu.Unlock()
-	w.Header().Set(headerContentType, "application/json")
+	w.Header().Set(headerContentType, mimeJSON)
 	w.WriteHeader(200)
 	_, _ = w.Write(raw)
 }
@@ -761,7 +763,7 @@ func (f *FakeManager) statePut(kind string) http.HandlerFunc {
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set(headerContentType, "application/json")
+	w.Header().Set(headerContentType, mimeJSON)
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }

@@ -96,7 +96,9 @@ func (b *Backing) LeaseDuration() time.Duration { return b.s.leaseDur() }
 
 // Compact does nothing: this backend removes a consumed task's entries inside
 // Settle.
-func (b *Backing) Compact() {}
+func (b *Backing) Compact() {
+	// Nothing to compact: Settle already removed every consumed task's entries.
+}
 
 // Entries reads back every entry appended so far, in order. The conformance
 // suite uses it to prove no entry is ever rewritten or written twice.

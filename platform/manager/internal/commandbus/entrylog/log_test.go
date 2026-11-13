@@ -254,7 +254,7 @@ func TestTheClaimIsConditionalOnTheKeysLastEntry(t *testing.T) {
 		t.Fatalf("two claims planned from one view must carry the same condition: %d, %d", plans[0].Append.ExpectLast, rival[0].Append.ExpectLast)
 	}
 	h.apply(plans[0].Append) // the first lands; the rival's condition (0) no longer holds
-	if got := h.log.lastSubject(rival[0].Append.Entry); got == rival[0].Append.ExpectLast {
+	if h.log.lastSubject(rival[0].Append.Entry) == rival[0].Append.ExpectLast {
 		t.Fatalf("the key's event subject did not move, so a rival claim would also land")
 	}
 }

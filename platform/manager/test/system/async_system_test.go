@@ -775,11 +775,11 @@ func stopConsoleConsumer(t *testing.T, ctx context.Context, e *Env) {
 
 // readConsoleOpStream opens GET /channel/ops/stream as the console adapter and
 // collects this lane's `ensure-topic` `op` frames until `want` have arrived
-// (want > 0), or until `idle` passes with none (idle > 0), or max elapses. It
+// (want > 0), or until `idle` passes with none (idle > 0), or limit elapses. It
 // then closes the connection, which is the drop.
-func readConsoleOpStream(t *testing.T, e *Env, auth string, want int, idle, max time.Duration) []consoleOpFrame {
+func readConsoleOpStream(t *testing.T, e *Env, auth string, want int, idle, limit time.Duration) []consoleOpFrame {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), max)
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	url := e.Manager.URL() + "/channel/ops/stream?adapter=console&contract=2"
 	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -829,7 +829,7 @@ func readConsoleOpStream(t *testing.T, e *Env, auth string, want int, idle, max 
 
 	var got []consoleOpFrame
 	seen := map[string]bool{}
-	quiet := time.NewTimer(max)
+	quiet := time.NewTimer(limit)
 	if idle > 0 {
 		quiet.Reset(idle)
 	}
