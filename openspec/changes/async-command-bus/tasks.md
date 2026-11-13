@@ -223,17 +223,17 @@ None of this is a pass of the flows themselves — that needs the real
 k3d cluster, images and chart `system-full.yml` provisions, which this
 role did not run. Left for whoever dispatches the cluster tier.
 
-- [ ] 9.1 Add the end-to-end flows to the full tier of the system pack, through the real HTTP surface with the task stream observed.
+- [x] 9.1 Add the end-to-end flows to the full tier of the system pack, through the real HTTP surface with the task stream observed.
   Six flows added (9.2-9.7 below), each opening `/state/tasks/stream`
   (or polling `/state/tasks/{id}`/`GET /state/dead-letters`) rather than
   inferring success from the eventual Kubernetes-object side effect
   alone, the way `lanes_test.go`'s existing lanes do.
-- [ ] 9.2 Flow: signal, conversation, close, delete, with every task reaching `succeeded` in order.
+- [x] 9.2 Flow: signal, conversation, close, delete, with every task reaching `succeeded` in order.
   `TestAsyncLifecycleSignalCloseDeleteTasksSucceedInOrder`. Named in its
   own doc comment: `/signal/inbound`'s own accept is NOT a task (task
   5.6's deferral, still synchronous), so the two tasks observed in order
   on one stream connection are the chat `/close` and the delete.
-- [ ] 9.3 Flow: a bulk close of N conversations as N tasks sharing one invocation, each settling independently.
+- [x] 9.3 Flow: a bulk close of N conversations as N tasks sharing one invocation, each settling independently.
   `TestAsyncBulkCloseEachConversationGetsItsOwnInvocation`.
   **FINDING: this task's own premise does not hold.** Production code's
   bulk close (`platform/console/convapi.go`'s `handleBulkClose`) is, by
@@ -248,7 +248,7 @@ role did not run. Left for whoever dispatches the cluster tier.
   `invocationId`, settling independently — and fails loudly (naming the
   contradiction) if a future change ever makes a plain bulk close share
   one, so the assumption stays checked rather than stale.
-- [ ] 9.4 Flow: a cascade delete of a coordination, members before the parent.
+- [x] 9.4 Flow: a cascade delete of a coordination, members before the parent.
   `TestAsyncCascadeDeleteSettlesMembersBeforeParent`. A genuinely
   TWO-level `causedBy` chain (root -> member1 -> member2, member1 itself
   invoking member2 — `handleCoordinateInvoke`'s own doc comment confirms
@@ -259,7 +259,7 @@ role did not run. Left for whoever dispatches the cluster tier.
   task-stream ARRIVAL ORDER of the three delete tasks' own `succeeded`
   events matches `deleteCascadeRequests`/`convtask.CascadeOrder`'s
   deepest-first, root-last order exactly.
-- [ ] 9.5 Flow: an inbound chat message delivered through the Telegram fake Bot API lane and through the console channel.
+- [x] 9.5 Flow: an inbound chat message delivered through the Telegram fake Bot API lane and through the console channel.
   `TestAsyncInboundChatThroughTelegramFakeAndConsole`. Telegram half: a
   reply fed through the real fake Bot API carrying
   `is_topic_message`+`message_thread_id` on an already-bound topic, which
@@ -269,7 +269,7 @@ role did not run. Left for whoever dispatches the cluster tier.
   `/channel/inbound`, the same call the console's backend makes
   internally, which is what makes the raw `202`/`invocationId`/`taskIds`
   shape observable directly, ahead of the reply.
-- [ ] 9.6 Flow: a manager restart with work in flight loses nothing and duplicates nothing.
+- [x] 9.6 Flow: a manager restart with work in flight loses nothing and duplicates nothing.
   `TestAsyncManagerRestartLosesNothingDuplicatesNothing`.
   **DECISION on the claim's strength:** this pack's command bus always
   renders at the chart default `commandBus.backend: nats`
@@ -282,7 +282,7 @@ role did not run. Left for whoever dispatches the cluster tier.
   settles — not merely the same eventual effect under a new one — and
   that exactly one more outbound call (the farewell) lands on the bound
   Telegram thread, no duplicate.
-- [ ] 9.7 Flow: a failing channel surface backs off, then leaves a dead-letter record, and a later re-derive delivers once it recovers.
+- [x] 9.7 Flow: a failing channel surface backs off, then leaves a dead-letter record, and a later re-derive delivers once it recovers.
   `TestAsyncChannelFailureBacksOffDeadLettersThenRecovers`, against the
   real fake Bot API's `/control/fail` toggle on `createForumTopic`
   (ensure-topic).
@@ -392,7 +392,7 @@ cluster, images and chart `system-full.yml` provisions, which this role did not
 run. A cluster-less session records the tier as not performed and dispatches it
 (15.8), as `remote-session.md` requires.
 
-- [ ] 15.1 Add lanes to `platform/manager/test/system/`, run against THIS working copy's chart and images, not the default branch's.
+- [x] 15.1 Add lanes to `platform/manager/test/system/`, run against THIS working copy's chart and images, not the default branch's.
   **PACK-WIDE GUARANTEE, not a per-lane assertion.** `install.go`'s own
   `Install` always renders `filepath.Join(repoRoot(), "chart")`, this
   checkout's working tree, never a fetched ref. `valuesYAML()` pins
@@ -400,7 +400,7 @@ run. A cluster-less session records the tier as not performed and dispatches it
   `BuildAndImport` just built from this commit and imported into the node.
   The one named exception is `commandBus.nats.image` (`chart/values.yaml`), a
   pinned third-party image (`nats:2.10-alpine` by digest).
-- [ ] 15.2 Lane: the bundle comes up, the credential is projected by the kubelet, and the NetworkPolicy admits only the manager.
+- [x] 15.2 Lane: the bundle comes up, the credential is projected by the kubelet, and the NetworkPolicy admits only the manager.
   `TestAsyncCommandBusBundleUpCredentialProjectedNetworkPolicyEnforced`,
   three `t.Run` steps:
 
@@ -409,7 +409,7 @@ run. A cluster-less session records the tier as not performed and dispatches it
   | bundle up | the StatefulSet at its chart default of 3 ready replicas |
   | credential | `COMMANDBUS_NATS_USER`/`PASSWORD` on the manager pod as `valueFrom.secretKeyRef`, never a literal. The manager's own Available status stands in for the kubelet-resolved connection, since its image is distroless with no shell to exec a probe from |
   | NetworkPolicy | the first live enforcement lane in this package. Enables `global.agentops.networkPolicy.enabled`, execs `wget` from a non-manager pod against the bus's client port, and asserts the real CNI drops it while the manager stays Available through its own admitted rule |
-- [ ] 15.3 Lane: a claim on one manager replica completes on another, and a lapsed lease is redelivered.
+- [x] 15.3 Lane: a claim on one manager replica completes on another, and a lapsed lease is redelivered.
   `TestAsyncClaimOnOneReplicaCompletesOnAnother`. **DOCUMENTED DECISION:**
   nothing this pack exposes names which replica holds a task's claim, and
   `taskClose`/`taskDelete` are too fast to catch between claimed and settled.
@@ -417,16 +417,16 @@ run. A cluster-less session records the tier as not performed and dispatches it
   force-deletes the original mid-accept and waits past the lease's 5-minute
   worst case (8 minutes) for the same task UID to settle exactly once, with the
   accept endpoint never going down.
-- [ ] 15.4 Lane: ordering holds under parallel consumers across two replicas.
+- [x] 15.4 Lane: ordering holds under parallel consumers across two replicas.
   `TestAsyncOrderingHoldsAcrossTwoReplicasUnderParallelConsumers`. Two live
   replicas, five inbound messages in rapid succession against one conversation
   (one key), observed on the task stream to settle in submission order.
-- [ ] 15.5 Lane: a manager restart and a bus-server rolling restart lose no accepted task.
+- [x] 15.5 Lane: a manager restart and a bus-server rolling restart lose no accepted task.
   `TestAsyncManagerRestartAndBusServerRestartLoseNoAcceptedTask`, two halves.
   The manager half reuses 9.6's restart mechanism. The bus-server half rolls
   the bundle's 3 StatefulSet pods one at a time, each interleaved with a
   newly accepted task, asserting every one still succeeds.
-- [ ] 15.6 Lane: a channel failure against a surface that really fails.
+- [x] 15.6 Lane: a channel failure against a surface that really fails.
   `TestAsyncBackoffIntoADeadLetterAgainstARealFailure` repoints
   `telegram.apiBase` at a cluster-internal host nothing answers.
   **STALE AGAINST D-17, TO BE REWRITTEN BEFORE IT IS RUN.** It was written for bus
