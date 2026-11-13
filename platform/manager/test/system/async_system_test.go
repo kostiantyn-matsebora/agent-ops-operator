@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -794,38 +795,7 @@ func readConsoleOpStream(t *testing.T, e *Env, auth string, want int, idle, limi
 	}
 
 	frames := make(chan consoleOpFrame)
-	go func() {
-		defer close(frames)
-		sc := bufio.NewScanner(resp.Body)
-		sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
-		var event, data string
-		for sc.Scan() {
-			line := sc.Text()
-			switch {
-			case line == "":
-				if event == "op" {
-					var op struct {
-						ID   string `json:"id"`
-						Kind string `json:"kind"`
-					}
-					// This lane's own ensure-topic ops only: the console queue
-					// may hold others (a later card behind an unfinished topic).
-					if json.Unmarshal([]byte(data), &op) == nil && op.Kind == "ensure-topic" && strings.Contains(op.ID, consoleStreamMark) {
-						select {
-						case frames <- consoleOpFrame{OpID: op.ID, Kind: op.Kind}:
-						case <-ctx.Done():
-							return
-						}
-					}
-				}
-				event, data = "", ""
-			case strings.HasPrefix(line, "event: "):
-				event = strings.TrimPrefix(line, "event: ")
-			case strings.HasPrefix(line, "data: "):
-				data = strings.TrimPrefix(line, "data: ")
-			}
-		}
-	}()
+	go scanConsoleOpFrames(ctx, resp.Body, frames)
 
 	var got []consoleOpFrame
 	seen := map[string]bool{}
@@ -859,6 +829,48 @@ func readConsoleOpStream(t *testing.T, e *Env, auth string, want int, idle, limi
 		case <-ctx.Done():
 			t.Fatalf("the op stream read ran out of time with %d frames", len(got))
 		}
+	}
+}
+
+// scanConsoleOpFrames reads the SSE body and sends this lane's own
+// ensure-topic `op` frames to frames, closing it when the body ends.
+func scanConsoleOpFrames(ctx context.Context, body io.Reader, frames chan<- consoleOpFrame) {
+	defer close(frames)
+	sc := bufio.NewScanner(body)
+	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
+	var event, data string
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case line == "":
+			if event == "op" && !sendOwnEnsureTopic(ctx, data, frames) {
+				return
+			}
+			event, data = "", ""
+		case strings.HasPrefix(line, "event: "):
+			event = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			data = strings.TrimPrefix(line, "data: ")
+		}
+	}
+}
+
+// sendOwnEnsureTopic forwards the frame when it is this lane's own
+// ensure-topic op (the console queue may hold others, a later card behind an
+// unfinished topic). It returns false only when ctx ended mid-send.
+func sendOwnEnsureTopic(ctx context.Context, data string, frames chan<- consoleOpFrame) bool {
+	var op struct {
+		ID   string `json:"id"`
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal([]byte(data), &op) != nil || op.Kind != "ensure-topic" || !strings.Contains(op.ID, consoleStreamMark) {
+		return true
+	}
+	select {
+	case frames <- consoleOpFrame{OpID: op.ID, Kind: op.Kind}:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
