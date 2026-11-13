@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -66,32 +65,17 @@ import (
 // requireNats-style skip gate: there is no OTHER backend this pack ever
 // installs to skip for.
 
-// commandbusSelector is the bus bundle's own pod label
-// (chart/charts/commandbus/templates/_helpers.tpl).
-const commandbusSelector = "app.kubernetes.io/name=agentops-commandbus"
+// By the chart's default the command bus rides the state store's own nats
+// bundle (commandBus.nats.enabled is unset and stateStore.backend is nats):
+// one StatefulSet (agentops-nats), one client Service, one credential Secret,
+// no second bundle. natsPods, natsSelector and waitNatsStatefulSetReady
+// (state_nats_test.go) name those servers. A dedicated bus bundle
+// (agentops-commandbus) renders only when `commandBus.nats.enabled` opts into
+// one, which this pack never does.
 
-// commandbusPods lists the bus bundle's own server pods.
-func commandbusPods(t *testing.T, ctx context.Context, e *Env) []corev1.Pod {
-	t.Helper()
-	pods, err := e.K.Pods(ctx, commandbusSelector)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pods
-}
-
-// waitCommandbusStatefulSetReady polls until the bundle's StatefulSet
-// reports at least n ready replicas.
-func waitCommandbusStatefulSetReady(t *testing.T, ctx context.Context, e *Env, n int32) {
-	t.Helper()
-	waitFor(t, fmt.Sprintf("the command bus StatefulSet to report %d ready replica(s)", n), 5*time.Minute, func() (bool, error) {
-		var sts appsv1.StatefulSet
-		if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: "agentops-commandbus"}, &sts); err != nil {
-			return false, err
-		}
-		return sts.Status.ReadyReplicas >= n, nil
-	})
-}
+// busCredentialSecret is the Secret the manager's COMMANDBUS_NATS_USER and
+// _PASSWORD resolve from at the chart default: the shared bundle's own.
+const busCredentialSecret = "agentops-nats-credentials"
 
 // managerReadyPodNames names every manager pod currently Running, for a
 // lane that needs to target one of them precisely (11.3) rather than only
@@ -104,7 +88,8 @@ func managerReadyPodNames(t *testing.T, ctx context.Context, e *Env) []string {
 	}
 	var names []string
 	for _, p := range pods {
-		if p.Status.Phase == corev1.PodRunning {
+		// A pod being deleted keeps phase Running until its container stops.
+		if p.Status.Phase == corev1.PodRunning && p.DeletionTimestamp == nil {
 			names = append(names, p.Name)
 		}
 	}
@@ -113,17 +98,19 @@ func managerReadyPodNames(t *testing.T, ctx context.Context, e *Env) []string {
 
 // ---- 11.2 -------------------------------------------------------------
 
-// 11.2 The bundle comes up, the credential is projected by the kubelet,
-// and the NetworkPolicy admits only the manager.
+// 11.2 The bus's servers come up, the credential is projected by the kubelet,
+// and the NetworkPolicy admits only the manager. At the chart default the bus
+// shares the state store's nats bundle (see above), so this pins that shared
+// bundle as the bus's server.
 func TestAsyncCommandBusBundleUpCredentialProjectedNetworkPolicyEnforced(t *testing.T) {
 	fullTier(t)
 	e := requireEnv(t)
 	ctx := context.Background()
 
-	t.Run("the bundle comes up at its chart default of three replicas", func(t *testing.T) {
-		waitCommandbusStatefulSetReady(t, ctx, e, 3)
-		if pods := commandbusPods(t, ctx, e); len(pods) < 3 {
-			t.Fatalf("want at least 3 command bus pods, got %d", len(pods))
+	t.Run("the bus servers come up at the chart default of three replicas", func(t *testing.T) {
+		waitNatsStatefulSetReady(t, ctx, e, 3)
+		if pods := natsPods(t, ctx, e); len(pods) < 3 {
+			t.Fatalf("want at least 3 bus server pods, got %d", len(pods))
 		}
 	})
 
@@ -138,7 +125,7 @@ func TestAsyncCommandBusBundleUpCredentialProjectedNetworkPolicyEnforced(t *test
 
 // assertCommandBusCredentialProjected: the manager's own env carries
 // COMMANDBUS_NATS_USER/PASSWORD as valueFrom.secretKeyRef against the
-// bundle's chart-generated credential Secret (chart/templates/
+// bus server bundle's chart-generated credential Secret (chart/templates/
 // deployment.yaml, cmd/manager/commandbus.go's own commandBusNatsUserEnv/
 // commandBusNatsPasswordEnv) — never a literal value, which is what makes
 // this the KUBELET's own resolution rather than the manager reading the
@@ -179,8 +166,8 @@ func commandBusCredentialEnvNames(t *testing.T, env []corev1.EnvVar) []string {
 		if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
 			t.Fatalf("%s must be a secretKeyRef, not a literal value", ev.Name)
 		}
-		if ev.ValueFrom.SecretKeyRef.Name != "agentops-commandbus-credentials" {
-			t.Fatalf("%s must resolve from the bundle's own credential Secret, got %q", ev.Name, ev.ValueFrom.SecretKeyRef.Name)
+		if ev.ValueFrom.SecretKeyRef.Name != busCredentialSecret {
+			t.Fatalf("%s must resolve from the bus server bundle's own credential Secret %q, got %q", ev.Name, busCredentialSecret, ev.ValueFrom.SecretKeyRef.Name)
 		}
 		seen = append(seen, ev.Name)
 	}
@@ -203,33 +190,39 @@ func commandBusCredentialEnvNames(t *testing.T, env []corev1.EnvVar) []string {
 // layer.
 func assertCommandBusNetworkPolicyEnforced(t *testing.T, ctx context.Context, e *Env) {
 	t.Helper()
+	// UpgradeManager, not Upgrade: the policy change rolls the manager, whose
+	// hard pod anti-affinity leaves the new ReplicaSet Pending behind the old
+	// pods on this pack's one-node cluster (observed: available=2 updated=1
+	// replicas=3 for the whole wait).
 	t.Cleanup(func() {
-		if err := e.Upgrade(context.Background()); err != nil {
+		if err := e.UpgradeManager(context.Background()); err != nil {
 			t.Errorf("restoring the install with the NetworkPolicy back off: %v", err)
 		}
 	})
-	if err := e.Upgrade(ctx, "global.agentops.networkPolicy.enabled=true"); err != nil {
+	if err := e.UpgradeManager(ctx, "global.agentops.networkPolicy.enabled=true"); err != nil {
 		t.Fatalf("enabling the NetworkPolicy: %v", err)
 	}
 
-	// A non-manager, non-commandbus pod already running in the
-	// namespace — the state store's OWN nats bundle (never this bus's own
-	// pods, and never the manager) — dials the bus's client Service
-	// directly. Reused for the same reason Dump() (cluster.go) already
-	// execs `wget` against a nats pod: the image is alpine-based and
-	// always carries busybox wget, with no shell needed beyond `exec`
-	// itself.
-	victims := natsPods(t, ctx, e)
-	if len(victims) == 0 {
-		t.Fatal("need a non-manager, non-commandbus pod to probe the policy from")
+	// One server of the bundle dials ANOTHER server's client port by its
+	// stable pod DNS name, never the client Service, which could route the
+	// call back to the very pod it came from (loopback is not filtered by a
+	// policy). A server pod is not the manager, so the rendered rule must
+	// refuse it. Reused for the same reason Dump() (cluster.go) already execs
+	// `wget` against a nats pod: the image is alpine-based and always carries
+	// busybox wget, with no shell needed beyond `exec` itself.
+	if len(natsPods(t, ctx, e)) < 2 {
+		t.Fatal("need two bus server pods, one to probe the other's client port")
 	}
-	out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "exec", victims[0].Name, "--",
-		"wget", "-T", "4", "-qO-", "http://agentops-commandbus-client:4222/")
+	out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "exec", "agentops-nats-0", "--",
+		"wget", "-T", "4", "-qO-", "http://agentops-nats-1.agentops-nats-headless:4222/")
 	if err == nil {
-		t.Fatalf("a non-manager pod must NOT reach the command bus's client port, got: %s", out)
+		t.Fatalf("a non-manager pod must NOT reach the bus server's client port, got: %s", out)
 	}
 	lower := strings.ToLower(out + err.Error())
-	if !strings.Contains(lower, "timed out") && !strings.Contains(lower, "connection") {
+	// A dropped SYN times out and a rejected one is refused. A reset or an
+	// error reading a reply means the connection WAS made, so the policy
+	// admitted it.
+	if !strings.Contains(lower, "timed out") && !strings.Contains(lower, "refused") {
 		t.Fatalf("the denial must read as a blocked connection, not some other failure: %v %s", err, out)
 	}
 
@@ -274,7 +267,7 @@ func assertCommandBusNetworkPolicyEnforced(t *testing.T, ctx context.Context, e 
 // pick a lapsed lease back up whichever way the real race against the
 // kubelet's SIGKILL actually falls. The 8-minute wait below is sized past
 // the lease's own worst case (5 minutes, commandbus/nats's own
-// defaultLeaseDuration, matching chat/ops.go's OpQueue.ReclaimAfter — the
+// defaultLeaseDuration, the conv queue's claim lease — the
 // same margin TestAsyncManagerRestartLosesNothingDuplicatesNothing already
 // uses for the identical reason), so a run that DOES catch the task still
 // genuinely claimed at the instant of the kill still passes without
@@ -341,9 +334,10 @@ func TestAsyncClaimOnOneReplicaCompletesOnAnother(t *testing.T) {
 		c, err := e.K.Conversation(ctx, conv.Name)
 		return err == nil && c.Status.Phase == agentopsv1alpha1.ConversationClosed, err
 	})
-	final, fcode := getTask(t, e, auth, closeUID)
-	if fcode != 200 || final.State != "succeeded" {
-		t.Fatalf("the close task must read back succeeded exactly once: %d %+v", fcode, final)
+	// Succeeded is removed after its 30s grace, so a read back is succeeded or
+	// gone, and never anything that could still run the close again.
+	if final, fcode := getTask(t, e, auth, closeUID); fcode == 200 && final.State != "succeeded" {
+		t.Fatalf("the close task must not be left in any state but succeeded: %+v", final)
 	}
 }
 
@@ -407,7 +401,7 @@ func TestAsyncOrderingHoldsAcrossTwoReplicasUnderParallelConsumers(t *testing.T)
 	if code != 202 || len(accepted.TaskIDs) != 1 {
 		t.Fatalf("closing: %d %+v", code, accepted)
 	}
-	waitTaskState(t, e, auth, accepted.TaskIDs[0], "succeeded", 2*time.Minute)
+	waitTaskSettled(t, e, auth, accepted.TaskIDs[0], 2*time.Minute)
 }
 
 // awaitSettleOrder reads the task stream until every submitted task has
@@ -505,7 +499,7 @@ func assertManagerRestartLosesNoAcceptedTask(t *testing.T, ctx context.Context, 
 	if closeErr != nil || closeCode != 202 || len(closeAccepted.TaskIDs) != 1 {
 		t.Fatalf("accepting the close across the restart: code=%d err=%v accepted=%+v", closeCode, closeErr, closeAccepted)
 	}
-	waitTaskState(t, e, auth, closeAccepted.TaskIDs[0], "succeeded", 8*time.Minute)
+	waitTaskSettled(t, e, auth, closeAccepted.TaskIDs[0], 7*time.Minute)
 	waitFor(t, "the conversation closed", 2*time.Minute, func() (bool, error) {
 		c, err := e.K.Conversation(ctx, conv.Name)
 		return err == nil && c.Status.Phase == agentopsv1alpha1.ConversationClosed, err
@@ -528,12 +522,12 @@ func assertBusServerRollingRestartLosesNoAcceptedTask(t *testing.T, ctx context.
 	frames := streamFrames(resp)
 
 	// Captured ONCE, up front: the StatefulSet's own ordinal pod names
-	// (agentops-commandbus-0/1/2), so rolling each of them exactly once is
+	// (agentops-nats-0/1/2), so rolling each of them exactly once is
 	// a true rolling restart of the whole bundle — re-listing after each
 	// delete would risk picking the SAME, already-recreated ordinal again
 	// rather than moving on to the next.
 	var names []string
-	for _, p := range commandbusPods(t, ctx, e) {
+	for _, p := range natsPods(t, ctx, e) {
 		names = append(names, p.Name)
 	}
 	if len(names) < 3 {
@@ -557,7 +551,7 @@ func assertBusServerRollingRestartLosesNoAcceptedTask(t *testing.T, ctx context.
 			client.GracePeriodSeconds(0)); err != nil {
 			t.Fatal(err)
 		}
-		waitCommandbusStatefulSetReady(t, ctx, e, int32(len(names)))
+		waitNatsStatefulSetReady(t, ctx, e, int32(len(names)))
 	}
 
 	for _, uid := range submitted {
@@ -568,7 +562,7 @@ func assertBusServerRollingRestartLosesNoAcceptedTask(t *testing.T, ctx context.
 	if code != 202 || len(accepted.TaskIDs) != 1 {
 		t.Fatalf("closing: %d %+v", code, accepted)
 	}
-	waitTaskState(t, e, auth, accepted.TaskIDs[0], "succeeded", 2*time.Minute)
+	waitTaskSettled(t, e, auth, accepted.TaskIDs[0], 2*time.Minute)
 }
 
 // ---- 11.6 -------------------------------------------------------------
@@ -577,7 +571,7 @@ func assertBusServerRollingRestartLosesNoAcceptedTask(t *testing.T, ctx context.
 // over the REAL network, not a cooperating double's 5xx.
 //
 // Section 9.7 (async_e2e_test.go, TestAsyncChannelFailureBacksOffDead
-// LettersThenRecovers) already proves the backoff-then-dead-letter-then-
+// LettersThenRecovers) already proves the hand-over-then-dead-letter-then-
 // recovery shape end to end against test/fakebotapi's own `/control/fail`
 // toggle — a COOPERATING failure a unit test could simulate equally well.
 // What only a real cluster decides (design D-14's own table: "System: ...
@@ -610,6 +604,14 @@ func TestAsyncBackoffIntoADeadLetterAgainstARealFailure(t *testing.T) {
 		t.Fatalf("repointing the gateway at an address nothing answers: %v", err)
 	}
 
+	// Opened before the conversation exists, as 9.7 does: the telegram
+	// ensure-topic is enqueued by the reconciler, never an accept handler, so
+	// the task stream is the only way to find its UID, and a feed that starts
+	// from "now" would miss it once the console half had bound.
+	resp := openTaskStream(t, ctx, e, auth)
+	defer resp.Body.Close()
+	frames := streamFrames(resp)
+
 	fp := "e2e-async-real-failure-" + stamp
 	e.PostTask(t, SourceFanout, fp, "echo "+fp)
 	conv := e.ConversationFor(t, fp, 2*time.Minute)
@@ -618,55 +620,39 @@ func TestAsyncBackoffIntoADeadLetterAgainstARealFailure(t *testing.T) {
 	// console never reaches (the same isolation 9.7 already relies on).
 	waitThreadOn(t, ctx, e, conv.Name, ChannelConsole, 2*time.Minute)
 
-	resp := openTaskStream(t, ctx, e, auth)
-	defer resp.Body.Close()
-	frames := streamFrames(resp)
+	uid := awaitChannelTaskUID(t, frames, ChannelTelegram, conv.Name)
 
-	// Discover the telegram ensure-topic task: enqueued by the reconciler,
-	// never an accept handler, so no HTTP response hands this test its
-	// UID — the task stream is the only way to find it (same idiom 9.7
-	// uses).
-	uid := awaitTelegramTaskUID(t, frames, conv.Name)
+	// Handed over: the adapter acknowledged it and is retrying against the
+	// genuinely unreachable address inside the delivery TTL.
+	waitTaskState(t, e, auth, uid, "running", 2*time.Minute)
 
-	retries := 0
-	waitFor(t, "at least two real retries against a genuinely unreachable address", 3*time.Minute, func() (bool, error) {
-		task, code := getTask(t, e, auth, uid)
-		if code != 200 {
-			return false, nil
-		}
-		if task.State == "retrying" && task.Attempt > retries {
-			retries = task.Attempt
-		}
-		return retries >= 2, nil
-	})
-
-	// The real dead-letter record, reached after the queue's own 8
-	// attempts are exhausted — bounded generously past the deterministic
-	// worst case of doubling backoff (5+10+20+40+80+160+300s ≈ 10m25s),
-	// same margin 9.7 uses for the identical backoff profile.
-	waitTaskState(t, e, auth, uid, "dead", 15*time.Minute)
-	dead := deadLetters(t, e, auth, "out.telegram")
+	// The real dead-letter record: the adapter reports FAILED once its retry
+	// budget (the 5 minute topic delivery TTL less a margin) is spent, and a
+	// failure is final. 7 minutes covers the manager's TTL backstop too.
+	waitTaskState(t, e, auth, uid, "dead", 7*time.Minute)
+	dead := deadLetters(t, e, auth, "out."+ChannelTelegram)
 	if !slices.ContainsFunc(dead, func(d taskStateWire) bool { return d.UID == uid }) {
-		t.Fatalf("the dead task %s must be listed on GET /state/dead-letters?queue=out.telegram", uid)
+		t.Fatalf("the dead task %s must be listed on GET /state/dead-letters?queue=out.%s", uid, ChannelTelegram)
 	}
 }
 
-// awaitTelegramTaskUID reads the task stream until the telegram task for
-// the named conversation appears and returns its UID.
-func awaitTelegramTaskUID(t *testing.T, frames <-chan string, conversation string) string {
+// awaitChannelTaskUID reads the task stream until a task on the Channel's own
+// queue (out.<channel>) keyed by the named conversation appears and returns
+// its UID. The queue is named for the Channel resource, not its adapter.
+func awaitChannelTaskUID(t *testing.T, frames <-chan string, channel, conversation string) string {
 	t.Helper()
-	deadline := time.After(6 * time.Minute)
+	deadline := time.After(3 * time.Minute)
 	for {
 		select {
 		case f, ok := <-frames:
 			if !ok {
-				t.Fatal("the task stream ended before the telegram ensure-topic task appeared")
+				t.Fatalf("the task stream ended before a task on out.%s appeared", channel)
 			}
-			if w, ok := taskPut(f); ok && w.Queue == "out.telegram" && strings.Contains(w.Key, conversation) {
+			if w, ok := taskPut(f); ok && w.Queue == "out."+channel && w.Key == conversation {
 				return w.UID
 			}
 		case <-deadline:
-			t.Fatal("the telegram ensure-topic task never appeared on the task stream")
+			t.Fatalf("no task on out.%s for conversation %s ever appeared on the task stream", channel, conversation)
 		}
 	}
 }
@@ -675,16 +661,22 @@ func awaitTelegramTaskUID(t *testing.T, frames <-chan string, conversation strin
 
 // consoleOpFrame is one `op` event off GET /channel/ops/stream.
 type consoleOpFrame struct {
-	Sequence uint64
-	OpID     string
-	Kind     string
+	OpID string
+	Kind string
 }
 
-// 11.7 The console's feed resumes after a drop: nothing is lost, nothing
-// acknowledged is delivered again, and the replay is in sequence order
-// (design D-16). The live console is scaled to zero for the lane so this
-// test is the only consumer of the console channel's queue, then reads the
-// SAME endpoint the console reads, as the master token.
+// consoleStreamMark picks this lane's own ops out of the console queue: the
+// conversations it starts are named for their fingerprint.
+const consoleStreamMark = "e2e-async-console-stream"
+
+// 11.7 The console's feed after a drop: nothing it never acknowledged is lost,
+// nothing it acknowledged is delivered again (design D-17, the receipt-only
+// adapter). The stream has no cursor and no Last-Event-ID: every connection is
+// pushed exactly the messages not yet acknowledged, and the acknowledgement is
+// what consumes a message. The live console is scaled to zero for the lane so
+// this test is the only consumer of the console channel's queue, then reads
+// and acknowledges over the SAME endpoints the console uses, as the master
+// token.
 //
 // WRITTEN, COMPILES, NOT RUN — no cluster in this environment. One
 // assumption it cannot check here: that the ChannelAdapter reconciler leaves
@@ -694,30 +686,28 @@ type consoleOpFrame struct {
 func TestAsyncConsoleStreamResumesAfterADropWithoutLossOrDuplicates(t *testing.T) {
 	fullTier(t)
 	e := requireEnv(t)
-	ctx := context.Background()
 	stamp := fmt.Sprint(time.Now().UnixNano())
 	auth := bearerPrefix + e.Values.AdapterToken
 
-	stopConsoleConsumer(t, ctx, e)
+	stopConsoleConsumer(t, context.Background(), e)
 
 	// Three conversations: each opens with an ensure-topic op on the console
 	// channel, on its own key, so none is serialized behind another.
 	for i := 0; i < 3; i++ {
-		fp := fmt.Sprintf("e2e-async-console-stream-%s-%d", stamp, i)
+		fp := fmt.Sprintf("%s-%s-%d", consoleStreamMark, stamp, i)
 		e.PostTask(t, SourceTasks, fp, "echo "+fp)
 	}
 
-	first := readConsoleOpStream(t, e, auth, "", 3, 0, 3*time.Minute)
-	assertStrictlyIncreasing(t, first)
+	first := readConsoleOpStream(t, e, auth, 3, 0, 3*time.Minute)
 
 	// Acknowledge only the first, then drop (readConsoleOpStream closed the
 	// connection). The other two stay pushed-and-unacknowledged.
 	ackConsoleOp(t, e, auth, first[0])
 
-	replay := readConsoleOpStream(t, e, auth, fmt.Sprint(first[0].Sequence), 2, 0, time.Minute)
-	assertStrictlyIncreasing(t, replay)
-	if replay[0].OpID != first[1].OpID || replay[1].OpID != first[2].OpID {
-		t.Fatalf("a reconnect after sequence %d must replay %s then %s, got %+v", first[0].Sequence, first[1].OpID, first[2].OpID, replay)
+	// A reconnect is pushed exactly the two it never acknowledged.
+	replay := readConsoleOpStream(t, e, auth, 2, 0, time.Minute)
+	if got, want := opIDs(replay), opIDs(first[1:]); !slices.Equal(sortedCopy(got), sortedCopy(want)) {
+		t.Fatalf("a reconnect must be pushed exactly the unacknowledged ops %v, got %v", want, got)
 	}
 	for _, f := range replay {
 		if f.OpID == first[0].OpID {
@@ -725,18 +715,31 @@ func TestAsyncConsoleStreamResumesAfterADropWithoutLossOrDuplicates(t *testing.T
 		}
 	}
 
-	// Everything seen so far is acknowledged; a reconnect from the start
-	// replays none of it.
+	// Everything seen so far is acknowledged; a reconnect is pushed none of it.
 	acked := map[string]bool{first[0].OpID: true}
 	for _, f := range replay {
 		ackConsoleOp(t, e, auth, f)
 		acked[f.OpID] = true
 	}
-	for _, f := range readConsoleOpStream(t, e, auth, "0", 0, 15*time.Second, time.Minute) {
+	for _, f := range readConsoleOpStream(t, e, auth, 0, 15*time.Second, time.Minute) {
 		if acked[f.OpID] {
 			t.Fatalf("acknowledged op %s was delivered again after a reconnect: %+v", f.OpID, f)
 		}
 	}
+}
+
+func opIDs(frames []consoleOpFrame) []string {
+	ids := make([]string, 0, len(frames))
+	for _, f := range frames {
+		ids = append(ids, f.OpID)
+	}
+	return ids
+}
+
+func sortedCopy(in []string) []string {
+	out := slices.Clone(in)
+	slices.Sort(out)
+	return out
 }
 
 // stopConsoleConsumer scales the console Deployment to zero and restores it
@@ -770,20 +773,17 @@ func stopConsoleConsumer(t *testing.T, ctx context.Context, e *Env) {
 	})
 }
 
-// readConsoleOpStream opens GET /channel/ops/stream as the console adapter,
-// resuming from lastEventID when non-empty, and collects `op` frames until
-// `want` have arrived (want > 0), or until `idle` passes with none (idle > 0),
-// or max elapses. It then closes the connection, which is the drop.
-func readConsoleOpStream(t *testing.T, e *Env, auth, lastEventID string, want int, idle, max time.Duration) []consoleOpFrame {
+// readConsoleOpStream opens GET /channel/ops/stream as the console adapter and
+// collects this lane's `ensure-topic` `op` frames until `want` have arrived
+// (want > 0), or until `idle` passes with none (idle > 0), or max elapses. It
+// then closes the connection, which is the drop.
+func readConsoleOpStream(t *testing.T, e *Env, auth string, want int, idle, max time.Duration) []consoleOpFrame {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), max)
 	defer cancel()
 	url := e.Manager.URL() + "/channel/ops/stream?adapter=console&contract=2"
 	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
 	req.Header.Set("Authorization", auth)
-	if lastEventID != "" {
-		req.Header.Set("Last-Event-ID", lastEventID)
-	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("opening the console op stream: %v", err)
@@ -798,7 +798,7 @@ func readConsoleOpStream(t *testing.T, e *Env, auth, lastEventID string, want in
 		defer close(frames)
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
-		var event, id, data string
+		var event, data string
 		for sc.Scan() {
 			line := sc.Text()
 			switch {
@@ -808,20 +808,19 @@ func readConsoleOpStream(t *testing.T, e *Env, auth, lastEventID string, want in
 						ID   string `json:"id"`
 						Kind string `json:"kind"`
 					}
-					seq, perr := strconv.ParseUint(id, 10, 64)
-					if json.Unmarshal([]byte(data), &op) == nil && perr == nil {
+					// This lane's own ensure-topic ops only: the console queue
+					// may hold others (a later card behind an unfinished topic).
+					if json.Unmarshal([]byte(data), &op) == nil && op.Kind == "ensure-topic" && strings.Contains(op.ID, consoleStreamMark) {
 						select {
-						case frames <- consoleOpFrame{Sequence: seq, OpID: op.ID, Kind: op.Kind}:
+						case frames <- consoleOpFrame{OpID: op.ID, Kind: op.Kind}:
 						case <-ctx.Done():
 							return
 						}
 					}
 				}
-				event, id, data = "", "", ""
+				event, data = "", ""
 			case strings.HasPrefix(line, "event: "):
 				event = strings.TrimPrefix(line, "event: ")
-			case strings.HasPrefix(line, "id: "):
-				id = strings.TrimPrefix(line, "id: ")
 			case strings.HasPrefix(line, "data: "):
 				data = strings.TrimPrefix(line, "data: ")
 			}
@@ -829,6 +828,7 @@ func readConsoleOpStream(t *testing.T, e *Env, auth, lastEventID string, want in
 	}()
 
 	var got []consoleOpFrame
+	seen := map[string]bool{}
 	quiet := time.NewTimer(max)
 	if idle > 0 {
 		quiet.Reset(idle)
@@ -840,6 +840,10 @@ func readConsoleOpStream(t *testing.T, e *Env, auth, lastEventID string, want in
 			if !ok {
 				t.Fatalf("the op stream ended on its own after %d frames", len(got))
 			}
+			if seen[f.OpID] {
+				t.Fatalf("op %s was pushed twice on one connection", f.OpID)
+			}
+			seen[f.OpID] = true
 			got = append(got, f)
 			if want > 0 && len(got) >= want {
 				return got
@@ -858,26 +862,13 @@ func readConsoleOpStream(t *testing.T, e *Env, auth, lastEventID string, want in
 	}
 }
 
-// assertStrictlyIncreasing fails unless the frames' sequences rise.
-func assertStrictlyIncreasing(t *testing.T, frames []consoleOpFrame) {
-	t.Helper()
-	for i := 1; i < len(frames); i++ {
-		if frames[i].Sequence <= frames[i-1].Sequence {
-			t.Fatalf("sequences must rise in delivery order: %+v", frames)
-		}
-	}
-}
-
-// ackConsoleOp acknowledges one op through the existing done endpoint. An
-// ensure-topic is completed with a thread id, as the console does.
+// ackConsoleOp acknowledges one op as the console does: the receipt. The
+// manager consumes the message at the acknowledgement (`consumed: true`) and no
+// report follows.
 func ackConsoleOp(t *testing.T, e *Env, auth string, f consoleOpFrame) {
 	t.Helper()
-	body := []byte(`{}`)
-	if f.Kind == "ensure-topic" {
-		body, _ = json.Marshal(map[string]string{"threadId": "system-pack-" + f.OpID})
-	}
-	code, out := e.do(t, "POST", e.Manager.URL()+"/channel/ops/"+url.PathEscape(f.OpID)+"/done", body, auth)
-	if code != 200 {
-		t.Fatalf("acknowledging %s: %d %s", f.OpID, code, out)
+	code, out := e.do(t, "POST", e.Manager.URL()+"/channel/ops/"+url.PathEscape(f.OpID)+"/ack?adapter=console&contract=2", nil, auth)
+	if code != 200 || !strings.Contains(out, `"consumed":true`) {
+		t.Fatalf("acknowledging %s: %d %s (a receipt adapter's acknowledgement must consume it)", f.OpID, code, out)
 	}
 }

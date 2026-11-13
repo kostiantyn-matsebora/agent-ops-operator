@@ -115,24 +115,24 @@ func awaitTaskUIDSucceeded(t *testing.T, frames <-chan string, uid string, timeo
 	}
 }
 
-// awaitTaskKeySucceeded drains frames until SOME task on this Key is seen in
-// state "succeeded" — used where the task's own UID was never handed back to
+// awaitTaskKeySucceeded drains frames until SOME task of this queue on this
+// Key is seen in state "succeeded" — used where the task's own UID was never handed back to
 // this test (an inbound reply forwarded by a real adapter, never this test's
 // own HTTP call).
-func awaitTaskKeySucceeded(t *testing.T, frames <-chan string, key string, timeout time.Duration) taskStateWire {
+func awaitTaskKeySucceeded(t *testing.T, frames <-chan string, queue, key string, timeout time.Duration) taskStateWire {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {
 		select {
 		case f, ok := <-frames:
 			if !ok {
-				t.Fatalf("the task stream ended before a task on key %s succeeded", key)
+				t.Fatalf("the task stream ended before a task on queue %s key %s succeeded", queue, key)
 			}
-			if w, ok := taskPut(f); ok && w.Key == key && w.State == "succeeded" {
+			if w, ok := taskPut(f); ok && w.Queue == queue && w.Key == key && w.State == "succeeded" {
 				return w
 			}
 		case <-deadline:
-			t.Fatalf("no task on key %s reached succeeded on the task stream within %s", key, timeout)
+			t.Fatalf("no task on queue %s key %s reached succeeded on the task stream within %s", queue, key, timeout)
 		}
 	}
 }
@@ -159,6 +159,28 @@ func waitTaskState(t *testing.T, e *Env, auth, uid, want string, timeout time.Du
 		return w.State == want, nil
 	})
 	return last
+}
+
+// waitTaskSettled waits for a task to have been consumed. A message that
+// succeeds is DELETED from the queue (design D-2), so after its short grace
+// (30s) GET /state/tasks/{id} answers 404 instead of "succeeded": a settled
+// task is either still read back as succeeded or already gone. A dead one
+// fails the test at once. The task's effect is what the caller asserts next,
+// since a 404 alone cannot tell a consumed task from one never accepted.
+func waitTaskSettled(t *testing.T, e *Env, auth, uid string, timeout time.Duration) {
+	t.Helper()
+	waitFor(t, fmt.Sprintf("task %s to be consumed (succeeded, or removed after its grace)", uid), timeout, func() (bool, error) {
+		w, code := getTask(t, e, auth, uid)
+		switch {
+		case code == 404:
+			return true, nil
+		case code != 200:
+			return false, nil
+		case w.State == "dead":
+			t.Fatalf("task %s went dead (code %q), it must have been consumed", uid, w.Code)
+		}
+		return w.State == "succeeded", nil
+	})
 }
 
 // deadLetters reads GET /state/dead-letters?queue=.
@@ -395,7 +417,7 @@ func TestAsyncBulkCloseEachConversationGetsItsOwnInvocation(t *testing.T) {
 }
 
 // awaitCloseInvocations reads the task stream until every named
-// conversation's close task has succeeded, returning each one's invocationId
+// conversation's close task (queue "conv") has succeeded, returning each one's invocationId
 // and failing if a task's invocationId changes mid-flight.
 func awaitCloseInvocations(t *testing.T, frames <-chan string, names []string) map[string]string {
 	t.Helper()
@@ -557,7 +579,10 @@ func TestAsyncInboundChatThroughTelegramFakeAndConsole(t *testing.T) {
 	defer tgResp.Body.Close()
 	tgFrames := streamFrames(tgResp)
 
-	replyText := "echo telegram-continue-" + stamp
+	// The stub runtime answers "[stub] <input minus its directive word>", so
+	// the reply carries the text without the leading "echo".
+	followUp := "telegram-continue-" + stamp
+	replyText := "echo " + followUp
 	update := map[string]any{
 		"update_id": time.Now().Unix() % 1_000_000_000,
 		"message": map[string]any{
@@ -570,11 +595,11 @@ func TestAsyncInboundChatThroughTelegramFakeAndConsole(t *testing.T) {
 	raw, _ := json.Marshal(update)
 	e.BotFeed(t, raw)
 
-	awaitTaskKeySucceeded(t, tgFrames, convTG.Name, 3*time.Minute)
+	awaitTaskKeySucceeded(t, tgFrames, "conv", convTG.Name, 3*time.Minute)
 	waitFor(t, "the telegram reply sent back through the fake Bot API", 3*time.Minute, func() (bool, error) {
 		for _, c := range e.BotCalls(t, "sendMessage") {
 			b, _ := json.Marshal(c["body"])
-			if strings.Contains(string(b), replyText) && strings.Contains(string(b), "[stub]") {
+			if strings.Contains(string(b), "[stub] "+followUp) {
 				return true, nil
 			}
 		}
@@ -593,15 +618,15 @@ func TestAsyncInboundChatThroughTelegramFakeAndConsole(t *testing.T) {
 	e.WaitRun(t, convConsole.Name, 1, 3*time.Minute)
 	consoleThread := waitThreadOn(t, ctx, e, convConsole.Name, ChannelConsole, time.Minute)
 
-	consoleReply := "echo console-continue-" + stamp
+	consoleFollowUp := "console-continue-" + stamp
+	consoleReply := "echo " + consoleFollowUp
 	code, accepted := postChannelInbound(t, e, auth, ChannelConsole, consoleThread, consoleReply, "system-pack-9.5")
 	if code != 202 || accepted.InvocationID == "" || len(accepted.TaskIDs) != 1 {
 		t.Fatalf("accepting the console continuation: %d %+v", code, accepted)
 	}
-	waitTaskState(t, e, auth, accepted.TaskIDs[0], "succeeded", 3*time.Minute)
+	waitTaskSettled(t, e, auth, accepted.TaskIDs[0], 3*time.Minute)
 	waitFor(t, "the console reply recorded", 2*time.Minute, func() (bool, error) {
-		body := e.ConsoleTranscript(t, convConsole.Name)
-		return strings.Contains(body, consoleReply) && strings.Contains(body, "[stub]"), nil
+		return strings.Contains(e.ConsoleTranscript(t, convConsole.Name), "[stub] "+consoleFollowUp), nil
 	})
 }
 
@@ -613,13 +638,13 @@ func TestAsyncInboundChatThroughTelegramFakeAndConsole(t *testing.T) {
 //
 // DECISION on the exact claim: this pack's command bus always renders at
 // its chart default, commandBus.backend: nats (chart/values.yaml;
-// install.go never overrides it — SYSTEM_STATE_BACKEND pins a DIFFERENT
-// subsystem, the conversation/signal state store, not the command bus),
-// so the task's own log and lease (design D-2) live in the bus's own
-// NATS server, never in the manager process. That is what lets this test
-// assert the STRONGER of the two claims the task text allows: the SAME
-// task UID the old manager minted is the one that later settles, not
-// merely the same eventual effect under a new one.
+// install.go never overrides it), riding the state store's nats servers, so
+// the task's own log (design D-2) lives in NATS, never in the manager
+// process. That is what lets this test assert the STRONGER of the two claims
+// the task text allows: the SAME task UID the old manager minted is the one
+// that settles (it never goes dead), not merely the same eventual effect under
+// a new one. A succeeded task is removed after a 30s grace, so "settled" reads
+// as succeeded or gone.
 func TestAsyncManagerRestartLosesNothingDuplicatesNothing(t *testing.T) {
 	fullTier(t)
 	e := requireEnv(t)
@@ -654,10 +679,14 @@ func TestAsyncManagerRestartLosesNothingDuplicatesNothing(t *testing.T) {
 	}
 	closeUID := closeAccepted.TaskIDs[0]
 
-	// Generous margin past ReclaimAfter (5 minutes, chat/ops.go) in case the
-	// old pod's lease on an in-flight claim had to lapse before another
-	// replica could pick the SAME task back up.
-	waitTaskState(t, e, auth, closeUID, "succeeded", 8*time.Minute)
+	// A consumed message is deleted after a 30s grace (design D-2), and the
+	// restart itself takes longer than that, so the task is most likely
+	// already gone by now: settled means succeeded OR removed, never dead.
+	// The 7 minutes sit past the conv queue's 5 minute lease, in case the old
+	// pod died holding the claim and the lease had to lapse before another
+	// replica could take the SAME task. That the close really ran is what the
+	// closed conversation and the single farewell below prove.
+	waitTaskSettled(t, e, auth, closeUID, 7*time.Minute)
 	waitFor(t, "the conversation closed exactly once", 2*time.Minute, func() (bool, error) {
 		c, err := e.K.Conversation(ctx, conv.Name)
 		return err == nil && c.Status.Phase == agentopsv1alpha1.ConversationClosed, err
@@ -675,11 +704,18 @@ func TestAsyncManagerRestartLosesNothingDuplicatesNothing(t *testing.T) {
 
 // ---- 9.7 ------------------------------------------------------------------
 
-// 9.7 A channel surface that genuinely fails: the real fake Bot API
-// rejects createForumTopic (ensure-topic's own call, KindOutStable — 8
-// attempts, 5s-5m jittered backoff, commandbus.DefaultInventory), observed
-// backing off through real retries against the real fake Bot API, then
-// reaching a real dead-letter record.
+// 9.7 A channel surface that genuinely fails: the real fake Bot API rejects
+// createForumTopic (ensure-topic's own call, a hand-over message of kind
+// KindOutTopic on the Channel's own queue, out.<channel name>), observed being
+// handed over to the adapter, retried by the ADAPTER against the real fake Bot
+// API, and then failed for good as a real dead-letter record.
+//
+// Under the hand-over contract (design D-17) the bus runs no attempts and no
+// backoff of its own: the adapter acknowledges the message, which starts its 5
+// minute delivery TTL, retries against its surface inside that TTL and reports
+// FAILED, and a failure is final. So this lane observes running (handed over),
+// at least two real createForumTopic calls (the adapter's own retries), then
+// dead, never "retrying".
 //
 // DECISION on recovery: rather than waiting out the natural 5-minute park
 // cool-off (design D-4) for the SAME CommandID to unsuppress on its own,
@@ -687,14 +723,8 @@ func TestAsyncManagerRestartLosesNothingDuplicatesNothing(t *testing.T) {
 // healthy again. EnqueueEnsureTopic (chat/ops.go) mints a FRESH
 // CommandID per reopen count ("topic:...:r<n>"), so a reopen's own
 // re-derive is a genuinely different, unsuppressed submission hitting the
-// now-healthy Bot API — the same re-derivation mechanism this task means
-// to prove, through a path this lane does not have to sit idle for ~5
-// more real minutes to exercise. The log's own park-then-release
-// timing is already pinned at the unit tier by the commandbus
-// conformance suite (task 2.6, "park then release"); re-proving it here
-// too would cost every full-tier run real wall-clock time for a fact this
-// lane does not uniquely decide. This is the documented call the task's
-// own instructions invite.
+// now-healthy Bot API. The park-then-release timing is already pinned at the
+// unit tier by the commandbus conformance suite (task 2.6).
 func TestAsyncChannelFailureBacksOffDeadLettersThenRecovers(t *testing.T) {
 	fullTier(t)
 	e := requireEnv(t)
@@ -702,6 +732,16 @@ func TestAsyncChannelFailureBacksOffDeadLettersThenRecovers(t *testing.T) {
 	stamp := fmt.Sprint(time.Now().UnixNano())
 	auth := bearerPrefix + e.Values.AdapterToken
 
+	// The stream is opened BEFORE the conversation exists: the telegram
+	// ensure-topic is enqueued by the reconciler, never an accept handler, so
+	// no HTTP response hands this test its UID and the task stream is the only
+	// way to find it. A feed resumed from "now" would miss it once the
+	// console half had bound.
+	findResp := openTaskStream(t, ctx, e, auth)
+	defer findResp.Body.Close()
+	frames := streamFrames(findResp)
+
+	callsBefore := len(e.BotCalls(t, "createForumTopic"))
 	failBody, _ := json.Marshal(map[string]any{"method": "createForumTopic", "mode": "5xx", "forever": true})
 	if code, out := e.do(t, "POST", e.BotAPI.URL()+"/control/fail", failBody, ""); code != 204 {
 		t.Fatalf("injecting the failure: %d %s", code, out)
@@ -713,41 +753,26 @@ func TestAsyncChannelFailureBacksOffDeadLettersThenRecovers(t *testing.T) {
 	fp := "e2e-async-failing-channel-" + stamp
 	e.PostTask(t, SourceFanout, fp, "echo "+fp)
 	conv := e.ConversationFor(t, fp, 2*time.Minute)
-	// The console half of the same fanout must bind fine regardless — the
-	// injected failure is scoped to the telegram key alone (design D-5's
-	// "out" family resolves one policy per queue, and the queue itself is
-	// per-channel-type).
+	// The console half of the same fanout must bind fine regardless: the
+	// injected failure is scoped to the telegram Channel's own queue.
 	waitThreadOn(t, ctx, e, conv.Name, ChannelConsole, 2*time.Minute)
 
-	// Discover the telegram ensure-topic task: it is enqueued by the
-	// reconciler, never an accept handler, so no HTTP response hands this
-	// test its UID — the task stream is the only way to find it.
-	findResp := openTaskStream(t, ctx, e, auth)
-	frames := streamFrames(findResp)
-	uid := awaitTelegramTaskUID(t, frames, conv.Name)
-	findResp.Body.Close()
+	uid := awaitChannelTaskUID(t, frames, ChannelTelegram, conv.Name)
 
-	// Real backoff, observed through at least two genuine retries against
-	// the real fake Bot API.
-	retries := 0
-	waitFor(t, "at least two real retries", 3*time.Minute, func() (bool, error) {
-		task, code := getTask(t, e, auth, uid)
-		if code != 200 {
-			return false, nil
-		}
-		if task.State == "retrying" && task.Attempt > retries {
-			retries = task.Attempt
-		}
-		return retries >= 2, nil
+	// Handed over: the adapter acknowledged it and is delivering.
+	waitTaskState(t, e, auth, uid, "running", 2*time.Minute)
+
+	// Real retries by the adapter against the real fake Bot API.
+	waitFor(t, "at least two real createForumTopic attempts", 2*time.Minute, func() (bool, error) {
+		return len(e.BotCalls(t, "createForumTopic"))-callsBefore >= 2, nil
 	})
 
-	// The real dead-letter record, reached after the queue's own 8
-	// attempts are exhausted — bounded generously past the deterministic
-	// worst case of doubling backoff (5+10+20+40+80+160+300s ≈ 10m25s).
-	waitTaskState(t, e, auth, uid, "dead", 15*time.Minute)
-	dead := deadLetters(t, e, auth, "out.telegram")
+	// The adapter reports FAILED when its retry budget (the 5 minute delivery
+	// TTL less a margin) is spent. 7 minutes covers the TTL backstop as well.
+	waitTaskState(t, e, auth, uid, "dead", 7*time.Minute)
+	dead := deadLetters(t, e, auth, "out."+ChannelTelegram)
 	if !slices.ContainsFunc(dead, func(d taskStateWire) bool { return d.UID == uid }) {
-		t.Fatalf("the dead task %s must be listed on GET /state/dead-letters?queue=out.telegram", uid)
+		t.Fatalf("the dead task %s must be listed on GET /state/dead-letters?queue=out.%s", uid, ChannelTelegram)
 	}
 
 	// Recover the surface, then force a re-derive through a close+reopen
@@ -761,7 +786,7 @@ func TestAsyncChannelFailureBacksOffDeadLettersThenRecovers(t *testing.T) {
 	if code != 202 || len(accepted.TaskIDs) != 1 {
 		t.Fatalf("closing before reopen: %d %+v", code, accepted)
 	}
-	waitTaskState(t, e, auth, accepted.TaskIDs[0], "succeeded", 2*time.Minute)
+	waitTaskSettled(t, e, auth, accepted.TaskIDs[0], 2*time.Minute)
 	waitFor(t, "the conversation closed", time.Minute, func() (bool, error) {
 		c, err := e.K.Conversation(ctx, conv.Name)
 		return err == nil && c.Status.Phase == agentopsv1alpha1.ConversationClosed, err
@@ -774,7 +799,7 @@ func TestAsyncChannelFailureBacksOffDeadLettersThenRecovers(t *testing.T) {
 	if reopenCode != 202 || len(reopenAccepted.TaskIDs) != 1 {
 		t.Fatalf("reopening: %d %s", reopenCode, reopenOut)
 	}
-	waitTaskState(t, e, auth, reopenAccepted.TaskIDs[0], "succeeded", time.Minute)
+	waitTaskSettled(t, e, auth, reopenAccepted.TaskIDs[0], time.Minute)
 
 	waitFor(t, "a fresh, successful telegram topic once the surface recovered", 2*time.Minute, func() (bool, error) {
 		c, err := e.K.Conversation(ctx, conv.Name)
