@@ -667,8 +667,10 @@ type consoleOpFrame struct {
 }
 
 // consoleStreamMark picks this lane's own ops out of the console queue: the
-// conversations it starts are named for their fingerprint.
-const consoleStreamMark = "e2e-async-console-stream"
+// conversations it starts are named for the FIRST THREE words of their task
+// ("task-e2e-async-console", "-2", ...), never the whole fingerprint, so the
+// mark is that three-word prefix. No other lane's fingerprint begins with it.
+const consoleStreamMark = "e2e-async-console"
 
 // 11.7 The console's feed after a drop: nothing it never acknowledged is lost,
 // nothing it acknowledged is delivered again (design D-17, the receipt-only

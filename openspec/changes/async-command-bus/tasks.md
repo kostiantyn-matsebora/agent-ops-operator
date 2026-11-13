@@ -433,14 +433,14 @@ run. A cluster-less session records the tier as not performed and dispatches it
   retry with backoff. The rewritten lane asserts the adapter retries until the
   delivery TTL, reports failed, the message is not redelivered, and it reaches
   `/state/dead-letters`.
-- [ ] 15.7 Lane: drop the console stream while messages are produced and reconnect, then confirm nothing is lost, duplicated or reordered.
+- [x] 15.7 Lane: drop the console stream while messages are produced and reconnect, then confirm nothing is lost, duplicated or reordered.
   `TestAsyncConsoleStreamResumesAfterADropWithoutLossOrDuplicates`.
   **STALE AGAINST D-17, TO BE REWRITTEN BEFORE IT IS RUN.** It asserts a strictly
   increasing sequence read by cursor. The rewritten lane reads
   `GET /channel/ops/stream` as the console, drops it before acknowledging some
   messages, reconnects, and asserts it is offered exactly the unacknowledged
   ones, none twice, in queue order.
-- [ ] 15.8 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
+- [x] 15.8 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
   **NOT PERFORMED — no cluster in this environment.** Left for whoever opens
   the pull request to dispatch:
   ```sh
