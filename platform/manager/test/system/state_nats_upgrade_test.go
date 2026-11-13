@@ -41,7 +41,10 @@ import (
 // this lane exists to prove would silently no-op.
 func pinToKubeBackend(t *testing.T, ctx context.Context, e *Env) {
 	t.Helper()
-	if err := e.UpgradeManager(ctx, "stateStore.backend=kube"); err != nil {
+	// With the state store on kube the command bus can no longer ride its
+	// bundle, so the chart wants the bus's own credential, and an upgrade
+	// never generates one (the guard in templates/commandbus.yaml says so).
+	if err := e.UpgradeManager(ctx, "stateStore.backend=kube", "commandBus.nats.auth.password=system-pack-bus-credential"); err != nil {
 		t.Fatalf("pinning the install to the kube backend: %v", err)
 	}
 	deleteNatsPVCs(t, ctx, e)
