@@ -213,16 +213,20 @@ re-checks its descendants when it runs.
 |---|---|
 | Expand at run time | The parent's row shows no work until it runs, and a crash between expansion and enqueue needs its own recovery |
 
-### D-8: `escalate` is two atomic tasks, and the result append has its own verb
+### D-8: `escalate` is one idempotent task
 
-| Case | Tasks |
+| Case | Work inside the one `escalate` task |
 |---|---|
-| Uncaused root | one `escalate` task: a patch setting `status.escalatedAt` and the message, a no-op when already set |
-| Caused member | a cascading `close`, then `append-result`, one invocation, one key (the root's) |
+| Uncaused root | a patch setting `status.escalatedAt` and the message, a no-op when already set |
+| Caused member | the cascading close with the message as its reason, and the result appended to the parent |
 
-`append-result` is a new verb on `conv`, keyed by the parent's root. Its dedup
-id derives from the task, not the clock. The current id embeds
-`time.Now().UnixNano()`, so a redelivery would append the result twice.
+The task's command id is `escalate:<conversation>`, so a redelivery is
+suppressed or replays the same effect. Each step is conditional on the state it
+finds, so a repeat changes nothing.
+
+A split into a `close` task then an `append-result` task was planned and not
+built. One task per conversation is enough, since both steps already guard
+themselves and a second task would add a write on the key.
 
 The inline calls from `/work/done` (the second-miss escalation) keep calling
 `Router.Escalate` directly. That path stays synchronous (D-12).

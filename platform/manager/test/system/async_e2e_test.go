@@ -615,7 +615,7 @@ func TestAsyncInboundChatThroughTelegramFakeAndConsole(t *testing.T) {
 // its chart default, commandBus.backend: nats (chart/values.yaml;
 // install.go never overrides it — SYSTEM_STATE_BACKEND pins a DIFFERENT
 // subsystem, the conversation/signal state store, not the command bus),
-// so the task's own ledger and lease (design D-2) live in the bus's own
+// so the task's own log and lease (design D-2) live in the bus's own
 // NATS server, never in the manager process. That is what lets this test
 // assert the STRONGER of the two claims the task text allows: the SAME
 // task UID the old manager minted is the one that later settles, not
@@ -689,7 +689,7 @@ func TestAsyncManagerRestartLosesNothingDuplicatesNothing(t *testing.T) {
 // re-derive is a genuinely different, unsuppressed submission hitting the
 // now-healthy Bot API — the same re-derivation mechanism this task means
 // to prove, through a path this lane does not have to sit idle for ~5
-// more real minutes to exercise. The ledger's own park-then-release
+// more real minutes to exercise. The log's own park-then-release
 // timing is already pinned at the unit tier by the commandbus
 // conformance suite (task 2.6, "park then release"); re-proving it here
 // too would cost every full-tier run real wall-clock time for a fact this

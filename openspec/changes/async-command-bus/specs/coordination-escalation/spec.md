@@ -8,14 +8,10 @@ Instead the manager SHALL close it with the supplied message as its
 `closeReason` and its result. That result reaches its PARENT as an ordinary
 member-result input (coordination-loop).
 
-That SHALL be two tasks of one invocation on the tree's root key:
+That SHALL be ONE `escalate` task on the escalating conversation's own key.
 
-1. a `close` task with cascade, carrying the message as its reason
-2. an `append-result` task appending the result to the parent
-
-The second task runs only after the first settled. Its deduplication id SHALL
-be derived from the task, never from the clock, so a redelivery appends the
-result to the parent once.
+Its command id SHALL be derived from the conversation, never from the clock,
+so a redelivery closes the member and reports to the parent once.
 
 A member binds no channel of its own — unchanged. It has nothing to post
 into, and nothing for `escalate` to bind.
@@ -28,12 +24,8 @@ into, and nothing for `escalate` to bind.
 - **WHEN** a parent receiving a bubbled escalation is itself nested and calls `escalate` again
 - **THEN** the same closure-and-report happens one level further up, until a call reaches the uncaused root
 
-#### Scenario: The report follows the close
-- **WHEN** a member escalates
-- **THEN** its `close` task settles first and the parent's `append-result` task runs after it on the same key
-
-#### Scenario: A redelivered report appends once
-- **WHEN** the `append-result` task is delivered twice
+#### Scenario: A redelivered escalation reports once
+- **WHEN** a member's `escalate` task is delivered twice
 - **THEN** the parent holds one copy of the result
 
 ### Requirement: The uncaused root binds its channels at creation, and escalation posts into them

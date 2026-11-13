@@ -166,7 +166,7 @@ func TestPoolFailsATaskWithAPlainErrorAsInternal(t *testing.T) {
 	var got commandbus.Task
 	waitFor(t, 2*time.Second, func() bool {
 		got, err = bus.GetTask(ctx, task.UID)
-		// CodeInternal is retryable, so the ledger moves to Retrying on the
+		// CodeInternal is retryable, so the log moves to Retrying on the
 		// very first Fail rather than Dead.
 		return err == nil && got.State == commandbus.StateRetrying
 	})

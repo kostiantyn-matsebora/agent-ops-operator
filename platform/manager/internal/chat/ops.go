@@ -55,7 +55,7 @@ const (
 	// Unlike close-topic this is NOT derivable: the CR it belongs to is
 	// disappearing, so there is nowhere to record what is owed. The deleting
 	// Conversation holds a finalizer while it is outstanding, and failure is
-	// now retried by the bus (design D-5's "out.<type> delete-conversation"
+	// now retried by the bus (design D-5's "out.<channel> delete-conversation"
 	// row: 3 attempts, never parked — see Complete's own doc comment) rather
 	// than terminal on the first attempt as it once was; the finalizer's own
 	// grace period, not this op's dedup state, is what eventually gives up.
@@ -153,7 +153,7 @@ const settledWindowSize = 512
 var outKinds = []commandbus.Kind{commandbus.KindOutStable, commandbus.KindOutEphemeral, commandbus.KindOutTopic, commandbus.KindOutDeleteConversation}
 
 // OpQueue is the channel-adapter-facing outbound surface: Enqueue* submits
-// one task per op onto the command bus's "out.<channelType>" queue family
+// one task per op onto the command bus's "out.<channel>" queue family
 // (design D-5), Claim/Complete are GET /channel/ops and POST /channel/ops/
 // {id}/done's thin, direct wrappers over Bus.Claim/Settle/Fail, and
 // Pending/Settled/Stats read a local mirror rather than the bus itself

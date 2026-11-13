@@ -58,7 +58,6 @@ Every asynchronous command SHALL map to one queue and one ordering key:
 | `delete` | `conv` | the root conversation of the target |
 | `reset-context` | `conv` | the root conversation of the target |
 | `escalate` | `conv` | the root conversation of the target |
-| `append-result` | `conv` | the root conversation of the parent |
 | `ingest-signal` | `in.signal` | the source and the `initiationId` |
 | `ensure-topic`, `send`, `close-topic`, `delete-conversation` | `out.<channel>` | the conversation |
 
@@ -133,31 +132,27 @@ invocation and task ids and SHALL NOT create a second task.
 - **THEN** the second post returns the first one's invocation
 
 ### Requirement: Escalation is decomposed by where the conversation sits
-An `escalate` command SHALL be decomposed at accept time by whether the
-conversation carries `causedBy`.
+An `escalate` command SHALL be ONE `escalate` task on the escalating conversation's key.
+Its command id SHALL derive from the conversation, never from the clock.
 
-| Conversation | Tasks |
+| Conversation | The task does |
 |---|---|
-| root, uncaused | one `escalate` task |
-| member, caused | a `close` task with cascade, then an `append-result` task, one invocation, one key |
+| root, uncaused | one patch setting `status.escalatedAt` and the message, a no-op when already escalated |
+| member, caused | closes the member with the message as its reason, and appends the result to the parent |
 
-The root's `escalate` task SHALL perform one patch setting `status.escalatedAt` and
-the message, and SHALL be a no-op when the conversation is already escalated.
-
-The member's close SHALL carry the message as its reason. The `append-result`
-task SHALL append that result to the parent, and its deduplication id SHALL be
-derived from the task, never from the clock, so a redelivery appends once.
+Each step SHALL be conditional on the state it finds, so a redelivery appends the
+result to the parent once.
 
 #### Scenario: A redelivered root escalation is a no-op
 - **WHEN** an `escalate` task is delivered twice to an uncaused root
 - **THEN** the second delivery changes nothing and succeeds
 
-#### Scenario: A member escalation closes and then reports
+#### Scenario: A member escalation closes and reports
 - **WHEN** a member calls `escalate` with a message
-- **THEN** a close task and then an append task are enqueued on the root's key, and the parent receives the message once
+- **THEN** one `escalate` task is enqueued on the member's key, and it closes the member and appends the message to the parent
 
-#### Scenario: A redelivered append lands once
-- **WHEN** the append task's lease lapses after the parent was appended and it is delivered again
+#### Scenario: A redelivered member escalation reports once
+- **WHEN** the `escalate` task's lease lapses after the parent was appended and it is delivered again
 - **THEN** the parent holds one copy of the result
 
 ### Requirement: Channel operations run on the bus as hand-over queues

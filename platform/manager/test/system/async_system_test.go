@@ -455,7 +455,7 @@ func awaitSettleOrder(t *testing.T, frames <-chan string, submitted []string) []
 //
 // The bus-server half is different in KIND: unlike a manager replica's own
 // claim (not durably placed on any one node — see 11.3's own doc
-// comment), the LEDGER ITSELF is a 3-way replicated JetStream store
+// comment), the LOG ITSELF is a 3-way replicated JetStream store
 // (design D-8's shape, reused verbatim for the command bus per design
 // D-13's "same shape as the state bundle"). One server down at a time is
 // comfortably inside quorum for every task regardless of exactly when it

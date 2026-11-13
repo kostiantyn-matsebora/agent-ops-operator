@@ -573,7 +573,7 @@ func (f *fakeProvider) Send(ctx context.Context, threadID *string, msg Message) 
 }
 
 // In-process delivery is now a real consumer.Pool, started by Run (design
-// D-10's "in-process providers become a consumer consuming out.<type>"),
+// D-10's "in-process providers become a consumer consuming out.<channel>"),
 // never a one-shot goroutine fired from inside enqueue — so this test
 // drives Run itself, in the background, for the fake registered type.
 func TestInProcessProviderServesRegisteredType(t *testing.T) {
@@ -875,7 +875,7 @@ func TestCompleteFailsTheTaskWhenTheHandlerWriteFailsDespiteAdapterSuccess(t *te
 	}
 }
 
-// Stats() aggregates over the three out.<type> kinds and reports WHICH op
+// Stats() aggregates over the three out.<channel> kinds and reports WHICH op
 // and WHICH conversation is oldest in each of the queued/claimed buckets —
 // the identities commandbus.QueueStats gained for exactly this (task 6's
 // own extension to internal/commandbus/stats.go).
