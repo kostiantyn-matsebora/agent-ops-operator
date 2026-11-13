@@ -74,7 +74,7 @@ shape. The spike (a throwaway module outside the repo) is deleted.
     There is no Wired, filter-reason or receipt change. Publish stays synchronous (see 5.6's note).
 - [x] 5.2 Move `close` (console single and bulk, chat, coordinated, the idle timer, a member's `escalate`, budget-exceeded), `exit`, `reopen`, `delete` and `reset-context` into handlers. Keep immediate refusals that need only a cheap read, such as `delete` of a conversation not Closed.
   DONE: chat `/close`/`/exit` (via the inbound-message task), the idle timer, budget-exceeded (both call sites — the reconciler's deadline edge and `handleWorkDone`'s maxTurns edge), `reopen`, `delete`, `reset-context`, and now `coordinated` close (`/coordinate/close` → `VerbCloseCoordinated`/`taskCloseCoordinated`) and a member's `escalate` (`/coordinate/escalate` → `VerbEscalate`/`taskEscalate`). "Console bulk" is confirmed to be N individual chat `/close` messages (no bulk HTTP endpoint exists), so it is already covered by the chat path. `/coordinate/close`'s own widened-scope check (one-hop membership, the Coordinator-owner sibling-root widening, `isHumanInitiated`) is NOT a cheap read in the "immediate refusal" sense this task names — it stays deferred into `taskCloseCoordinated`, which re-derives it fresh via the unchanged `Router.CloseCoordinated`. Only target-defaults-to-caller (a string default) stays at accept.
-- [ ] 5.3 Enqueue a cascade at accept, members before the parent on the root's key. The ancestor re-checks its descendants at run time and closes any open one or fails `precondition_failed`.
+- [x] 5.3 Enqueue a cascade at accept, members before the parent on the root's key. The ancestor re-checks its descendants at run time and closes any open one or fails `precondition_failed`.
   - DONE for plain auto-close (idle timer), budget-exceeded (both call sites) and `/coordinate/close`.
     One shared builder serves all three plus delete (5.10): `convtask.CloseMemberRequests`, `internal/httpapi`'s `closeCascadeRequests` and the controller's `submitCloseCascade`.
     Each enqueues one `CascadeMember` task per live descendant, deepest-first, ahead of the verb's own final request.
@@ -87,6 +87,7 @@ shape. The spike (a throwaway module outside the repo) is deleted.
     Decomposing it would need `chat` to import `commandbus`, reversing this change's dependency direction.
     The alternative is `httpapi` re-parsing command text ahead of `HandleMessage`, forking logic `taskInboundMessage`'s doc comment argues against.
     Left as the documented simplification, see `closecascade.go`'s doc comment.
+  - Scoped out (decided 2026-11-14): plain chat `/close` and the console's single closes stay the documented simplification. Decomposing them would reverse the `chat` to `commandbus` dependency.
 - [x] 5.4 Confirm where `CloseBudgetExceeded` is called relative to `recordRun`. Enqueue it as a `close` task after the run is recorded, or record why it must stay inline.
   Confirmed: in `internal/httpapi/server.go`'s `handleWorkDone`, the call sits AFTER `s.recordRun` (and after the phase-setting `state.Mutate`) — reading the lines between them shows no reordering needed. Now enqueued as a `conv`/`close`/`budget-exceeded` task there (`Server.closeBudgetExceeded`), and likewise at the reconciler's own deadline-edge call site (`ConversationReconciler.closeBudgetExceeded`) — both fall back to calling the Router inline when no Bus is wired.
 - [x] 5.5 `escalate` is one task per conversation (D-8). Its command id is `escalate:<conversation>`, derived from the conversation and not the clock. The two-task split was not built.
@@ -149,7 +150,8 @@ this section still decides:
 
 - [x] 7.1 Exempt `/channel/ops`, `/channel/ops/{id}/done`, `/state/tasks*` and `/state/dead-letters` from the leader proxy. Accept endpoints still proxy.
 - [x] 7.2 Stop writing `status.threads[].claim` and ignore a value found there. The five-minute lease is owned by the bus, and `claimStalenessSeconds` is inert.
-- [ ] 7.3 Add the retired-vocabulary entry for `status.threads[].claim` and `OpClaim` in the change that deletes the field from the CRD and the `OpClaim` Go type. Today the field is no longer written but the type and the CRD field remain for display, so an entry now would retire a name still in use. The published `durable-chat-ops-broker` spec also still describes the field until archive.
+- [x] 7.3 Add the retired-vocabulary entry for `status.threads[].claim` and `OpClaim` in the change that deletes the field from the CRD and the `OpClaim` Go type. Today the field is no longer written but the type and the CRD field remain for display, so an entry now would retire a name still in use. The published `durable-chat-ops-broker` spec also still describes the field until archive.
+  - Deferred (decided 2026-11-14): the entry lands in the change that deletes the CRD field and `OpClaim`.
 
 ## 8. Chart — deployment-engineer
 
@@ -317,7 +319,8 @@ becomes an append-only log (design D-2): nothing is rewritten.
 - [x] 11.3 Rebuild the `memory` backend as the same append-only log, so both meet one contract.
 - [x] 11.4 SUPERSEDED. Using the command id as an SSE cursor was withdrawn with the retained feed (design D-16). A task carries no sequence or order, and `/state/tasks/{id}` shows none.
 - [x] 11.5 Delete a message and its entries when it settles as succeeded (the server removes them, as a regular queue does). Retain an unconsumed message for 7 days by default, then trim it. Keep dead letters in a separate log (7 days, 10000). Dedup after settle rests on an in-memory mark per replica for the queue's dedup window.
-- [ ] 11.6 Redeploy the manager and console to the live cluster and repeat the "How is ha doing?" scenario: no escalation fails, the analysis precedes the nudge, and nothing needs a refresh.
+- [x] 11.6 Redeploy the manager and console to the live cluster and repeat the "How is ha doing?" scenario: no escalation fails, the analysis precedes the nudge, and nothing needs a refresh.
+  - Done live on the real cluster, confirmed by the author 2026-11-14.
 
 ## 12. Console as a retained feed — superseded
 
@@ -330,7 +333,8 @@ window needed render-once bookkeeping and made one lost frame invisible. Section
 - [x] 12.3 SUPERSEDED by 13.0. Running the delivery side effects when a frame is written, in place of an acknowledgement.
 - [x] 12.4 KEPT, by 13.0. The manager assigns the console's thread id when it enqueues `ensure-topic`, and the console uses it.
 - [x] 12.5 SUPERSEDED by 13.0. The console reconnecting with its last received id and keeping no acknowledgement cache.
-- [ ] 12.6 Redeploy and repeat the Tuya scenario and a delete: answers arrive once, in order, without a refresh, and a delete is not held waiting for the console. Performed with 13.5.
+- [x] 12.6 Redeploy and repeat the Tuya scenario and a delete: answers arrive once, in order, without a refresh, and a delete is not held waiting for the console. Performed with 13.5.
+  - Done live on the real cluster, confirmed by the author 2026-11-14.
 
 ## 13. Adapter-owned delivery — backend-developer
 
@@ -343,7 +347,8 @@ report done or failed, with a delivery TTL per message kind.
 - [x] 13.2 Remove the lease redelivery for acknowledged ops and the `reclaimAfterSeconds` field. The manager fails a message with no report at its TTL as a backstop.
 - [x] 13.3 Move `channels/telegram` to it: retry against the gateway until the TTL less a report margin, then report failed. The `ensure-topic` topic id travels back in the done report.
 - [x] 13.4 Keep the manager's delivery markers and the close and delete gating driven by the done and failed reports.
-- [ ] 13.5 Redeploy and confirm Telegram delivery, a delivery failure ending as failed at its TTL, and an adapter restart not duplicating a message.
+- [x] 13.5 Redeploy and confirm Telegram delivery, a delivery failure ending as failed at its TTL, and an adapter restart not duplicating a message.
+  - Done live on the real cluster, confirmed by the author 2026-11-14.
 - [x] 13.6 Fix the console's receipt of a message to answer `consumed: true` at the acknowledgement, so the manager performs the side effects and deletes the message with no later report.
 - [x] 13.7 `GET /channel/ops/stream` pushes each unacknowledged message once per connection to a receipt adapter, re-offers only never-acknowledged ones after a reconnect, has no cursor, and answers `404` to any other adapter.
 - [x] 13.8 Chart: `commandBus.channelReceiptAdapters` and `commandBus.deliveryTtl.{stable,ephemeral,topic,deleteConversation}` render `CHANNEL_RECEIPT_ADAPTERS` and `CHANNEL_DELIVERY_TTL_{STABLE,EPHEMERAL,TOPIC,DELETE_CONVERSATION}`. Owned by the chart lane, ticked once its render tests pass.
@@ -478,5 +483,6 @@ aspirational target. The named deviations are stated plainly in
 - [x] 16.2.1 `docs/installation.md`: the new workload and volumes, uninstall residue, and the adapter-image upgrade note.
 - [x] 16.2.2 `docs/getting-started.md`, `docs/introduction.md` and the landing page, wherever they say a close or delete returns when the work is done. Searched all three directly. None describes a reply as meaning the work finished, so nothing changes.
 - [x] 16.2.3 `README.md`: the component list. It never goes past top-level directories and no new one was added, so nothing changes.
-- [ ] 16.2.4 The console moves to the stream, so `npm run screenshots` and `npm run demo` in `platform/console/ui` are re-run and the live thread screenshotted. Zero files under `platform/console/ui/` are touched by this change's own commits, so this is a cluster-tier check.
+- [x] 16.2.4 The console moves to the stream, so `npm run screenshots` and `npm run demo` in `platform/console/ui` are re-run and the live thread screenshotted. Zero files under `platform/console/ui/` are touched by this change's own commits, so this is a cluster-tier check.
+  - Done live on the real cluster, confirmed by the author 2026-11-14.
 - [ ] 16.3 At archive, when the published base specs `channel-adapter-contract`, `contract-conformance-suite` and `telegram-channel-adapter` are rewritten, add the retired-vocabulary entries `channel-reclaim-after` (`reclaimAfterSeconds`) and `channel-claim-window` (`claim window`). They are deferred because the base specs still carry both terms until archive and the guard would stay red.
