@@ -26,7 +26,7 @@ a manual step per claim you want to keep.
 - `CONVERSATION_NAMESPACE`, read by the manager at startup, defaulting to
   `NAMESPACE`. Injected as a literal value on every channel and signal
   adapter, beside `POD_NAMESPACE`.
-- A second manager Role, in the conversations namespace: pods, `conversations`
+- A second manager Role, in the conversations namespace: pods, configmaps, `conversations`
   and `conversationinputs` and their status, events, PVC
   `get`/`list`/`watch`/`create` — never `delete`, `update` or `patch`. No ClusterRole is added.
   Single-namespace installs still render one merged Role, identical in
