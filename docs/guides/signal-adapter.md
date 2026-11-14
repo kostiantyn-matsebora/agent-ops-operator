@@ -170,9 +170,15 @@ curl -X POST -H "Authorization: Bearer $env:ADAPTER_TOKEN" `
 See [`POST /signal/inbound`]({{ '/contracts/signal-adapter/' | relative_url }}#post-signalinbound)
 for the full request and response shape.
 
-**The response acknowledges storage, not routing** (`API-2`). `200` is
-`{"queued": n}`: the signals the manager stored or deduplicated. It routes
-them afterwards, so the response never says whether a conversation opened.
+**The response acknowledges acceptance, not storage or routing** (`API-2`).
+`202` is `{"invocationId": "…", "taskIds": ["…"], "queued": n}`: `queued`
+counts the signals accepted, one durably enqueued task each, and equals
+`taskIds`'s length.
+
+A `Signal` may not exist yet when the response is written, and the manager
+routes it afterwards, so the response never says whether a conversation
+opened. Treat any `2xx` as accepted, and ignore `invocationId`/`taskIds` if
+you have no use for them.
 
 A `5xx` means nothing was acknowledged: re-send the batch with the same ids.
 
@@ -369,7 +375,7 @@ signals land.
    dependency-free Go with a five-field cron parser and restart-safe cursors.
    It conforms to the [signal adapter
    specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-   2.3.0.
+   2.4.0.
 3. **Compare a different transport** —
    [`signals/alertmanager`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/alertmanager/)
    receives webhooks,

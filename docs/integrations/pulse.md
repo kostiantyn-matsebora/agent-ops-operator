@@ -23,7 +23,7 @@ way to act: an operator-state annotation.
 
 `signals/pulse` conforms to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-2.3.0.
+2.4.0.
 
 ## What starts work
 

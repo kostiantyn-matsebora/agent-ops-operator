@@ -158,6 +158,13 @@ for the source and the reference material beside this file.
 - The signal adapter specification moves again to **2.3.1**, wording only:
   `API-7` says the manager's per-phase TTL expires a terminal `Signal`, where
   it said the TTL deletes it. Behaviour is unchanged.
+- The signal adapter specification moves again to **2.4.0**.
+  `POST /signal/inbound` now accepts, then processes: the success status
+  moves from `200` to `202`, and gains `invocationId` and one `taskId` per
+  admitted signal (`API-2`, `API-3` replaced). `queued` now means accepted,
+  not stored. No shipped adapter checks for exactly `200`, so none stops
+  conforming, and every shipped adapter's claimed version moves to `2.4.0`
+  in this same change.
 - A machine signal arriving at a full conversation backlog now waits as
   `Pending` and routes when it drains. A chat message is still declined at
   once and told on its surface.
@@ -202,8 +209,13 @@ for the source and the reference material beside this file.
 - `status.threads[].claim` is no longer written. The command bus's own
   dedup makes the reconciler-level dispatch claim unnecessary. A value a
   pre-upgrade record still carries is ignored, never trusted.
-- `POST /signal/inbound` is unchanged by this release — it still validates,
-  stores and replies synchronously, despite the command bus's arrival.
+- `POST /signal/inbound` now accepts, then processes, like every other
+  converted endpoint. It validates, applies the source's
+  `attributeFilters`, durably enqueues one `ingest-signal` task per
+  admitted signal on its own queue, `in.signal`, and replies `202`. The
+  `in.signal` consumer then answers an in-place chat command, or creates
+  the `Signal`, with the bus's bounded retry and dead-letter record. No
+  adapter needs to change.
 
 ### Fixed
 

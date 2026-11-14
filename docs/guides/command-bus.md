@@ -28,9 +28,11 @@ whichever replica next picks it up. The reply means accepted, not performed.
 |---|---|---|
 | `reopen`, `delete`, `reset-context`, `/channel/inbound` | the status you already got | the same status, plus `invocationId` and `taskIds` |
 | `/coordinate/close`, `/coordinate/escalate` | `200 {"ok":true}` | the same `200`, plus `invocationId` and `taskIds` |
+| `/signal/inbound` | `200 {"queued": n}` | `202`, plus `invocationId` and one `taskId` per admitted signal. `queued` still counts, now meaning accepted |
 
-`reset-context` is the one status code that changed, from `200` to `202`.
-Every other endpoint's code was already `202` or `200`.
+`reset-context` and `/signal/inbound` are the two endpoints whose status
+code changed, both from `200` to `202`. Every other endpoint's code was
+already `202` or `200`.
 
 A caller that needs the outcome reads it back:
 
@@ -48,8 +50,15 @@ A task that succeeds is removed from its queue, so reading it afterwards may ans
 
 `conflict`, `unavailable` and `internal` retry with backoff before giving up. The others go straight to a dead-letter record, listed at `GET /state/dead-letters`.
 
-**`POST /signal/inbound` is unchanged.** It still validates, stores and
-replies synchronously.
+**`POST /signal/inbound` now accepts and processes too**, on its own
+queue, `in.signal`. It validates, applies the source's `attributeFilters`
+and durably enqueues one `ingest-signal` task per admitted signal, then
+replies.
+
+The `in.signal` consumer answers an in-place chat command, or creates the
+`Signal`. It carries the same bounded retry and dead-letter record as any
+other queue. No adapter needs to change — see [the signal adapter
+guide]({{ '/guides/signal-adapter/' | relative_url }}#3-push-them).
 
 ## What changes for a channel adapter
 
