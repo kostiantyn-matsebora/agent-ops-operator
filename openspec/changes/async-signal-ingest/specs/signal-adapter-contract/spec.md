@@ -102,7 +102,7 @@ The manager SHALL expose `POST /signal/inbound` (non-leader-gated) accepting `{s
 
 A signal carrying any other value SHALL be refused with `400` naming the four accepted values. Validation SHALL run before anything is enqueued, so a refused signal creates nothing.
 
-Accepting a signal SHALL mean durably ENQUEUEING it for the `in.signal` consumer, which stores it as a `Signal` (`signal-persistence`), never routing it. The manager routes each stored signal afterwards, by pure id equality:
+Accepting a signal SHALL mean durably ENQUEUEING it for the `in.signal` consumer, which stores it as a `Signal` (`signal-persistence`), never routing it. The consumer makes no routing decision. The manager's signal routing, which reads each `Signal` after the consumer stores it, routes it afterwards by pure id equality:
 
 - an OPEN conversation whose `conversationId` equals the signal's `initiationId`, originated by the claiming pipeline, receives the signal appended as a recurrence
 - otherwise a new conversation is created, adopting the `initiationId` as its `conversationId`

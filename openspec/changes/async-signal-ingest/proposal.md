@@ -24,11 +24,12 @@ with no producer or consumer. This change gives it both.
 - **An `in.signal` consumer does the rest**: answering an in-place chat command
   and creating the `Signal` CR, with the bus's bounded retry, backoff and
   dead-letter record.
-- **Ordering and dedup are unchanged**: the key is the source and the
-  `initiationId`, which stays the deduplication key. A signal carrying a
-  `signalId` that already landed is still deduplicated.
-- **No adapter changes.** An adapter that predates the bus keeps posting the same
-  body and treats any `2xx` as accepted.
+- **Ordering and dedup are unchanged**: the ordering key is the source and the
+  `initiationId`. The deduplication key is the `signalId`, so a signal carrying
+  one that already landed is still deduplicated.
+- **No adapter behaviour changes.** An adapter that predates the bus keeps posting
+  the same body and treats any `2xx` as accepted. Every shipped adapter's
+  claimed specification version still moves to `2.4.0`.
 - **MINOR (additive status change)**: the success status moves from `200` to `202`. The
   `queued` count now means "accepted", not "stored".
 
@@ -60,5 +61,5 @@ Depends on `async-command-bus` being archived: its `async-operations` and
 - **Adopter site**: the signal adapter guides under `docs/guides/` and
   `docs/integrations/` that describe the reply, plus `docs/installation.md` where
   it names the queues.
-- **Not affected**: the signal adapters themselves, the chart (the queue and its
+- **Not affected**: the signal adapters' behaviour (only their claimed version moves), the chart (the queue and its
   credential exist), and the retry and TTL values already declared for `in.signal`.

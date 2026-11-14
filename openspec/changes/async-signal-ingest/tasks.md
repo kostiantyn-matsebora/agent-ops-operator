@@ -30,6 +30,7 @@
 
 - [ ] 5.1 `docs/contracts.md` and `docs/contracts/signal-adapter.md`: the `202` reply, `taskIds`, the new meaning of `queued`, and spec version `2.4.0` (re-check that `2.3.0` is still current).
 - [ ] 5.1a Bump the claimed specification version to `2.4.0` in every shipped signal adapter that states one, and in the page's enumeration of them.
+- [ ] 5.1b Run the signal-adapter-contract conformance walk for every shipped signal adapter after the `2.4.0` bump, per "A specification change carries conformance", and record the verdict.
 - [ ] 5.2 `docs/concepts.md`: the `Signal` is created by the consumer after acceptance.
 - [ ] 5.3 `docs/CHANGELOG.md`: the `200` to `202` move and the note that no adapter changes.
 - [ ] 5.4 At archive, after `async-command-bus` is archived, fold the `ingest-signal` row and the `in.signal` queue entry into `async-operations` and `command-bus`, and drop the `Wired=False` refusal from the signal accept steps (design D-7). This change's accept step already makes no such refusal, so the drop only removes it from the published specs `async-command-bus` leaves behind.
