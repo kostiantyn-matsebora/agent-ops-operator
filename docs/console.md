@@ -1233,9 +1233,11 @@ CrashLoopBackOff is not one.
 
 **A split release adds a second, narrower Role**: the same account, `pods`
 `get`/`list`/`watch` alone, in the conversations namespace — where runtime
-pods now run. The console reads `CONVERSATION_NAMESPACE`, defaulting to
-`POD_NAMESPACE`. It watches both. A conversation's own pod stays on the
-Infrastructure view either way.
+pods now run.
+
+The console reads `CONVERSATION_NAMESPACE`, defaulting to `POD_NAMESPACE`. It
+watches both. A conversation's own pod stays on the Infrastructure view either
+way.
 
 **`Conversation` and `Signal` are the two kinds this Role no longer names.**
 The console reads both through the manager's
