@@ -141,10 +141,10 @@ referencing CRs alone.
 - **THEN** nothing creates a copy in the conversations namespace
 
 ### Requirement: The chart splits by default and keeps the namespace it creates
-The chart SHALL expose `conversationNamespace`, defaulting to
-`agent-ops-conversations`, and `createConversationNamespace`, defaulting to
-true. Setting `conversationNamespace` to the release namespace SHALL render the
-single-namespace layout.
+The chart SHALL expose `global.agentops.conversationNamespace`, defaulting
+to `agent-ops-conversations`, and `global.agentops.createConversationNamespace`,
+defaulting to true. Setting `global.agentops.conversationNamespace` to the
+release namespace SHALL render the single-namespace layout.
 
 A namespace the chart creates SHALL carry the release labels and
 `helm.sh/resource-policy: keep`. The chart SHALL render its generated
@@ -156,7 +156,7 @@ for the manager, the conversations namespace for housekeeping.
 - **THEN** conversation-scoped objects target `agent-ops-conversations`, which the chart creates and labels
 
 #### Scenario: Single namespace is one value away
-- **WHEN** `conversationNamespace` equals the release namespace
+- **WHEN** `global.agentops.conversationNamespace` equals the release namespace
 - **THEN** no namespace is created and every object renders in the release namespace
 
 #### Scenario: Uninstall leaves the conversations namespace standing

@@ -17,11 +17,13 @@ container, one directory, grouped by runtime role.
   `platform/console`→`agentops-console`. `.github/components.sh` derives
   and asserts uniqueness — moving a directory renames a published image.
 - **THE GROUPING ABOVE IS NOT A NAMESPACE.** `platform/` groups by runtime
-  role, not by where a release puts the workload. `platform/housekeeping/`'s
-  CronJob runs in the CONVERSATIONS namespace, beside the claims it mounts,
-  and `platform/context-sync/` and `platform/egress-proxy/` run there too,
-  sidecars inside the runtime pod. Every other `platform/` component stays
-  in CONTROL. See `invariants.md`'s placement rule.
+  role, not by where a release puts the workload. See `invariants.md`'s
+  placement rule.
+  - `platform/housekeeping/`'s CronJob runs in CONVERSATIONS, beside the
+    claims it mounts.
+  - `platform/context-sync/` and `platform/egress-proxy/` run in
+    CONVERSATIONS, sidecars inside the runtime pod.
+  - Every other `platform/` component stays in CONTROL.
 - **BUILD CONTEXT IS THE DIRECTORY.** `COPY ../shared` cannot work. `-f`
   lets 9 components share one Dockerfile while building only from their own
   dir. An own Dockerfile (`manager`, `console`, `egress-proxy`,
