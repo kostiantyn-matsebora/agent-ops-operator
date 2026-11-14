@@ -136,8 +136,9 @@ def render(p):
     # neighbour reaching either one.
     s.append(node(28, 100, 250, "state & bus servers", "credential required", p))
 
-    # The runtime pod — where model output actually executes — beside the
-    # operator's own namespace, because crossing 2 goes between them.
+    # The runtime pod — where model output actually executes, in the
+    # CONVERSATIONS namespace (split-conversation-namespace) — beside the
+    # control namespace, because crossing 2 goes between them.
     s.append(boundary(28, 172, 340, 182, "runtime pod", p, tone="danger"))
     s.append(node(42, 190, 312, "the agent container", "runs the model's output", p,
                   kind="untrusted"))
@@ -146,7 +147,7 @@ def render(p):
     s.append(node(42, 302, 312, "its ServiceAccount", "bound to nothing", p,
                   kind="control"))
 
-    s.append(boundary(408, 172, 332, 182, "operator namespace", p))
+    s.append(boundary(408, 172, 332, 182, "control namespace", p))
     s.append(node(422, 190, 304, "the manager", "unauthenticated", p))
     s.append(node(422, 248, 304, "MCP servers", "accept any caller", p))
     s.append(node(422, 302, 304, "adapters, console", "credentials as env", p))
@@ -161,7 +162,7 @@ def render(p):
         s.append(node(x, 384, 172, t, sub, p))
 
     # The crossings. Each number is a row in the page's threat table.
-    s.append(arrow(610, 148, 610, 168, p))                   # 1 neighbour -> operator ns
+    s.append(arrow(610, 148, 610, 168, p))                   # 1 neighbour -> control ns
     s.append(badge(634, 158, 1, p))
     s.append(arrow(372, 272, 402, 272, p, tone="brand"))     # 2 agent -> MCP
     s.append(badge(387, 250, 2, p, tone="brand"))

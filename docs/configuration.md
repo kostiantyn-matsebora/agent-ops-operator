@@ -15,6 +15,26 @@ helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 ```
 
+## Namespaces
+
+A release resolves two namespaces — see
+[Concepts](https://kostiantyn-matsebora.github.io/agent-ops-operator/concepts/#where-things-run-the-control-and-conversations-namespaces)
+for what lives in each.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `global.agentops.conversationNamespace` | `agent-ops-conversations` | where runtime pods, their claims and their accounts run |
+| `global.agentops.createConversationNamespace` | `true` | `false` means you create it, labeled however you need |
+
+Setting `conversationNamespace` to the release namespace is the
+single-namespace layout: no namespace is created, and every object renders
+where this chart is installed, exactly as every release before 20.0.0.
+
+This is a REVERSIBLE value. Switching it after install is the `conversationNamespace`
+upgrade path in [the changelog](https://kostiantyn-matsebora.github.io/agent-ops-operator/changelog/),
+not an installation decision — the claims it points at carry
+`helm.sh/resource-policy: keep` either way.
+
 ## Storage
 
 The access mode and storage class are set once, before install — see

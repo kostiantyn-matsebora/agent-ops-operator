@@ -16,6 +16,7 @@ import (
 	"time"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/conformance"
 )
@@ -24,7 +25,10 @@ import (
 // Cooldowns, Receipts and AdapterState fixture in internal/state/conformance
 // reads or writes through (see fixtures.go's own comment on
 // FixtureSourceName/FixtureChannelName: a Part-based collection's Create
-// needs its owning object to already exist).
+// needs its owning object to already exist). ns is the CONTROL namespace
+// (split-conversation-namespace task 9.4): Cooldowns, Receipts and
+// AdapterState all open there, so that is where their owning objects must
+// live, whether or not Conversations/Runs/Blobs share that namespace.
 func provisionFixtureParents(t testing.TB, ns string) {
 	t.Helper()
 	src := &agentopsv1alpha1.SignalSource{}
@@ -41,15 +45,17 @@ func provisionFixtureParents(t testing.TB, ns string) {
 	}
 }
 
-// openStores returns a func() state.Stores that opens a fresh, empty,
-// isolated backend on every call: a brand-new namespace, its two fixture
-// parents, OpenStores over it with a fast sweep (the expiry scenarios wait
-// on it), and the sweep goroutine itself running for the life of the test.
-func openStores(t testing.TB) func() state.Stores {
+// openStoresPair returns a func() state.Stores that opens a fresh, empty,
+// isolated backend on every call, scoped to a pair mkPair builds fresh each
+// time: its fixture parents (provisioned in pair.Control, where Cooldowns/
+// Receipts/AdapterState actually open), OpenStores over it with a fast sweep
+// (the expiry scenarios wait on it), and the sweep goroutine itself running
+// for the life of the test.
+func openStoresPair(t testing.TB, mkPair func(testing.TB) namespace.Namespaces) func() state.Stores {
 	return func() state.Stores {
-		ns := newNamespace(t)
-		provisionFixtureParents(t, ns)
-		b := openBackend(t, wwClient, ns, WithSweepInterval(50*time.Millisecond))
+		pair := mkPair(t)
+		provisionFixtureParents(t, pair.Control)
+		b := openBackendPair(t, wwClient, pair, WithSweepInterval(50*time.Millisecond))
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel)
 		go b.Run(ctx)
@@ -57,8 +63,40 @@ func openStores(t testing.TB) func() state.Stores {
 	}
 }
 
+// equalNamespacePair is today's single-namespace layout: one fresh
+// namespace, both fields of the pair naming it.
+func equalNamespacePair(t testing.TB) namespace.Namespaces {
+	n := newNamespace(t)
+	return namespace.Namespaces{Control: n, Conversations: n}
+}
+
+// splitNamespacePair is two fresh, GENUINELY distinct namespaces — the
+// layout split-conversation-namespace adds. Conversations, Runs and Blobs
+// open in the second; Signals, Cooldowns, Receipts and AdapterState open in
+// the first (kube.OpenStores' own split by kind, decision 3).
+func splitNamespacePair(t testing.TB) namespace.Namespaces {
+	return namespace.Namespaces{Control: newNamespace(t), Conversations: newNamespace(t)}
+}
+
+// openStores is openStoresPair fixed to the equal-namespace layout — the
+// one every pre-split caller of this file already got.
+func openStores(t testing.TB) func() state.Stores {
+	return openStoresPair(t, equalNamespacePair)
+}
+
+// TestStores is the kube backend's pre-split shape: one namespace, both
+// fields of the pair equal.
 func TestStores(t *testing.T) {
 	conformance.RunStores(t, openStores(t))
+}
+
+// TestStoresSplitNamespaces pins split-conversation-namespace decision 3:
+// the generic conformance suite — every field of state.Stores, Signals/
+// Cooldowns/Receipts/AdapterState included — passes exactly the same way
+// when Control and Conversations are two genuinely different namespaces,
+// with no scenario skipped and no assertion relaxed.
+func TestStoresSplitNamespaces(t *testing.T) {
+	conformance.RunStores(t, openStoresPair(t, splitNamespacePair))
 }
 
 func BenchmarkStores(b *testing.B) {

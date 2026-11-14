@@ -1231,6 +1231,12 @@ The pod, deployment and cronjob grant is a deliberate widening past
 a pod runs on exist in no CR, and an operations console that cannot see a
 CrashLoopBackOff is not one.
 
+**A split release adds a second, narrower Role**: the same account, `pods`
+`get`/`list`/`watch` alone, in the conversations namespace — where runtime
+pods now run. The console reads `CONVERSATION_NAMESPACE`, defaulting to
+`POD_NAMESPACE`, and watches both, so a conversation's own pod stays on the
+Infrastructure view either way.
+
 **`Conversation` and `Signal` are the two kinds this Role no longer names.**
 The console reads both through the manager's
 [state read surface](contracts.md#the-state-read-surface) instead, over its

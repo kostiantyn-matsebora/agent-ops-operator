@@ -75,31 +75,31 @@
 
 ## 10. System tests
 
-- [ ] 10.1 A system lane on k3d, built from this working copy: a split release opens a conversation from an ordinary signal, its pod runs in Conversations under a Conversations account, mounts its claim and reaches the manager
-- [ ] 10.2 The same lane with NetworkPolicies enforced: every wired flow passes and runtime pods accept no ingress
-- [ ] 10.3 The authorizer denies the manager pods in a third namespace and PVC `delete` in Conversations
-- [ ] 10.4 A missing Secret in Conversations fails the pod and the condition names it
-- [ ] 10.5 The migration on a 19.x release: close, place Secrets, PV rebind, upgrade, and a reopened conversation continues its context
-- [ ] 10.6 Run the system pack
+- [x] 10.1 A system lane on k3d, built from this working copy: a split release opens a conversation from an ordinary signal, its pod runs in Conversations under a Conversations account, mounts its claim and reaches the manager — `TestSplitConversationPodRunsInConversationsNamespace` (`test/system/namespace_split_test.go`). WRITTEN AND COMPILED (`go vet -tags system`, `go test -tags system -c`) ONLY — this working copy has no docker/k3d, so it has never run on a cluster. Dispatch `system-smoke.yml` to confirm pass/fail
+- [x] 10.2 The same lane with NetworkPolicies enforced: every wired flow passes and runtime pods accept no ingress — `TestSplitNetworkPolicyEnforcedRuntimePodAcceptsNoIngress` (same file), FULL TIER ONLY. The no-ingress probe targets the egress-proxy sidecar's own `:15001` listener (the one socket a runtime pod binds wider than loopback) from a control-namespace pod — see the test's own doc comment. WRITTEN AND COMPILED ONLY, not run
+- [x] 10.3 The authorizer denies the manager pods in a third namespace and PVC `delete` in Conversations — `TestSplitRBACDeniesThirdNamespaceAndPVCDelete` (same file), via `SubjectAccessReview` (`Kube.Can`, pre-existing). WRITTEN AND COMPILED ONLY, not run
+- [x] 10.4 A missing Secret in Conversations fails the pod and the condition names it — `TestSplitMissingSecretFailsPodAndConditionNamesIt` (same file). WRITTEN AND COMPILED ONLY, not run
+- [x] 10.5 The migration on a 19.x release: close, place Secrets, PV rebind, upgrade, and a reopened conversation continues its context — ADAPTED: this harness (`install.go`) only ever renders the WORKING TREE's own chart, with no mechanism to pin a published 19.x version, so `TestSplitMigrationFromSingleNamespaceCarriesClaimAndReopens` (`test/system/namespace_migration_test.go`) pins `global.agentops.conversationNamespace` to the release namespace as the pre-split stand-in, then performs the real PV rebind (Retain, delete, clear `claimRef`, pre-create with `volumeName`, `persistence.context.existingClaim`) against a real PV before upgrading onto the split layout. No Secret placement step: this lane's profile resolves none. WRITTEN AND COMPILED ONLY — the PV-rebind mechanics are especially unverified without a real cluster. Dispatch the full tier to confirm
+- [ ] 10.6 Run the system pack — NOT PERFORMED (no docker/k3d on this machine). `go test -tags system -list` ALSO cannot discover tests here: `TestMain` (`harness_test.go`) provisions a k3d cluster unconditionally before `m.Run()`, regardless of `-test.list`, confirmed by running the compiled test binary directly with `-test.list` and getting the same `k3d not found on PATH` panic. Discovery was instead confirmed by `go vet -tags system ./...` (full typecheck, zero findings) and `go test -tags system -c` (the whole suite, including these five new functions, links into one binary with no error). Dispatching `gh workflow run system-smoke.yml --ref change/split-conversation-namespace` (and the full-tier equivalent for 10.2/10.5) is the orchestrating session's job, not this one's
 
 ## 11. Documentation
 
 ### Reference docs
 
-- [ ] 11.1 `docs/concepts.md`: the two namespaces, the placement rule and its table
-- [ ] 11.2 `docs/contracts.md`: no manager surface carries a namespace
-- [ ] 11.3 `docs/contracts/signal-adapter.md` to 2.5.0: `POD_NAMESPACE` and `CONVERSATION_NAMESPACE` in `#environment`, `ADP-10`, `ADP-7` reworded, changelog and conformance rows
-- [ ] 11.4 `docs/configuration.md`: `conversationNamespace`, `createConversationNamespace`
-- [ ] 11.5 `docs/security.md`: the moved trust boundary, the state-read token beside agent code, re-run `threat-model.py`
-- [ ] 11.6 `docs/integrations/kubernetes.md` and `docs/console.md`: route accounts and runtime pods in the conversations namespace
-- [ ] 11.7 `docs/CHANGELOG.md` `[20.0.0]`, with the Upgrade section as the migration of record: close, Secrets, PV rebind, upgrade, kube cleanup, verify, rollback
-- [ ] 11.8 `.claude/rules/`: `terminology.md` (control and conversations namespace, the namespace pair), `invariants.md` (the placement rule), `structure.md`, `gotchas.md` for anything the system lane surfaced
-- [ ] 11.9 Re-run `python3 .github/scripts/docs-generate.py` and pass `--check`
+- [x] 11.1 `docs/concepts.md`: the two namespaces, the placement rule and its table
+- [x] 11.2 `docs/contracts.md`: no manager surface carries a namespace
+- [x] 11.3 `docs/contracts/signal-adapter.md` to 2.5.0: `POD_NAMESPACE` and `CONVERSATION_NAMESPACE` in `#environment`, `ADP-10`, `ADP-7` reworded, changelog and conformance rows
+- [x] 11.4 `docs/configuration.md`: `conversationNamespace`, `createConversationNamespace`
+- [x] 11.5 `docs/security.md`: the moved trust boundary, the state-read token beside agent code, re-run `threat-model.py`
+- [x] 11.6 `docs/integrations/kubernetes.md` and `docs/console.md`: route accounts and runtime pods in the conversations namespace
+- [x] 11.7 `docs/CHANGELOG.md` `[20.0.0]`, with the Upgrade section as the migration of record: close, Secrets, PV rebind, upgrade, kube cleanup, verify, rollback
+- [x] 11.8 `.claude/rules/`: `terminology.md` (control and conversations namespace, the namespace pair), `invariants.md` (the placement rule), `structure.md`, `gotchas.md` — three entries added, including the egress-proxy-listener probe the system lane's own no-ingress test surfaced
+- [x] 11.9 Re-run `python3 .github/scripts/docs-generate.py` and pass `--check` (also caught and fixed a stale `--version 19.0.1` in `docs/installation.md`'s install commands)
 
 ### Adopter site
 
-- [ ] 11.10 `docs/installation.md`: both namespaces, Secret placement, the 19 to 20 upgrade mirroring the changelog
-- [ ] 11.11 `docs/getting-started.md`: where the first conversation's pod appears
-- [ ] 11.12 `docs/index.md` and `README.md`: the isolation claim
-- [ ] 11.13 `docs/guides/agent-profile.md`, `agent-runtime.md`, `toolsets.md`: referenced Secrets belong in the conversations namespace
-- [ ] 11.14 `docs/guides/pipeline.md`: claims are created in the conversations namespace
+- [x] 11.10 `docs/installation.md`: both namespaces, Secret placement, the 19 to 20 upgrade mirroring the changelog
+- [x] 11.11 `docs/getting-started.md`: where the first conversation's pod appears
+- [x] 11.12 `docs/index.md` and `README.md`: the isolation claim
+- [x] 11.13 `docs/guides/agent-profile.md`, `agent-runtime.md`, `toolsets.md`: referenced Secrets belong in the conversations namespace
+- [x] 11.14 `docs/guides/pipeline.md`: claims are created in the conversations namespace

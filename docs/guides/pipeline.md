@@ -122,9 +122,11 @@ rbac:
 ```
 
 **Naming an account does not create one.** A bundle renders an account only
-where it also grants that route something, `rbac.runtime.serviceAccounts` is where you declare yours, and
-an account this chart never sees is a perfectly good reference. A name nothing
-backs fails when the pod is created, saying which account.
+where it also grants that route something. `rbac.runtime.serviceAccounts` is
+where you declare yours, and an account this chart never sees is a
+perfectly good reference.
+
+A name nothing backs fails when the pod is created, saying which account.
 
 **THE FLOOR IS HOW YOU RESTRICT ONE ROUTE.** On an install whose inherited
 default is an account of yours that carries rights, naming `agentops-runtime`
@@ -175,6 +177,10 @@ it.
 
 **The API server refuses both fields at once.** They decide who creates the
 claim, so both is two answers rather than a preference.
+
+**Either way, the claim is in the conversations namespace** — where the
+runtime pod that mounts it runs. A `claimName` you pre-create belongs there
+too, not in the release namespace this Pipeline itself lives in.
 
 {: .ao-callout}
 > **The claim outlives the route.** It carries no ownerRef on the Pipeline and

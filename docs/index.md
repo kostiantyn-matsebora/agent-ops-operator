@@ -85,11 +85,12 @@ already in it.
   Claude Code, Ollama and GitHub Copilot ship with it. Point it at your own
   image and the work contract is unchanged.
 
-- A pod per conversation
+- A pod per conversation, in its own namespace
   {: .ao-icon-conversation}
 
   Isolated, serial and capped. One runaway conversation cannot take the others
-  with it, and an idle one is reaped.
+  with it, it shares a namespace with no control-plane credential, and an
+  idle one is reaped.
 
 - Tools that come from the wiring
   {: .ao-icon-toolset}

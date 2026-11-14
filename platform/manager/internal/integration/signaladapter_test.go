@@ -314,6 +314,57 @@ func TestSignalAuthScoping(t *testing.T) {
 	}
 }
 
+// TestSignalAdapterInjectsConversationNamespaceInBothLayouts pins
+// signal-adapter-lifecycle ADP-10 / split-conversation-namespace decision
+// 7: CONVERSATION_NAMESPACE is injected as a literal value beside
+// POD_NAMESPACE, equal to it in a single-namespace release and distinct in
+// a split one. The adapter's own Deployment stays in the control namespace
+// (`ns`) in BOTH cases — only the env value differs.
+func TestSignalAdapterInjectsConversationNamespaceInBothLayouts(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		adapter        string
+		conversationNS string
+	}{
+		{"split: distinct from POD_NAMESPACE", "cns-split-sig", "agent-ops-conversations"},
+		{"single-namespace: equal to POD_NAMESPACE", "cns-equal-sig", ns},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mkSignalAdapter(t, tc.adapter)
+			rc := &controller.SignalAdapterReconciler{
+				Client: k8sClient, Scheme: scheme,
+				ManagerURL:            "http://manager:8080",
+				MasterToken:           testMasterToken,
+				FloorServiceAccount:   testFloorServiceAccount,
+				ConversationNamespace: tc.conversationNS,
+			}
+			if _, err := rc.Reconcile(context.Background(),
+				ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: tc.adapter}}); err != nil {
+				t.Fatal(err)
+			}
+
+			var deploy appsv1.Deployment
+			if err := k8sClient.Get(context.Background(),
+				types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName(tc.adapter)}, &deploy); err != nil {
+				t.Fatalf("workload not created: %v", err)
+			}
+			if deploy.Namespace != ns {
+				t.Fatalf("the adapter's own Deployment must stay in the control namespace, got %q", deploy.Namespace)
+			}
+			env := map[string]string{}
+			for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
+				env[e.Name] = e.Value
+			}
+			if env["POD_NAMESPACE"] != "" {
+				t.Fatalf("POD_NAMESPACE must come from the downward API, never a literal here: %+v", env)
+			}
+			if env["CONVERSATION_NAMESPACE"] != tc.conversationNS {
+				t.Fatalf("CONVERSATION_NAMESPACE = %q, want %q", env["CONVERSATION_NAMESPACE"], tc.conversationNS)
+			}
+		})
+	}
+}
+
 func TestSignalAdapterLifecycle(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-siglife")

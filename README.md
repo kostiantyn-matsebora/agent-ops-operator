@@ -105,7 +105,7 @@ identity, mediated egress and at-least-once delivery are already in it.
   decides what happens next.
 - **Any model you can run** — Claude Code, Ollama and GitHub Copilot ship with
   it. Point it at your own image and the work contract is unchanged.
-- **A pod per conversation** — isolated, serial and capped.
+- **A pod per conversation, in its own namespace** — isolated, serial, capped.
 - **Tools that come from the wiring** — not from the prompt. An agent holds the
   cluster identity its route named and nothing else.
 
@@ -156,11 +156,11 @@ credential, one flag, no clone:
 
 ```sh
 kubectl create namespace agent-ops
-kubectl -n agent-ops create secret generic agentops-claude \
-  --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
-
 helm install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
   -n agent-ops --set global.demo.enabled=true
+
+kubectl -n agent-ops-conversations create secret generic agentops-claude \
+  --from-literal=oauthToken=$(claude setup-token)   # the agent's own namespace
 ```
 
 **[Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/)**

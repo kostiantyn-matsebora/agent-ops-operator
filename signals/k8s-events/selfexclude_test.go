@@ -166,6 +166,66 @@ func TestSuccessiveRuntimePodNamesAllExcluded(t *testing.T) {
 	}
 }
 
+// panicLookup fails the test the instant it is consulted — proof that a
+// mechanism relying on it never reads the cache to decide.
+type panicLookup struct{ t *testing.T }
+
+func (p panicLookup) OwnedByAgentOps(ns, kind, name string) (bool, bool) {
+	p.t.Helper()
+	p.t.Fatalf("must never read the cache to decide: looked up %s/%s/%s", ns, kind, name)
+	return false, false
+}
+
+// Mechanism 4 (split-conversation-namespace): every event in the
+// conversations namespace is dropped, with no object read — even an object
+// matching no name prefix (mechanism 2) that the cache has never heard of
+// (mechanism 1 would answer "unknown", not "ours").
+func TestConversationsNamespaceRuleExcludesAnUnprefixedObjectWithNoRead(t *testing.T) {
+	s := (&selfExcluder{ownNamespace: "agentops", conversationsNamespace: "agentops-conversations"}).withCache(panicLookup{t})
+	excluded, why := s.Excludes(ev("agentops-conversations", "PersistentVolumeClaim", "agentops-context"), false)
+	if !excluded {
+		t.Fatalf("an object in the conversations namespace must be excluded even with no name-prefix match")
+	}
+	if why == "" {
+		t.Fatalf("exclusion must carry a reason")
+	}
+}
+
+// Mechanism 4 is NOT configurable: mechanism 3's own override
+// (includeOwnNamespace) must not re-admit an object merely because it sits
+// in the conversations namespace.
+func TestConversationsNamespaceRuleIsNotOverridable(t *testing.T) {
+	s := &selfExcluder{ownNamespace: "agentops", conversationsNamespace: "agentops-conversations"}
+	if excluded, _ := s.Excludes(ev("agentops-conversations", "PersistentVolumeClaim", "agentops-context"), true); !excluded {
+		t.Fatalf("includeOwnNamespace must not re-admit an object in the conversations namespace (mechanism 4)")
+	}
+}
+
+// Single-namespace layout: CONVERSATION_NAMESPACE equal to POD_NAMESPACE
+// means mechanism 4 never applies, and mechanism 3's own override still
+// works exactly as it did before this capability existed — a co-located
+// application's events are visible.
+func TestConversationsNamespaceRuleDoesNotApplyWhenNamespacesAreEqual(t *testing.T) {
+	s := &selfExcluder{ownNamespace: "agentops", conversationsNamespace: "agentops"}
+	if excluded, _ := s.Excludes(ev("agentops", "Pod", "my-app-xk2p9"), true); excluded {
+		t.Fatalf("mechanism 4 must be inert when the two namespaces are equal, leaving the mechanism-3 override intact")
+	}
+	if excluded, _ := s.Excludes(ev("agentops", "Pod", "my-app-xk2p9"), false); !excluded {
+		t.Fatalf("mechanism 3 must still exclude the operator's own namespace by default when the namespaces are equal")
+	}
+}
+
+// Mechanism 2, for the kind task 5.3 added to the prefix list: an MCP
+// ConfigMap is excluded by name prefix alone, with NO excluder configured
+// at all (nil receiver) — the case that matters under the nats backend,
+// where the ConfigMap carries no owner reference for mechanism 1 to follow.
+func TestNamePrefixRuleExcludesMCPConfigMapWithNoRead(t *testing.T) {
+	var s *selfExcluder
+	if excluded, _ := s.Excludes(ev("agentops-conversations", "ConfigMap", "agentops-mcp-conv-abc123"), false); !excluded {
+		t.Fatalf("an MCP ConfigMap must be excluded by name prefix alone, with no excluder configured")
+	}
+}
+
 func TestIsOwnedLabels(t *testing.T) {
 	cases := []struct {
 		name   string

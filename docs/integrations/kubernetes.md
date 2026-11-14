@@ -21,7 +21,7 @@ the events, decides which are real, and gives an agent the tools to look.
 
 `signals/k8s-events` conforms to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-2.4.0.
+2.5.0.
 
 ## What starts work
 
@@ -53,6 +53,10 @@ until you say otherwise:
 > agent pod execution is withheld, so a request to change a Deployment is
 > declined with that reason rather than tried and refused by RBAC.
 {: .ao-callout}
+
+**The route's own account runs in the conversations namespace**, beside the
+pod it identifies. The MCP server itself stays in the release namespace, and
+its NetworkPolicy admits the agent's pod across that split.
 
 Want the acting route without a server that can act? Set both independently:
 

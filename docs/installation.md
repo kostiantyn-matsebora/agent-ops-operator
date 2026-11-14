@@ -49,13 +49,13 @@ read-only demo on your cluster in fifteen minutes.
    ```sh
    helm install agent-ops \
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     --version 19.0.1 -n agent-ops
+     --version 20.0.0 -n agent-ops
    ```
 
    ```powershell
    helm install agent-ops `
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     --version 19.0.1 -n agent-ops
+     --version 20.0.0 -n agent-ops
    ```
 
    **No registry credential.** The chart and every image it renders are public
@@ -234,6 +234,23 @@ helm upgrade agent-ops `
 Read [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
 first, since it is the only place migration steps live, keyed by chart version
 and newest first.
+
+**20.0.0 is BREAKING**: a release now resolves a second namespace, for
+runtime pods and everything they run as, mount or resolve. Split by
+default — the chart creates `agent-ops-conversations` for you.
+
+This needs a manual step per claim and per Secret you want to keep. Close
+every open conversation, place your Secrets in the new namespace, carry
+each claim across by PV rebind, then upgrade.
+
+The full procedure, in order, with commands, is the `[20.0.0]` entry's
+Upgrade section in [the
+changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
+Read it before you upgrade a production install.
+
+Pin today's single-namespace layout instead with
+`global.agentops.conversationNamespace` set to your release namespace — no
+object splits, and no manual step is owed.
 
 **19.0.0 is BREAKING**:
 

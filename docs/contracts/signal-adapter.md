@@ -15,7 +15,7 @@ next:
   url: /agent-ops-operator/crds/signal-adapter/
 ---
 
-**Version 2.4.0**
+**Version 2.5.0**
 
 This specification gives everything necessary to build and maintain a
 `SignalAdapter` — a container agent-ops does not ship, normalizing one
@@ -223,7 +223,8 @@ it, matching any of:
 |---|---|
 | `ADP-5` | Name prefix — the object's name starts with an agent-ops-reserved prefix. |
 | `ADP-6` | Owner or label — the object is owned by, or labeled as, an agent-ops kind. |
-| `ADP-7` | Own namespace — the object lives in agent-ops' own namespace. |
+| `ADP-7` | Own namespace — the object lives in the namespace `POD_NAMESPACE` names. An installation that co-locates its own workloads there MAY disable this one alone. |
+| `ADP-10` | Conversations namespace — the object lives in the namespace `CONVERSATION_NAMESPACE` names, whenever that differs from `POD_NAMESPACE`. NOT configurable: that namespace holds only agent-ops machinery by construction. |
 
 ### Post-emit refractory window
 
@@ -287,6 +288,8 @@ An adapter implementing none of these stays fully conformant — see
 | always | `MANAGER_URL` | Where to read sources and push signals. |
 | always | `ADAPTER_NAME` | This adapter's own name — the `adapter=` scope on every call. |
 | always | `ADAPTER_TOKEN` | Bearer credential — see `SEC-1`. |
+| always | `POD_NAMESPACE` | This adapter's own namespace, a downward-API field. Feeds `ADP-7`. |
+| always | `CONVERSATION_NAMESPACE` | The release's conversations namespace, a literal value. Equal to `POD_NAMESPACE` outside a split release. Feeds `ADP-10`. |
 | conditional | `LISTEN_ADDR` | Set only when `SignalAdapter.spec.port` is set — this adapter is pushed to rather than polling, and the reconciler owns the matching Service. |
 | per-source | `AGENTOPS_CRED_<SOURCE>_<KEY>` | A source's own credentials, keyed by its sanitized name — see `credentialEnvPrefix` on the [source entry](#source-entry). |
 
@@ -362,6 +365,7 @@ deduplicated for the `Signal`'s life, and a changed alert carries a new
 
 | Version | Date | Changed |
 |---|---|---|
+| 2.5.0 | 2026-11-14 | `POD_NAMESPACE` and `CONVERSATION_NAMESPACE` join [Environment](#environment) — the second is new, the first was always injected but undocumented. `ADP-10` adds the conversations-namespace exclusion mechanism, not configurable. `ADP-7` is reworded to name `POD_NAMESPACE` explicitly and state that it alone may be disabled. ADDITIVE: `CONVERSATION_NAMESPACE` is absent or equal to `POD_NAMESPACE` outside a split release, and `ADP-10` never applies there, so no shipped adapter stops conforming. `signals/k8s-events`, the one observing adapter with a namespace-scoped exclusion to extend, implements `ADP-10`. Every shipped adapter's claimed version moves to `2.5.0` in the same change. |
 | 2.4.0 | 2026-11-14 | `POST /signal/inbound` accepts, then processes. The success status moves from `200` to `202`, and the body gains `invocationId` and one `taskId` per admitted signal, enqueued on `in.signal` before the reply is written. `queued` now means accepted, not stored — a `Signal` is created afterwards by the `in.signal` consumer, with the bus's bounded retry and dead-letter record. `API-2` and `API-3` are REPLACED, and `MGR-1` says the storing is a consumer's. ADDITIVE by the page's own rule: no shipped adapter checks for exactly `200` (verified over `signals/*`), and the new fields are ignorable, so none stops conforming. Every shipped adapter's claimed version moves to `2.4.0` in the same change. |
 | 2.3.1 | 2026-11-04 | Wording only: `API-7` says the manager's per-phase TTL expires a terminal `Signal`, where it said the TTL deletes it. Behaviour is unchanged. |
 | 2.3.0 | 2026-10-29 | `POST /signal/inbound` is publish-then-consume. `API-2` is REPLACED: the response acknowledges storage, `{"queued", "reason"?}`, and the `conversations` field is withdrawn. `API-3` is rewritten around a `5xx` re-send. A normalized signal may carry an optional `signalId` (`API-7`), and every shipped adapter sends one (`ADP-9`). `MGR-1`, `MGR-2` and `MGR-4` say the routing is the consumer's. ADDITIVE by the page's rule: no shipped adapter read the withdrawn field, and a `2.2.0` adapter sending no `signalId` stays conformant. |

@@ -59,6 +59,12 @@ var (
 	// production wires it (state-store design D-4): every Get carries the
 	// revision its Update compares against, so a test never reads a stale one.
 	stores state.Stores
+
+	// storeClient is the same WithWatch client `stores` was opened over,
+	// package-level so a namespace-split test (namespacesplit_test.go) can
+	// open a SECOND, independently-scoped backend against two genuinely
+	// distinct namespaces without duplicating envtest's own cfg plumbing.
+	storeClient client.WithWatch
 )
 
 // chartDir locates the chart from a test's working directory, which is this
@@ -112,7 +118,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	storeClient, err := client.NewWithWatch(cfg, client.Options{Scheme: scheme})
+	storeClient, err = client.NewWithWatch(cfg, client.Options{Scheme: scheme})
 	if err != nil {
 		panic(err)
 	}
