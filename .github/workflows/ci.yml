@@ -58,6 +58,11 @@ jobs:
     # is a person asking, and runs on a draft.
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    # `pull-requests: read` for a hand run, which asks which refs its pull
+    # request is made of. Nothing here writes.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       modules: ${{ steps.list.outputs.modules }}
       images: ${{ steps.list.outputs.images }}
@@ -76,78 +81,39 @@ jobs:
           fetch-depth: 0
       - id: list
         env:
-          # The commit this push or pull request is measured against. Empty on a
-          # branch's first push, where there is nothing to diff and everything
-          # must build.
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
-          ALL_MODULES=$(./.github/components.sh modules \
-            | jq -c --arg m "$ENVTEST_MODULE" 'map(select(. != $m))')
-          ALL_IMAGES=$(./.github/components.sh images)
-
-          # WHAT CHANGED, or EVERYTHING when that cannot be established. A new
-          # branch reports an all-zero base, and a shallow or grafted history
-          # makes the diff fail — both must build the world rather than build
-          # nothing, because a filter that silently matches nothing is a CI that
-          # silently tests nothing.
-          changed=""
-          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] \
-             && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
-            changed=$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" || true)
+          # WHAT CHANGED, or EVERYTHING when that cannot be established
+          # (`ci-discover.sh` builds the world on an empty list). A pull request
+          # is measured against where its branch LEFT the base branch — the
+          # merge base with the base branch as it is now — never against
+          # `base.sha`, which freezes when the pull request opens: once master
+          # moves, that diff counts everyone else's merged work as this
+          # change's and rebuilds components it never touched. A hand run
+          # (`workflow_dispatch`) names a pull request and asks for its refs.
+          base_ref="$PR_BASE_REF"; head="$PR_HEAD_SHA"
+          if [ "$EVENT" = workflow_dispatch ]; then
+            read -r base_ref head < <(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --json baseRefName,headRefOid --jq '"\(.baseRefName) \(.headRefOid)"' || true) || true
           fi
-
-          # THE FOUR PATHS THAT REBUILD EVERYTHING. The shared Dockerfile is
-          # nine components' recipe, `components.sh` decides what exists at all,
-          # this workflow decides how any of it is tested, and the scan action
-          # runs against every image. A change to one of them touches no
-          # component directory and invalidates all of them.
-          if [ -z "$changed" ] \
-             || echo "$changed" | grep -qE '^\.github/(docker/|components\.sh|workflows/ci\.yml|actions/)'; then
-            echo "building everything: base=${BASE_SHA:-none}" >&2
-            echo "modules=$ALL_MODULES" >> "$GITHUB_OUTPUT"
-            echo "images=$ALL_IMAGES" >> "$GITHUB_OUTPUT"
-            for j in operator chart docs site system scripts; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
-            exit 0
+          : > /tmp/changed.txt
+          if [ -n "${base_ref:-}" ] && [ -n "${head:-}" ]; then
+            git fetch --no-tags origin "$base_ref" >&2 || true
+            git diff --name-only "origin/$base_ref...$head" > /tmp/changed.txt 2>/dev/null || : > /tmp/changed.txt
+          elif [ "$EVENT" = push ] && [ -n "$PUSH_BEFORE" ] \
+               && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            git diff --name-only "$PUSH_BEFORE" "$GITHUB_SHA" > /tmp/changed.txt || : > /tmp/changed.txt
           fi
-
-          printf '%s\n' "$changed" > /tmp/changed.txt
           echo "changed files:" >&2; cat /tmp/changed.txt >&2
-
-          # A component is built when a file inside its own directory moved.
-          # `components.sh` reports contexts as `./path`; the diff reports
-          # `path` — normalising here rather than at each use is what keeps the
-          # two from drifting apart.
-          echo "modules=$(echo "$ALL_MODULES" | jq -c --rawfile c /tmp/changed.txt '
-            ($c | split("\n") | map(select(length > 0))) as $files
-            | map(select(. as $m | $files | any(startswith($m + "/"))))')" >> "$GITHUB_OUTPUT"
-
-          # THE FIXED JOBS ARE FILTERED TOO, and `operator` is why. It provisions
-          # envtest and runs the suite against a real API server — minutes, on
-          # every push, including one that edited a paragraph. Its tests render
-          # the CHART, so it watches both trees.
-          #
-          # Each flag is `true` or empty; a job reads its own and nothing else,
-          # so adding a job means adding one line here rather than editing a
-          # shared expression.
-          m() { grep -qE "$1" /tmp/changed.txt && echo true; }
-          {
-            echo "operator=$(m '^(platform/manager/|chart/)')"
-            echo "chart=$(m '^(chart/|platform/manager/api/)')"
-            echo "docs=$(m '^(docs/|chart/|platform/manager/api/|\.github/scripts/docs-generate)')"
-            echo "site=$(m '^docs/')"
-            # Anything a running install is built from: every component
-            # group, the chart, the test doubles and the pack itself.
-            echo "system=$(m '^(platform/|runtimes/|signals/|channels/|gateways/|chart/|test/|\.github/workflows/system\.yml)')"
-            # The workflow's own scripts, their suite, and the hooks the suite
-            # exercises. The workflow files are the everything case above.
-            echo "scripts=$(m '^(\.github/scripts/|\.github/tests/|\.github/\.coveragerc|\.claude/hooks/)')"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "images=$(echo "$ALL_IMAGES" | jq -c --rawfile c /tmp/changed.txt '
-            ($c | split("\n") | map(select(length > 0))) as $files
-            | map(select((.context | sub("^\\./"; "")) as $d | $files | any(startswith($d + "/"))))')" >> "$GITHUB_OUTPUT"
+          ./.github/scripts/ci-discover.sh /tmp/changed.txt >> "$GITHUB_OUTPUT"
 
   # The operator, against a REAL API server. Its own suite file records that
   # envtest schedules nothing, so this proves the API-server half and nothing
