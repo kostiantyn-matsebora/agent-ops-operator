@@ -197,8 +197,11 @@ func TestNatsTwoServersDownHoldsWorkThenResumes(t *testing.T) {
 
 	outageID := "e2e-nats-outage-write-" + stamp
 	waitFor(t, "a write attempted during the outage to be refused rather than silently accepted", 2*time.Minute, func() (bool, error) {
+		// 202 is the accept step's own success (async-signal-ingest design
+		// D-4) — anything else, never a bare "not 200", is what "refused"
+		// means now.
 		code, _ := postSignalRaw(e, t, SourceTasks, outageID)
-		return code != 200, nil
+		return code != 202, nil
 	})
 	waitFor(t, "/state/* to report the outage rather than answer stale", time.Minute, func() (bool, error) {
 		code, _ := e.do(t, "GET", e.Manager.URL()+"/state/conversations", nil, bearerPrefix+e.Values.AdapterToken)
@@ -215,7 +218,7 @@ func TestNatsTwoServersDownHoldsWorkThenResumes(t *testing.T) {
 	// the publisher's retry, as every adapter retries a refused publish.
 	waitFor(t, "the retried write to be accepted once quorum returns", 3*time.Minute, func() (bool, error) {
 		code, _ := postSignalRaw(e, t, SourceTasks, outageID)
-		return code == 200, nil
+		return code == 202, nil
 	})
 	waitFor(t, "the retried write to open its conversation", 3*time.Minute, func() (bool, error) {
 		return conversationExistsFor(ctx, e, outageID)

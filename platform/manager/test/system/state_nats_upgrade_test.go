@@ -316,7 +316,7 @@ func TestNatsRollingServerImageUpgradeKeepsWritesSucceeding(t *testing.T) {
 			}
 			id := fmt.Sprintf("e2e-nats-rolling-%s-%d", stamp, i)
 			code, out := postSignalRaw(e, t, SourceTasks, id)
-			if code != 200 {
+			if code != 202 { // 202 is the accept step's own success now (design D-4)
 				atomic.AddInt32(&failed, 1)
 				t.Logf("write %d during the rolling nats upgrade: %d %s", i, code, out)
 			}

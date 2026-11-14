@@ -144,12 +144,15 @@ func (e *Env) PostTask(t *testing.T, source, id, payload string) map[string]any 
 	return e.PostSignal(t, source, map[string]any{"initiationId": id, "kind": "task", "payload": payload, "title": id})
 }
 
-// PostSignal posts one normalized signal.
+// PostSignal posts one normalized signal. The endpoint only ACCEPTS it
+// (202, `queued`/`taskIds` — async-signal-ingest design D-1/D-4): it answers
+// no chat command and stores no Signal itself, both of which now happen on
+// the "in.signal" consumer, later.
 func (e *Env) PostSignal(t *testing.T, source string, signal map[string]any) map[string]any {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"source": source, "signals": []any{signal}})
 	code, out := e.do(t, "POST", e.Manager.URL()+"/signal/inbound", body, bearerPrefix+e.Values.AdapterToken)
-	if code != 200 {
+	if code != 202 {
 		t.Fatalf("POST /signal/inbound: %d %s", code, out)
 	}
 	var res map[string]any

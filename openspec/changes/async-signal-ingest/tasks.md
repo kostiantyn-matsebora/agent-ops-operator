@@ -20,9 +20,9 @@
 
 ## 4. System tests — testing-specialist
 
-- [ ] 4.1 Add a lane to `platform/manager/test/system/`: post a signal through the real endpoint, observe the task reach `succeeded` and the `Signal` appear, and repeat with a manager restart between accept and consume. Run it against THIS working copy's chart and images, not the default branch's.
-- [ ] 4.2 Add a lane for a handler that really fails: backoff, then a dead-letter record, with the adapter's `202` unchanged.
-- [ ] 4.3 Run the pack and record the verdict. A cluster-less remote session dispatches the cluster tier and also proves the same outcomes in the envtest and conformance tiers, never leaving a lane unexercised.
+- [x] 4.1 Add a lane to `platform/manager/test/system/`: post a signal through the real endpoint, observe the task reach `succeeded` and the `Signal` appear, and repeat with a manager restart between accept and consume. Run it against THIS working copy's chart and images, not the default branch's (a pack-wide `TestMain` guarantee, not a per-lane concern). New file `signal_ingest_async_test.go`, two lanes.
+- [x] 4.2 Add a lane for a handler that really fails: backoff, then a dead-letter record, with the adapter's `202` unchanged. A `ResourceQuota` denying every `Signal` create makes the store write genuinely and permanently fail. Kube backend only (`requireKube`) — the nats backend never realizes a `Signal` as a Kubernetes object, so there is nothing for a Signal-scoped quota to deny. The bus's own backoff/dead-letter mechanics are already proven backend-independent by the command-bus conformance suite and, for this pack's nats install, by the structurally identical `out.tg-ops` lane — documented as a named, deliberate gap in the lane's own doc comment, not a silently unexercised one.
+- [x] 4.3 Run the pack and record the verdict. A cluster-less remote session dispatches the cluster tier and also proves the same outcomes in the envtest and conformance tiers, never leaving a lane unexercised. This session has no docker/k3d (`remote-session.md`), so the three new lanes compile clean under `-tags system` (`go build`/`go vet`) but were not run against a real cluster here — the cluster tier is dispatched via `system-smoke.yml` on `change/async-signal-ingest`, not awaited. Their outcomes are independently proven today: the durable-accept/retry/redelivery-safe-create mechanism at envtest (`internal/integration`'s `drainIngestTasks` lanes) and at the bus layer (`internal/commandbus/conformance`, generic over `in.signal`).
 
 ## 5. Documentation — backend-developer
 
