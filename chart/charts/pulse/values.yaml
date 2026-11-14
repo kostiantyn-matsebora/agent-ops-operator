@@ -44,7 +44,8 @@ signal:
     # secret now heals the registered webhook on its own, a configured
     # signingSecret is enforced on every delivery whether or not the adapter
     # registered the webhook itself, and an unmatched source's 404 names it.
-    tag: "0.2.0"
+    # 0.3.0: sends a per-delivery signalId, so a re-sent alert is stored once.
+    tag: "0.3.0"
   resources: {}
   # WHO MAY POST WEBHOOKS HERE, when global.agentops.networkPolicy is on.
   # Raw NetworkPolicyPeer entries, exactly like the parent chart's

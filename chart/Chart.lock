@@ -1,19 +1,19 @@
 dependencies:
 - name: prometheus
   repository: ""
-  version: 0.2.2
+  version: 0.2.3
 - name: kubernetes
   repository: ""
-  version: 0.4.1
+  version: 0.4.2
 - name: telegram
   repository: ""
-  version: 0.5.2
+  version: 0.6.0
 - name: home-assistant
   repository: ""
-  version: 0.2.2
+  version: 0.2.3
 - name: pulse
   repository: ""
-  version: 0.2.0
+  version: 0.2.1
 - name: claude
   repository: ""
   version: 0.1.0
@@ -32,5 +32,5 @@ dependencies:
 - name: commandbus
   repository: ""
   version: 0.1.0
-digest: sha256:21c617638670a33d37a053be33a728edeac5504a56add0f8945e3bc19ee32f74
-generated: "2026-11-13T08:46:41.22604145+02:00"
+digest: sha256:820ab885c46388c3adc89b9bd474fd3b027a4621a8b67d20b056075387323d42
+generated: "2026-11-14T17:21:30.941165189+02:00"
