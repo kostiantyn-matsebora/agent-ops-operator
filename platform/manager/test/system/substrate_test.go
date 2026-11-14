@@ -62,50 +62,50 @@ func TestCredentialProjectionIsKubeletResolved(t *testing.T) {
 func TestRBACAsEnforced(t *testing.T) {
 	e := requireEnv(t)
 	ctx := context.Background()
-	deny := func(sa, verb, group, resource string) {
+	both := []string{Namespace, ConversationsNamespace}
+	can := func(sa, verb, group, resource, ns string, want bool) {
 		t.Helper()
-		ok, err := e.K.Can(ctx, sa, verb, group, resource, Namespace)
+		ok, err := e.K.Can(ctx, sa, verb, group, resource, ns)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ok {
-			t.Errorf("%s must NOT be allowed to %s %s.%s", sa, verb, resource, group)
+		if ok != want {
+			t.Errorf("%s allowed to %s %s.%s in %s = %v, want %v", sa, verb, resource, group, ns, ok, want)
 		}
 	}
-	allow := func(sa, verb, group, resource string) {
-		t.Helper()
-		ok, err := e.K.Can(ctx, sa, verb, group, resource, Namespace)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !ok {
-			t.Errorf("%s must be allowed to %s %s.%s", sa, verb, resource, group)
+	// The manager reads NO Secrets — every verb, in either namespace.
+	for _, ns := range both {
+		for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete"} {
+			can("agentops-manager", verb, "", "secrets", ns, false)
 		}
 	}
-	// The manager reads NO Secrets — every verb.
-	for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete"} {
-		deny("agentops-manager", verb, "", "secrets")
+	// Conversations and runtime pods are the conversations namespace's.
+	can("agentops-manager", "list", "agentops.dev", "conversations", ConversationsNamespace, true)
+	can("agentops-manager", "create", "", "pods", ConversationsNamespace, true)
+	// In control the manager only READS pods — its own replicas.
+	can("agentops-manager", "list", "", "pods", Namespace, true)
+	can("agentops-manager", "create", "", "pods", Namespace, false)
+	// The floor account is bound to NOTHING, on either side.
+	for _, ns := range both {
+		for _, res := range []string{"pods", "secrets", "configmaps"} {
+			can("agentops-runtime", "list", "", res, ns, false)
+		}
+		can("agentops-runtime", "list", "agentops.dev", "conversations", ns, false)
 	}
-	allow("agentops-manager", "list", "agentops.dev", "conversations")
-	allow("agentops-manager", "create", "", "pods")
-	// The floor account is bound to NOTHING.
-	for _, res := range []string{"pods", "secrets", "configmaps"} {
-		deny("agentops-runtime", "list", "", res)
-	}
-	deny("agentops-runtime", "list", "agentops.dev", "conversations")
 	// The console reads the configuration kinds over the Kubernetes API and
 	// nothing else; it never writes.
-	allow("agentops-adapter-console", "watch", "agentops.dev", "pipelines")
-	deny("agentops-adapter-console", "get", "", "secrets")
-	deny("agentops-adapter-console", "delete", "", "pods")
-	// state-store-generic-contract design D-7/D-8: Conversations and Signals
-	// moved off the Kubernetes API onto the manager's /state/* surface
-	// (spec.stateAccess), so the console's Role grants NEITHER kind any
-	// verb at all — list/watch denied is the same "never a write path"
-	// posture signal-persistence once proved with an allow.
-	for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete"} {
-		deny("agentops-adapter-console", verb, "agentops.dev", "conversations")
-		deny("agentops-adapter-console", verb, "agentops.dev", "signals")
+	can("agentops-adapter-console", "watch", "agentops.dev", "pipelines", Namespace, true)
+	for _, ns := range both {
+		can("agentops-adapter-console", "get", "", "secrets", ns, false)
+		can("agentops-adapter-console", "delete", "", "pods", ns, false)
+		// state-store-generic-contract design D-7/D-8: Conversations and
+		// Signals moved off the Kubernetes API onto the manager's /state/*
+		// surface (spec.stateAccess), so the console's Roles grant NEITHER
+		// kind any verb at all.
+		for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete"} {
+			can("agentops-adapter-console", verb, "agentops.dev", "conversations", ns, false)
+			can("agentops-adapter-console", verb, "agentops.dev", "signals", ns, false)
+		}
 	}
 }
 
@@ -119,7 +119,11 @@ func TestInformerLiveness(t *testing.T) {
 	for _, kind := range []string{"agentprofiles", "agentruntimes", "channels", "channeladapters", "conversations",
 		"mcpconfigs", "mcptoolsets", "pipelines", "signaladapters", "signalsources", "signals"} {
 		for _, verb := range []string{"list", "watch"} {
-			ok, err := e.K.Can(ctx, "agentops-manager", verb, "agentops.dev", kind, Namespace)
+			ns := Namespace
+			if kind == "conversations" {
+				ns = ConversationsNamespace
+			}
+			ok, err := e.K.Can(ctx, "agentops-manager", verb, "agentops.dev", kind, ns)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -166,13 +170,13 @@ func TestContextSurvivesLosingThePod(t *testing.T) {
 	if conv.Status.RuntimePod == "" {
 		t.Fatalf("no runtime pod recorded on %s", conv.Name)
 	}
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Status.RuntimePod}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ConversationsNamespace, Name: conv.Status.RuntimePod}}
 	if err := e.K.Delete(ctx, pod); err != nil {
 		t.Fatalf("deleting the runtime pod: %v", err)
 	}
 	waitFor(t, "the pod to be gone", 2*time.Minute, func() (bool, error) {
 		var p corev1.Pod
-		return apierrors.IsNotFound(e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: pod.Name}, &p)), nil
+		return apierrors.IsNotFound(e.K.Get(ctx, types.NamespacedName{Namespace: ConversationsNamespace, Name: pod.Name}, &p)), nil
 	})
 	// Continue through the console, the human path.
 	if code, out := e.ConsoleSend(t, conv.Name, "echo two"); code/100 != 2 {
@@ -217,14 +221,14 @@ func TestAdmissionFIFOOnPodDelete(t *testing.T) {
 	ours := func(pod corev1.Pod) bool { return indexOf(names, pod.Labels["agentops.dev/conversation"]) >= 0 }
 	pauseCronLaneAndClearLeftovers(t, ctx, e)
 	waitFor(t, "no runtime pods", 4*time.Minute, func() (bool, error) {
-		pods, err := e.K.Pods(ctx, "agentops.dev/conversation")
+		pods, err := e.K.RuntimePods(ctx, "agentops.dev/conversation")
 		return err == nil && len(pods) == 0, err
 	})
 	for i := 0; i < cap; i++ {
 		post(i, "stall")
 	}
 	waitFor(t, fmt.Sprintf("the cap of %d held by stalling conversations", cap), 4*time.Minute, func() (bool, error) {
-		pods, err := e.K.Pods(ctx, "agentops.dev/conversation")
+		pods, err := e.K.RuntimePods(ctx, "agentops.dev/conversation")
 		if err != nil {
 			return false, err
 		}
@@ -326,11 +330,13 @@ func TestImagePullThroughAuthenticatedRegistry(t *testing.T) {
 	// The pull Secret rides on the floor ServiceAccount — the kubelet's own
 	// mechanism, and the one place a private registry's credential can sit
 	// without the manager reading a Secret.
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: "e2e-registry-pull"},
+	// Both sit beside the runtime pod, in the conversations namespace: the
+	// kubelet resolves an account and its pull Secrets in the pod's own.
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "e2e-registry-pull"},
 		Type: corev1.SecretTypeDockerConfigJson, Data: map[string][]byte{corev1.DockerConfigJsonKey: reg.DockerConfigJSON()}}
-	mustCreate(t, e.K, secret)
+	mustCreateIn(t, e.K, ConversationsNamespace, secret)
 	var sa corev1.ServiceAccount
-	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: "agentops-runtime"}, &sa); err != nil {
+	if err := e.K.Get(ctx, types.NamespacedName{Namespace: ConversationsNamespace, Name: "agentops-runtime"}, &sa); err != nil {
 		t.Fatal(err)
 	}
 	patched := sa.DeepCopy()
@@ -340,7 +346,7 @@ func TestImagePullThroughAuthenticatedRegistry(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		var cur corev1.ServiceAccount
-		if e.K.Get(context.Background(), types.NamespacedName{Namespace: Namespace, Name: "agentops-runtime"}, &cur) == nil {
+		if e.K.Get(context.Background(), types.NamespacedName{Namespace: ConversationsNamespace, Name: "agentops-runtime"}, &cur) == nil {
 			cur.ImagePullSecrets = nil
 			_ = e.K.Update(context.Background(), &cur)
 		}
@@ -365,7 +371,7 @@ func TestImagePullThroughAuthenticatedRegistry(t *testing.T) {
 	if run := conv.Status.Runs[0]; run.Status != "succeeded" || !strings.Contains(run.Result, "pulled") {
 		t.Fatalf("the pulled image must run: %+v", run)
 	}
-	pods, _ := e.K.Pods(ctx, "agentops.dev/conversation="+conv.Name)
+	pods, _ := e.K.RuntimePods(ctx, "agentops.dev/conversation="+conv.Name)
 	if len(pods) == 0 || !strings.HasPrefix(pods[0].Spec.Containers[0].Image, registryHost+"/") {
 		t.Fatalf("the pod must run the registry's image: %+v", pods)
 	}

@@ -339,5 +339,17 @@ func (c *Cluster) Dump(dir string) {
 			}
 		}
 	}
+	// The conversations namespace: runtime pods, their MCP ConfigMaps and
+	// the housekeeping CronJob's pods, under a "conv-" prefix.
+	write("conv-pods.txt", "-n", ConversationsNamespace, "get", "pods", "-o", "wide")
+	write("conv-pods.yaml", "-n", ConversationsNamespace, "get", "pods", "-o", "yaml")
+	out, _ = c.Kubectl(ctx, "-n", ConversationsNamespace, "get", "pods", "-o", "name")
+	for _, line := range strings.Fields(out) {
+		pod, ok := strings.CutPrefix(line, "pod/")
+		if !ok || strings.ContainsAny(pod, ":/ ") {
+			continue
+		}
+		write("conv-log-"+pod+".txt", "-n", ConversationsNamespace, "logs", pod, "--all-containers", "--tail=2000")
+	}
 	fmt.Fprintf(os.Stderr, "diagnostics written to %s\n", dir)
 }

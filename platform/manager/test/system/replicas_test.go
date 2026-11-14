@@ -165,7 +165,7 @@ func clearAdmissionPoolForReplicaLane(t *testing.T, ctx context.Context, e *Env)
 	t.Helper()
 	pauseCronLaneAndClearLeftovers(t, ctx, e)
 	waitFor(t, "no runtime pods", 4*time.Minute, func() (bool, error) {
-		pods, err := e.K.Pods(ctx, "agentops.dev/conversation")
+		pods, err := e.K.RuntimePods(ctx, "agentops.dev/conversation")
 		return err == nil && len(pods) == 0, err
 	})
 }

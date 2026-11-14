@@ -74,7 +74,7 @@ func postTaskAndWaitPodFailsToStart(t *testing.T, ctx context.Context, e *Env, s
 		if err != nil || c.Status.RuntimePod == "" {
 			return false, err
 		}
-		pods, err := e.K.Pods(ctx, "agentops.dev/conversation="+conv.Name)
+		pods, err := e.K.RuntimePods(ctx, "agentops.dev/conversation="+conv.Name)
 		if err != nil || len(pods) == 0 {
 			return false, err
 		}

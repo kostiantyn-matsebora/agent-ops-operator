@@ -53,9 +53,10 @@ func requireAgent(t *testing.T) *Env {
 func setupAgent(t *testing.T, e *Env) {
 	t.Helper()
 	ctx := context.Background()
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: "agentops-claude"},
+	// The runtime pod resolves it, so it lives beside the pod.
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "agentops-claude"},
 		StringData: map[string]string{"oauthToken": os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")}}
-	if err := ensure(ctx, e.K, secret); err != nil {
+	if err := ensureIn(ctx, e.K, ConversationsNamespace, secret); err != nil {
 		t.Fatal(err)
 	}
 	profile := &agentopsv1alpha1.AgentProfile{ObjectMeta: metav1.ObjectMeta{Name: agentProfile}}
@@ -130,10 +131,10 @@ func TestRealRuntime(t *testing.T) {
 	// refuses to repeat the value back, which is not the boundary this
 	// assertion is testing.
 	if first.Status.RuntimePod != "" {
-		_ = e.K.Delete(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: first.Status.RuntimePod}})
+		_ = e.K.Delete(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ConversationsNamespace, Name: first.Status.RuntimePod}})
 		waitFor(t, "the pod to be gone", 2*time.Minute, func() (bool, error) {
 			var p corev1.Pod
-			return apierrors.IsNotFound(e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: first.Status.RuntimePod}, &p)), nil
+			return apierrors.IsNotFound(e.K.Get(ctx, types.NamespacedName{Namespace: ConversationsNamespace, Name: first.Status.RuntimePod}, &p)), nil
 		})
 	}
 	answer := ask(t, e, conv.Name, "What was the word I asked you to remember? Reply with the word only.", 2)
@@ -209,7 +210,7 @@ func TestRealRuntimeStorageOutageReportsUnavailable(t *testing.T) {
 	// pod-local live tree is broken, exactly the shape an unreadable share
 	// (a stale mount, a permission error, a share manager mid-restart) takes
 	// from inside one pod.
-	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "exec", "-c", "worker", pod, "--",
+	if out, err := e.Cluster.Kubectl(ctx, "-n", ConversationsNamespace, "exec", "-c", "worker", pod, "--",
 		"chmod", "000", "/data/context/.claude/projects"); err != nil {
 		t.Fatalf("corrupting the pod's live context store: %v\n%s", err, out)
 	}

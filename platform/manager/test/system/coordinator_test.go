@@ -304,7 +304,7 @@ func TestCoordinatorCloseAndDeleteCascadeThroughConsole(t *testing.T) {
 	member := e.invokeMember(t, coordName, root.Name, "domain", "echo cascade-member-"+stamp)
 	e.WaitRun(t, member, 1, 3*time.Minute)
 
-	memberPodName := types.NamespacedName{Namespace: e.K.Namespace, Name: runtimepod.PodName(member)}
+	memberPodName := types.NamespacedName{Namespace: ConversationsNamespace, Name: runtimepod.PodName(member)}
 	waitFor(t, "the member's runtime pod to exist", time.Minute, func() (bool, error) {
 		var pod corev1.Pod
 		return e.K.Get(ctx, memberPodName, &pod) == nil, nil

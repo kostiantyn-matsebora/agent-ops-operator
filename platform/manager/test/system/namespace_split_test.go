@@ -34,14 +34,6 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
 
-// ConversationsNamespace is the chart's own default
-// (global.agentops.conversationNamespace, chart/values.yaml) that
-// install.go's valuesYAML never overrides, so it is also what this pack's
-// shared install actually renders: every runtime pod, its MCP ConfigMap,
-// every persistence claim and every `rbac.runtime.serviceAccounts` entry
-// land here now, never in Namespace (the release/control namespace every
-// pre-existing lane in this package was written against).
-const ConversationsNamespace = "agent-ops-conversations"
 
 // 10.1 The most basic end-to-end proof the split actually works: an
 // ordinary signal opens a conversation whose runtime pod lands in the
