@@ -12,9 +12,11 @@ eviction cannot serve — nothing waiting, so nothing evicts.
 runtime pod and nothing else. The Conversation object, its thread bindings, its
 inputs, its run history and its stored context handle SHALL be untouched.
 
-It SHALL be intercepted on the reply path BEFORE the text becomes an input, for
-the same reason `/close` is: handing it to the agent would both dispatch a work
-unit for a command and leave the pod running.
+It SHALL be recognised when the inbound message is processed, BEFORE the text
+becomes an input, for the same reason `/close` is: handing it to the agent would
+both dispatch a work unit for a command and leave the pod running. Recognition
+hands the command to the `exit` task, which the last requirement of this
+capability owns.
 
 The next input SHALL admit the conversation again and give it a fresh runtime
 pod, resuming from its context handle — the behavior an eviction already
@@ -95,34 +97,49 @@ idle TTL expires.
 - **THEN** it still counts as active until it is gone, so the cap is never
   exceeded by the release
 
-### Requirement: /exit acts only when the conversation needs no worker
+### Requirement: /exit acts only when the conversation needs no agent runtime
 
 `/exit` SHALL release the pod only when the conversation has nothing inflight
-and nothing queued — the SAME predicate that makes a pod evictable. That
-predicate SHALL have ONE definition in the codebase, shared by the eviction path
-and this command, so the two cannot drift into different meanings of "idle".
+and nothing queued — the SAME predicate that makes a pod evictable.
+
+That predicate SHALL have ONE definition in the codebase, shared by the
+eviction path and this command, so the two cannot drift into different
+meanings of "idle".
+
+The predicate SHALL be evaluated when the `exit` task runs, not when the
+command was accepted.
+
+A refusal SHALL be reported by the task with the code `precondition_failed`,
+which is not retried. A run that ends later never turns an old refusal into a
+surprise release.
 
 A `/exit` while a run is in progress SHALL be REFUSED, naming the run and
-pointing at `/close` for the case where the intent is to abandon it. Killing the
-pod mid-run would clear the inflight state and re-dispatch the input, running
-work that may already have acted a second time — the one outcome a release must
-never produce.
+pointing at `/close` for the case where the intent is to abandon it.
 
-A `/exit` with queued input SHALL be REFUSED and say why: the conversation needs
-a worker (`dispatch.NeedsWorker`), so the pod would be recreated immediately and
-nothing would be freed.
+Killing the pod mid-run would clear the inflight state and re-dispatch the
+input. Work that may already have acted would run a second time, the one
+outcome a release must never produce.
+
+A `/exit` with queued input SHALL be REFUSED and say why.
+
+The conversation needs an agent runtime (`dispatch.NeedsWorker`), so the pod would be
+recreated immediately and nothing would be freed.
+
+The refusal SHALL reach the person on the thread as a notice naming its reason,
+exactly as before.
 
 #### Scenario: A run is in progress
 
-- **WHEN** `/exit` arrives while the conversation has an inflight run
-- **THEN** no pod is deleted, and the reply names the run and offers `/close`
-  for abandoning it
+- **WHEN** an `exit` task runs while the conversation has an inflight run
+- **THEN** no pod is deleted, the task is dead as `precondition_failed` without
+  a retry, and the thread's notice names the run and offers `/close` for
+  abandoning it
 
 #### Scenario: Work is queued
 
-- **WHEN** `/exit` arrives while inputs are waiting to be dispatched
-- **THEN** no pod is deleted, and the reply says the conversation still has work
-  to do
+- **WHEN** an `exit` task runs while inputs are waiting to be dispatched
+- **THEN** no pod is deleted, the task is dead as `precondition_failed`, and the
+  notice says the conversation still has work to do
 
 #### Scenario: The predicate is singular
 
@@ -135,10 +152,16 @@ nothing would be freed.
 - **WHEN** any `/exit` is processed
 - **THEN** no inflight run is cleared and no input is re-dispatched as a result
 
+#### Scenario: A refusal is not retried into a release
+
+- **WHEN** an `exit` task was refused for an inflight run and the run then ends
+- **THEN** no pod is deleted, because the task is dead and is not retried
+
 ### Requirement: The reply states what happens to the conversation's memory
 
-The reply SHALL distinguish releasing a runtime from ending a conversation, and
-SHALL say what becomes of the context.
+The reply on the thread SHALL distinguish releasing a runtime from ending a
+conversation, and SHALL say what becomes of the context. It is posted when the
+`exit` task has run, never at accept.
 
 Where the conversation's runtime can carry context across a pod loss — decided
 by the runtime's `contextStorage` against the configured context volume, which the
@@ -154,7 +177,7 @@ release rather than erroring.
 
 #### Scenario: Continuity survives the release
 
-- **WHEN** `/exit` succeeds on an install whose runtime keeps context on a home
+- **WHEN** `/exit` succeeds on an install whose runtime keeps context on a context
   volume that is provided
 - **THEN** the reply says the conversation is still open and keeps its context
 
@@ -210,3 +233,30 @@ exactly the pair a person must not have to guess between.
 
 - **WHEN** a person sends `/pipelines`
 - **THEN** the reply names both `/exit` and `/close` and states what each does
+
+### Requirement: /exit is a task and the reply means accepted
+
+A `/exit` typed in a conversation's thread SHALL arrive as an inbound chat
+message. The manager SHALL accept it and enqueue one `exit` task on the
+conversation's root key, the ordering key of the conversation's root as
+`async-operations` defines it. The pod SHALL be deleted when the task runs.
+
+The accept reply SHALL be `202` with the invocation id and the task id, as
+`async-operations` states. It means accepted, not that the pod is gone. The
+reply to the person on the thread, stating what happens to the conversation's
+memory, SHALL be posted when the task has run.
+
+The `exit` handler SHALL be idempotent. A task delivered twice on a conversation
+with no pod SHALL report that there was nothing to release and succeed.
+
+#### Scenario: An exit is accepted before it is done
+
+- **WHEN** `/exit` is sent in an idle conversation's thread
+- **THEN** the inbound message is accepted
+- **AND** an `exit` task is enqueued
+- **AND** the pod is deleted when the task runs
+
+#### Scenario: A redelivered exit changes nothing twice
+
+- **WHEN** an `exit` task is delivered a second time after its pod was already deleted
+- **THEN** the task succeeds, reports there was nothing to release, and no error is raised

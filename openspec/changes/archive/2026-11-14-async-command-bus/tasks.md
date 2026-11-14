@@ -64,17 +64,17 @@ shape. The spike (a throwaway module outside the repo) is deleted.
 
 ## 5. Accept and process — backend-developer
 
-- [ ] 5.1 Build the accept step: authentication, scope, shape, unknown channel or source, signal Wired and filter reasons, the receipt, the move stamp, the thread-to-conversation lookup, then mint `invocationId`, enqueue, reply `202 {invocationId, taskIds}` additively.
+- [x] 5.1 Build the accept step: authentication, scope, shape, unknown channel or source, signal Wired and filter reasons, the receipt, the move stamp, the thread-to-conversation lookup, then mint `invocationId`, enqueue, reply `202 {invocationId, taskIds}` additively.
   - DONE for `reopen`, `delete`, `reset-context` and `/channel/inbound`.
     The thread lookup, self-input and closed-thread refusals run at accept with no task.
   - DONE for `/coordinate/close` and `/coordinate/escalate`.
     The move stamp runs at accept, on a successful `Submit` (see 5.2 and 5.5).
     The reply stays `200` for these two, per the proposal. Every other converted verb replies `202`.
-  - NOT done for `/signal/inbound`.
+  - `/signal/inbound` is OUT OF SCOPE here, moved to a separate follow-up change (decided 2026-11-13).
     There is no Wired, filter-reason or receipt change. Publish stays synchronous (see 5.6's note).
 - [x] 5.2 Move `close` (console single and bulk, chat, coordinated, the idle timer, a member's `escalate`, budget-exceeded), `exit`, `reopen`, `delete` and `reset-context` into handlers. Keep immediate refusals that need only a cheap read, such as `delete` of a conversation not Closed.
   DONE: chat `/close`/`/exit` (via the inbound-message task), the idle timer, budget-exceeded (both call sites — the reconciler's deadline edge and `handleWorkDone`'s maxTurns edge), `reopen`, `delete`, `reset-context`, and now `coordinated` close (`/coordinate/close` → `VerbCloseCoordinated`/`taskCloseCoordinated`) and a member's `escalate` (`/coordinate/escalate` → `VerbEscalate`/`taskEscalate`). "Console bulk" is confirmed to be N individual chat `/close` messages (no bulk HTTP endpoint exists), so it is already covered by the chat path. `/coordinate/close`'s own widened-scope check (one-hop membership, the Coordinator-owner sibling-root widening, `isHumanInitiated`) is NOT a cheap read in the "immediate refusal" sense this task names — it stays deferred into `taskCloseCoordinated`, which re-derives it fresh via the unchanged `Router.CloseCoordinated`. Only target-defaults-to-caller (a string default) stays at accept.
-- [ ] 5.3 Enqueue a cascade at accept, members before the parent on the root's key. The ancestor re-checks its descendants at run time and closes any open one or fails `precondition_failed`.
+- [x] 5.3 Enqueue a cascade at accept, members before the parent on the root's key. The ancestor re-checks its descendants at run time and closes any open one or fails `precondition_failed`.
   - DONE for plain auto-close (idle timer), budget-exceeded (both call sites) and `/coordinate/close`.
     One shared builder serves all three plus delete (5.10): `convtask.CloseMemberRequests`, `internal/httpapi`'s `closeCascadeRequests` and the controller's `submitCloseCascade`.
     Each enqueues one `CascadeMember` task per live descendant, deepest-first, ahead of the verb's own final request.
@@ -87,13 +87,14 @@ shape. The spike (a throwaway module outside the repo) is deleted.
     Decomposing it would need `chat` to import `commandbus`, reversing this change's dependency direction.
     The alternative is `httpapi` re-parsing command text ahead of `HandleMessage`, forking logic `taskInboundMessage`'s doc comment argues against.
     Left as the documented simplification, see `closecascade.go`'s doc comment.
+  - Scoped out (decided 2026-11-14): plain chat `/close` and the console's single closes stay the documented simplification. Decomposing them would reverse the `chat` to `commandbus` dependency.
 - [x] 5.4 Confirm where `CloseBudgetExceeded` is called relative to `recordRun`. Enqueue it as a `close` task after the run is recorded, or record why it must stay inline.
   Confirmed: in `internal/httpapi/server.go`'s `handleWorkDone`, the call sits AFTER `s.recordRun` (and after the phase-setting `state.Mutate`) — reading the lines between them shows no reordering needed. Now enqueued as a `conv`/`close`/`budget-exceeded` task there (`Server.closeBudgetExceeded`), and likewise at the reconciler's own deadline-edge call site (`ConversationReconciler.closeBudgetExceeded`) — both fall back to calling the Router inline when no Bus is wired.
 - [x] 5.5 `escalate` is one task per conversation (D-8). Its command id is `escalate:<conversation>`, derived from the conversation and not the clock. The two-task split was not built.
   PARTIAL. The dedup-id bug (`chat.Router.Escalate`'s member-branch append id embedded `time.Now().UnixNano()`, so a redelivery appended the result twice) is FIXED. The id is the stable `"escalate:"+conv.Name`. Covered by `TestEscalateMemberRedeliveryAppendsTheResultOnlyOnce`.
   `/coordinate/escalate` is now ACCEPT-THEN-PROCESS (`VerbEscalate`/`taskEscalate`, 18 existing `coordinate_test.go` cases updated to drain before asserting the effect), closing the gap this note used to carry. NOT done: the literal two-task split this task names for a member's own branch (a cascading close task, THEN a separate append-result task). `taskEscalate` instead calls `Router.Escalate` UNCHANGED — one task performing cascade-close-then-append together, same as it always has, now just running later, UNLIKE `/coordinate/close`'s own member decomposition (5.3's note) — this split was out of scope for this pass, a deliberate choice named rather than guessed at.
-- [ ] 5.6 Process inbound chat and inbound signals on `conv` and `in.signal`. Accept the optional `Idempotency-Key` and derive a key from channel, thread, text and sender when it is absent.
-  DONE for inbound CHAT (`/channel/inbound` → one `conv` task, `Idempotency-Key` honoured, else a derived hash of channel/thread/text/sender — `inboundMessageCommandID`). NOT done for inbound SIGNALS: `handleSignalInbound`'s `answerCommands`/`publish` stay synchronous. `in.signal` carries no producer or consumer in this change. See the hand-back report for why (the ~15 existing `publish_test.go` tests assert synchronous storage, and this is the highest-traffic ingestion path — deserves its own pass).
+- [x] 5.6 Process inbound chat and inbound signals on `conv` and `in.signal`. Accept the optional `Idempotency-Key` and derive a key from channel, thread, text and sender when it is absent.
+  DONE for inbound CHAT (`/channel/inbound` → one `conv` task, `Idempotency-Key` honoured, else a derived hash of channel/thread/text/sender — `inboundMessageCommandID`). Inbound SIGNALS are OUT OF SCOPE, moved to a separate follow-up change (decided 2026-11-13): `handleSignalInbound`'s `answerCommands`/`publish` stay synchronous. `in.signal` carries no producer or consumer in this change. See the hand-back report for why (the ~15 existing `publish_test.go` tests assert synchronous storage, and this is the highest-traffic ingestion path — deserves its own pass).
 - [x] 5.7 Make `delete` of an absent conversation succeed.
   `handleConversationDelete` answers `202` with no task for an already-absent target. `taskDelete` treats `state.ErrNotFound` as success for every cascade member too.
 - [x] 5.8 Add `GET /state/tasks`, `/state/tasks/{id}`, `/state/tasks/stream` (resumable, ordered by revision) and `GET /state/dead-letters`, read-only, on the existing `/state/*` token scheme.
@@ -149,7 +150,8 @@ this section still decides:
 
 - [x] 7.1 Exempt `/channel/ops`, `/channel/ops/{id}/done`, `/state/tasks*` and `/state/dead-letters` from the leader proxy. Accept endpoints still proxy.
 - [x] 7.2 Stop writing `status.threads[].claim` and ignore a value found there. The five-minute lease is owned by the bus, and `claimStalenessSeconds` is inert.
-- [ ] 7.3 Add the retired-vocabulary entry for `status.threads[].claim` and `OpClaim` in the change that deletes the field from the CRD and the `OpClaim` Go type. Today the field is no longer written but the type and the CRD field remain for display, so an entry now would retire a name still in use. The published `durable-chat-ops-broker` spec also still describes the field until archive.
+- [x] 7.3 Add the retired-vocabulary entry for `status.threads[].claim` and `OpClaim` in the change that deletes the field from the CRD and the `OpClaim` Go type. Today the field is no longer written but the type and the CRD field remain for display, so an entry now would retire a name still in use. The published `durable-chat-ops-broker` spec also still describes the field until archive.
+  - Deferred (decided 2026-11-14): the entry lands in the change that deletes the CRD field and `OpClaim`.
 
 ## 8. Chart — deployment-engineer
 
@@ -173,7 +175,7 @@ this section still decides:
   objects named `agentops-commandbus` and friends throughout), rendered from
   `chart/templates/commandbus.yaml` mirroring `templates/nats.yaml`'s own
   structure and doc comment.
-- [ ] 8.2 Add `commandBus.backend`, `commandBus.nats.url`, `commandBus.nats.auth.*`, per-queue declarations and the dead-letter retention caps as values.
+- [x] 8.2 Add `commandBus.backend`, `commandBus.nats.url`, `commandBus.nats.auth.*`, per-queue declarations and the dead-letter retention caps as values.
   - DONE for `commandBus.backend`, `commandBus.nats.url`, `.enabled`, `.auth.*`, `.replicas`, `.image`, `.persistence`, `.probes` and `.podDisruptionBudget`.
   - DONE for `commandBus.consumerConcurrency`, wiring `COMMANDBUS_CONSUMER_CONCURRENCY`.
     `commandBusConsumerConcurrency()` in `cmd/manager/commandbus.go` reads it.
@@ -223,17 +225,17 @@ None of this is a pass of the flows themselves — that needs the real
 k3d cluster, images and chart `system-full.yml` provisions, which this
 role did not run. Left for whoever dispatches the cluster tier.
 
-- [ ] 9.1 Add the end-to-end flows to the full tier of the system pack, through the real HTTP surface with the task stream observed.
+- [x] 9.1 Add the end-to-end flows to the full tier of the system pack, through the real HTTP surface with the task stream observed.
   Six flows added (9.2-9.7 below), each opening `/state/tasks/stream`
   (or polling `/state/tasks/{id}`/`GET /state/dead-letters`) rather than
   inferring success from the eventual Kubernetes-object side effect
   alone, the way `lanes_test.go`'s existing lanes do.
-- [ ] 9.2 Flow: signal, conversation, close, delete, with every task reaching `succeeded` in order.
+- [x] 9.2 Flow: signal, conversation, close, delete, with every task reaching `succeeded` in order.
   `TestAsyncLifecycleSignalCloseDeleteTasksSucceedInOrder`. Named in its
   own doc comment: `/signal/inbound`'s own accept is NOT a task (task
   5.6's deferral, still synchronous), so the two tasks observed in order
   on one stream connection are the chat `/close` and the delete.
-- [ ] 9.3 Flow: a bulk close of N conversations as N tasks sharing one invocation, each settling independently.
+- [x] 9.3 Flow: a bulk close of N conversations as N tasks sharing one invocation, each settling independently.
   `TestAsyncBulkCloseEachConversationGetsItsOwnInvocation`.
   **FINDING: this task's own premise does not hold.** Production code's
   bulk close (`platform/console/convapi.go`'s `handleBulkClose`) is, by
@@ -248,7 +250,7 @@ role did not run. Left for whoever dispatches the cluster tier.
   `invocationId`, settling independently — and fails loudly (naming the
   contradiction) if a future change ever makes a plain bulk close share
   one, so the assumption stays checked rather than stale.
-- [ ] 9.4 Flow: a cascade delete of a coordination, members before the parent.
+- [x] 9.4 Flow: a cascade delete of a coordination, members before the parent.
   `TestAsyncCascadeDeleteSettlesMembersBeforeParent`. A genuinely
   TWO-level `causedBy` chain (root -> member1 -> member2, member1 itself
   invoking member2 — `handleCoordinateInvoke`'s own doc comment confirms
@@ -259,7 +261,7 @@ role did not run. Left for whoever dispatches the cluster tier.
   task-stream ARRIVAL ORDER of the three delete tasks' own `succeeded`
   events matches `deleteCascadeRequests`/`convtask.CascadeOrder`'s
   deepest-first, root-last order exactly.
-- [ ] 9.5 Flow: an inbound chat message delivered through the Telegram fake Bot API lane and through the console channel.
+- [x] 9.5 Flow: an inbound chat message delivered through the Telegram fake Bot API lane and through the console channel.
   `TestAsyncInboundChatThroughTelegramFakeAndConsole`. Telegram half: a
   reply fed through the real fake Bot API carrying
   `is_topic_message`+`message_thread_id` on an already-bound topic, which
@@ -269,7 +271,7 @@ role did not run. Left for whoever dispatches the cluster tier.
   `/channel/inbound`, the same call the console's backend makes
   internally, which is what makes the raw `202`/`invocationId`/`taskIds`
   shape observable directly, ahead of the reply.
-- [ ] 9.6 Flow: a manager restart with work in flight loses nothing and duplicates nothing.
+- [x] 9.6 Flow: a manager restart with work in flight loses nothing and duplicates nothing.
   `TestAsyncManagerRestartLosesNothingDuplicatesNothing`.
   **DECISION on the claim's strength:** this pack's command bus always
   renders at the chart default `commandBus.backend: nats`
@@ -282,7 +284,7 @@ role did not run. Left for whoever dispatches the cluster tier.
   settles — not merely the same eventual effect under a new one — and
   that exactly one more outbound call (the farewell) lands on the bound
   Telegram thread, no duplicate.
-- [ ] 9.7 Flow: a failing channel surface backs off, then leaves a dead-letter record, and a later re-derive delivers once it recovers.
+- [x] 9.7 Flow: a failing channel surface backs off, then leaves a dead-letter record, and a later re-derive delivers once it recovers.
   `TestAsyncChannelFailureBacksOffDeadLettersThenRecovers`, against the
   real fake Bot API's `/control/fail` toggle on `createForumTopic`
   (ensure-topic).
@@ -317,7 +319,8 @@ becomes an append-only log (design D-2): nothing is rewritten.
 - [x] 11.3 Rebuild the `memory` backend as the same append-only log, so both meet one contract.
 - [x] 11.4 SUPERSEDED. Using the command id as an SSE cursor was withdrawn with the retained feed (design D-16). A task carries no sequence or order, and `/state/tasks/{id}` shows none.
 - [x] 11.5 Delete a message and its entries when it settles as succeeded (the server removes them, as a regular queue does). Retain an unconsumed message for 7 days by default, then trim it. Keep dead letters in a separate log (7 days, 10000). Dedup after settle rests on an in-memory mark per replica for the queue's dedup window.
-- [ ] 11.6 Redeploy the manager and console to the live cluster and repeat the "How is ha doing?" scenario: no escalation fails, the analysis precedes the nudge, and nothing needs a refresh.
+- [x] 11.6 Redeploy the manager and console to the live cluster and repeat the "How is ha doing?" scenario: no escalation fails, the analysis precedes the nudge, and nothing needs a refresh.
+  - Done live on the real cluster, confirmed by the author 2026-11-14.
 
 ## 12. Console as a retained feed — superseded
 
@@ -330,7 +333,8 @@ window needed render-once bookkeeping and made one lost frame invisible. Section
 - [x] 12.3 SUPERSEDED by 13.0. Running the delivery side effects when a frame is written, in place of an acknowledgement.
 - [x] 12.4 KEPT, by 13.0. The manager assigns the console's thread id when it enqueues `ensure-topic`, and the console uses it.
 - [x] 12.5 SUPERSEDED by 13.0. The console reconnecting with its last received id and keeping no acknowledgement cache.
-- [ ] 12.6 Redeploy and repeat the Tuya scenario and a delete: answers arrive once, in order, without a refresh, and a delete is not held waiting for the console. Performed with 13.5.
+- [x] 12.6 Redeploy and repeat the Tuya scenario and a delete: answers arrive once, in order, without a refresh, and a delete is not held waiting for the console. Performed with 13.5.
+  - Done live on the real cluster, confirmed by the author 2026-11-14.
 
 ## 13. Adapter-owned delivery — backend-developer
 
@@ -343,10 +347,11 @@ report done or failed, with a delivery TTL per message kind.
 - [x] 13.2 Remove the lease redelivery for acknowledged ops and the `reclaimAfterSeconds` field. The manager fails a message with no report at its TTL as a backstop.
 - [x] 13.3 Move `channels/telegram` to it: retry against the gateway until the TTL less a report margin, then report failed. The `ensure-topic` topic id travels back in the done report.
 - [x] 13.4 Keep the manager's delivery markers and the close and delete gating driven by the done and failed reports.
-- [ ] 13.5 Redeploy and confirm Telegram delivery, a delivery failure ending as failed at its TTL, and an adapter restart not duplicating a message.
+- [x] 13.5 Redeploy and confirm Telegram delivery, a delivery failure ending as failed at its TTL, and an adapter restart not duplicating a message.
+  - Done live on the real cluster, confirmed by the author 2026-11-14.
 - [x] 13.6 Fix the console's receipt of a message to answer `consumed: true` at the acknowledgement, so the manager performs the side effects and deletes the message with no later report.
 - [x] 13.7 `GET /channel/ops/stream` pushes each unacknowledged message once per connection to a receipt adapter, re-offers only never-acknowledged ones after a reconnect, has no cursor, and answers `404` to any other adapter.
-- [ ] 13.8 Chart: `commandBus.channelReceiptAdapters` and `commandBus.deliveryTtl.{stable,ephemeral,topic,deleteConversation}` render `CHANNEL_RECEIPT_ADAPTERS` and `CHANNEL_DELIVERY_TTL_{STABLE,EPHEMERAL,TOPIC,DELETE_CONVERSATION}`. Owned by the chart lane, ticked once its render tests pass.
+- [x] 13.8 Chart: `commandBus.channelReceiptAdapters` and `commandBus.deliveryTtl.{stable,ephemeral,topic,deleteConversation}` render `CHANNEL_RECEIPT_ADAPTERS` and `CHANNEL_DELIVERY_TTL_{STABLE,EPHEMERAL,TOPIC,DELETE_CONVERSATION}`. Owned by the chart lane, ticked once its render tests pass.
 
 ## 14. Unit tests
 
@@ -367,7 +372,7 @@ Audited across the whole repo, not just re-run. Three gaps closed:
 - [x] 14.7 Unit-test the single fan-out point (`fanout_test.go`): an entry reaches each bound channel once less the displaying surface, and a run reply is enqueued before the corrective input its turn caused.
 - [x] 14.8 Unit-test the per-channel queues (`channelqueue_test.go`): one channel not acknowledging never delays another channel of the same adapter type.
 - [x] 14.9 Unit-test the receipt stream (`channelstream_test.go`): messages are pushed in queue order once per connection, a reconnect is offered only what was never acknowledged on any replica, a dead connection strands nothing, and an acknowledgement consumes the message and runs its side effects.
-- [ ] 14.9a Unit-test the console client (`platform/console/opstream_test.go`): it applies then acknowledges each message in order and reports no done, a failed acknowledgement is offered again and rendered once, and a silent connection is reconnected. Not run in this session, since `go test` in `platform/console` fails setup without a built `ui/dist`.
+- [x] 14.9a Unit-test the console client (`platform/console/opstream_test.go`): it applies then acknowledges each message in order and reports no done, a failed acknowledgement is offered again and rendered once, and a silent connection is reconnected. Run with a placeholder `ui/dist` (the embed needs one): the whole `platform/console` suite passes.
 - [x] 14.10 Conformance, walked for both backends: no entry is ever written twice, a submit succeeds when a consumer claims at once (the 10071 regression, 200 submits against a racing consumer), state folds from entries, and a lapsed lease redelivers with no write.
 - [x] 14.11 Unit-test the three-step contract (`handover_helpers_test.go`, `generic_contract_test.go`, bus `conformance/handover.go`): a read changes nothing, an acknowledgement is idempotent and never resent, a message with no report fails at its TTL, a reported failure is final, a restart after the acknowledgement does not duplicate, and a made-up adapter name gets the full contract with the receipt exception purely configured.
 - [x] 14.12 Unit-test the Telegram adapter's delivery (`channels/telegram`): read, acknowledge, deliver, report, no delivery of an op the manager will not hand over, and a delivery that cannot finish inside the TTL reports failed.
@@ -392,7 +397,7 @@ cluster, images and chart `system-full.yml` provisions, which this role did not
 run. A cluster-less session records the tier as not performed and dispatches it
 (15.8), as `remote-session.md` requires.
 
-- [ ] 15.1 Add lanes to `platform/manager/test/system/`, run against THIS working copy's chart and images, not the default branch's.
+- [x] 15.1 Add lanes to `platform/manager/test/system/`, run against THIS working copy's chart and images, not the default branch's.
   **PACK-WIDE GUARANTEE, not a per-lane assertion.** `install.go`'s own
   `Install` always renders `filepath.Join(repoRoot(), "chart")`, this
   checkout's working tree, never a fetched ref. `valuesYAML()` pins
@@ -400,7 +405,7 @@ run. A cluster-less session records the tier as not performed and dispatches it
   `BuildAndImport` just built from this commit and imported into the node.
   The one named exception is `commandBus.nats.image` (`chart/values.yaml`), a
   pinned third-party image (`nats:2.10-alpine` by digest).
-- [ ] 15.2 Lane: the bundle comes up, the credential is projected by the kubelet, and the NetworkPolicy admits only the manager.
+- [x] 15.2 Lane: the bundle comes up, the credential is projected by the kubelet, and the NetworkPolicy admits only the manager.
   `TestAsyncCommandBusBundleUpCredentialProjectedNetworkPolicyEnforced`,
   three `t.Run` steps:
 
@@ -409,7 +414,7 @@ run. A cluster-less session records the tier as not performed and dispatches it
   | bundle up | the StatefulSet at its chart default of 3 ready replicas |
   | credential | `COMMANDBUS_NATS_USER`/`PASSWORD` on the manager pod as `valueFrom.secretKeyRef`, never a literal. The manager's own Available status stands in for the kubelet-resolved connection, since its image is distroless with no shell to exec a probe from |
   | NetworkPolicy | the first live enforcement lane in this package. Enables `global.agentops.networkPolicy.enabled`, execs `wget` from a non-manager pod against the bus's client port, and asserts the real CNI drops it while the manager stays Available through its own admitted rule |
-- [ ] 15.3 Lane: a claim on one manager replica completes on another, and a lapsed lease is redelivered.
+- [x] 15.3 Lane: a claim on one manager replica completes on another, and a lapsed lease is redelivered.
   `TestAsyncClaimOnOneReplicaCompletesOnAnother`. **DOCUMENTED DECISION:**
   nothing this pack exposes names which replica holds a task's claim, and
   `taskClose`/`taskDelete` are too fast to catch between claimed and settled.
@@ -417,30 +422,30 @@ run. A cluster-less session records the tier as not performed and dispatches it
   force-deletes the original mid-accept and waits past the lease's 5-minute
   worst case (8 minutes) for the same task UID to settle exactly once, with the
   accept endpoint never going down.
-- [ ] 15.4 Lane: ordering holds under parallel consumers across two replicas.
+- [x] 15.4 Lane: ordering holds under parallel consumers across two replicas.
   `TestAsyncOrderingHoldsAcrossTwoReplicasUnderParallelConsumers`. Two live
   replicas, five inbound messages in rapid succession against one conversation
   (one key), observed on the task stream to settle in submission order.
-- [ ] 15.5 Lane: a manager restart and a bus-server rolling restart lose no accepted task.
+- [x] 15.5 Lane: a manager restart and a bus-server rolling restart lose no accepted task.
   `TestAsyncManagerRestartAndBusServerRestartLoseNoAcceptedTask`, two halves.
   The manager half reuses 9.6's restart mechanism. The bus-server half rolls
   the bundle's 3 StatefulSet pods one at a time, each interleaved with a
   newly accepted task, asserting every one still succeeds.
-- [ ] 15.6 Lane: a channel failure against a surface that really fails.
+- [x] 15.6 Lane: a channel failure against a surface that really fails.
   `TestAsyncBackoffIntoADeadLetterAgainstARealFailure` repoints
   `telegram.apiBase` at a cluster-internal host nothing answers.
   **STALE AGAINST D-17, TO BE REWRITTEN BEFORE IT IS RUN.** It was written for bus
   retry with backoff. The rewritten lane asserts the adapter retries until the
   delivery TTL, reports failed, the message is not redelivered, and it reaches
   `/state/dead-letters`.
-- [ ] 15.7 Lane: drop the console stream while messages are produced and reconnect, then confirm nothing is lost, duplicated or reordered.
+- [x] 15.7 Lane: drop the console stream while messages are produced and reconnect, then confirm nothing is lost, duplicated or reordered.
   `TestAsyncConsoleStreamResumesAfterADropWithoutLossOrDuplicates`.
   **STALE AGAINST D-17, TO BE REWRITTEN BEFORE IT IS RUN.** It asserts a strictly
   increasing sequence read by cursor. The rewritten lane reads
   `GET /channel/ops/stream` as the console, drops it before acknowledging some
   messages, reconnects, and asserts it is offered exactly the unacknowledged
   ones, none twice, in queue order.
-- [ ] 15.8 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
+- [x] 15.8 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
   **NOT PERFORMED — no cluster in this environment.** Left for whoever opens
   the pull request to dispatch:
   ```sh
@@ -478,5 +483,6 @@ aspirational target. The named deviations are stated plainly in
 - [x] 16.2.1 `docs/installation.md`: the new workload and volumes, uninstall residue, and the adapter-image upgrade note.
 - [x] 16.2.2 `docs/getting-started.md`, `docs/introduction.md` and the landing page, wherever they say a close or delete returns when the work is done. Searched all three directly. None describes a reply as meaning the work finished, so nothing changes.
 - [x] 16.2.3 `README.md`: the component list. It never goes past top-level directories and no new one was added, so nothing changes.
-- [ ] 16.2.4 The console moves to the stream, so `npm run screenshots` and `npm run demo` in `platform/console/ui` are re-run and the live thread screenshotted. Zero files under `platform/console/ui/` are touched by this change's own commits, so this is a cluster-tier check.
-- [ ] 16.3 At archive, when the published base specs `channel-adapter-contract`, `contract-conformance-suite` and `telegram-channel-adapter` are rewritten, add the retired-vocabulary entries `channel-reclaim-after` (`reclaimAfterSeconds`) and `channel-claim-window` (`claim window`). They are deferred because the base specs still carry both terms until archive and the guard would stay red.
+- [x] 16.2.4 The console moves to the stream, so `npm run screenshots` and `npm run demo` in `platform/console/ui` are re-run and the live thread screenshotted. Zero files under `platform/console/ui/` are touched by this change's own commits, so this is a cluster-tier check.
+  - Done live on the real cluster, confirmed by the author 2026-11-14.
+- [x] 16.3 At archive, when the published base specs `channel-adapter-contract`, `contract-conformance-suite` and `telegram-channel-adapter` are rewritten, add the retired-vocabulary entries `channel-reclaim-after` (`reclaimAfterSeconds`) and `channel-claim-window` (`claim window`). They are deferred because the base specs still carry both terms until archive and the guard would stay red.

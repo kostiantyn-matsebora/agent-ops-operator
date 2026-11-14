@@ -14,19 +14,23 @@ every binding with nothing stored, and its transcript is a CACHE of
 ## Requirements
 
 ### Requirement: Console serves the channel adapter contract
-The console SHALL be a conforming channel adapter: it long-polls `GET /channel/ops?adapter=console`, completes operations via `POST /channel/ops/{id}/done`, and submits UI-typed user messages via `POST /channel/inbound`, authenticating every call with its injected per-adapter derived token. It SHALL tolerate at-least-once op delivery by deduplicating on operation id.
+The console SHALL be a conforming channel adapter and the declared receipt-only one: the manager deletes each op at the acknowledgement, with no delivery TTL and no report (`CHANNEL_RECEIPT_ADAPTERS`). It SHALL read ops over the manager's stream `GET /channel/ops/stream?adapter=console`, acknowledge each with `POST /channel/ops/{id}/ack` on receipt, and submit UI-typed user messages via `POST /channel/inbound`, authenticating every call with its injected per-adapter derived token. It SHALL call no `/done`, since the manager consumes each op at the acknowledgement. It SHALL tolerate an op offered more than once by rendering each op id once.
 
 #### Scenario: Ensure-topic binds a console thread
 - **WHEN** the console receives an `ensure-topic` op for a conversation
-- **THEN** it completes the op with a thread id derived deterministically from the conversation's UID (`console-<uid>`), so the same conversation maps to the same thread across console restarts
+- **THEN** it uses the thread id the manager assigned (`console-<uid>`, derived from the conversation's UID), so the same conversation maps to the same thread across console restarts
 
-#### Scenario: Redelivered op renders once
-- **WHEN** a `send` op is delivered twice (manager retry)
+#### Scenario: Re-offered op renders once
+- **WHEN** a `send` op is offered twice (a failed acknowledgement, a reconnect)
 - **THEN** the transcript shows the message exactly once, deduplicated by op id
 
 #### Scenario: UI message enters through the shared router
 - **WHEN** a user types a message in a joined conversation's transcript view
 - **THEN** the console posts it to `/channel/inbound` with the console thread id and it is queued/acked exactly as an inbound message from any other channel
+
+#### Scenario: A reconnect is offered only unacknowledged ops
+- **WHEN** the console's stream drops and it reconnects
+- **THEN** it is pushed only the ops it never acknowledged, and none that it acknowledged
 
 ### Requirement: Fan-out traffic renders as a live transcript
 `send` ops received by the console (agent results, acks, attributed relays, and the console's own users' messages delivered back) SHALL append to a bounded in-memory per-thread transcript streamed to connected browsers in real time. Relayed messages SHALL be rendered as attributed remote-user messages, visually distinct from agent output and from messages typed in the console itself.

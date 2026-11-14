@@ -434,7 +434,11 @@ func awaitCloseInvocations(t *testing.T, frames <-chan string, names []string) m
 			if !ok {
 				t.Fatalf("the task stream ended before every close settled: %v", succeeded)
 			}
-			recordCloseFrame(t, f, names, invocationOfTask, invocationOf, succeeded)
+			w, ok := taskPut(f)
+			if !ok || w.Queue != "conv" || !slices.Contains(names, w.Key) {
+				continue
+			}
+			recordCloseFrame(t, w, invocationOfTask, invocationOf, succeeded)
 		case <-deadline:
 			t.Fatalf("not every close settled within the deadline: %v of %v", succeeded, names)
 		}
@@ -442,14 +446,10 @@ func awaitCloseInvocations(t *testing.T, frames <-chan string, names []string) m
 	return invocationOf
 }
 
-// recordCloseFrame folds one task-stream frame into awaitCloseInvocations'
-// bookkeeping, failing on an invocationId that changes.
-func recordCloseFrame(t *testing.T, f string, names []string, invocationOfTask, invocationOf map[string]string, succeeded map[string]bool) {
+// recordCloseFrame folds one accepted close task's frame into the maps
+// awaitCloseInvocations keeps, failing the test when an invocationId moves.
+func recordCloseFrame(t *testing.T, w taskStateWire, invocationOfTask, invocationOf map[string]string, succeeded map[string]bool) {
 	t.Helper()
-	w, ok := taskPut(f)
-	if !ok || w.Queue != "conv" || !slices.Contains(names, w.Key) {
-		return
-	}
 	if prior, seen := invocationOfTask[w.UID]; seen && prior != w.InvocationID {
 		t.Fatalf("task %s of conversation %s changed invocationId mid-flight: %q then %q", w.UID, w.Key, prior, w.InvocationID)
 	}
