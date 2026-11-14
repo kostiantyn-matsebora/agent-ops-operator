@@ -49,13 +49,13 @@ read-only demo on your cluster in fifteen minutes.
    ```sh
    helm install agent-ops \
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     --version 20.0.0 -n agent-ops
+     --version 19.0.1 -n agent-ops
    ```
 
    ```powershell
    helm install agent-ops `
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     --version 20.0.0 -n agent-ops
+     --version 19.0.1 -n agent-ops
    ```
 
    **No registry credential.** The chart and every image it renders are public
@@ -244,7 +244,7 @@ every open conversation, place your Secrets in the new namespace, carry
 each claim across by PV rebind, then upgrade.
 
 The full procedure, in order, with commands, is the `[20.0.0]` entry's
-Upgrade section in [the
+(`[Unreleased]` until the release ships) Upgrade section in [the
 changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
 Read it before you upgrade a production install.
 
