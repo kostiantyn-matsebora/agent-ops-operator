@@ -14,7 +14,6 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -23,6 +22,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/cachescope"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/consumer"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
@@ -231,17 +231,11 @@ func main() {
 		replicaIdentity = "unknown"
 	}
 
-	// The cache covers exactly the two namespaces — one entry when they are
-	// equal, which is what today's single-namespace cache already was.
-	cacheNamespaces := map[string]cache.Config{namespaces.Control: {}}
-	if namespaces.Distinct() {
-		cacheNamespaces[namespaces.Conversations] = cache.Config{}
-	}
+	// Each kind is cached only in the namespace its Role grants — see
+	// cachescope.Options.
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme: scheme,
-		Cache: cache.Options{
-			DefaultNamespaces: cacheNamespaces,
-		},
+		Scheme:                 scheme,
+		Cache:                  cachescope.Options(namespaces),
 		Metrics:                metricsserver.Options{BindAddress: env("METRICS_ADDR", ":9090")},
 		HealthProbeBindAddress: env("PROBE_ADDR", ":8081"),
 		LeaderElection:         true,

@@ -52,8 +52,9 @@ a single namespace:
 - equal values SHALL reproduce the single-namespace deployment with no branch
   on layout
 
-The cache SHALL cover exactly the two namespaces, and leader election SHALL
-stay in the control namespace.
+The cache SHALL cover exactly the two namespaces, each kind only in the
+namespace whose Role grants it, and leader election SHALL stay in the control
+namespace.
 
 #### Scenario: Equal namespaces reproduce today's layout
 - **WHEN** `CONVERSATION_NAMESPACE` equals `NAMESPACE`
@@ -62,6 +63,10 @@ stay in the control namespace.
 #### Scenario: The cache is two namespaces, never the cluster
 - **WHEN** the manager starts with two distinct namespaces
 - **THEN** it watches those two namespaces and no other
+
+#### Scenario: Every kind is cached only where its Role grants it
+- **WHEN** the manager starts split under the chart's own Roles
+- **THEN** every informer syncs: wiring kinds watched in control alone, `conversations` and `conversationinputs` and PVCs in conversations alone, pods and configmaps in both
 
 #### Scenario: The lease stays in control
 - **WHEN** the manager runs split
@@ -90,7 +95,8 @@ The chart SHALL grant the manager one namespaced Role per namespace, each with
 only what is used there:
 
 - the control-namespace Role SHALL cover every wiring and identity kind,
-  `signals`, adapter Deployments, Services, configmaps, leases and events
+  `signals`, adapter Deployments, Services, configmaps, leases, events, and
+  a read (`get`/`list`/`watch`) on pods, for the manager's own replicas
 - the conversations-namespace Role SHALL cover pods, configmaps,
   `conversations`, `conversationinputs` and their status, events, and PVC
   `get`/`list`/`watch`/`create`

@@ -8,10 +8,11 @@ Conversations (runtime pods, their claims): {{ $convNS }}
 Everything in this release lives in one namespace: {{ .Release.Namespace }}
 (conversationNamespace equals the release namespace — single-namespace layout.)
 {{- end }}
-Upgrading from chart < 20.0? See the [Unreleased] Upgrade section in
-docs/CHANGELOG.md BEFORE running `helm upgrade` — it splits conversation-scoped
-objects into a second namespace by default, and migrating in place needs
-Secrets placed there and a claim carried across first.
+Upgrading from a release without conversationNamespace? Read the Upgrade
+section of the docs/CHANGELOG.md entry that adds it BEFORE running
+`helm upgrade` — it splits conversation-scoped objects into a second
+namespace by default, and migrating in place needs Secrets placed there and
+a claim carried across first.
 
 Quick check:   kubectl -n {{ .Release.Namespace }} get pipelines,signalsources,channels,channeladapters,signaladapters
 Ask an agent:  a task is an ordinary signal — post it to a SignalSource a Ready

@@ -71,6 +71,7 @@
 - [x] 9.8 Console: pods from both namespaces reach the Infrastructure view
 - [x] 9.9 Chart render tests: two manager Roles and no new ClusterRole, runtime accounts, claims and both CronJobs in Conversations, the context-probe label, the floor account in both namespaces bound to nothing, namespace `keep`, the single-namespace render matching today's
 - [x] 9.10 `TestEveryWiredFlowIsAllowed` and `TestNetworkPolicyIsOptIn` pass in both layouts
+- [x] 9.12 Envtest: the manager's cache syncs under the chart's own rendered Roles, impersonating its account, in both layouts (`TestManagerCacheSyncsUnderTheChartsRoles*`); the leader proxy finds the leader's pod in Control under a split (`TestLeaderProxyFindsTheLeaderInControlUnderASplit`)
 - [x] 9.11 `go build`, `go vet` and `go test ./...` in every module touched, run against this working copy's tree in the Go container
 
 ## 10. System tests

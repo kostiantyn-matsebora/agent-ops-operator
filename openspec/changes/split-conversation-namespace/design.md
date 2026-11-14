@@ -84,8 +84,11 @@ decision 1.
 
 - Single-namespace sets both to one value. The only difference between
   layouts is two strings resolved at startup.
-- The cache is configured with both namespaces. Equal values collapse to one
-  entry.
+- The cache covers both namespaces, each kind only where its Role grants
+  it: control by default, `conversations`, `conversationinputs` and PVCs in
+  conversations, pods and configmaps in both. A kind cached in a namespace
+  its Role does not grant never syncs, and the manager never starts. Equal
+  values collapse every entry to one.
 - Leader election stays in control.
 - `CONVERSATION_NAMESPACE` is read at startup, defaulting to `NAMESPACE`.
 
@@ -110,7 +113,7 @@ adapter state open in Control.
 
 | Role | Namespace | Rules |
 |---|---|---|
-| manager control Role | control | every wiring kind, `signals`, adapter Deployments, Services, configmaps, leases, events |
+| manager control Role | control | every wiring kind, `signals`, adapter Deployments, Services, configmaps, leases, events, pods `get/list/watch` (its own replicas) |
 | manager conversations Role | conversations | pods, configmaps, `conversations`, `conversationinputs` and status, PVC `get/list/watch/create`, events |
 | console read-only Role | conversations | pods `get/list/watch` |
 

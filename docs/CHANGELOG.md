@@ -30,7 +30,8 @@ a manual step per claim you want to keep.
   and `conversationinputs` and their status, events, PVC
   `get`/`list`/`watch`/`create` — never `delete`. No ClusterRole is added.
   Single-namespace installs still render one merged Role, identical in
-  substance to today's.
+  substance to today's. The control Role keeps a read on pods, for the
+  manager's own replicas.
 - A second console Role, in the conversations namespace: `pods`
   `get`/`list`/`watch` alone, so the Infrastructure view keeps every runtime
   pod. The console reads `CONVERSATION_NAMESPACE`, defaulting to

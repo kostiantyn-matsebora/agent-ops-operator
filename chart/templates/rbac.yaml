@@ -8,7 +8,8 @@ Two rule sets, never one inlined Role:
 
   agentops.managerControlOnlyRules        every wiring/identity kind, signals,
                                            adapter Deployments, serviceaccounts,
-                                           Services, leases
+                                           Services, leases, its own pods
+                                           (get/list/watch)
   agentops.managerConversationsOnlyRules  pods, Conversation/ConversationInput
                                            and their status, PVC create/list/
                                            get/watch — NO delete/update/patch
@@ -63,6 +64,14 @@ which indents EVERY line uniformly — the pattern `agentops.runtimeReadRules`
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# The manager's OWN replicas: the leader proxy resolves the Lease holder to a
+# pod IP, and the state store's one-time import refuses to run beside an
+# older replica. Read-only, and only here — creating and deleting pods is
+# the conversations Role's, where runtime pods run. Single-namespace merges
+# this with the conversations Role's pods rule, a superset of it.
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
 {{- end -}}
 
 {{- define "agentops.managerConversationsOnlyRules" -}}

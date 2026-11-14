@@ -207,7 +207,8 @@ func (s *Server) leaderProxyTarget(ctx context.Context) string {
 		podName = holder[:i]
 	}
 	var pods corev1.PodList
-	if err := s.Client.List(ctx, &pods, client.InNamespace(s.Namespaces.Conversations),
+	// The manager's own replicas run in CONTROL, never beside runtime pods.
+	if err := s.Client.List(ctx, &pods, client.InNamespace(s.Namespaces.Control),
 		client.MatchingLabels{managerPodLabel: managerPodLabelValue}); err != nil {
 		return ""
 	}

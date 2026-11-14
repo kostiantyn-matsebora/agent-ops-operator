@@ -35,9 +35,9 @@ func Resolve(control, conversations string) Namespaces {
 	return Namespaces{Control: control, Conversations: conversations}
 }
 
-// Distinct reports whether the pair names two different namespaces. It
-// exists to size the controller-runtime cache's namespace set — never to
-// gate behaviour, which must take one code path whatever this answers.
+// Distinct reports whether the pair names two different namespaces. It is
+// for tests and diagnostics only — never to gate behaviour, which must take
+// one code path whatever this answers.
 func (n Namespaces) Distinct() bool {
 	return n.Control != n.Conversations
 }
