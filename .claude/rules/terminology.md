@@ -72,8 +72,8 @@ container. Checkpoints are conditional AND incremental.
 
 | Word | Names |
 |---|---|
-| control namespace | `.Release.Namespace` — the manager, every wiring/identity CR, the state store, adapters, the console, every MCP server |
-| conversations namespace | `global.agentops.conversationNamespace` — runtime pods and everything they run as, mount or resolve |
+| control namespace | `.Release.Namespace` — the manager, every wiring/identity CR, the state store (except below), adapters, the console, every MCP server |
+| conversations namespace | `global.agentops.conversationNamespace` — runtime pods and everything they run as, mount or resolve, every persistence claim, the housekeeping and context-probe CronJobs, and `Conversation`/`ConversationInput` CRs under the `kube` backend. The full rule is `invariants.md`'s placement row |
 
 `Namespaces{Control, Conversations}` is the Go pair threaded wherever
 `Namespace string` was one value. Equal strings are the single-namespace
