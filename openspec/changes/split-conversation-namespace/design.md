@@ -87,7 +87,7 @@ decision 1.
 - The cache covers both namespaces, each kind only where its Role grants
   it: control by default, `conversations`, `conversationinputs` and PVCs in
   conversations, pods and configmaps in both. A kind cached in a namespace
-  its Role does not grant never syncs. Equal
+  that its Role does not grant never syncs. Equal
   values collapse every entry to one.
 - Leader election stays in control.
 - `CONVERSATION_NAMESPACE` is read at startup, defaulting to `NAMESPACE`.

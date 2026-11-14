@@ -137,7 +137,7 @@ def render(p):
     s.append(node(28, 100, 250, "state & bus servers", "credential required", p))
 
     # The runtime pod — where model output actually executes, in the
-    # CONVERSATIONS namespace (split-conversation-namespace) — beside the
+    # CONVERSATIONS namespace (a split release) — beside the
     # control namespace, because crossing 2 goes between them.
     s.append(boundary(28, 172, 340, 182, "runtime pod", p, tone="danger"))
     s.append(node(42, 190, 312, "the agent container", "runs the model's output", p,

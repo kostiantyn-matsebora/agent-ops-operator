@@ -51,7 +51,7 @@
 - [x] 7.9 `deployment.yaml`: pass `CONVERSATION_NAMESPACE` to the manager. `console.yaml`: pass it to the console and add its read-only pods Role in Conversations
 - [x] 7.10 `chart/charts/kubernetes`: route accounts and their binding subjects in Conversations, every other object in the release namespace
 - [x] 7.11 Bump `Chart.yaml` to 20.0.0
-- [ ] 7.11a Pin the matching manager, console and `signal-k8s-events` image tags — intentionally LEFT AS-IS (manager 0.62.0, console 0.41.0, signal-k8s-events 0.6.0), since this change's own CI has not yet published new tags. Follow-up for the release
+- [ ] 7.11a Release step, owed at release time: pin the matching manager, console and `signal-k8s-events` image tags — intentionally LEFT AS-IS (manager 0.62.0, console 0.41.0, signal-k8s-events 0.6.0), since this change's own CI has not yet published new tags. Follow-up for the release
 - [x] 7.12 `NOTES.txt`: print both namespaces and point at the 20.0.0 Upgrade section
 
 ## 8. Chart: NetworkPolicy peers — deployment-engineer

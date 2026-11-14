@@ -1079,8 +1079,8 @@ Equal namespaces render as one Role, the exact union a pre-split release had.
 No ClusterRole is added for the manager.
 
 See [installation](installation.md) for `conversationNamespace` /
-`createConversationNamespace` and the chart 20.0.0 upgrade from a
-single-namespace release.
+`createConversationNamespace` and the upgrade from a single-namespace
+release, which the release that ships the split documents.
 
 ## Capabilities are wiring
 
