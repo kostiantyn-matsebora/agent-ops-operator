@@ -5,8 +5,9 @@
 The chart SHALL add `console.defaultLook`, one of `workspace` and `classic`,
 with the default `workspace`.
 
-The value SHALL reach the console the way `console.write.enabled` does, and the
-console SHALL return it with the session. A value that is neither SHALL fail the
+The value SHALL reach the console the way `console.write.enabled` does, as a key
+of the console Channel's `config` with a `configSchema` property. The console
+SHALL return it with the session. A value that is neither SHALL fail the
 render and name both accepted values.
 
 Changing the value SHALL NOT change any viewer's stored choice.

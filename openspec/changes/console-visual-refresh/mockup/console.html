@@ -239,14 +239,13 @@ kbd{font-family:var(--mono);border:1px solid var(--border-strong);border-radius:
 .row .tl{display:inline-flex;align-items:center;gap:8px}.row .tl .pill{padding:0 7px}.row{min-height:76px}.row .st{min-height:0}.row .kb{position:absolute;right:6px;bottom:6px;opacity:0;transition:opacity .15s;padding:0 6px}.row:hover .kb,.row:focus-within .kb,.row.sel .kb,.kb[aria-expanded="true"]{opacity:1}@media(hover:none){.row .kb{opacity:1}}
 .row .lc{height:2px;margin-top:6px;display:flex}.row .lc .strip{display:flex;width:100%;gap:3px}.row .lc .strip s{flex:1;width:auto;height:2px;border-radius:1px}.row{min-height:84px}
 code{color:color-mix(in srgb,var(--text) 65%,transparent);background:color-mix(in srgb,var(--text) 2.5%,transparent);border:0;font-size:.9em;font-weight:inherit;padding:.08em .3em;border-radius:4px}code.cmd{display:block;margin:6px 0;padding:6px 10px;border-radius:6px;background:color-mix(in srgb,var(--text) 6%,transparent);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}.sec code{font-size:12px}
-</style>
-
 .r{position:relative}
-.cp{position:absolute;top:2px;right:2px;width:28px;height:28px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:var(--surface);color:var(--subtle);cursor:pointer;opacity:0;transition:opacity .12s}
+.cp{position:absolute;bottom:12px;right:2px;width:28px;height:28px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:transparent;color:var(--subtle);cursor:pointer;opacity:0;transition:opacity .12s}
 .cp::before{content:"";position:absolute;inset:-8px}
 .r:hover .cp,.r:focus-within .cp,.cp:focus-visible{opacity:1}
 .cp:hover{color:var(--text)}.cp.done{opacity:1;color:var(--brand)}.cp.done::after{content:"Copied";position:absolute;right:32px;font-size:12px;white-space:nowrap}
 @media (hover:none){.cp{opacity:1}.cp::before{inset:-8px}}
+</style>
 
 <style>
 .page{grid-column:3/-1;grid-row:1;overflow:auto;padding:16px 22px 28px;display:flex;flex-direction:column;gap:14px}

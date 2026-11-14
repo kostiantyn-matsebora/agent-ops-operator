@@ -162,9 +162,10 @@ It runs in the mocked browser tier (`e2e/`), which needs no cluster. The full
 
 ### D11. The install default travels as `metricsUrl` does
 
-`console.defaultLook` goes into the console channel's opaque config, with an
-entry in `configSchema`. The service reads it and returns it as
-`Session.defaultLook`. The chart fails the render on a value that is neither
+`console.defaultLook` travels exactly as `console.write.enabled` and
+`console.metrics.url` do in `chart/templates/console.yaml`. It is a `defaultLook`
+key in the console Channel's `config`, with a matching `configSchema` property.
+The console service reads it and returns it as `Session.defaultLook`. The chart fails the render on a value that is neither
 `workspace` nor `classic`.
 
 ### D12. Order of work
