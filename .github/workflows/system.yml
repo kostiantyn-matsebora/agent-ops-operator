@@ -63,7 +63,15 @@ jobs:
   pack:
     name: system / ${{ inputs.tier }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # #478 (async-command-bus) added 12 full-tier-only lanes (async_e2e_test.go,
+    # async_system_test.go) plus a 3-pod bus subchart to install and roll —
+    # the full tier's wall clock grew past the smoke tier's old shared ceiling.
+    # Measured live: 43585050775 hit this exactly, "Run the pack" cancelled at
+    # the 60m job timeout with no panic logged (go test's own -timeout below
+    # never got the chance to fire). The smoke tier stays far under either
+    # number (its own SYSTEM_BUDGET self-check caps it at 20m), so raising the
+    # shared ceiling changes nothing there.
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: ${{ env.MANAGER_MODULE }}
@@ -110,7 +118,7 @@ jobs:
           # go test ever reaches test2json — passes through unchanged instead
           # of erroring), while the raw event stream is kept for the report
           # below and for the diagnostics upload.
-          go test -tags system -count=1 -timeout 55m -v -json ./test/system/ \
+          go test -tags system -count=1 -timeout ${{ inputs.tier == 'full' && '85m' || '55m' }} -v -json ./test/system/ \
             | tee "$SYSTEM_ARTIFACT_DIR/events.jsonl" \
             | jq -rR '. as $raw | try (fromjson | select(.Action == "output") | .Output) catch $raw'
       # Full tier only, from here on: the pack above already produced a
