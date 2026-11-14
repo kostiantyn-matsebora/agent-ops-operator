@@ -119,7 +119,7 @@ Delivery is at-least-once.
 - **WHEN** an adapter posts a signal for a source claimed by a Ready Pipeline binding two channels
 - **THEN** the resulting conversation carries thread bindings for both pipeline channels and uses the pipeline's profile
 
-#### Scenario: Unwired source drops, the reason lives on its Signal
+#### Scenario: Unwired source drops with a reason
 - **WHEN** an adapter posts a signal for a source no Ready Pipeline claims
 - **THEN** the response reports it queued with no routing reason, no conversation is created, and its `Signal` records `Dropped` with reason `unclaimed`
 

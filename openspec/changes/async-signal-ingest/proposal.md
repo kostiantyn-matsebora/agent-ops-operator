@@ -29,7 +29,7 @@ with no producer or consumer. This change gives it both.
   `signalId` that already landed is still deduplicated.
 - **No adapter changes.** An adapter that predates the bus keeps posting the same
   body and treats any `2xx` as accepted.
-- **BREAKING (status only)**: the success status moves from `200` to `202`. The
+- **MINOR (additive status change)**: the success status moves from `200` to `202`. The
   `queued` count now means "accepted", not "stored".
 
 ## Capabilities
