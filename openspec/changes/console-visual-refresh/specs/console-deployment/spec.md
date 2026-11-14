@@ -10,6 +10,13 @@ of the console Channel's `config` with a `configSchema` property. The console
 SHALL return it with the session. A value that is neither SHALL fail the
 render and name both accepted values.
 
+The chart fails where the browser falls back because they differ in who can
+fix the value.
+
+- An operator writes the chart value and learns of a typo at once.
+- A browser may hold a stored choice or a link from a build that registered a
+  look this one does not, and must stay usable.
+
 Changing the value SHALL NOT change any viewer's stored choice.
 
 #### Scenario: The default renders

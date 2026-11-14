@@ -6,8 +6,8 @@ navigation rail, an inbox column of scopes, the conversation list, and the
 thread pane. Opening a conversation SHALL replace the thread pane and SHALL NOT
 leave the view.
 
-Other looks present conversations by their own capability. The requirements
-below describe the `classic` look.
+Other looks present conversations by their own capability. Every other
+requirement in this capability describes the `classic` look and no other.
 
 The URL SHALL name the open conversation, so a link opens the view with that
 conversation selected and the list beside it. This SHALL hold in every look.

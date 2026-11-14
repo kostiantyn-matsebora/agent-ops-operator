@@ -88,7 +88,8 @@ The look in force SHALL be resolved in this order:
 4. the build's default, `workspace`.
 
 An install default that names no registered look SHALL be ignored and the build
-default used.
+default used. The chart rejects such a value at render time, so this only meets a
+console whose build and chart disagree.
 
 #### Scenario: The install pins classic
 
@@ -106,6 +107,11 @@ A `look` query parameter naming a registered look SHALL select it for that
 page load. It SHALL NOT overwrite the stored choice.
 
 This exists so screenshots, documentation and end-to-end specs can pin a look.
+
+#### Scenario: A link names an unknown look
+
+- **WHEN** the console is opened with `?look=sparkly` and no such look is registered
+- **THEN** the parameter is ignored and the look is resolved from the stored choice, the install default and the build default, in that order
 
 #### Scenario: A link pins a look
 
