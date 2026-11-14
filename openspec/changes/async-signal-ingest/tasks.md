@@ -18,13 +18,13 @@
 - [ ] 3.2 Move the tests of `answerCommands` and `publishOne` to the consumer's package and add a redelivery case, an unwired-source case and a fully-filtered-batch case.
 - [ ] 3.3 Run `go build ./... && go vet ./... && go test ./...` in `platform/manager`, with `KUBEBUILDER_ASSETS` set so the envtest suite runs. In every `signals/*` module, run `go test ./...` to confirm no adapter changed behaviour.
 
-## 4. System tests
+## 4. System tests — testing-specialist
 
 - [ ] 4.1 Add a lane to `platform/manager/test/system/`: post a signal through the real endpoint, observe the task reach `succeeded` and the `Signal` appear, and repeat with a manager restart between accept and consume. Run it against THIS working copy's chart and images, not the default branch's.
 - [ ] 4.2 Add a lane for a handler that really fails: backoff, then a dead-letter record, with the adapter's `202` unchanged.
 - [ ] 4.3 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
 
-## 5. Documentation
+## 5. Documentation — backend-developer
 
 ### Reference docs
 

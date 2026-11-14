@@ -26,9 +26,6 @@ duplicate rule above, and make NO routing decision:
 at the request, enqueues nothing, persists nothing, and is reported on the
 response as it is today.
 
-The request SHALL run on the leader. A non-leader's `leaderProxyMiddleware`
-forwards the call, unchanged.
-
 Every admitted signal that can open or continue a conversation SHALL be
 published this way — machine kinds, an unaddressed chat message, and an
 addressed `/<pipeline> <task>`.
