@@ -22,8 +22,65 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/consumer"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 )
+
+// isCoded reports whether a handler attached a commandbus error code (a
+// terminal failure) rather than returning a plain, retried error.
+func isCoded(err error) bool {
+	var ce *consumer.CodedError
+	return errors.As(err, &ce)
+}
+
+func TestHandleIngestSignalTaskUnreadablePayloadIsTerminal(t *testing.T) {
+	s, _ := sigServer(t, sigTestSource("bad-src", "ad"))
+	err := s.HandleIngestSignalTask(context.Background(), commandbus.Task{UID: "t-1", Payload: []byte("{not json")})
+	if err == nil || !isCoded(err) {
+		t.Fatalf("want a coded (terminal) error, got %v", err)
+	}
+}
+
+func TestHandleIngestSignalTaskMissingSourceIsTerminalAndStoresNothing(t *testing.T) {
+	s, c := sigServer(t, sigTestSource("present-src", "ad"))
+	p := ingestSignalPayload{Source: "gone-src", Signal: NormalizedSignal{InitiationID: "i-1", Payload: "x"}}
+	err := s.HandleIngestSignalTask(context.Background(), commandbus.Task{UID: "t-2", Payload: p.encode()})
+	if err == nil || !isCoded(err) {
+		t.Fatalf("want a coded (terminal) error, got %v", err)
+	}
+	if n := len(listSignals(t, c)); n != 0 {
+		t.Fatalf("nothing may be stored for a vanished source, got %d", n)
+	}
+}
+
+func TestHandleIngestSignalTaskSourceReadFailureIsRetryable(t *testing.T) {
+	source := sigTestSource("read-src", "ad")
+	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(source).
+		WithInterceptorFuncs(interceptor.Funcs{Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+			return apierrors.NewInternalError(errors.New("apiserver down"))
+		}}).Build()
+	s := &Server{Reader: c, Client: c, Namespace: sigTestNamespace, Signals: testSignals(t, c, sigTestNamespace),
+		Activity: activity.New(16), Bus: memory.Open()}
+	p := ingestSignalPayload{Source: source.Name, Signal: NormalizedSignal{InitiationID: "i-1", Payload: "x"}}
+	err := s.HandleIngestSignalTask(context.Background(), commandbus.Task{UID: "t-3", Payload: p.encode()})
+	if err == nil || isCoded(err) {
+		t.Fatalf("want a plain (retried) error, got %v", err)
+	}
+}
+
+func TestChatChannelNilWhenUnnamedOrUnknown(t *testing.T) {
+	s, _ := sigServer(t, sigTestSource("cc-src", "ad"), chatChannelObj("known", "tg"))
+	ctx := context.Background()
+	if ch := s.chatChannel(ctx, NormalizedSignal{}); ch != nil {
+		t.Fatalf("no channel label must resolve nil, got %v", ch.Name)
+	}
+	if ch := s.chatChannel(ctx, NormalizedSignal{Labels: map[string]string{LabelChatChannel: "nope"}}); ch != nil {
+		t.Fatalf("unknown channel must resolve nil, got %v", ch.Name)
+	}
+	if ch := s.chatChannel(ctx, NormalizedSignal{Labels: map[string]string{LabelChatChannel: "known"}}); ch == nil || ch.Name != "known" {
+		t.Fatalf("known channel must resolve, got %v", ch)
+	}
+}
 
 // drainOneIngestTask claims exactly one task off SignalIngestQueue and runs
 // HandleIngestSignalTask against it DIRECTLY, settling or failing it on the

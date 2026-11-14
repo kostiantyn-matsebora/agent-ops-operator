@@ -614,14 +614,8 @@ func main() {
 		Bus: bus, Queue: httpapi.SignalIngestQueue, Handler: api.HandleIngestSignalTask,
 		Concurrency: commandBusConsumerConcurrency(),
 	})
-	if err != nil {
-		setupLog.Error(err, "in.signal task consumer")
-		os.Exit(1)
-	}
-	if err := mgr.Add(manager.RunnableFunc(signalPool.Run)); err != nil {
-		setupLog.Error(err, "in.signal task consumer")
-		os.Exit(1)
-	}
+	exitOnSetupError("in.signal task consumer", err)
+	exitOnSetupError("in.signal task consumer", mgr.Add(manager.RunnableFunc(signalPool.Run)))
 
 	// The metric set observes the activity log and samples the same in-memory
 	// state GET /status reports, into the registry already serving :9090. The
