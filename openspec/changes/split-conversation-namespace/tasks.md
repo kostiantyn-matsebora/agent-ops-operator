@@ -61,17 +61,17 @@
 
 ## 9. Unit tests
 
-- [ ] 9.1 Envtest runs the reconcilers split, with both namespaces created: a signal-opened conversation's pod and MCP ConfigMap land in Conversations while its wiring is read from Control
-- [ ] 9.2 Envtest: closing releases the pod and ConfigMap in Conversations, and the orphan sweeper deletes an unrecorded pod there
-- [ ] 9.3 Envtest: equal namespaces reproduce today's placement exactly
-- [ ] 9.4 The kube store's conformance suite passes with the pair, Signals in Control and Conversations and ConversationInputs in Conversations
-- [ ] 9.5 The expected-references condition names every reference kind with no Secret read
-- [ ] 9.6 The SignalAdapter reconciler injects `CONVERSATION_NAMESPACE` in both layouts
-- [ ] 9.7 `signals/k8s-events`: mechanism 4 drops an unprefixed claim's event split, is not overridable, and does not apply when the namespaces are equal, and the name-prefix rule drops an `agentops-mcp-conv-` ConfigMap
-- [ ] 9.8 Console: pods from both namespaces reach the Infrastructure view
-- [ ] 9.9 Chart render tests: two manager Roles and no new ClusterRole, runtime accounts, claims and both CronJobs in Conversations, the context-probe label, the floor account in both namespaces bound to nothing, namespace `keep`, the single-namespace render matching today's
-- [ ] 9.10 `TestEveryWiredFlowIsAllowed` and `TestNetworkPolicyIsOptIn` pass in both layouts
-- [ ] 9.11 `go build`, `go vet` and `go test ./...` in every module touched, run against this working copy's tree in the Go container
+- [x] 9.1 Envtest runs the reconcilers split, with both namespaces created: a signal-opened conversation's pod and MCP ConfigMap land in Conversations while its wiring is read from Control
+- [x] 9.2 Envtest: closing releases the pod and ConfigMap in Conversations, and the orphan sweeper deletes an unrecorded pod there
+- [x] 9.3 Envtest: equal namespaces reproduce today's placement exactly
+- [x] 9.4 The kube store's conformance suite passes with the pair, Signals in Control and Conversations and ConversationInputs in Conversations
+- [x] 9.5 The expected-references condition names every reference kind with no Secret read
+- [x] 9.6 The SignalAdapter reconciler injects `CONVERSATION_NAMESPACE` in both layouts
+- [x] 9.7 `signals/k8s-events`: mechanism 4 drops an unprefixed claim's event split, is not overridable, and does not apply when the namespaces are equal, and the name-prefix rule drops an `agentops-mcp-conv-` ConfigMap
+- [x] 9.8 Console: pods from both namespaces reach the Infrastructure view
+- [x] 9.9 Chart render tests: two manager Roles and no new ClusterRole, runtime accounts, claims and both CronJobs in Conversations, the context-probe label, the floor account in both namespaces bound to nothing, namespace `keep`, the single-namespace render matching today's
+- [x] 9.10 `TestEveryWiredFlowIsAllowed` and `TestNetworkPolicyIsOptIn` pass in both layouts
+- [x] 9.11 `go build`, `go vet` and `go test ./...` in every module touched, run against this working copy's tree in the Go container
 
 ## 10. System tests
 

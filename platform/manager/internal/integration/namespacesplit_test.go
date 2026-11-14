@@ -359,6 +359,14 @@ func TestEqualNamespacesReproduceTodaysPlacement(t *testing.T) {
 	if err := k8sClient.Create(ctx, conv); err != nil {
 		t.Fatal(err)
 	}
+	// This conversation's pod lands in the SHARED `ns` every other test in
+	// this package counts capacity against — unlike every other test in this
+	// file, which namespaces its workload into a throwaway createNamespace(t)
+	// namespace nothing else reads. Left behind, a Pending pod here (envtest
+	// runs no kubelet) permanently inflates that count and starves a
+	// cap-sensitive test far away in the same binary (runtimestart_test.go's
+	// cap-1 tests, measured failing from exactly this leak).
+	t.Cleanup(func() { cleanupConversation(t, "equal-ns-conv") })
 	reconcileSplit(t, rc, ns, "equal-ns-conv")
 
 	if !podExistsIn(t, ns, "equal-ns-conv") {
