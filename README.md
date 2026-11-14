@@ -155,13 +155,12 @@ A read-only **k8s-engineer** agent — no chat, no repository, no MCP setup. One
 credential, one flag, no clone:
 
 ```sh
-kubectl create namespace agent-ops
-kubectl create namespace agent-ops-conversations   # global.agentops.conversationNamespace, default shown
+helm install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
+  -n agent-ops --create-namespace --set global.demo.enabled=true
+
+# the chart created agent-ops-conversations, where runtime pods resolve it
 kubectl -n agent-ops-conversations create secret generic agentops-claude \
   --from-literal=oauthToken=$(claude setup-token)
-
-helm install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-  -n agent-ops --set global.demo.enabled=true
 ```
 
 **[Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/)**
