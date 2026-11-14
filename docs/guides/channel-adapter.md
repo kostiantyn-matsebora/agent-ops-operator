@@ -266,7 +266,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-telegram
-    helm.sh/chart: "telegram-0.6.0"
+    helm.sh/chart: "telegram-0.6.1"
 spec:
   image: "ghcr.io/kostiantyn-matsebora/agentops-channel-telegram:0.27.0"
   # Receives forwarded topic updates: the reconciler owns Service
@@ -368,7 +368,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-telegram
-    helm.sh/chart: "telegram-0.6.0"
+    helm.sh/chart: "telegram-0.6.1"
 spec:
   # names the ChannelAdapter serving this surface; that adapter's
   # implementation is what defines and validates `config` below

@@ -715,7 +715,7 @@ global:
         retain: 3
         # The sidecar image. RELEASE-WIDE rather than per runtime: it implements
         # a contract, and the manager reads it once as bootstrap configuration.
-        image: ghcr.io/kostiantyn-matsebora/agentops-context-sync:0.2.5
+        image: ghcr.io/kostiantyn-matsebora/agentops-context-sync:0.2.6
         # Bounds the pod-local live context. In this mode the WHOLE context tree
         # is ephemeral — caches and tool state included — so it must be
         # generous. Empty leaves it unbounded, which is Kubernetes' own default.
@@ -744,7 +744,7 @@ global:
         enabled: true
         # The proxy image. Release-wide like the sidecar above: a contract, not
         # a backend choice.
-        image: ghcr.io/kostiantyn-matsebora/agentops-egress-proxy:0.2.6
+        image: ghcr.io/kostiantyn-matsebora/agentops-egress-proxy:0.2.7
         # The image that installs the redirect. Empty uses the proxy image,
         # which ships both. Point it elsewhere only to keep the privileged image
         # minimal.

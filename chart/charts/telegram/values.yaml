@@ -72,7 +72,7 @@ signalAdapter:
 router:
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-gateway-telegram
-    tag: 0.7.0
+    tag: 0.7.1
   # Where POST /telegram/call/{method} is served. The chart renders the
   # router's Service on this port too, since the reconciler owns no Service
   # for it (it is not an adapter CR).
