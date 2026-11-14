@@ -184,7 +184,7 @@ func (s *Server) publishOne(ctx context.Context, source *agentopsv1alpha1.Signal
 	case err == nil:
 		log.FromContext(ctx).Info("signal stored", "signal", name, "source", source.Name)
 		return nil
-	case in.SignalID != "" && errors.Is(err, state.ErrAlreadyExists):
+	case errors.Is(err, state.ErrAlreadyExists):
 		s.Activity.Emit(activity.Event{
 			Kind:   activity.KindSignalDropped,
 			From:   activity.Node(activity.NodeSignalSource, source.Name),
