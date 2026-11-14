@@ -8,6 +8,8 @@ ACCEPTED, and nothing it decided later:
 | Status | Body |
 |---|---|
 | `202` | `{"invocationId": "<id>", "taskIds": ["<id>"], "queued": <n>, "reason": "<optional>"}` |
+| `400` | `{"error": "<message>"}` — a signal was refused before enqueueing (for example an unknown `severity`), nothing is created |
+| `404` | `{"error": "<message>"}` — the named SignalSource does not exist, nothing is enqueued |
 | `5xx` | `{"error": "<message>"}` — a signal could not be enqueued, so the batch is not acknowledged |
 
 ```json
@@ -117,9 +119,9 @@ Delivery is at-least-once.
 - **WHEN** an adapter posts a signal for a source claimed by a Ready Pipeline binding two channels
 - **THEN** the resulting conversation carries thread bindings for both pipeline channels and uses the pipeline's profile
 
-#### Scenario: Unwired source drops with a reason
+#### Scenario: Unwired source drops, the reason lives on its Signal
 - **WHEN** an adapter posts a signal for a source no Ready Pipeline claims
-- **THEN** the response reports it queued, no conversation is created, and its `Signal` records `Dropped` with reason `unclaimed`
+- **THEN** the response reports it queued with no routing reason, no conversation is created, and its `Signal` records `Dropped` with reason `unclaimed`
 
 #### Scenario: A repeated id lands on its open conversation
 - **WHEN** a signal arrives whose `initiationId` equals an open conversation's `conversationId` for the claiming pipeline, outside the source's cooldown
