@@ -86,6 +86,8 @@
 
 ## 11. Documentation
 
+Ticked ahead of section 10 because the system lanes are dispatched to CI, not run here. Section 10 stays unticked until the pack runs.
+
 ### Reference docs
 
 - [x] 11.1 `docs/concepts.md`: the two namespaces, the placement rule and its table

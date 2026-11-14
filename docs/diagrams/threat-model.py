@@ -167,7 +167,7 @@ def render(p):
         s.append(node(x, 384, 172, t, sub, p))
 
     # The crossings. Each number is a row in the page's threat table.
-    s.append(arrow(610, 148, 610, 164, p))                 # 1 neighbour -> control ns
+    s.append(arrow(610, 148, 610, 156, p))                 # 1 neighbour -> control ns
     s.append(badge(634, 158, 1, p))
     s.append(arrow(380, 272, 404, 272, p, tone="brand"))     # 2 agent -> MCP
     s.append(badge(392, 250, 2, p, tone="brand"))

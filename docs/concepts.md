@@ -938,14 +938,12 @@ the moment it exists.
 - **No component logs message content**, so the pod logs an agent can read carry
   no conversation text.
 
-What an agent gains in the control namespace is pod names and specs
+What an agent gains in the namespace its pod runs in is pod names and specs
 (credentials are `valueFrom` references, not values), Services, events and the
 compiled MCP ConfigMaps.
 
-**In a split release that namespace is conversations, not control.** Every
-runtime pod runs there, so that is where the grant above actually reaches.
-
-The control namespace, where the manager and adapters run, holds none of
+**In a split release that is the conversations namespace.** The control
+namespace, where the manager and adapters run, holds none of
 those objects by default. See
 [Where things run](#where-things-run-the-control-and-conversations-namespaces).
 

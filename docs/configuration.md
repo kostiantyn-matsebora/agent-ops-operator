@@ -21,11 +21,6 @@ The conversations namespace is set once, before install — see
 [Installation](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/#namespaces).
 Switching it later is a migration, not a `helm upgrade`.
 
-| Key | Default | Consequence |
-|---|---|---|
-| `global.agentops.conversationNamespace` | `agent-ops-conversations` | where runtime pods, their claims and their accounts run. The release namespace is the single-namespace layout |
-| `global.agentops.createConversationNamespace` | `true` | `false` means you create it, labeled however you need |
-
 ## Storage
 
 The access mode and storage class are set once, before install — see

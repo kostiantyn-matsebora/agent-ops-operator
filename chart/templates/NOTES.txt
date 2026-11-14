@@ -8,7 +8,8 @@ Conversations (runtime pods, their claims): {{ $convNS }}
 Everything in this release lives in one namespace: {{ .Release.Namespace }}
 (conversationNamespace equals the release namespace — single-namespace layout.)
 {{- end }}
-{{- if .Release.IsUpgrade }}
+{{- /* Only the upgrade that introduces the split: the conversations namespace does not exist yet. */ -}}
+{{- if and .Release.IsUpgrade (include "agentops.namespacesSplit" .) (not (lookup "v1" "Namespace" "" $convNS)) }}
 Upgrading from a release without conversationNamespace? Read the Upgrade
 section of the docs/CHANGELOG.md entry that adds it BEFORE running
 `helm upgrade` — it splits conversation-scoped objects into a second

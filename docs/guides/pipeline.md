@@ -185,6 +185,9 @@ too.
 In a split layout that is not the release namespace. In a single-namespace
 layout the two are the same.
 
+Runtime service accounts a Pipeline names render in the conversations
+namespace too, beside the pods that run as them.
+
 {: .ao-callout}
 > **The claim outlives the route.** It carries no ownerRef on the Pipeline and
 > the manager holds no `delete` verb on claims, so deleting this route never
