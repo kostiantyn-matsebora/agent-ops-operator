@@ -45,11 +45,12 @@
 - [ ] 7.4 `rbac.yaml` and `runtime-rbac.yaml`: the floor account and every `rbac.runtime.serviceAccounts` entry render in Conversations, and every binding subject names them there
 - [ ] 7.5 `pvc.yaml`: every chart claim in Conversations, `resource-policy: keep` kept
 - [ ] 7.6 `housekeeping.yaml`, `context-probe.yaml`: both CronJobs in Conversations
-- [ ] 7.7 `state-read-auth.yaml`: render the generated token into Conversations from the same lookup
-- [ ] 7.8 `deployment.yaml`: pass `CONVERSATION_NAMESPACE` to the manager. `console.yaml`: pass it to the console and add its read-only pods Role in Conversations
-- [ ] 7.9 `chart/charts/kubernetes`: route accounts and their binding subjects in Conversations, every other object in the release namespace
-- [ ] 7.10 Pin the matching manager, console and `signal-k8s-events` image tags, and bump `Chart.yaml` to 20.0.0
-- [ ] 7.11 `NOTES.txt`: print both namespaces and point at the 20.0.0 Upgrade section
+- [ ] 7.7 `context-probe.yaml`: give the CronJob and its pods an agentops `app.kubernetes.io/name`, since `agentops-context-probe` matches no self-exclusion prefix
+- [ ] 7.8 `state-read-auth.yaml`: render the generated token into Conversations from the same lookup
+- [ ] 7.9 `deployment.yaml`: pass `CONVERSATION_NAMESPACE` to the manager. `console.yaml`: pass it to the console and add its read-only pods Role in Conversations
+- [ ] 7.10 `chart/charts/kubernetes`: route accounts and their binding subjects in Conversations, every other object in the release namespace
+- [ ] 7.11 Pin the matching manager, console and `signal-k8s-events` image tags, and bump `Chart.yaml` to 20.0.0
+- [ ] 7.12 `NOTES.txt`: print both namespaces and point at the 20.0.0 Upgrade section
 
 ## 8. Chart: NetworkPolicy peers — deployment-engineer
 
@@ -67,7 +68,7 @@
 - [ ] 9.6 The SignalAdapter reconciler injects `CONVERSATION_NAMESPACE` in both layouts
 - [ ] 9.7 `signals/k8s-events`: mechanism 4 drops an unprefixed claim's event split, is not overridable, and does not apply when the namespaces are equal
 - [ ] 9.8 Console: pods from both namespaces reach the Infrastructure view
-- [ ] 9.9 Chart render tests: two manager Roles and no new ClusterRole, runtime accounts, claims and both CronJobs in Conversations, namespace `keep`, the single-namespace render matching today's
+- [ ] 9.9 Chart render tests: two manager Roles and no new ClusterRole, runtime accounts, claims and both CronJobs in Conversations, the context-probe label, namespace `keep`, the single-namespace render matching today's
 - [ ] 9.10 `TestEveryWiredFlowIsAllowed` and `TestNetworkPolicyIsOptIn` pass in both layouts
 - [ ] 9.11 `go build`, `go vet` and `go test ./...` in every module touched, run against this working copy's tree in the Go container
 

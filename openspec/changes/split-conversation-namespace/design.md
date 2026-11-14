@@ -51,8 +51,9 @@ agent code runs**. This change separates them. These facts constrain how:
 
 ### 1. The placement rule
 
-**An object moves if a runtime pod runs as it, mounts it or resolves it, or
-if it is conversation-scoped state.** Nothing else moves.
+**An object moves if it is a runtime pod or something a runtime pod runs as,
+mounts or resolves, a workload sharing a runtime pod's claims, or
+conversation-scoped state.** Nothing else moves.
 
 | Object | Namespace | Rule |
 |---|---|---|
@@ -127,7 +128,7 @@ reach to a manager that is namespace-bound by design.
 Every reference a runtime pod resolves must exist in the conversations
 namespace:
 
-- `AgentProfile.spec.repo.auth.secretRef` (SSH volume, `GIT_TOKEN`)
+- `AgentProfile.spec.repository.auth.secretRef` (SSH volume, `GIT_TOKEN`)
 - `AgentProfile.spec.env[].valueFrom`
 - the runtime's model credential
 - `MCPConfig` header and env `valueFrom`, raw MCP `configMapRef`/`secretRef`

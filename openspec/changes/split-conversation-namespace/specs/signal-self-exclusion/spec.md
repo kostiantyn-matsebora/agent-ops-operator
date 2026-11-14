@@ -17,7 +17,7 @@ Mechanisms 1, 2 and 4 SHALL NOT be configurable. Mechanism 3 SHALL be overridabl
 
 Mechanism 4 is not overridable because the conversations namespace holds only agent-ops machinery by construction. Many objects there, such as the claim `agentops-context`, carry none of mechanism 2's prefixes.
 
-Every agent-ops workload SHALL carry one of the prefixes mechanism 2 lists.
+Every agent-ops workload SHALL be caught by mechanism 1 or 2, whatever namespace it runs in. Mechanisms 3 and 4 are a second line, never the only one.
 
 A maintenance workload is the case most likely to be forgotten and the worst to forget: it fails on a schedule, so an unexcluded one starts a conversation about agent-ops' own upkeep on every failure.
 

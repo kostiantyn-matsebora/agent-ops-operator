@@ -1,10 +1,14 @@
 ## ADDED Requirements
 
-### Requirement: Objects a runtime pod runs as, mounts or resolves live in the conversations namespace
+### Requirement: Conversation-scoped objects live in the conversations namespace
 A release SHALL resolve two namespaces, a **control namespace** (the release
 namespace) and a **conversations namespace**. An object SHALL live in the
-conversations namespace if and only if a runtime pod runs as it, mounts it or
-resolves it, or it is conversation-scoped state.
+conversations namespace if and only if one of these holds:
+
+- it is a runtime pod, or a runtime pod runs as it, mounts it or resolves it
+- it is a workload mounting a claim a runtime pod mounts, or such a workload
+  resolves it
+- it is conversation-scoped state
 
 The conversations namespace SHALL hold:
 
@@ -80,9 +84,15 @@ conversations namespace.
 
 ### Requirement: The manager's permissions are namespaced in both namespaces
 The chart SHALL grant the manager one namespaced Role per namespace, each with
-only what is used there. The conversations-namespace Role SHALL cover pods,
-configmaps, `conversations`, `conversationinputs` and their status, events, and
-PVC `get`/`list`/`watch`/`create`.
+only what is used there:
+
+- the control-namespace Role SHALL cover every wiring and identity kind,
+  `signals`, adapter Deployments, Services, configmaps, leases and events
+- the conversations-namespace Role SHALL cover pods, configmaps,
+  `conversations`, `conversationinputs` and their status, events, and PVC
+  `get`/`list`/`watch`/`create`
+
+In a single-namespace release both rule sets SHALL render as one Role.
 
 No ClusterRole SHALL be added for the manager. Neither Role SHALL carry a
 `secrets` verb or a PVC `delete`, `update` or `patch`.
