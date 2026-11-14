@@ -96,7 +96,9 @@ only what is used there:
 
 - the control-namespace Role SHALL cover every wiring and identity kind,
   `signals`, adapter Deployments, Services, configmaps, leases, events, and
-  a read (`get`/`list`/`watch`) on pods, which reaches EVERY pod in the control namespace because RBAC cannot scope a verb to the manager's own replicas
+  a read (`get`/`list`/`watch`) on pods
+  - that pod read reaches EVERY pod in the control namespace
+  - RBAC cannot scope a verb to the manager's own replicas
 - the conversations-namespace Role SHALL cover pods, configmaps,
   `conversations`, `conversationinputs` and their status, events, and PVC
   `get`/`list`/`watch`/`create`

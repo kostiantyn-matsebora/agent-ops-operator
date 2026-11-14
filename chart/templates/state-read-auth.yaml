@@ -78,7 +78,9 @@ data:
 # of STATE_READ_TOKEN has to exist there too. One generated value, one
 # lookup, two Secret objects — never a copy job reading a Secret across the
 # boundary this change exists to fence (the manager holds no `secrets` verb
-# in either namespace).
+# in either namespace). No lookup in THIS namespace on purpose: the value is
+# always the one resolved from the control copy above, so a re-render keeps
+# both Secrets equal and a stale or missing copy here is repaired by it.
 apiVersion: v1
 kind: Secret
 metadata:

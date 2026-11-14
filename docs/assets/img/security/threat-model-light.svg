@@ -28,9 +28,9 @@
 <circle cx="634" cy="158" r="11" fill="#6b4bd6"/><text x="634" y="163" fill="#eef1f2" font-size="13" font-weight="700" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">1</text>
 <path d="M380,272 L404,272" stroke="#0d7d76" stroke-width="1.6" fill="none" marker-end="url(#ar-brand)"/>
 <circle cx="392" cy="250" r="11" fill="#0d7d76"/><text x="392" y="255" fill="#eef1f2" font-size="13" font-weight="700" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">2</text>
-<path d="M114,366 L114,380" stroke="#0d7d76" stroke-width="1.6" fill="none" marker-end="url(#ar-brand)"/>
+<path d="M114,370 L114,380" stroke="#0d7d76" stroke-width="1.6" fill="none" marker-end="url(#ar-brand)"/>
 <circle cx="138" cy="369" r="11" fill="#0d7d76"/><text x="138" y="374" fill="#eef1f2" font-size="13" font-weight="700" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">3</text>
-<path d="M292,366 L292,380" stroke="#0d7d76" stroke-width="1.6" fill="none" marker-end="url(#ar-brand)" stroke-dasharray="5 4"/>
+<path d="M292,370 L292,380" stroke="#0d7d76" stroke-width="1.6" fill="none" marker-end="url(#ar-brand)" stroke-dasharray="5 4"/>
 <circle cx="316" cy="369" r="11" fill="#0d7d76"/><text x="316" y="374" fill="#eef1f2" font-size="13" font-weight="700" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">4</text>
 <path d="M470,358 L470,380" stroke="#0d7d76" stroke-width="1.6" fill="none" marker-end="url(#ar-brand)"/>
 <circle cx="494" cy="369" r="11" fill="#0d7d76"/><text x="494" y="374" fill="#eef1f2" font-size="13" font-weight="700" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">5</text>
