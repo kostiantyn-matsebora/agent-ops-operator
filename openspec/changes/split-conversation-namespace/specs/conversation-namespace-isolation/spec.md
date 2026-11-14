@@ -129,7 +129,8 @@ single-namespace layout.
 
 A namespace the chart creates SHALL carry the release labels and
 `helm.sh/resource-policy: keep`. The chart SHALL render its generated
-state-read token into the conversations namespace for housekeeping.
+state-read token into both namespaces from one value: the control namespace
+for the manager, the conversations namespace for housekeeping.
 
 #### Scenario: Default install is split
 - **WHEN** the chart is installed with no namespace values

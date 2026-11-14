@@ -36,8 +36,9 @@ namespace gives the isolation a boundary Kubernetes itself enforces.**
 - **BREAKING, on by default.** Chart major 20.0.0.
   - Every Secret a runtime pod resolves must exist in the conversations
     namespace.
-  - Persistence claims stay behind in the release namespace. The release's
-    upgrade notes give the PV rebind that carries context across.
+  - Claims that exist before the upgrade are left in the release namespace.
+    The release's upgrade notes give the PV rebind that carries context
+    across.
   - Under the kube backend, open `Conversation` CRs in the release namespace
     stop being reconciled.
 

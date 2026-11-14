@@ -18,7 +18,7 @@ namespace.
 
 #### Scenario: Wiring renders in the release namespace
 - **WHEN** the bundle renders in a split release
-- **THEN** its profiles, Pipelines, toolsets, MCP config, SignalSource, SignalAdapter and MCP server are in the release namespace
+- **THEN** its profiles, Pipelines, capabilities, toolsets, MCP config, SignalSource, SignalAdapter, events adapter account and MCP server are in the release namespace
 
 #### Scenario: The MCP server stays reachable under policy
 - **WHEN** the bundle renders split with NetworkPolicies enabled
