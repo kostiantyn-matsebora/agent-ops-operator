@@ -32,7 +32,7 @@ Before replying, `POST /signal/inbound` SHALL, in this order:
 The accept step SHALL NOT answer a chat command, create a `Signal` or make any routing decision.
 
 - A refusal at steps 1 to 3 SHALL enqueue nothing and name its reason.
-- An unwired source is not a refusal. Its signals are accepted, and the consumer records the drop.
+- An unwired source is not a refusal. Its signals are accepted, the consumer stores them unrouted, and routing records the drop.
 - If enqueueing fails for any admitted signal, the reply SHALL be `5xx` with an `error`. The adapter's ordinary re-send repeats the batch.
 
 #### Scenario: A refusal enqueues nothing
@@ -45,7 +45,7 @@ The accept step SHALL NOT answer a chat command, create a `Signal` or make any r
 
 #### Scenario: An unwired source is accepted
 - **WHEN** an adapter posts a signal for a source no Ready Pipeline claims
-- **THEN** the reply is `202` and a task is recorded, and the consumer later records `Dropped` with reason `unclaimed` on the `Signal`
+- **THEN** the reply is `202` and a task is recorded, and the consumer stores a `Signal` with no `status.phase`, and routing later records `Dropped` with reason `unclaimed`
 
 #### Scenario: An enqueue failure is not acknowledged
 - **WHEN** the manager cannot durably enqueue a signal of the batch

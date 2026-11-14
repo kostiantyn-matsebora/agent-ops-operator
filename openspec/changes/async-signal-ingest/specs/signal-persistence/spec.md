@@ -11,7 +11,8 @@ names the consumer's create.
 - A batch of N admitted signals yields N `Signal`s, even when several share
   an `initiationId`.
 - The one exception is a signal whose `signalId` names a `Signal` that
-  already exists, below.
+  already exists. The consumer then creates and changes nothing, records a
+  duplicate activity event and succeeds.
 
 Publication SHALL look up no existing `Signal` and make NO routing decision:
 
@@ -47,7 +48,8 @@ exists once its task has run, and a task that exhausts its attempts is dead
 and visible, never silently lost.
 
 - A re-send of a signal carrying a `signalId` is deduplicated at
-  publication, below.
+  publication. The consumer finds the existing `Signal` by `signalId` and
+  creates nothing.
 - A re-send of a signal without one yields a further `Signal`. The
   consumer makes that safe — by cooldown and by equality reuse.
 - A redelivery of ONE task SHALL NOT yield a second `Signal`.

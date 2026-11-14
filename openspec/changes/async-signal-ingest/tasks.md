@@ -9,7 +9,7 @@
 - [ ] 2.1 Register the `in.signal` consumer pool in `cmd/manager` beside the `conv` pool, sized by the existing consumer concurrency. Verify the pool starts and reports ready only with the bus up.
 - [ ] 2.2 Move `answerCommands` and `publishOne` into the `ingest-signal` handler, so the consumer answers an in-place chat command and creates the `Signal`. Verify a chat `/close` signal is answered once and stores nothing.
 - [ ] 2.3 Make the create idempotent under redelivery: a `signalId` that landed is deduplicated, and a signal without one takes its name from the task id. Verify a redelivered task creates one `Signal`.
-- [ ] 2.4 Declare no new retry values: use the inventory entry already declared for `in.signal` (5 attempts, 1s to 30s with jitter, 1-minute dedup window, 5-minute park cool-off). Verify a handler that always fails goes `dead` and appears in `/state/dead-letters`.
+- [ ] 2.4 Declare no new retry values: use the inventory entry already declared for `in.signal` (5 attempts, 1s to 30s with jitter). Verify a handler that always fails goes `dead` and appears in `/state/dead-letters`.
 - [ ] 2.5 Add the `ingest-signal` verb to the command-bus conformance suite. Verify `go test -tags conformance ./test/conformance/` passes.
 
 ## 3. Unit tests — testing-specialist

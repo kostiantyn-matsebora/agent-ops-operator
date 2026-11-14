@@ -18,7 +18,7 @@ with no producer or consumer. This change gives it both.
 - **`/signal/inbound` accepts, then processes.** The request keeps authentication,
   scope, body shape, the unknown-source refusal, the attribute filters and
   the "signal received" receipt (an unwired source is not refused: the consumer
-  records `Wired=False` on the `Signal`, as `signal-persistence` says today), then enqueues one
+  stores the `Signal` and routing later records `Dropped` with reason `unclaimed`), then enqueues one
   `ingest-signal` task per admitted signal on `in.signal` and replies `202` with
   `{invocationId, taskIds}`, still carrying `queued` and `reason`.
 - **An `in.signal` consumer does the rest**: answering an in-place chat command

@@ -125,7 +125,7 @@ Tests of `answerCommands` and `publishOne` move to the consumer's package. A new
 
 ## Open Questions
 
-1. **`Wired=False` at accept.** Settled: follow `signal-persistence`. An unwired source is accepted with `202`, and the consumer records `Wired=False` on the `Signal`. The accept-step list in `async-operations` stops listing the refusal for a signal when D-7's fold happens.
+1. **`Wired=False` at accept.** Settled: follow `signal-persistence`. An unwired source is accepted with `202`, and the consumer stores the `Signal` with no `status.phase`, and routing later records `Dropped` with reason `unclaimed`. The accept-step list in `async-operations` stops listing the refusal for a signal when D-7's fold happens.
 2. **Fully filtered batch.** Settled: `202` with `queued: 0`, empty `taskIds` and `reason: filtered`.
 3. **Header rename.** The requirement "The inbound response acknowledges storage, never routing" no longer describes storage. The delta keeps the exact header so it MODIFIES cleanly. A rename (RENAMED then MODIFIED) is cleaner and costs one more delta entry.
 4. **Dedup requirement text.** "A re-send of the same message is deduplicated" still says "publication". D-1's delta defines publication as the consumer's create, so no third delta is made. Say so if a reader finds it unclear.
