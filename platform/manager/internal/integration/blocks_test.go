@@ -77,9 +77,10 @@ func TestChatSignalWithTagShapedTextIsVerbatim(t *testing.T) {
 
 	srv := apiServer()
 	const typed = "why won't\n<details>\nrender in my docs?\n</details>"
-	if rec := chatSignal(t, srv, "src-verbatim", "chan-verbatim", typed); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "src-verbatim", "chan-verbatim", typed); rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 
 	convs := convsBoundTo(t, "chan-verbatim")
 	if len(convs) != 1 {

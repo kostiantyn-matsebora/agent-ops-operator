@@ -112,9 +112,10 @@ func TestChatSignalOriginatesWithClaimingPipeline(t *testing.T) {
 	srv := apiServer()
 
 	rec := chatSignal(t, srv, "src-chat", "chan-chat", "check the disk")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsBoundTo(t, "chan-chat")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -144,9 +145,10 @@ func TestUnclaimedChatSourceDropsAndTellsTheUser(t *testing.T) {
 	srv := apiServer()
 
 	rec := chatSignal(t, srv, "src-unwired", "chan-unwired", "anyone there?")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	if n := len(convsBoundTo(t, "chan-unwired")); n != 0 {
 		t.Fatalf("unclaimed source must create no conversation, got %d", n)
 	}
@@ -179,9 +181,10 @@ func TestResolutionIsByClaimNotCreationOrder(t *testing.T) {
 	reconcilePipeline(t, "pipe-newer")
 
 	srv := apiServer()
-	if rec := chatSignal(t, srv, "src-shared", "chan-shared", "who answers?"); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "src-shared", "chan-shared", "who answers?"); rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsBoundTo(t, "chan-shared")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -230,9 +233,10 @@ func TestChatCommandsAnswerWithoutCreatingConversations(t *testing.T) {
 	reconcilePipeline(t, "cmd-pipe")
 	srv := apiServer()
 
-	if rec := chatSignal(t, srv, "src-cmd", "chan-cmd", "/agents"); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "src-cmd", "chan-cmd", "/agents"); rec.Code != 202 {
 		t.Fatalf("/agents: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	if n := len(convsBoundTo(t, "chan-cmd")); n != 0 {
 		t.Fatalf("/agents must create no conversation, got %d", n)
 	}
@@ -247,9 +251,10 @@ func TestChatCommandsAnswerWithoutCreatingConversations(t *testing.T) {
 	}
 
 	// an addressed pipeline still opens a conversation, on the pipeline named
-	if rec := chatSignal(t, srv, "src-cmd", "chan-cmd", "/cmd-pipe check nodes"); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "src-cmd", "chan-cmd", "/cmd-pipe check nodes"); rec.Code != 202 {
 		t.Fatalf("addressed command: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsBoundTo(t, "chan-cmd")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -283,9 +288,10 @@ func TestAddressedCommandStampsOriginReader(t *testing.T) {
 
 	rec := chatSignalWithReader(t, srv, "src-origin-addr", "chan-origin-addr",
 		"/origin-addr-pipe check nodes", "sha256:addressed-reader")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("addressed command: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsBoundTo(t, "chan-origin-addr")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -307,9 +313,10 @@ func TestAddressedCommandWithNoReaderStampsNone(t *testing.T) {
 	srv := apiServer()
 
 	if rec := chatSignal(t, srv, "src-origin-noreader", "chan-origin-noreader",
-		"/origin-noreader-pipe check nodes"); rec.Code != 200 {
+		"/origin-noreader-pipe check nodes"); rec.Code != 202 {
 		t.Fatalf("addressed command: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsBoundTo(t, "chan-origin-noreader")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -331,9 +338,10 @@ func TestMachinePostedTaskStampsNoOriginReader(t *testing.T) {
 	rec := postSignal(t, apiServer().Handler(), testMasterToken, "src-origin-task", []map[string]any{
 		{"initiationId": "task-1", "kind": "task", "payload": "run the thing"},
 	})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	if err := k8sClient.List(context.Background(), &list); err != nil {
 		t.Fatal(err)
@@ -364,9 +372,10 @@ func TestChatConversationIsTitledByTheMessage(t *testing.T) {
 	srv := apiServer()
 
 	if rec := chatSignal(t, srv, "src-title", "chan-title",
-		"  why   is the api pod   crashlooping? "); rec.Code != 200 {
+		"  why   is the api pod   crashlooping? "); rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsBoundTo(t, "chan-title")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -385,9 +394,10 @@ func TestChatConversationIsTitledByTheMessage(t *testing.T) {
 	// verified valid UTF-8: a long multi-byte question must never come back
 	// cut mid-character.
 	long := strings.Repeat("почему ", 40)
-	if rec := chatSignal(t, srv, "src-title", "chan-title", long); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "src-title", "chan-title", long); rec.Code != 202 {
 		t.Fatalf("long chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	after := convsBoundTo(t, "chan-title")
 	if len(after) != 2 {
 		t.Fatalf("want 2 conversations after a second, distinct question, got %d", len(after))
@@ -417,9 +427,10 @@ func TestAlertConversationKeepsTheSourceTitle(t *testing.T) {
 	rec := postSignal(t, apiServer().Handler(), testMasterToken, "src-alerttitle", []map[string]any{
 		{"initiationId": "at-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "disk is full"},
 	})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(context.Background(), &list)
 	found := false
@@ -443,10 +454,11 @@ func TestRepeatedChatTextCreatesTwoConversations(t *testing.T) {
 	srv := apiServer()
 
 	for i := 0; i < 2; i++ {
-		if rec := chatSignal(t, srv, "src-rep", "chan-rep", "same question"); rec.Code != 200 {
+		if rec := chatSignal(t, srv, "src-rep", "chan-rep", "same question"); rec.Code != 202 {
 			t.Fatalf("chat signal %d: %d %s", i, rec.Code, rec.Body.String())
 		}
 	}
+	drainIngestTasks(t)
 	if n := len(convsBoundTo(t, "chan-rep")); n != 2 {
 		t.Fatalf("want 2 conversations (no cooldown, no grouping for chat), got %d", n)
 	}

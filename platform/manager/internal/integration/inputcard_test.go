@@ -94,9 +94,10 @@ func TestAlertConversationPostsItsCard(t *testing.T) {
 		"initiationId": "card-1", "labels": map[string]string{"alertname": "CardAlert", "namespace": "prod"},
 		"payload": "node/1 root filesystem at 97%",
 	}})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := convForProfile(t, "prof-card")
 	if conv == nil {
 		t.Fatal("conversation not created")
@@ -158,9 +159,10 @@ func TestChatSignalIsNotDeliveredToItsOwnSurface(t *testing.T) {
 	reconcilePipeline(t, "nocard-pipe")
 	srv := apiServer()
 
-	if rec := chatSignal(t, srv, "src-nocard", "chan-nocard", "why is api down?"); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "src-nocard", "chan-nocard", "why is api down?"); rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := convForProfile(t, "prof-nocard")
 	if conv == nil {
 		t.Fatal("conversation not created")
@@ -192,9 +194,10 @@ func TestTaskSignalPostsItsCard(t *testing.T) {
 	reconcilePipeline(t, "taskcard-pipe")
 	srv := apiServer()
 
-	if rec := taskSignal(t, srv, "src-taskcard", "tc-1", "roll the api deployment", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "src-taskcard", "tc-1", "roll the api deployment", nil); rec.Code != 202 {
 		t.Fatalf("task signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := convForProfile(t, "prof-taskcard")
 	if conv == nil {
 		t.Fatal("conversation not created")

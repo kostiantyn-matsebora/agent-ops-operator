@@ -95,12 +95,13 @@ func TestTwoPipelinesOneRuntimeTwoVolumes(t *testing.T) {
 	reconcilePipeline(t, "pv-pipe-b")
 	srv := apiServer()
 
-	if rec := taskSignal(t, srv, "pv-src-a", "pv-a-1", "work", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "pv-src-a", "pv-a-1", "work", nil); rec.Code != 202 {
 		t.Fatalf("signal a: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := taskSignal(t, srv, "pv-src-b", "pv-b-1", "work", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "pv-src-b", "pv-b-1", "work", nil); rec.Code != 202 {
 		t.Fatalf("signal b: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 
 	byClaim := map[string]bool{}
 	for _, c := range convsForProfile(t, "pv-prof-two") {
@@ -129,9 +130,10 @@ func TestEditingAPipelineDoesNotMoveARunningConversationsVolume(t *testing.T) {
 	reconcilePipeline(t, "pv-frozen-pipe")
 	srv := apiServer()
 
-	if rec := taskSignal(t, srv, "pv-src-frozen", "pv-frozen-1", "work", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "pv-src-frozen", "pv-frozen-1", "work", nil); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := onlyConv(t, "pv-prof-frozen")
 	if conv.Spec.ContextClaimName != "claim-at-creation" {
 		t.Fatalf("the conversation must snapshot the resolved claim: got %q", conv.Spec.ContextClaimName)
@@ -157,9 +159,10 @@ func TestARouteBindingNothingTakesTheReleaseDefault(t *testing.T) {
 	reconcilePipeline(t, "pv-default-pipe")
 	srv := apiServer()
 
-	if rec := taskSignal(t, srv, "pv-src-default", "pv-default-1", "work", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "pv-src-default", "pv-default-1", "work", nil); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := onlyConv(t, "pv-prof-default")
 	// suite_test.go's fixture release default.
 	if conv.Spec.ContextClaimName != "test-context" {
@@ -257,9 +260,10 @@ func TestAVolumeBindingResolvesToTheCreatedClaim(t *testing.T) {
 	})
 	srv := apiServer()
 
-	if rec := taskSignal(t, srv, "pv-src-derived", "pv-derived-1", "work", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "pv-src-derived", "pv-derived-1", "work", nil); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := onlyConv(t, "pv-prof-derived")
 	want := runtimepod.PipelineClaimName("pv-derived-pipe", runtimepod.VolumeContext)
 	if conv.Spec.ContextClaimName != want {

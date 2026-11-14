@@ -55,9 +55,10 @@ func TestCooldownIsRecordedAndSurvivesARestart(t *testing.T) {
 		"initiationId": "cool-1", "labels": map[string]string{"alertname": "Flapping", "namespace": "prod"},
 		"payload": "first sighting",
 	}})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	if n := countConversations(t, "prof-cool"); n != 1 {
 		t.Fatalf("want one conversation, got %d", n)
 	}
@@ -76,9 +77,10 @@ func TestCooldownIsRecordedAndSurvivesARestart(t *testing.T) {
 	rec = postSignal(t, before.Handler(), testMasterToken, "src-cool", []map[string]any{{
 		"initiationId": "cool-1", "payload": "same alert again",
 	}})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("re-delivery: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	if got := loadSource(t, "src-cool").ResourceVersion; got != recorded {
 		t.Fatalf("a suppressed signal wrote to the source (%s -> %s)", recorded, got)
 	}
@@ -88,9 +90,10 @@ func TestCooldownIsRecordedAndSurvivesARestart(t *testing.T) {
 	rec = postSignal(t, after.Handler(), testMasterToken, "src-cool", []map[string]any{{
 		"initiationId": "cool-1", "payload": "still firing after the restart",
 	}})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("post-restart delivery: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	if n := countConversations(t, "prof-cool"); n != 1 {
 		t.Fatalf("a restart must not re-open a suppressed conversation, got %d", n)
 	}

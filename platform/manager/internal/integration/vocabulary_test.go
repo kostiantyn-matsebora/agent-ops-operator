@@ -85,9 +85,10 @@ func TestOpsPollCarriesTheRevisionOnBothOutcomes(t *testing.T) {
 	mkProfile(t, "vocab-profile")
 	mkPipeline(t, "vocab-pipe", []string{"vocab-src"}, []string{"vocab-chan"}, "vocab-profile")
 	reconcilePipeline(t, "vocab-pipe")
-	if rec := chatSignal(t, srv, "vocab-src", "vocab-chan", "/"+chat.ListCommand); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "vocab-src", "vocab-chan", "/"+chat.ListCommand); rec.Code != 202 {
 		t.Fatalf("listing command: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	code, rev = opsPoll(t, srv)
 	if code != 200 {
 		t.Fatalf("expected a delivered op, got %d", code)
@@ -183,9 +184,10 @@ func TestPreVocabularyAdapterIsUnaffected(t *testing.T) {
 
 	// A conversation still originates from a chat signal, addressed form and
 	// all, with no knowledge of anything added here.
-	if rec := chatSignal(t, srv, "legacy-src", "legacy-chan", "/legacy-pipe check the disk"); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "legacy-src", "legacy-chan", "/legacy-pipe check the disk"); rec.Code != 202 {
 		t.Fatalf("addressed command: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	if n := len(convsBoundTo(t, "legacy-chan")); n != 1 {
 		t.Fatalf("want one conversation, got %d", n)
 	}
@@ -193,9 +195,10 @@ func TestPreVocabularyAdapterIsUnaffected(t *testing.T) {
 	// A command whose whole result is a reply still produces a send op — the
 	// path an older adapter meets most often. Note it asks with the RETIRED
 	// listing name, which such an adapter is the likeliest thing to send.
-	if rec := chatSignal(t, srv, "legacy-src", "legacy-chan", "/"+chat.RetiredListCommand); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "legacy-src", "legacy-chan", "/"+chat.RetiredListCommand); rec.Code != 202 {
 		t.Fatalf("retired listing name: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 
 	assertOpsArriveInParsableShape(t, srv)
 

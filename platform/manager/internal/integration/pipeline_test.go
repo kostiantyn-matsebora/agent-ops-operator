@@ -217,9 +217,10 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	srv := apiServer()
 	// chat originating on channel A → conversation bound to BOTH channels
 	rec := chatSignal(t, srv, "mc-src", "mc-a", "/mc-pipe mirror me")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := findConversationBoundToBoth(t, ctx, "mc-a", "mc-b")
 	defer cleanupConversation(t, conv.Name)
 
@@ -423,9 +424,10 @@ func TestSignalRoutingBindsPipelineFirst(t *testing.T) {
 	rec := postSignal(t, h, testMasterToken, "sp-src", []map[string]any{{
 		"initiationId": "sp-1", "labels": map[string]string{"alertname": "PipeAlert"}, "payload": "boom",
 	}})
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
+	if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	var conv *agentopsv1alpha1.Conversation
@@ -503,9 +505,10 @@ func TestSingleChannelResultIsDeliveredByTheOperator(t *testing.T) {
 	srv := apiServer()
 
 	rec := chatSignal(t, srv, "sc-src", "sc-chan", "/sc-pipe single surface")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	var conv *agentopsv1alpha1.Conversation

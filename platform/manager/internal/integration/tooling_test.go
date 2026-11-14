@@ -257,9 +257,10 @@ func matAssertSignalConversationMaterializesTooling(t *testing.T, ctx context.Co
 	rec := postSignal(t, srv.Handler(), testMasterToken, "mat-src", []map[string]any{{
 		"initiationId": "mat-1", "labels": map[string]string{"alertname": "MatAlert"}, "payload": "boom",
 	}})
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
+	if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	var conv *agentopsv1alpha1.Conversation
@@ -289,9 +290,10 @@ func matAssertTaskConversationInheritsClaimingPipelineTooling(t *testing.T, ctx 
 	rec := postSignal(t, srv.Handler(), testMasterToken, "mat-src", []map[string]any{{
 		"initiationId": "mat-task-1", "kind": "task", "payload": "addressed",
 	}})
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
+	if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("task signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	var taskConv *agentopsv1alpha1.Conversation
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
@@ -366,9 +368,10 @@ func TestToolsModeRoundTripsFromPipelineToWorkUnit(t *testing.T) {
 	rec := postSignal(t, apiServer().Handler(), testMasterToken, "mode-src", []map[string]any{{
 		"initiationId": "mode-1", "labels": map[string]string{"alertname": "ModeAlert"}, "payload": "boom",
 	}})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	var conv *agentopsv1alpha1.Conversation

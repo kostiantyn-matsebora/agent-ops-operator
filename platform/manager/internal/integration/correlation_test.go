@@ -28,9 +28,10 @@ func TestOpenConversationWithMatchingConversationIDGetsRecurrence(t *testing.T) 
 	h1 := apiServer().Handler()
 	if rec := postSignal(t, h1, testMasterToken, "src-corr-open", []map[string]any{
 		{"initiationId": "corr-open-1", "payload": "first"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("first signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsFromPipeline(t, "corr-open-pipe")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -54,9 +55,10 @@ func TestOpenConversationWithMatchingConversationIDGetsRecurrence(t *testing.T) 
 	h2 := apiServer().Handler()
 	if rec := postSignal(t, h2, testMasterToken, "src-corr-open", []map[string]any{
 		{"initiationId": "corr-open-1", "payload": "second"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("repeat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 
 	after := convsFromPipeline(t, "corr-open-pipe")
 	if len(after) != 1 {
@@ -78,9 +80,10 @@ func TestFreshInitiationIDOpensANewConversation(t *testing.T) {
 	h := apiServer().Handler()
 	if rec := postSignal(t, h, testMasterToken, "src-corr-fresh", []map[string]any{
 		{"initiationId": "corr-fresh-1", "payload": "hello"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsFromPipeline(t, "corr-fresh-pipe")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -104,10 +107,11 @@ func TestDistinctInitiationIDsNeverMerge(t *testing.T) {
 	for _, id := range []string{"corr-distinct-a", "corr-distinct-b"} {
 		if rec := postSignal(t, h, testMasterToken, "src-corr-distinct", []map[string]any{
 			{"initiationId": id, "labels": labels, "payload": "firing"},
-		}); rec.Code != 200 {
+		}); rec.Code != 202 {
 			t.Fatalf("signal %s: %d %s", id, rec.Code, rec.Body.String())
 		}
 	}
+	drainIngestTasks(t)
 	convs := convsFromPipeline(t, "corr-distinct-pipe")
 	if len(convs) != 2 {
 		t.Fatalf("two distinct initiationIds sharing every label must never merge, want 2 conversations, got %d", len(convs))
@@ -137,9 +141,10 @@ func TestClosedConversationExcludedFromEqualityRouting(t *testing.T) {
 	h1 := apiServer().Handler()
 	if rec := postSignal(t, h1, testMasterToken, "src-corr-closed", []map[string]any{
 		{"initiationId": "corr-closed-1", "payload": "first"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("first signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	first := convsFromPipeline(t, "corr-closed-pipe")
 	if len(first) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(first))
@@ -157,9 +162,10 @@ func TestClosedConversationExcludedFromEqualityRouting(t *testing.T) {
 	h2 := apiServer().Handler()
 	if rec := postSignal(t, h2, testMasterToken, "src-corr-closed", []map[string]any{
 		{"initiationId": "corr-closed-1", "payload": "second"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("repeat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	all := convsFromPipeline(t, "corr-closed-pipe")
 	if len(all) != 2 {
 		t.Fatalf("a signal matching a CLOSED conversation's id must open a new one, got %d", len(all))

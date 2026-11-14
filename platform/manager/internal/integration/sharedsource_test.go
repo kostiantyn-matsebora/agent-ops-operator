@@ -51,15 +51,16 @@ func TestSharedAlertSourceFansOutToEveryPipeline(t *testing.T) {
 	rec := postSignal(t, h, testMasterToken, "src-fan", []map[string]any{
 		{"initiationId": "fan-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "disk is full"},
 	})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
 	var out map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	// one SIGNAL stored; the fan-out onto two CONVERSATIONS is the consumer's
+	// one SIGNAL accepted; the fan-out onto two CONVERSATIONS is the consumer's
 	if out["queued"] != float64(1) {
 		t.Fatalf("want queued 1, got %v", out)
 	}
+	drainIngestTasks(t)
 
 	a, b := convsFromPipeline(t, "fan-a"), convsFromPipeline(t, "fan-b")
 	if len(a) != 1 || len(b) != 1 {
@@ -85,9 +86,10 @@ func TestSharedAlertSourceFansOutToEveryPipeline(t *testing.T) {
 	// a re-delivery inside the window reaches NEITHER pipeline
 	if rec := postSignal(t, h, testMasterToken, "src-fan", []map[string]any{
 		{"initiationId": "fan-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "still full"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("re-delivery: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	if n := len(convsFromPipeline(t, "fan-a")) + len(convsFromPipeline(t, "fan-b")); n != 2 {
 		t.Fatalf("a suppressed initiationId must open nothing new, got %d conversation(s)", n)
 	}
@@ -111,9 +113,10 @@ func TestFannedOutConversationsNeverMerge(t *testing.T) {
 
 	if rec := postSignal(t, h, testMasterToken, "src-merge", []map[string]any{
 		{"initiationId": "merge-1", "labels": map[string]string{"alertname": "Flapping"}, "payload": "first"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 
 	a, b := convsFromPipeline(t, "merge-a"), convsFromPipeline(t, "merge-b")
 	if len(a) != 1 || len(b) != 1 {
@@ -146,9 +149,10 @@ func TestFannedOutConversationsNeverMerge(t *testing.T) {
 	h2 := apiServer().Handler()
 	if rec := postSignal(t, h2, testMasterToken, "src-merge", []map[string]any{
 		{"initiationId": "merge-1", "labels": map[string]string{"alertname": "Flapping"}, "payload": "second"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("second delivery: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var afterA, afterB agentopsv1alpha1.Conversation
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: a[0].Name}, &afterA); err != nil {
 		t.Fatal(err)
@@ -182,9 +186,10 @@ func TestLegacyConversationIsNeverMatchedByEqualityRouting(t *testing.T) {
 
 	if rec := postSignal(t, h, testMasterToken, "src-legacy", []map[string]any{
 		{"initiationId": "leg-1", "labels": map[string]string{"alertname": "Legacy"}, "payload": "first"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsFromPipeline(t, "legacy-a")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -208,9 +213,10 @@ func TestLegacyConversationIsNeverMatchedByEqualityRouting(t *testing.T) {
 	h2 := apiServer().Handler()
 	if rec := postSignal(t, h2, testMasterToken, "src-legacy", []map[string]any{
 		{"initiationId": "leg-1", "labels": map[string]string{"alertname": "Legacy"}, "payload": "second"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("second signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var afterLegacy agentopsv1alpha1.Conversation
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: legacy.Name}, &afterLegacy); err != nil {
 		t.Fatal(err)
@@ -238,9 +244,10 @@ func TestAttributionIsExactForIdenticallyWiredPipelines(t *testing.T) {
 
 	if rec := postSignal(t, h, testMasterToken, "src-twin", []map[string]any{
 		{"initiationId": "twin-1", "labels": map[string]string{"alertname": "Twin"}, "payload": "x"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	for _, name := range []string{"twin-a", "twin-b"} {
 		convs := convsFromPipeline(t, name)
 		if len(convs) != 1 {
@@ -267,9 +274,10 @@ func TestAmbiguousBareChatMessageIsRefusedWithTheChoices(t *testing.T) {
 	srv := apiServer()
 
 	rec := chatSignal(t, srv, "src-amb", "chan-amb", "who is on call?")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	if n := len(convsBoundTo(t, "chan-amb")); n != 0 {
 		t.Fatalf("an ambiguous message must create nothing, got %d conversation(s)", n)
 	}
@@ -323,9 +331,10 @@ func TestAgentsListingMatchesWhatTheTypeaheadOffers(t *testing.T) {
 	reconcilePipeline(t, "list-broken")
 	srv := apiServer()
 
-	if rec := chatSignal(t, srv, "src-list", "chan-list", "/agents"); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "src-list", "chan-list", "/agents"); rec.Code != 202 {
 		t.Fatalf("/agents: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("/agents must emit a send op: %d", rec.Code)
@@ -362,9 +371,10 @@ func TestAddressingWorksWithSeveralServers(t *testing.T) {
 		{"addr-b", "prof-addr-b"},
 	} {
 		if rec := chatSignal(t, srv, "src-addr", "chan-addr",
-			"/"+tc.pipeline+" check nodes"); rec.Code != 200 {
+			"/"+tc.pipeline+" check nodes"); rec.Code != 202 {
 			t.Fatalf("addressed to %s: %d %s", tc.pipeline, rec.Code, rec.Body.String())
 		}
+		drainIngestTasks(t)
 		convs := convsFromPipeline(t, tc.pipeline)
 		if len(convs) != 1 {
 			t.Fatalf("%s: want 1 conversation, got %d", tc.pipeline, len(convs))

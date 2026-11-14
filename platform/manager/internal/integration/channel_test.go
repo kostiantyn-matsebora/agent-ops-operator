@@ -70,8 +70,13 @@ func rawAdapterReq(srv *httpapi.Server, method, path string, body any, token str
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	rec := httptest.NewRecorder()
-	// A signal posted is only STORED by the endpoint; the consumer routes it.
-	// No manager runs here, so the leader's consumer pool is stood in for.
+	// A signal posted is only ACCEPTED (202) by the endpoint now
+	// (async-signal-ingest): it is stored later by the in.signal consumer,
+	// and routed after that by the leader's SIGNAL ROUTING consumer. No
+	// manager runs here, so drainIngestTasks (suite_test.go) stands in for
+	// both, once a test calls it — this just records the "before" snapshot
+	// for it to use, exactly as it always recorded one for consumeNewSignals
+	// directly, before storage moved behind a queue.
 	publishing := method == "POST" && path == "/signal/inbound"
 	var before map[string]bool
 	if publishing {
@@ -79,8 +84,8 @@ func rawAdapterReq(srv *httpapi.Server, method, path string, body any, token str
 		before = signalNames()
 	}
 	srv.Handler().ServeHTTP(rec, req)
-	if publishing && rec.Code == 200 {
-		consumeNewSignals(before)
+	if publishing && rec.Code == 202 {
+		pendingSignalRouteBefore = before
 	}
 	return rec
 }
@@ -114,9 +119,10 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 
 	// command naming a known pipeline -> task conversation
 	rec := chatSignal(t, srv, "src-inb", "chan-inb", "/inb-pipe check the nodes")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list)
 	var conv *agentopsv1alpha1.Conversation
@@ -137,9 +143,10 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 
 	// /agents listing comes back as a send op on the adapter queue
 	rec = chatSignal(t, srv, "src-inb", "chan-inb", "/agents")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("agents inbound: %d", rec.Code)
 	}
+	drainIngestTasks(t)
 	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-inb&contract=2&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("expected queued send op: %d", rec.Code)

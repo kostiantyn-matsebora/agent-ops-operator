@@ -1,11 +1,8 @@
 package integration
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -433,14 +430,11 @@ func TestTerminalSignalsExpireOnTheirOwnPhasesTTLInOrder(t *testing.T) {
 func TestAPublishedSignalIsOwnedByItsSignalSource(t *testing.T) {
 	mkSignalSource(t, "own-src", "own-t", "")
 	h := apiServer().Handler()
-	body, _ := json.Marshal(map[string]any{"source": "own-src", "signals": []map[string]any{{"initiationId": "own-1", "payload": "x"}}})
-	req := httptest.NewRequest("POST", "/signal/inbound", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+testMasterToken)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != 200 {
+	rec := postSignal(t, h, testMasterToken, "own-src", []map[string]any{{"initiationId": "own-1", "payload": "x"}})
+	if rec.Code != 202 {
 		t.Fatalf("publish: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	sig := onlySignalFor(t, "own-1")
 	var src agentopsv1alpha1.SignalSource
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: "own-src"}, &src); err != nil {

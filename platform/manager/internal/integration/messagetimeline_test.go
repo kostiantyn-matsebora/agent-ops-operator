@@ -181,9 +181,10 @@ func TestDeliveryIsDecidedPerSurfaceNotPerTransport(t *testing.T) {
 	reconcilePipeline(t, "twosurf-pipe")
 	srv := apiServer()
 
-	if rec := chatSignal(t, srv, "src-twosurf", "surf-one", "anyone home?"); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "src-twosurf", "surf-one", "anyone home?"); rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := convForProfile(t, "prof-twosurf")
 	if conv == nil {
 		t.Fatal("conversation not created")
@@ -224,9 +225,10 @@ func TestAlertReachesEveryChannel(t *testing.T) {
 		"initiationId": "allchan-1", "labels": map[string]string{"alertname": "NobodyReadsMe"},
 		"payload": "disk at 99%",
 	}})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := convForProfile(t, "prof-allchan")
 	if conv == nil {
 		t.Fatal("conversation not created")
@@ -266,9 +268,10 @@ func TestSurfaceThatDoesNotEchoReceivesItsOwnUsersMessages(t *testing.T) {
 	reconcilePipeline(t, "viewer-pipe")
 	srv := apiServer()
 
-	if rec := chatSignal(t, srv, "src-viewer", "viewer-chan", "start here"); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "src-viewer", "viewer-chan", "start here"); rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := convForProfile(t, "prof-viewer")
 	if conv == nil {
 		t.Fatal("conversation not created")
