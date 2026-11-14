@@ -66,12 +66,20 @@ import (
 // an MCP ConfigMap under the nats backend, where it carries no owner
 // reference back to a Conversation for mechanism 1 to follow — mechanism 2
 // is the only one of the four that catches it there.
+//
+// agentops-context-probe- (split-conversation-namespace) is the same gap for
+// the context-probe CronJob's pods in a SINGLE-namespace release, where
+// mechanism 4 never applies: the chart gives it an `app.kubernetes.io/name`
+// (mechanism 1), but a Job's pod carries no owner reference to a Conversation
+// for that mechanism to follow, so the name alone must catch it, exactly like
+// housekeeping.
 var ownedNamePrefixes = []string{
 	"agentops-conv-",
 	"agentops-mcp-conv-",
 	"agentops-adapter-",
 	"agentops-signal-",
 	"agentops-housekeeping-",
+	"agentops-context-probe-",
 }
 
 // ownedAppLabels are the `app.kubernetes.io/name` values agent-ops stamps on

@@ -87,6 +87,7 @@ func envBool(key string, fallback bool) bool {
 // LoadConfig reads the environment and reports what is missing rather than
 // starting half-configured.
 func LoadConfig() (*Config, error) {
+	namespace := os.Getenv("POD_NAMESPACE")
 	c := &Config{
 		ManagerURL:         os.Getenv("MANAGER_URL"),
 		AdapterName:        envOr("ADAPTER_NAME", "console"),
@@ -94,8 +95,12 @@ func LoadConfig() (*Config, error) {
 		SignalAdapterToken: os.Getenv("SIGNAL_ADAPTER_TOKEN"),
 		SignalSourceName:   envOr("SIGNAL_SOURCE_NAME", "console"),
 		ListenAddr:         envOr("LISTEN_ADDR", ":8080"),
-		Namespace:          os.Getenv("POD_NAMESPACE"),
-		UIToken:            os.Getenv("UI_TOKEN"),
+		Namespace:          namespace,
+		// CONVERSATION_NAMESPACE (split-conversation-namespace), defaulting
+		// to POD_NAMESPACE — a single-namespace release reads two equal
+		// values, never a branch on whether they differ.
+		ConversationsNamespace: envOr("CONVERSATION_NAMESPACE", namespace),
+		UIToken:                os.Getenv("UI_TOKEN"),
 
 		AuthEnabled:           envBool("AUTH_ENABLED", true),
 		ExternalAuthenticator: os.Getenv("EXTERNAL_AUTHENTICATOR"),

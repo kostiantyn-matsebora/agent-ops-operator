@@ -28,15 +28,15 @@
 
 ## 5. Signal adapters and self-exclusion — backend-developer
 
-- [ ] 5.1 The SignalAdapter reconciler injects `CONVERSATION_NAMESPACE` as a literal value beside `POD_NAMESPACE`. Channel adapters are unchanged
-- [ ] 5.2 `signals/k8s-events/selfexclude.go`: mechanism 4 drops every event in `CONVERSATION_NAMESPACE` when it differs from `POD_NAMESPACE`, unconfigurably, with no object read
-- [ ] 5.3 Add `agentops-mcp-conv-` to the name-prefix rule, so an MCP ConfigMap is excluded under nats, where it carries no owner reference
-- [ ] 5.4 Reconcile the mechanism numbering in `selfexclude.go`'s comments with the spec
+- [x] 5.1 The SignalAdapter reconciler injects `CONVERSATION_NAMESPACE` as a literal value beside `POD_NAMESPACE`. Channel adapters are unchanged
+- [x] 5.2 `signals/k8s-events/selfexclude.go`: mechanism 4 drops every event in `CONVERSATION_NAMESPACE` when it differs from `POD_NAMESPACE`, unconfigurably, with no object read
+- [x] 5.3 Add `agentops-mcp-conv-` to the name-prefix rule, so an MCP ConfigMap is excluded under nats, where it carries no owner reference
+- [x] 5.4 Reconcile the mechanism numbering in `selfexclude.go`'s comments with the spec
 
 ## 6. Console — backend-developer
 
-- [ ] 6.1 `platform/console/config.go`: read `CONVERSATION_NAMESPACE`, defaulting to `POD_NAMESPACE`
-- [ ] 6.2 `platform/console/kube.go`: watch pods in both namespaces. Conversations and Signals stay on `/state/*`
+- [x] 6.1 `platform/console/config.go`: read `CONVERSATION_NAMESPACE`, defaulting to `POD_NAMESPACE`
+- [x] 6.2 `platform/console/kube.go`: watch pods in both namespaces. Conversations and Signals stay on `/state/*`
 
 ## 7. Chart: namespace, placement, RBAC — deployment-engineer
 

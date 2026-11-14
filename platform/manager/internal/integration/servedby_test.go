@@ -256,28 +256,44 @@ func TestSwitchingToServedByRemovesTheOldWorkload(t *testing.T) {
 // The manager's own RBAC must keep granting no serviceaccount delete — the
 // reconciler above depends on not needing it, and widening the grant to tidy an
 // inert object would be the wrong trade.
+//
+// split-conversation-namespace (decision 4): the manager's Role is now TWO —
+// a control Role (which carries the serviceaccounts rule: adapter workload
+// SAs) and a conversations Role (which does not: it has no reason to touch
+// one). Both names contain "agentops-manager" as a substring
+// ("agentops-manager-control" / "-conversations"), so every matching Role
+// must be checked, not just the last one rendered — collecting only the last
+// made this test silently check whichever one happened to render last,
+// passing or failing by accident of render order rather than by what it
+// claims to verify. A single-namespace release still renders ONE merged Role
+// named plain "agentops-manager", carrying the union, covered the same way.
 func TestManagerCannotDeleteServiceAccounts(t *testing.T) {
 	out := helmTemplate(t)
-	var role string
+	var roles []string
 	for _, doc := range splitDocs(out) {
 		if strings.Contains(doc, "\nkind: Role\n") && strings.Contains(doc, "name: agentops-manager") {
-			role = stripComments(doc)
+			roles = append(roles, stripComments(doc))
 		}
 	}
-	if role == "" {
+	if len(roles) == 0 {
 		t.Fatal("manager Role not rendered")
 	}
-	lines := strings.Split(role, "\n")
-	for i, line := range lines {
-		if !strings.Contains(line, `resources: ["serviceaccounts"]`) {
-			continue
+	found := false
+	for _, role := range roles {
+		lines := strings.Split(role, "\n")
+		for i, line := range lines {
+			if !strings.Contains(line, `resources: ["serviceaccounts"]`) {
+				continue
+			}
+			found = true
+			if i+1 < len(lines) && strings.Contains(lines[i+1], "delete") {
+				t.Fatalf("the manager must not be granted serviceaccount delete:\n%s", lines[i+1])
+			}
 		}
-		if i+1 < len(lines) && strings.Contains(lines[i+1], "delete") {
-			t.Fatalf("the manager must not be granted serviceaccount delete:\n%s", lines[i+1])
-		}
-		return
 	}
-	t.Fatalf("no serviceaccounts rule found in the manager Role:\n%s", role)
+	if !found {
+		t.Fatalf("no serviceaccounts rule found in any manager Role:\n%s", strings.Join(roles, "\n---\n"))
+	}
 }
 
 // A dangling servedBy is DIAGNOSABLE: without this the adapter would sit Ready

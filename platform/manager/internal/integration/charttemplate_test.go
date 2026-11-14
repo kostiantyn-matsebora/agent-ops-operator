@@ -925,16 +925,19 @@ func countDocsContaining(rendered, needle string) int {
 
 // assertParentOwnsExactlyOneRuntime renders combo and checks the parent
 // still owns exactly one runtime: the claude bundle's own CR plus the
-// parent's `default` copy of it, one ServiceAccount, and no bundle-named
-// identity anywhere (bindings included).
+// parent's `default` copy of it, one floor ServiceAccount PER NAMESPACE
+// (split-conversation-namespace: "the floor exists on both sides, bound to
+// nothing" — the chart splits by default, so the default render here is two
+// copies, not one; a single-namespace release still collapses to one), and
+// no bundle-named identity anywhere (bindings included).
 func assertParentOwnsExactlyOneRuntime(t *testing.T, combo []string) {
 	t.Helper()
 	out := helmTemplate(t, combo...)
 	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 2 {
 		t.Errorf("want the claude runtime and its default copy, got %d", n)
 	}
-	if sas := countDocsContaining(out, "kind: ServiceAccount\nmetadata:\n  name: agentops-runtime\n"); sas != 1 {
-		t.Errorf("want exactly 1 runtime ServiceAccount, got %d", sas)
+	if sas := countDocsContaining(out, "kind: ServiceAccount\nmetadata:\n  name: agentops-runtime\n"); sas != 2 {
+		t.Errorf("want the floor ServiceAccount in both namespaces (2), got %d", sas)
 	}
 	if strings.Contains(out, "agentops-runtime-k8s") {
 		t.Error("the bundle-named runtime ServiceAccount must not render")

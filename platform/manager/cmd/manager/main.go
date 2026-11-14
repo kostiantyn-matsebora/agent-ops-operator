@@ -322,7 +322,8 @@ func main() {
 		ManagerURL:  controlURL,
 		MasterToken: os.Getenv("ADAPTER_TOKEN"),
 		// The identity an adapter naming none runs as. The CHART owns the name.
-		FloorServiceAccount: os.Getenv(controller.FloorServiceAccountEnv),
+		FloorServiceAccount:   os.Getenv(controller.FloorServiceAccountEnv),
+		ConversationNamespace: namespaces.Conversations,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "channeladapter controller")
 		os.Exit(1)

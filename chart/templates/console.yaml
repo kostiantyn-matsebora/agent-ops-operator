@@ -254,11 +254,6 @@ spec:
         description: >-
           Optional Prometheus/VictoriaMetrics query endpoint for windows beyond
           the manager's in-memory activity buffer.
-      conversationNamespace:
-        type: string
-        description: >-
-          The namespace runtime pods run in, for the Infrastructure view's pod
-          watch. Defaults to this pod's own namespace outside a split release.
   credentialKeys:
     # documentation only — the manager never reads Secrets
     - key: uiToken
@@ -309,13 +304,6 @@ spec:
     {{- with $metricsURL }}
     metricsUrl: {{ . | quote }}
     {{- end }}
-    # split-conversation-namespace (console-deployment): widens the
-    # Infrastructure view's pod watch to the conversations namespace too,
-    # where runtime pods now run. A ChannelAdapter CR carries no env, so this
-    # opaque config is how the chart reaches the pod — same reason
-    # authEnabled/metricsUrl travel here. Equal to POD_NAMESPACE outside a
-    # split release.
-    conversationNamespace: {{ include "agentops.conversationNamespace" . | quote }}
 ---
 # The ORIGINATION identity. Externally served: no image, no workload — the
 # ChannelAdapter above already holds the process, and this CR exists to give it
