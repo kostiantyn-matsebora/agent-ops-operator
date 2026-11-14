@@ -28,7 +28,7 @@ a manual step per claim you want to keep.
   adapter, beside `POD_NAMESPACE`.
 - A second manager Role, in the conversations namespace: pods, `conversations`
   and `conversationinputs` and their status, events, PVC
-  `get`/`list`/`watch`/`create` — never `delete`. No ClusterRole is added.
+  `get`/`list`/`watch`/`create` — never `delete`, `update` or `patch`. No ClusterRole is added.
   Single-namespace installs still render one merged Role, identical in
   substance to today's. The control Role keeps a read on pods, for the
   manager's own replicas.

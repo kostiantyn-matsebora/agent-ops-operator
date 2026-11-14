@@ -98,6 +98,9 @@ only what is used there:
   `signals`, adapter Deployments, Services, configmaps, leases, events, and
   a read (`get`/`list`/`watch`) on pods
   - that pod read reaches EVERY pod in the control namespace
+  - the manager reads it to resolve the Lease holder to a pod IP for the
+    leader proxy, and to refuse the state store's one-time import beside an
+    older replica
   - RBAC cannot scope a verb to the manager's own replicas
 - the conversations-namespace Role SHALL cover pods, configmaps,
   `conversations`, `conversationinputs` and their status, events, and PVC

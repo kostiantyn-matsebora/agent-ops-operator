@@ -50,7 +50,7 @@
 - [x] 7.8 `state-read-auth.yaml`: render the generated token into Conversations from the same lookup
 - [x] 7.9 `deployment.yaml`: pass `CONVERSATION_NAMESPACE` to the manager. `console.yaml`: pass it to the console and add its read-only pods Role in Conversations
 - [x] 7.10 `chart/charts/kubernetes`: route accounts and their binding subjects in Conversations, every other object in the release namespace
-- [x] 7.11 Bump `Chart.yaml` to 20.0.0
+- [x] 7.11 `Chart.yaml` stays at 19.0.1 here, the bump to 20.0.0 is deferred to release time with the image pins (7.11a), when `require-release-docs.sh` checks that Chart.yaml, changelog and docs agree
 - [x] 7.11a Image-tag pin deferred to release time, stated reason: this change's own CI has not yet published new manager, console and `signal-k8s-events` tags (still 0.62.0, 0.41.0, 0.6.0). `require-release-docs.sh` refuses the chart tag push unless `Chart.yaml`, changelog and docs agree, so the release re-checks the pin
 - [x] 7.12 `NOTES.txt`: print both namespaces and point at the 20.0.0 Upgrade section
 
