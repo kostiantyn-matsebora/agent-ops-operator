@@ -44,11 +44,14 @@ The success status moves from `200` to `202`, and `queued` moves from
 "stored" to "accepted". The two new fields are additive:
 
 - no shipped adapter's obligation reads the status value, `conversations` or
-  a routing `reason`, so none stops conforming — by the page's own rule that
+  a routing `reason`, and none checks for an exact `200` (verified over
+  `signals/*`), so none stops conforming — by the page's own rule that
   is not MAJOR
 - the new status, fields and the any-`2xx` rule are the added parts, so the
   version SHALL move to `2.4.0` (MINOR), its changelog recording the status
   change
+- every shipped adapter's claimed version moves to `2.4.0` in the same
+  change, per "Shipped signal adapters claim a specification version"
 - the conformance walk is owed all the same, per "A specification change
   carries conformance"
 

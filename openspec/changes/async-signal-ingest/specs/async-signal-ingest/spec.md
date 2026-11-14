@@ -98,6 +98,7 @@ The `in.signal` consumer SHALL answer a chat signal that is an in-place command 
 - The reply SHALL go to the surface the signal's `reader` and chat labels name, exactly as a synchronous answer did.
 - A chat signal naming an unknown channel SHALL succeed with nothing stored and nothing sent, as before.
 - A failure to answer is a task failure, so the bus retries it.
+- The answer is the task's last step, so a task fails only when the answer did not go out. A task already settled as succeeded is never claimed again.
 
 #### Scenario: A listing command is answered by the consumer
 - **WHEN** a chat signal whose payload is the listing command is accepted
@@ -117,7 +118,7 @@ For every other signal, the consumer SHALL create exactly one `Signal` as `signa
 
 - A signal carrying a `signalId` that already names a `Signal` SHALL be deduplicated: nothing is created or changed, a duplicate activity event is recorded and the task succeeds.
 - A redelivered task SHALL NOT create a second `Signal`, whether its first attempt failed before or after the create.
-- A signal without a `signalId` that is redelivered after its create succeeded SHALL be recognised by the task, never stored twice.
+- A signal without a `signalId` takes its `Signal` name from the task id. A redelivery recomputes the same name, finds it exists and succeeds, so it is never stored twice.
 
 #### Scenario: An accepted signal becomes a Signal
 - **WHEN** an `ingest-signal` task for an admitted machine signal runs
