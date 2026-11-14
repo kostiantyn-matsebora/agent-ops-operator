@@ -63,7 +63,7 @@ The success status moves from `200` to `202`, and `queued` moves from
 - **THEN** the response is `202` with `queued: 2`, two `taskIds`, no
   `conversations` and no `reason`
 
-#### Scenario: A storage failure is not acknowledged
+#### Scenario: An enqueue failure is not acknowledged
 
 - **WHEN** the manager cannot enqueue a signal of the batch
 - **THEN** the response is `5xx` with an `error`, and a re-send of the
