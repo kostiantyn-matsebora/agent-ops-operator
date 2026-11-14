@@ -61,7 +61,7 @@ name the reason. `close`, `exit` and `reset-context` SHALL remain allowed.
 
 ### Requirement: A member takes its retention from its root
 A member of a coordination SHALL NOT be saved or unsaved on its own: the verbs SHALL
-answer `409`. A member SHALL be treated as Saved for retention while its uncaused
+answer `409` and SHALL name the reason. A member SHALL be treated as Saved for retention while its uncaused
 root is Saved.
 
 #### Scenario: Saving a root protects its members

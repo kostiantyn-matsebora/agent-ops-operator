@@ -19,9 +19,8 @@ unread/read, save/unsave, reopen, exit runtime, close or delete ever apply to it
 Its menu SHALL offer only open in a new tab, copy link and open the incident.
 
 A Saved conversation SHALL carry a visible mark on its row and its thread header,
-and the list SHALL offer a filter that shows only Saved conversations. Save,
-unsave and the filter SHALL be absent where writes are disabled, except the filter,
-which is a read.
+and the list SHALL offer a filter that shows only Saved conversations. Save and
+unsave SHALL be absent where writes are disabled. The filter SHALL remain, being a read.
 
 #### Scenario: A closed row offers reopen and delete
 - **WHEN** the operator opens the menu on a closed conversation that is not saved

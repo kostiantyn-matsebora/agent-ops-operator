@@ -39,9 +39,10 @@ matters". Operators need to mark a conversation as kept.
   `chart/crds/`), `internal/httpapi` (two verbs), `internal/chat` (two commands),
   `internal/controller` (autoclose/autodelete guard), `internal/state` (record
   field, every backend), `platform/console` (menu, mark, filter).
-- Reference docs: `docs/concepts.md` (the field), `docs/contracts.md` (the two
-  endpoints and the accept table), `docs/console.md`, `docs/CHANGELOG.md`;
-  regenerate via `docs-generate.py`.
+- Reference docs: `docs/concepts.md` (the field), `docs/crds/conversation.md` (the
+  field's spec page), `docs/contracts.md` (the two endpoints and the accept
+  table), `docs/contracts/channel-adapter.md` (the two verbs an adapter may call),
+  `docs/console.md` and `docs/CHANGELOG.md`. Regenerate via `docs-generate.py`.
 - Adopter site: `docs/console-guide.md` (keeping a conversation), the
   housekeeping/retention page under `docs/guides/` and `docs/configuration.md`
   where the autoclose and autodelete values are described; re-run `screenshots`

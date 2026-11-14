@@ -61,6 +61,6 @@ the manager verb. Filter is client-side over the list the console already holds.
 
 ## Migration Plan
 
-Additive optional status field; existing conversations are unsaved. Regenerate and
+Additive optional status field. Existing conversations are unsaved. Regenerate and
 apply CRDs on install (`gotchas.md`). Rollback: older managers ignore the field, so
 saved conversations become reclaimable again.

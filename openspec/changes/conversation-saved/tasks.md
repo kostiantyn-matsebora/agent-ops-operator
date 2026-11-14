@@ -13,7 +13,7 @@
 
 ## 3. The console — frontend-developer
 
-- [ ] 3.1 Save/Unsave in the row menu, absent for members and read-only. Verify: vitest cases for each menu scenario.
+- [ ] 3.1 Save/Unsave in the row menu, absent for members and read-only. Verify: vitest cases for each menu scenario, including delete absent on a Saved closed row.
 - [ ] 3.2 The Saved mark on row and thread header, and the Saved filter. Verify: vitest cases, then a Playwright screenshot of the working tree read as a PNG (`visual-check.md`).
 
 ## 4. Unit tests — testing-specialist
@@ -28,7 +28,7 @@
 ## 6. Documentation — last
 
 ### Reference docs
-- [ ] 6.1 `docs/concepts.md` (`savedAt`), `docs/contracts.md` (the two endpoints, the accept table), `docs/console.md`, `docs/CHANGELOG.md`. Verify: each names the field and verbs.
+- [ ] 6.1 `docs/concepts.md` (`savedAt`), `docs/crds/conversation.md`, `docs/contracts/channel-adapter.md`, `docs/contracts.md` (the two endpoints, the accept table), `docs/console.md`, `docs/CHANGELOG.md`. Verify: each names the field and verbs.
 - [ ] 6.2 Run `python3 .github/scripts/docs-generate.py`. Verify: `--check` passes.
 
 ### Adopter site
