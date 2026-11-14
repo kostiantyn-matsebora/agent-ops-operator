@@ -280,20 +280,31 @@ func TestManagerCannotDeleteServiceAccounts(t *testing.T) {
 	}
 	found := false
 	for _, role := range roles {
-		lines := strings.Split(role, "\n")
-		for i, line := range lines {
-			if !strings.Contains(line, `resources: ["serviceaccounts"]`) {
-				continue
-			}
+		if assertServiceAccountRulesNoDelete(t, role) {
 			found = true
-			if i+1 < len(lines) && strings.Contains(lines[i+1], "delete") {
-				t.Fatalf("the manager must not be granted serviceaccount delete:\n%s", lines[i+1])
-			}
 		}
 	}
 	if !found {
 		t.Fatalf("no serviceaccounts rule found in any manager Role:\n%s", strings.Join(roles, "\n---\n"))
 	}
+}
+
+// assertServiceAccountRulesNoDelete fails on a serviceaccounts rule granting
+// delete and reports whether the role held any such rule.
+func assertServiceAccountRulesNoDelete(t *testing.T, role string) bool {
+	t.Helper()
+	found := false
+	lines := strings.Split(role, "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, `resources: ["serviceaccounts"]`) {
+			continue
+		}
+		found = true
+		if i+1 < len(lines) && strings.Contains(lines[i+1], "delete") {
+			t.Fatalf("the manager must not be granted serviceaccount delete:\n%s", lines[i+1])
+		}
+	}
+	return found
 }
 
 // A dangling servedBy is DIAGNOSABLE: without this the adapter would sit Ready

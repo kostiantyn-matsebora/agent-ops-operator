@@ -91,25 +91,12 @@ func TestSplitMigrationFromSingleNamespaceCarriesClaimAndReopens(t *testing.T) {
 		_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
 	})
 	conv = e.WaitRun(t, conv.Name, 1, 4*time.Minute)
-	run := conv.Status.Runs[0]
-	if run.Status != "succeeded" || !strings.Contains(run.Result, "[stub] "+marker) {
-		t.Fatalf("the pre-migration run: %+v", run)
-	}
+	assertRunSucceededWith(t, conv.Status.Runs[0], "the pre-migration run", marker)
 	handle := conv.Status.RuntimeContextID
 	if handle == "" {
 		t.Fatalf("the runtime's handle must be recorded before it can be proven to survive the migration")
 	}
-
-	// Its claim is "agentops-context" in the RELEASE namespace right now —
-	// the single-namespace layout's own placement.
-	var oldPVC corev1.PersistentVolumeClaim
-	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: "agentops-context"}, &oldPVC); err != nil {
-		t.Fatalf("the pre-migration context claim must exist in the release namespace: %v", err)
-	}
-	if oldPVC.Spec.VolumeName == "" {
-		t.Fatalf("the claim must already be bound (first-consumer binding already happened once a run succeeded): %+v", oldPVC)
-	}
-	pvName := oldPVC.Spec.VolumeName
+	pvName := boundContextPVName(t, ctx, e)
 
 	// Migration Plan step 1: close every open conversation, so no pod or
 	// claim is in use.
@@ -127,7 +114,8 @@ func TestSplitMigrationFromSingleNamespaceCarriesClaimAndReopens(t *testing.T) {
 		_ = e.K.Delete(context.Background(), &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Namespace: ConversationsNamespace, Name: migratedClaim}})
 		_ = e.K.Delete(context.Background(), &corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: pvName}})
 	})
-	rebindContextPV(t, ctx, e, pvName, Namespace, "agentops-context", ConversationsNamespace, migratedClaim)
+	rebindContextPV(t, ctx, e, pvRebind{pvName: pvName, oldNamespace: Namespace, oldClaim: "agentops-context",
+		newNamespace: ConversationsNamespace, newClaim: migratedClaim})
 
 	// Migration Plan steps 2 (the conversations namespace already exists —
 	// the chart created it before this test ever pinned single-namespace
@@ -156,18 +144,9 @@ func TestSplitMigrationFromSingleNamespaceCarriesClaimAndReopens(t *testing.T) {
 		t.Fatalf("continuing the reopened conversation: %d %s", code, out)
 	}
 	conv = e.WaitRun(t, conv.Name, 2, 4*time.Minute)
-	run = conv.Status.Runs[len(conv.Status.Runs)-1]
-	if run.Status != "succeeded" || !strings.Contains(run.Result, "[stub] "+continueMarker) {
-		t.Fatalf("the post-migration run must continue, not fail for lost context: %+v", run)
-	}
-	if conv.Status.RuntimeContextID != handle {
-		t.Fatalf("the carried claim must carry the SAME handle across the migration: before=%q after=%q", handle, conv.Status.RuntimeContextID)
-	}
-	for _, c := range conv.Status.Conditions {
-		if c.Type == "ContextContinuity" && c.Status == metav1.ConditionFalse {
-			t.Fatalf("a carried claim must never be reported as a context loss: %s %s", c.Reason, c.Message)
-		}
-	}
+	assertRunSucceededWith(t, conv.Status.Runs[len(conv.Status.Runs)-1],
+		"the post-migration run must continue, not fail for lost context", continueMarker)
+	assertContextCarried(t, conv, handle)
 
 	// And the new pod lands in the conversations namespace — the
 	// conversation OPENED under the single-namespace layout, but its NEXT
@@ -183,6 +162,46 @@ func TestSplitMigrationFromSingleNamespaceCarriesClaimAndReopens(t *testing.T) {
 	assertPodMountsClaim(t, &pod, migratedClaim)
 }
 
+func assertRunSucceededWith(t *testing.T, run agentopsv1alpha1.RunStatus, what, marker string) {
+	t.Helper()
+	if run.Status != "succeeded" || !strings.Contains(run.Result, "[stub] "+marker) {
+		t.Fatalf("%s: %+v", what, run)
+	}
+}
+
+func assertContextCarried(t *testing.T, conv *agentopsv1alpha1.Conversation, handle string) {
+	t.Helper()
+	if conv.Status.RuntimeContextID != handle {
+		t.Fatalf("the carried claim must carry the SAME handle across the migration: before=%q after=%q", handle, conv.Status.RuntimeContextID)
+	}
+	for _, c := range conv.Status.Conditions {
+		if c.Type == "ContextContinuity" && c.Status == metav1.ConditionFalse {
+			t.Fatalf("a carried claim must never be reported as a context loss: %s %s", c.Reason, c.Message)
+		}
+	}
+}
+
+// boundContextPVName returns the PV behind the context claim, which sits in
+// the RELEASE namespace under the single-namespace layout.
+func boundContextPVName(t *testing.T, ctx context.Context, e *Env) string {
+	t.Helper()
+	var oldPVC corev1.PersistentVolumeClaim
+	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: "agentops-context"}, &oldPVC); err != nil {
+		t.Fatalf("the pre-migration context claim must exist in the release namespace: %v", err)
+	}
+	if oldPVC.Spec.VolumeName == "" {
+		t.Fatalf("the claim must already be bound (first-consumer binding already happened once a run succeeded): %+v", oldPVC)
+	}
+	return oldPVC.Spec.VolumeName
+}
+
+// pvRebind names the PV and the old and new claim a rebind moves it between.
+type pvRebind struct {
+	pvName                 string
+	oldNamespace, oldClaim string
+	newNamespace, newClaim string
+}
+
 // rebindContextPV performs design.md's Migration Plan step 4 against a REAL
 // PersistentVolume: Retain its reclaim policy, delete the old claim, clear
 // the PV's claimRef so it becomes Available again, then pre-create the new
@@ -191,8 +210,9 @@ func TestSplitMigrationFromSingleNamespaceCarriesClaimAndReopens(t *testing.T) {
 // to it rather than minting a second volume beside it (the exact failure
 // chart/templates/pvc.yaml's own comment names an explicit empty
 // storageClassName exists to avoid).
-func rebindContextPV(t *testing.T, ctx context.Context, e *Env, pvName, oldNamespace, oldClaim, newNamespace, newClaim string) {
+func rebindContextPV(t *testing.T, ctx context.Context, e *Env, r pvRebind) {
 	t.Helper()
+	pvName, oldNamespace, oldClaim, newNamespace, newClaim := r.pvName, r.oldNamespace, r.oldClaim, r.newNamespace, r.newClaim
 
 	var pv corev1.PersistentVolume
 	if err := e.K.Get(ctx, types.NamespacedName{Name: pvName}, &pv); err != nil {

@@ -142,60 +142,10 @@ func TestSplitNetworkPolicyEnforcedRuntimePodAcceptsNoIngress(t *testing.T) {
 
 	var pod corev1.Pod
 	t.Run("every wired flow survives the split with policies enforced", func(t *testing.T) {
-		stamp := fmt.Sprint(time.Now().UnixNano())
-		fp := "e2e-split-netpol-" + stamp
-		e.PostTask(t, SourceTasks, fp, "echo split-netpol "+stamp)
-		conv := e.ConversationFor(t, fp, time.Minute)
-		t.Cleanup(func() {
-			_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
-		})
-		conv = e.WaitRun(t, conv.Name, 1, 4*time.Minute)
-		run := conv.Status.Runs[len(conv.Status.Runs)-1]
-		if run.Status != "succeeded" || !strings.Contains(run.Result, "[stub] split-netpol "+stamp) {
-			t.Fatalf("every wired flow must still pass split with policies enforced: %+v", run)
-		}
-		if conv.Status.RuntimePod == "" {
-			t.Fatalf("no runtime pod recorded on %s", conv.Name)
-		}
-		if err := e.K.Get(ctx, types.NamespacedName{Namespace: ConversationsNamespace, Name: conv.Status.RuntimePod}, &pod); err != nil {
-			t.Fatalf("getting the runtime pod: %v", err)
-		}
-		if pod.Status.PodIP == "" {
-			t.Fatalf("the runtime pod must carry a pod IP once its run has succeeded: %+v", pod.Status)
-		}
+		assertSplitNetpolFlowPasses(t, ctx, e, &pod)
 	})
-
 	t.Run("a runtime pod accepts no ingress", func(t *testing.T) {
-		if pod.Status.PodIP == "" {
-			t.Skip("no runtime pod IP from the prior subtest")
-		}
-		// A runtime pod declares no container port of its own (it only
-		// long-polls the manager) — the one thing inside it with a socket
-		// bound to more than loopback is the egress-proxy sidecar
-		// (chart default global.agentops.runtimeDefaults.egressMediation.
-		// enabled: true, platform/egress-proxy/proxy.go: `net.Listen("tcp",
-		// ":"+LISTEN_PORT)`, default 15001) — mediating the AGENT's own
-		// outbound calls, never an inbound surface, so it is also the one
-		// socket this test can aim an actual TCP connection at to tell a
-		// policy DROP apart from "nothing is listening here anyway".
-		//
-		// Probed from a CONTROL-namespace pod with no rule admitting it —
-		// agentops-nats-0, alpine-based and known to carry busybox wget
-		// (the same double Dump(), cluster.go, and
-		// assertCommandBusNetworkPolicyEnforced, async_system_test.go,
-		// already rely on for exactly this reason).
-		out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "exec", "agentops-nats-0", "--",
-			"wget", "-T", "4", "-qO-", fmt.Sprintf("http://%s:15001/", pod.Status.PodIP))
-		if err == nil {
-			t.Fatalf("a runtime pod must accept NO ingress, got: %s", out)
-		}
-		lower := strings.ToLower(out + err.Error())
-		// A dropped SYN times out, a rejected one is refused — either reads
-		// as the policy having admitted nothing. A reset or an error reading
-		// a reply would mean the connection WAS made.
-		if !strings.Contains(lower, "timed out") && !strings.Contains(lower, "refused") {
-			t.Fatalf("the denial must read as a blocked connection, not some other failure: %v %s", err, out)
-		}
+		assertRuntimePodAcceptsNoIngress(t, ctx, e, &pod)
 	})
 
 	// The manager itself must stay admitted through its own rendered rule —
@@ -203,6 +153,65 @@ func TestSplitNetworkPolicyEnforcedRuntimePodAcceptsNoIngress(t *testing.T) {
 	// a probe from, same as assertCommandBusNetworkPolicyEnforced's own).
 	if err := e.K.WaitDeploymentAvailable(ctx, "agentops-manager", 3*time.Minute); err != nil {
 		t.Fatalf("the manager must stay Available through its own admitted rule: %v", err)
+	}
+}
+
+func assertSplitNetpolFlowPasses(t *testing.T, ctx context.Context, e *Env, pod *corev1.Pod) {
+	t.Helper()
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	fp := "e2e-split-netpol-" + stamp
+	e.PostTask(t, SourceTasks, fp, "echo split-netpol "+stamp)
+	conv := e.ConversationFor(t, fp, time.Minute)
+	t.Cleanup(func() {
+		_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
+	})
+	conv = e.WaitRun(t, conv.Name, 1, 4*time.Minute)
+	run := conv.Status.Runs[len(conv.Status.Runs)-1]
+	if run.Status != "succeeded" || !strings.Contains(run.Result, "[stub] split-netpol "+stamp) {
+		t.Fatalf("every wired flow must still pass split with policies enforced: %+v", run)
+	}
+	if conv.Status.RuntimePod == "" {
+		t.Fatalf("no runtime pod recorded on %s", conv.Name)
+	}
+	if err := e.K.Get(ctx, types.NamespacedName{Namespace: ConversationsNamespace, Name: conv.Status.RuntimePod}, pod); err != nil {
+		t.Fatalf("getting the runtime pod: %v", err)
+	}
+	if pod.Status.PodIP == "" {
+		t.Fatalf("the runtime pod must carry a pod IP once its run has succeeded: %+v", pod.Status)
+	}
+}
+
+func assertRuntimePodAcceptsNoIngress(t *testing.T, ctx context.Context, e *Env, pod *corev1.Pod) {
+	t.Helper()
+	if pod.Status.PodIP == "" {
+		t.Skip("no runtime pod IP from the prior subtest")
+	}
+	// A runtime pod declares no container port of its own (it only
+	// long-polls the manager) — the one thing inside it with a socket
+	// bound to more than loopback is the egress-proxy sidecar
+	// (chart default global.agentops.runtimeDefaults.egressMediation.
+	// enabled: true, platform/egress-proxy/proxy.go: `net.Listen("tcp",
+	// ":"+LISTEN_PORT)`, default 15001) — mediating the AGENT's own
+	// outbound calls, never an inbound surface, so it is also the one
+	// socket this test can aim an actual TCP connection at to tell a
+	// policy DROP apart from "nothing is listening here anyway".
+	//
+	// Probed from a CONTROL-namespace pod with no rule admitting it —
+	// agentops-nats-0, alpine-based and known to carry busybox wget
+	// (the same double Dump(), cluster.go, and
+	// assertCommandBusNetworkPolicyEnforced, async_system_test.go,
+	// already rely on for exactly this reason).
+	out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "exec", "agentops-nats-0", "--",
+		"wget", "-T", "4", "-qO-", fmt.Sprintf("http://%s:15001/", pod.Status.PodIP))
+	if err == nil {
+		t.Fatalf("a runtime pod must accept NO ingress, got: %s", out)
+	}
+	lower := strings.ToLower(out + err.Error())
+	// A dropped SYN times out, a rejected one is refused — either reads
+	// as the policy having admitted nothing. A reset or an error reading
+	// a reply would mean the connection WAS made.
+	if !strings.Contains(lower, "timed out") && !strings.Contains(lower, "refused") {
+		t.Fatalf("the denial must read as a blocked connection, not some other failure: %v %s", err, out)
 	}
 }
 

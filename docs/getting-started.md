@@ -79,9 +79,9 @@ fifteen minutes, most of it the install.
    > [Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }})
    > for what the `Coordinator` adds beyond this.
 
-3. **Wait for the manager.** This also gives the chart time to create the
-   conversations namespace, `agent-ops-conversations`, where the model
-   credential below belongs.
+3. **Wait for the manager.** The chart has already created the conversations
+   namespace, `agent-ops-conversations`, where the model credential below
+   belongs.
 
    ```sh
    kubectl -n agent-ops rollout status deploy/agentops-manager

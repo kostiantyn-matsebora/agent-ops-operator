@@ -56,7 +56,7 @@ until you say otherwise:
 
 **The route's own account runs in the conversations namespace**, beside the
 pod it identifies. The MCP server itself stays in the release namespace, and
-its NetworkPolicy admits the agent's pod across that split.
+its NetworkPolicy, when enabled, admits the agent's pod across that split.
 
 Want the acting route without a server that can act? Set both independently:
 

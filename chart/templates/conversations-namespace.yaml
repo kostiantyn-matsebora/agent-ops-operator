@@ -19,6 +19,9 @@ metadata:
   name: {{ include "agentops.conversationNamespace" . }}
   labels:
     app.kubernetes.io/name: agentops-conversations
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: agent-ops-operator
   annotations:
     helm.sh/resource-policy: keep
 {{- end }}

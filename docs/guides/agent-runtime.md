@@ -336,7 +336,7 @@ anything the release granted.
 **If you write your own account, hold it to the rules the chart's own follow**:
 no verb on `secrets`, no wildcard, no `escalate` or `bind`.
 
-**And nothing scoped to the control namespace** — where the manager, wiring
+**And nothing scoped to the [control namespace]({{ '/concepts/' | relative_url }}#where-things-run-the-control-and-conversations-namespaces)** — where the manager, wiring
 and adapters live, not where this runtime's own pod runs.
 
 **And letting an agent create or exec into a pod grants it every Secret in that

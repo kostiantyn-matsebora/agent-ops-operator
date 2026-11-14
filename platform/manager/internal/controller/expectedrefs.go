@@ -59,17 +59,7 @@ func expectedReferences(profile *agentopsv1alpha1.AgentProfile, runtimeEnv []cor
 		secretSet[profile.Spec.Repository.Auth.SecretRef.Name] = true
 	}
 	for _, envVars := range [][]corev1.EnvVar{profile.Spec.Env, runtimeEnv, mcp.Env} {
-		for _, e := range envVars {
-			if e.ValueFrom == nil {
-				continue
-			}
-			if ref := e.ValueFrom.SecretKeyRef; ref != nil && ref.Name != "" {
-				secretSet[ref.Name] = true
-			}
-			if ref := e.ValueFrom.ConfigMapKeyRef; ref != nil && ref.Name != "" {
-				configMapSet[ref.Name] = true
-			}
-		}
+		collectEnvReferences(envVars, secretSet, configMapSet)
 	}
 	if mcp.RawConfigMap != "" {
 		configMapSet[mcp.RawConfigMap] = true
@@ -83,6 +73,22 @@ func expectedReferences(profile *agentopsv1alpha1.AgentProfile, runtimeEnv []cor
 	secrets = setToSortedSlice(secretSet)
 	configMaps = setToSortedSlice(configMapSet)
 	return secrets, configMaps
+}
+
+// collectEnvReferences adds every Secret and ConfigMap an env list's
+// valueFrom names to the two sets.
+func collectEnvReferences(envVars []corev1.EnvVar, secretSet, configMapSet map[string]bool) {
+	for _, e := range envVars {
+		if e.ValueFrom == nil {
+			continue
+		}
+		if ref := e.ValueFrom.SecretKeyRef; ref != nil && ref.Name != "" {
+			secretSet[ref.Name] = true
+		}
+		if ref := e.ValueFrom.ConfigMapKeyRef; ref != nil && ref.Name != "" {
+			configMapSet[ref.Name] = true
+		}
+	}
 }
 
 func setToSortedSlice(set map[string]bool) []string {

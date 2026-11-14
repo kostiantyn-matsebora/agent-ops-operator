@@ -34,10 +34,13 @@ you gave it. **Treat the agent container as untrusted code with a shell.**
 | **6** agent → pod logs | conversation content readable with `pods/log` | **none** — [residual risk](#residual-risk) |
 | **7** any pod → state or bus server | reads or writes conversation state, or a task, directly, bypassing the manager's own authorization | [state store isolation](#state-store-isolation) / [command bus isolation](#command-bus-isolation) — **on** (credential), **off** (network policy) |
 
-**"Operator ns" above is the control namespace.** A release may resolve a
-second one, conversations, where the runtime pod itself runs — see
-[Concepts](https://kostiantyn-matsebora.github.io/agent-ops-operator/concepts/#where-things-run-the-control-and-conversations-namespaces).
-Every crossing above is the same either way: namespace is deployment
+**"Operator ns" above is the control namespace.**
+
+A release may resolve a second one, conversations, where the runtime pod
+itself runs. See
+[Concepts]({{ '/concepts/#where-things-run-the-control-and-conversations-namespaces' | relative_url }}).
+
+Every crossing above is the same either way. Namespace is deployment
 topology, not a trust boundary of its own.
 
 **Nothing in the cluster is granted by default.** A route naming no identity runs

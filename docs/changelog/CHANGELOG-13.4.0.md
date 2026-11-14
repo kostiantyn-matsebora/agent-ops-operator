@@ -60,7 +60,6 @@ below, each image carries what landed on it since its last tag:
 
 ### Changed
 
-
 - **The `kubernetes` bundle's events `ClusterRole` gains `nodes`
   `list`/`watch`** (cluster-wide RBAC only. A namespaced install has no
   equivalent, since nodes are cluster-scoped — drain awareness is simply off

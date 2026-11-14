@@ -89,6 +89,7 @@ var ownedAppLabels = map[string]bool{
 	"agentops-manager":        true,
 	"agentops-adapter":        true,
 	"agentops-signal-adapter": true,
+	"agentops-context-probe":  true,
 }
 
 // ownLabelPrefix marks any object carrying an agent-ops label key

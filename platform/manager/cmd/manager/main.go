@@ -41,6 +41,10 @@ func init() {
 	utilruntime.Must(agentopsv1alpha1.AddToScheme(scheme))
 }
 
+// inClusterScheme is the scheme of the manager's own Service address, which
+// never leaves the cluster network and terminates no TLS.
+const inClusterScheme = "http"
+
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -302,7 +306,7 @@ func main() {
 	// CONTROL_URL keeps addressing the manager's own FQDN in the CONTROL
 	// namespace always — a runtime pod dials out of the conversations
 	// namespace to reach it, never the reverse.
-	controlURL := env("CONTROL_URL", "http://agentops-manager."+namespaces.Control+".svc.cluster.local:8080")
+	controlURL := env("CONTROL_URL", inClusterScheme+"://agentops-manager."+namespaces.Control+".svc.cluster.local:8080")
 
 	// OpQueue.Run (task 6): the watch-fed Pending/Settled/Stats mirror, plus
 	// one consumer.Pool per Registry-registered in-process channel type —

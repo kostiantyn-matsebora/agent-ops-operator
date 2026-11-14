@@ -343,25 +343,30 @@ func TestSignalAdapterInjectsConversationNamespaceInBothLayouts(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			var deploy appsv1.Deployment
-			if err := k8sClient.Get(context.Background(),
-				types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName(tc.adapter)}, &deploy); err != nil {
-				t.Fatalf("workload not created: %v", err)
-			}
-			if deploy.Namespace != ns {
-				t.Fatalf("the adapter's own Deployment must stay in the control namespace, got %q", deploy.Namespace)
-			}
-			env := map[string]string{}
-			for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
-				env[e.Name] = e.Value
-			}
-			if env["POD_NAMESPACE"] != "" {
-				t.Fatalf("POD_NAMESPACE must come from the downward API, never a literal here: %+v", env)
-			}
-			if env["CONVERSATION_NAMESPACE"] != tc.conversationNS {
-				t.Fatalf("CONVERSATION_NAMESPACE = %q, want %q", env["CONVERSATION_NAMESPACE"], tc.conversationNS)
-			}
+			assertAdapterConversationNamespaceEnv(t, tc.adapter, tc.conversationNS)
 		})
+	}
+}
+
+func assertAdapterConversationNamespaceEnv(t *testing.T, adapter, conversationNS string) {
+	t.Helper()
+	var deploy appsv1.Deployment
+	if err := k8sClient.Get(context.Background(),
+		types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName(adapter)}, &deploy); err != nil {
+		t.Fatalf("workload not created: %v", err)
+	}
+	if deploy.Namespace != ns {
+		t.Fatalf("the adapter's own Deployment must stay in the control namespace, got %q", deploy.Namespace)
+	}
+	env := map[string]string{}
+	for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
+		env[e.Name] = e.Value
+	}
+	if env["POD_NAMESPACE"] != "" {
+		t.Fatalf("POD_NAMESPACE must come from the downward API, never a literal here: %+v", env)
+	}
+	if env["CONVERSATION_NAMESPACE"] != conversationNS {
+		t.Fatalf("CONVERSATION_NAMESPACE = %q, want %q", env["CONVERSATION_NAMESPACE"], conversationNS)
 	}
 }
 
