@@ -74,7 +74,7 @@ printf '{"fixed":["PRRT_a"],"unfixed":[{"threadId":"PRRT_b","reason":"B is expor
 
 land() { : > "$GH_CALLS"; rm -f "$tmp/work/.resolve-threads"
          (cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" \
-            --work-list "$tmp/work.json" --patch "${PATCH:-$tmp/fix.patch}" --report "${REPORT:-$tmp/report.json}" \
+            --work-list "${WORK:-$tmp/work.json}" --patch "${PATCH:-$tmp/fix.patch}" --report "${REPORT:-$tmp/report.json}" \
             ${DROPPED:+--dropped "$DROPPED"} --dispatched-by a-maintainer 2>&1); }
 
 out=$(land); rc=$?
@@ -120,6 +120,23 @@ fresh_repo
 printf '{"fixed":["PRRT_a","PRRT_b"],"unfixed":[]}' > "$tmp/report2.json"
 out=$(REPORT="$tmp/report2.json" land)
 assert_contains "$out" "unaddressed PRRT_b (b.go): reported fixed, but the patch does not touch \`b.go\`"
+assert_equals "PRRT_a" "$(cat "$tmp/work/.resolve-threads")"
+
+# #325: a finding's own `Where:` line can name a second file besides its
+# anchor path, and the correct fix lands there instead — #325 measured this
+# wrongly rejected as unaddressed.
+it "accepts a fix landing in a second file the finding's own Where line names (#325)"
+fresh_repo
+printf 'package b\n\nfunc B() int { return 2 }\n' > "$tmp/work/b.go"
+git -C "$tmp/work" diff > "$tmp/fix-where.patch"
+git -C "$tmp/work" checkout -q -- b.go
+cat > "$tmp/work-where.json" <<'JSON'
+[{"threadId":"PRRT_a","commentId":11,"path":"a.go","line":3,
+  "finding":"**Claim:** A miswords the scenario.\n**Where:** `a.go:3`, `b.go:7`","acceptedBy":"a-maintainer","reply":"fix it"}]
+JSON
+printf '{"fixed":["PRRT_a"],"unfixed":[]}' > "$tmp/report-where.json"
+out=$(WORK="$tmp/work-where.json" PATCH="$tmp/fix-where.patch" REPORT="$tmp/report-where.json" land)
+assert_contains "$out" "fixed      PRRT_a (a.go)"
 assert_equals "PRRT_a" "$(cat "$tmp/work/.resolve-threads")"
 
 it "drops a reported thread the work list does not carry"

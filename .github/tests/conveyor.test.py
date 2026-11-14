@@ -354,13 +354,13 @@ class TheCarries(unittest.TestCase):
 
 class TheGate(unittest.TestCase):
     def test_a_bot_start_is_accepted_exactly_where_the_grant_stands(self):
-        """The #254 invariant, on every path a bot can start a round by: the grant rule decides."""
+        """The #254 invariant, on every path a bot can start a round with a CARRIED label: the grant rule decides."""
         for pr, line, placer in itertools.product(pull_requests(), lines(), (WRITER, READER, None)):
             issue = pr.refs or pr.closes
             grant = c.standing_grant(V, line.issue_labels, "fix", pr.closes is not None) if issue else None
             backed = grant is not None and placer is not None and placer.may_push
             for event in ("labeled", "dispatch"):
-                trig = c.Trigger(event, BOT, label=FIX if event == "labeled" else "", mode="all")
+                trig = c.Trigger(event, BOT, label=FIX if event == "labeled" else "", mode="all", label_carried=True)
                 d = c.gate(V, trig, pr, line, placer)
                 with self.subTest(pr=pr, line=line, event=event):
                     if pr.fork:
@@ -372,12 +372,26 @@ class TheGate(unittest.TestCase):
                         # A carried label whose grant no longer stands comes off, on every path.
                         self.assertEqual(("refuse", FIX), (d.action, d.remove_label))
 
+    def test_325_a_bot_self_dispatch_on_a_label_a_person_placed_directly_needs_no_grant(self):
+        """A `conveyor:fix` placed directly by a person authorizes the whole loop on its own.
+
+        `land` self-dispatches the next round as the bot (`trigger.sender.bot`), but when the
+        fix label currently on the pull request was placed by a PERSON, not carried forward by
+        the workflow, `trigger.label_carried` is False -- and no standing grant is required, on
+        any issue state, including one carrying no `conveyor:run`/`conveyor:archive` at all.
+        """
+        pr = c.PullRequest(True, "OPEN", frozenset({FIX}), refs=325)
+        for line in (c.Line(frozenset()), c.Line(frozenset({RUN}))):
+            trig = c.Trigger("dispatch", BOT, mode="all", label_carried=False)
+            d = c.gate(V, trig, pr, line, None)
+            self.assertEqual("round", d.action, d.reason)
+
     def test_whatever_the_carry_carries_the_gate_accepts(self):
         for pr, line, placer in itertools.product(pull_requests(), lines(), (WRITER, READER, None)):
             if c.carry_fix(V, pr, line, placer).action != "carry":
                 continue
             for event in ("labeled", "dispatch"):
-                d = c.gate(V, c.Trigger(event, BOT, label=FIX, mode="all"), pr, line, placer)
+                d = c.gate(V, c.Trigger(event, BOT, label=FIX, mode="all", label_carried=True), pr, line, placer)
                 self.assertEqual("round", d.action, d.reason)
 
     def test_the_workflow_carries_the_fix_label_and_nothing_else(self):
@@ -490,13 +504,13 @@ class TheGate(unittest.TestCase):
         pr = c.PullRequest(True, "OPEN", frozenset({FIX}), closes=245)
         line = c.Line(frozenset({ARCH, "opsx:archived"}), "opsx", change_finished=True)
         for event in ("labeled", "dispatch"):
-            d = c.gate(V, c.Trigger(event, BOT, label=FIX), pr, line, WRITER)
+            d = c.gate(V, c.Trigger(event, BOT, label=FIX, label_carried=True), pr, line, WRITER)
             self.assertEqual("round", d.action, d.reason)
 
     def test_the_archive_grant_does_not_stand_for_an_ordinary_pull_request(self):
         pr = c.PullRequest(True, "OPEN", frozenset({FIX}), refs=255)
         line = c.Line(frozenset({ARCH}), "opsx", change_finished=True)
-        self.assertEqual("refuse", c.gate(V, c.Trigger("dispatch", BOT), pr, line, WRITER).action)
+        self.assertEqual("refuse", c.gate(V, c.Trigger("dispatch", BOT, label_carried=True), pr, line, WRITER).action)
 
 
 class TheGuard(unittest.TestCase):

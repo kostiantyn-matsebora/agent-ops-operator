@@ -73,6 +73,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -127,6 +128,18 @@ def patch_paths(patch: pathlib.Path) -> set[str]:
     patch here. `--numstat` is what `git apply` itself would touch."""
     out = sh("git", "apply", "--numstat", str(patch)).stdout
     return {line.split("\t")[2] for line in out.splitlines() if line.count("\t") >= 2}
+
+
+WHERE_LINE = re.compile(r"^\*\*Where:\*\*\s*(.+)$", re.MULTILINE)
+WHERE_PATH = re.compile(r"`([^`:]+)(?::\d+)?`")
+
+
+def where_paths(finding: str) -> set[str]:
+    """Every path the finding's own `**Where:**` line names (review-coordinator.md's
+    `Where` field: `path:line`, `path:line`, …). A finding's primary anchor can name a
+    second file whose content its own correct fix legitimately changes (#325)."""
+    m = WHERE_LINE.search(finding or "")
+    return set(WHERE_PATH.findall(m.group(1))) if m else set()
 
 
 def read_dropped(path) -> list[str]:
@@ -738,7 +751,8 @@ def main() -> int:
         `ci.yml` would dispute every genuine fix."""
         if item.get("source") == "check":
             return (not patch_empty), "reported fixed, but the patch is empty"
-        return item["path"] in touched, f"reported fixed, but the patch does not touch `{item['path']}`"
+        named = {item["path"]} | where_paths(item.get("finding", ""))
+        return bool(named & touched), f"reported fixed, but the patch does not touch `{item['path']}`"
 
     # THREE OUTCOMES, NOT TWO. An item the report NAMES as disputed is a DECISION
     # -- the fixing step looked at it and said something. An item the report

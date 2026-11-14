@@ -532,7 +532,7 @@ def gate(vocab: dict, trigger: Trigger, pr: PullRequest, line: Line, grant_place
         answered = True
 
     completion = trigger.event in ("review_completed", "ci_completed")
-    carried = ((trigger.sender.bot and trigger.event in ("labeled", "dispatch"))
+    carried = ((trigger.sender.bot and trigger.event in ("labeled", "dispatch") and trigger.label_carried)
                or ((completion or answered) and trigger.label_carried))
     if trigger.event == "labeled" and trigger.sender.bot and trigger.label != fix:
         return Decision("refuse", f"the workflow carries `{fix}` and nothing else, and it placed `{trigger.label}`",
