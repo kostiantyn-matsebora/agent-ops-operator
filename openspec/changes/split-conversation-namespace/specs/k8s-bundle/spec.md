@@ -7,7 +7,7 @@ there.
 
 Every other object the bundle renders SHALL stay in the release namespace:
 profiles, Pipelines, capabilities, toolsets, MCP configs, the SignalSource, the
-SignalAdapter, the events adapter account and the MCP server.
+SignalAdapter, the events adapter account `agentops-signal-<name>` and the MCP server.
 
 The MCP server's NetworkPolicy SHALL admit runtime pods from the conversations
 namespace.

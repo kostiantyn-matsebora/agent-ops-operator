@@ -60,7 +60,8 @@ conversation-scoped state.** Nothing else moves.
 | runtime pod `agentops-conv-<name>` | conversations | it runs the agent |
 | MCP ConfigMap `agentops-mcp-conv-<name>` | conversations | mounted |
 | `Conversation`, `ConversationInput` (kube backend) | conversations | conversation-scoped state |
-| floor account `agentops-runtime`, `rbac.runtime.serviceAccounts[]`, bundle route accounts | conversations | run as |
+| `rbac.runtime.serviceAccounts[]`, bundle route accounts | conversations | run as |
+| floor account `agentops-runtime`, bound to nothing | both | runtime pods and adapters both fall back to it |
 | chart claims (`agentops-context`, workspace, per-route) and manager claims `agentops-<pipeline>-<volume>` | conversations | mounted |
 | housekeeping and context-probe CronJobs | conversations | they mount the claims |
 | the chart's `stateReadAuth` Secret, a second render | conversations | housekeeping resolves it |
@@ -105,7 +106,7 @@ adapter state open in Control.
 - The one-time kube-to-nats import reads conversation kinds from Conversations
   and the rest from Control.
 
-### 4. RBAC: two namespaced Roles, no new ClusterRole
+### 4. RBAC: two manager Roles and a console Role, no new ClusterRole
 
 | Role | Namespace | Rules |
 |---|---|---|

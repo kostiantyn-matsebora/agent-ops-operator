@@ -15,8 +15,10 @@ namespace gives the isolation a boundary Kubernetes itself enforces.**
   everything a runtime pod runs as, mounts or resolves:
   - runtime pods `agentops-conv-<name>` and MCP ConfigMaps `agentops-mcp-conv-<name>`
   - `Conversation` and `ConversationInput` CRs, under the kube state backend
-  - the floor account `agentops-runtime`, every `rbac.runtime.serviceAccounts`
-    entry, and every bundle route account, with their binding subjects
+  - every `rbac.runtime.serviceAccounts` entry and every bundle route account,
+    with their binding subjects
+  - a second floor account `agentops-runtime`, bound to nothing. Adapters keep
+    the control-namespace one
   - every persistence claim, chart-rendered or manager-created
   - the housekeeping and context-probe CronJobs, which mount those claims
 - **The control namespace keeps the rest**: the manager, every wiring and

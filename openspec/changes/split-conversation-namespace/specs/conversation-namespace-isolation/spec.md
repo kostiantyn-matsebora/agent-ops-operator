@@ -14,14 +14,17 @@ The conversations namespace SHALL hold:
 
 - runtime pods `agentops-conv-<name>` and MCP ConfigMaps `agentops-mcp-conv-<name>`
 - `Conversation` and `ConversationInput` CRs, under the `kube` state backend
-- the floor account `agentops-runtime`, every `rbac.runtime.serviceAccounts`
-  entry and every bundle route account
+- every `rbac.runtime.serviceAccounts` entry and every bundle route account
 - every persistence claim, chart-rendered or manager-created
 - the housekeeping and context-probe CronJobs
 
 The control namespace SHALL hold everything else, including the manager,
 every wiring and identity CR, `Signal` CRs and the rest of the state store,
 NATS, adapters, the gateway, the console and every MCP server.
+
+The floor account `agentops-runtime` SHALL render in both namespaces, bound
+to nothing in either. Runtime pods and adapters both fall back to it, and each
+can only use an account in its own namespace.
 
 #### Scenario: A dispatched conversation's workload lands in the conversations namespace
 - **WHEN** a conversation is dispatched in a split release
@@ -156,7 +159,11 @@ for the manager, the conversations namespace for housekeeping.
 
 #### Scenario: Every runtime account follows the pods
 - **WHEN** the chart renders runtime RBAC split
-- **THEN** the floor account and every runtime account are in the conversations namespace, and every binding subject names them there
+- **THEN** every runtime account is in the conversations namespace, and every binding subject names it there
+
+#### Scenario: The floor exists on both sides, bound to nothing
+- **WHEN** the chart renders split
+- **THEN** `agentops-runtime` exists in both namespaces, no binding names either, and an adapter with no `spec.serviceAccountName` runs as the control-namespace one
 
 ### Requirement: NetworkPolicy peers name their namespace
 Under the existing `global.agentops.networkPolicy.enabled` gate, off by

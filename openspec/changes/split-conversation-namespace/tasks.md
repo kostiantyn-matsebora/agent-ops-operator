@@ -42,7 +42,7 @@
 - [ ] 7.1 `values.yaml`: `conversationNamespace: agent-ops-conversations`, `createConversationNamespace: true`, plus one helper resolving the effective namespace
 - [ ] 7.2 New template creating the namespace with the release labels and `helm.sh/resource-policy: keep`
 - [ ] 7.3 `rbac.yaml`: split the manager Role into a control Role and a conversations Role (pods, configmaps, conversations, conversationinputs and status, events, PVC `get/list/watch/create`). One Role when the namespaces are equal
-- [ ] 7.4 `rbac.yaml` and `runtime-rbac.yaml`: the floor account and every `rbac.runtime.serviceAccounts` entry render in Conversations, and every binding subject names them there
+- [ ] 7.4 `rbac.yaml` and `runtime-rbac.yaml`: every `rbac.runtime.serviceAccounts` entry renders in Conversations with every binding subject naming it there, and the floor account renders in both namespaces, bound to nothing
 - [ ] 7.5 `pvc.yaml`: every chart claim in Conversations, `resource-policy: keep` kept
 - [ ] 7.6 `housekeeping.yaml`, `context-probe.yaml`: both CronJobs in Conversations
 - [ ] 7.7 `context-probe.yaml`: give the CronJob and its pods an agentops `app.kubernetes.io/name`, since `agentops-context-probe` matches no self-exclusion prefix
@@ -68,7 +68,7 @@
 - [ ] 9.6 The SignalAdapter reconciler injects `CONVERSATION_NAMESPACE` in both layouts
 - [ ] 9.7 `signals/k8s-events`: mechanism 4 drops an unprefixed claim's event split, is not overridable, and does not apply when the namespaces are equal
 - [ ] 9.8 Console: pods from both namespaces reach the Infrastructure view
-- [ ] 9.9 Chart render tests: two manager Roles and no new ClusterRole, runtime accounts, claims and both CronJobs in Conversations, the context-probe label, namespace `keep`, the single-namespace render matching today's
+- [ ] 9.9 Chart render tests: two manager Roles and no new ClusterRole, runtime accounts, claims and both CronJobs in Conversations, the context-probe label, the floor account in both namespaces bound to nothing, namespace `keep`, the single-namespace render matching today's
 - [ ] 9.10 `TestEveryWiredFlowIsAllowed` and `TestNetworkPolicyIsOptIn` pass in both layouts
 - [ ] 9.11 `go build`, `go vet` and `go test ./...` in every module touched, run against this working copy's tree in the Go container
 
