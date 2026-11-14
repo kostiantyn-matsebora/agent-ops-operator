@@ -235,8 +235,13 @@ Read [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/
 first, since it is the only place migration steps live, keyed by chart version
 and newest first.
 
-**19.0.0 is BREAKING: the default state backend changes to `nats`**. See
-the changelog entry before you upgrade a production install.
+**19.0.0 is BREAKING**:
+
+- the default state backend changes to `nats`
+- every channel adapter image upgrades together with the manager, since the
+  `/channel/ops` wire contract changed (see below)
+
+See the changelog entry before you upgrade a production install.
 
 A fresh install now also runs three more pods and three more volumes.
 They are a clustered state server.
