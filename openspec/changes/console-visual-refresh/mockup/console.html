@@ -240,10 +240,10 @@ kbd{font-family:var(--mono);border:1px solid var(--border-strong);border-radius:
 .row .lc{height:2px;margin-top:6px;display:flex}.row .lc .strip{display:flex;width:100%;gap:3px}.row .lc .strip s{flex:1;width:auto;height:2px;border-radius:1px}.row{min-height:84px}
 code{color:color-mix(in srgb,var(--text) 65%,transparent);background:color-mix(in srgb,var(--text) 2.5%,transparent);border:0;font-size:.9em;font-weight:inherit;padding:.08em .3em;border-radius:4px}code.cmd{display:block;margin:6px 0;padding:6px 10px;border-radius:6px;background:color-mix(in srgb,var(--text) 6%,transparent);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}.sec code{font-size:12px}
 .r{position:relative}
-.cp{position:absolute;bottom:12px;right:2px;width:28px;height:28px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:transparent;color:var(--subtle);cursor:pointer;opacity:0;transition:opacity .12s}
+.cp{z-index:2;position:absolute;bottom:12px;right:2px;width:28px;height:28px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:transparent;color:var(--subtle);cursor:pointer;opacity:0;transition:opacity .12s}
 .cp::before{content:"";position:absolute;inset:-8px}
 .r:hover .cp,.r:focus-within .cp,.cp:focus-visible{opacity:1}
-.cp:hover{color:var(--text)}.cp.done{opacity:1;color:var(--brand)}.cp.done::after{content:"Copied";position:absolute;right:32px;font-size:12px;white-space:nowrap}
+.cp:hover{color:var(--text)}.cp.done{opacity:1;color:var(--brand)}.cp.done::after,.cp.manual::after{content:"Copied";position:absolute;right:32px;font-size:12px;white-space:nowrap}.cp.manual{opacity:1;color:var(--warning)}.cp.manual::after{content:"Copy by hand"}
 @media (hover:none){.cp{opacity:1}.cp::before{inset:-8px}}
 </style>
 
@@ -765,8 +765,9 @@ document.addEventListener('click',e=>{
   if(t.id==='showClosed'){S.showClosed=t.checked;saveL({showClosed:t.checked});paintSide();paintList();return}
   if(d.pick){S.multi.has(d.pick)?S.multi.delete(d.pick):S.multi.add(d.pick);paintSide();return}
   if(d.exp){S.exp.has(d.exp)?S.exp.delete(d.exp):S.exp.add(d.exp);paintList();return}
-  if(d.copy){const b=t.closest('.cp'),txt=CP[d.copy]||'';const ok=()=>{b.classList.add('done');b.setAttribute('aria-label','Copied');setTimeout(()=>{b.classList.remove('done');b.setAttribute('aria-label','Copy message')},1500)};
-    try{navigator.clipboard.writeText(txt).then(ok,()=>{const r=document.createRange();r.selectNodeContents(b.parentNode);const s=getSelection();s.removeAllRanges();s.addRange(r)})}catch(_){const r=document.createRange();r.selectNodeContents(b.parentNode);const s=getSelection();s.removeAllRanges();s.addRange(r)}return}
+  if(d.copy){const b=t.closest('.cp'),txt=CP[d.copy]||'';const flash=(cls,lab)=>{b.classList.add(cls);b.setAttribute('aria-label',lab);setTimeout(()=>{b.classList.remove(cls);b.setAttribute('aria-label','Copy message')},cls==='manual'?3000:1500)};
+    const hand=()=>{const r=document.createRange();r.selectNodeContents(b.parentNode);const s=getSelection();s.removeAllRanges();s.addRange(r);flash('manual','Copy by hand')};
+    try{navigator.clipboard.writeText(txt).then(()=>flash('done','Copied'),hand)}catch(_){hand()}return}
   if(d.menu){S.menu===d.menu?closeMenu():openMenu(d.menu,t);return}
   if(d.mk){const c=byId(S.menu);closeMenu();
     if(d.mk==='read')c.unread=0;if(d.mk==='unread')c.unread=1;

@@ -109,6 +109,9 @@ tokens in its own stylesheet for what the mockup needed and the shared set lacks
 The docs-site copy rule in `palette-and-mark.md` keeps applying to `--ao-*`
 alone. A look token is not copied to the site.
 
+If the work does change a shared `--ao-*` value, that is the rule's two-file
+change and tasks 3.9 and 3.10 cover it.
+
 ### D7. Asynchronous state lives in the model
 
 A `useCommands` model tracks each of the viewer's actions by target, with the
