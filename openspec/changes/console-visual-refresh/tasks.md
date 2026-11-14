@@ -13,12 +13,12 @@ Role: `frontend-developer`. Nothing here is visible to a viewer.
 
 Role: `frontend-developer`. Move `classic` onto each model as it lands.
 
-- [ ] 2.1 Extract the conversation list model (scopes, counts, ordering, unread) and verify unit tests pin its output against the current fixtures
-- [ ] 2.2 Extract the thread model (messages with their source markdown, signals, runs, members, start time) and verify the `classic` thread renders unchanged
-- [ ] 2.3 Extract the working-run model as `{ elapsed, latest, count }` that attaches tools and events to the reply on arrival, and verify a test for a viewer-sent run and a signal-started run
-- [ ] 2.4 Add `useCommands` with the states sending, accepted, done and failed, the in-flight count and the connection state, and verify unit tests for each transition and for retry on a safe verb only
-- [ ] 2.5 Make `accepted` optional so a synchronous verb goes from sending to done, and verify with a test
-- [ ] 2.6 Publish stable test identifiers from the model contract and verify the `e2e-live` specs use them in place of classes
+- [x] 2.1 Extract the conversation list model (scopes, counts, ordering, unread) and verify unit tests pin its output against the current fixtures
+- [x] 2.2 Extract the thread model (messages with their source markdown, signals, runs, members, start time) and verify the `classic` thread renders unchanged
+- [x] 2.3 Extract the working-run model as `{ elapsed, latest, count }` that attaches tools and events to the reply on arrival, and verify a test for a viewer-sent run and a signal-started run
+- [x] 2.4 Add `useCommands` with the states sending, accepted, done and failed, the in-flight count and the connection state, and verify unit tests for each transition and for retry on a safe verb only
+- [x] 2.5 Make `accepted` optional so a synchronous verb goes from sending to done, and verify with a test
+- [x] 2.6 Publish stable test identifiers from the model contract and verify the `e2e-live` specs use them in place of classes
 
 ## 3. The workspace look: shell and conversations
 

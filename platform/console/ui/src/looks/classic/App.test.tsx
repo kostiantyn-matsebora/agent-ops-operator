@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { App } from './App'
 import { useShell } from '../../shell'
+import { TESTID } from '../../model/testids'
 
 // The shell: the navigation folds to its icons and remembers it, so a wide
 // view keeps the width across reloads.
@@ -95,5 +96,15 @@ describe('a narrow width turns the nav into a closed drawer, never an overlay st
     shell()
     await userEvent.click(screen.getByRole('button', { name: 'Conversations and other sections' }))
     expect(screen.getByRole('link', { name: /^Overview/ })).toBeInTheDocument()
+  })
+})
+
+describe('the header renders the model contract’s identifiers', () => {
+  it('states the connection, and names the app nav that hides while closed', () => {
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 375 })
+    window.innerWidth = 375
+    shell()
+    expect(screen.getByTestId(TESTID.connection)).toHaveAttribute('data-state', 'connected')
+    expect(screen.getByTestId(TESTID.appNav)).toHaveAttribute('aria-hidden', 'true')
   })
 })

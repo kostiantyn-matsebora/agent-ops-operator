@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
 // Item #19 — the join hint for an UNJOINED Coordinator root names the
@@ -10,7 +11,7 @@ const f = loadFixtures()
 
 test('#19 an unjoined coordinator root is told to bind the COORDINATOR, never "the Pipeline that originated it"', async ({ page }) => {
   await page.goto(`/conversations/${f.conversations.coordUnjoinedRoot}`)
-  await expect(page.getByTestId('timeline')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId(TESTID.timeline)).toBeVisible({ timeout: 20_000 })
 
   await expect(page.getByText('This conversation has no console thread')).toBeVisible()
   // The REASON paragraph names the Coordinator's own channelRefs explicitly.
@@ -19,7 +20,7 @@ test('#19 an unjoined coordinator root is told to bind the COORDINATOR, never "t
   // PatternFly's `ClipboardCopy` renders it as a readonly `<input>`'s VALUE,
   // which never becomes a text NODE `getByText` would match, so this reads
   // the input's value directly instead.
-  await expect(page.locator('input[readonly]')).toHaveValue(new RegExp(String.raw`Coordinator ${f.coordinators.unjoined}\b`))
+  await expect(page.getByTestId(TESTID.joinHintFix).getByRole('textbox')).toHaveValue(new RegExp(String.raw`Coordinator ${f.coordinators.unjoined}\b`))
   // The retired wording, which only ever applied to an unattributable
   // PIPELINE conversation, must never leak onto a Coordinator root.
   await expect(page.getByText('the Pipeline that originated it')).toHaveCount(0)

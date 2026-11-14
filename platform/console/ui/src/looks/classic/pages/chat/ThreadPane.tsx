@@ -7,19 +7,15 @@ import {
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../../components/States'
-import {
-  useConversation, useConversationGraph, useConversations, useMarkRead, useSession,
-  useTopology, useVocabulary,
-} from '../../../../api/hooks'
-import { eventsFor, useStream } from '../../../../api/stream'
+import { useConversationGraph, useTopology, useVocabulary } from '../../../../api/hooks'
+import { useStream } from '../../../../api/stream'
 import { mergeEvents } from '../../../../graph/hops'
 import { PlainText, RawText } from '../../components/Text'
 import { Graph } from '../../../../graph/Graph'
 import { useDisplay } from '../../../../graph/display'
-import { api, ApiError } from '../../../../api/client'
 import { PipelineName } from '../../components/PipelineName'
 import { ComposerHint } from '../../components/ComposerHint'
-import { Icon, stripLeadingIcon } from '../../components/Icon'
+import { Icon } from '../../components/Icon'
 import { Yaml } from '../../components/Yaml'
 import { MetadataCard } from '../../components/Metadata'
 import { matchEntries } from '../NewConversation'
@@ -31,9 +27,15 @@ import { isCloseCommand, skipCloseConfirm, writeSkipCloseConfirm } from './close
 import { Blocks } from '../../components/Blocks'
 import { parse } from '../../../../api/blocks'
 import type {
-  ActivityEvent, ConversationDetail, ConversationSummary, Message, RecordedInput, Run, RunToolCall, RunTurn,
-  VocabularyEntry,
+  ActivityEvent, ConversationSummary, Run, RunToolCall, RunTurn, VocabularyEntry,
 } from '../../../../api/types'
+import {
+  chainStepLabel, memberTranscript, useMemberChain, useMemberExchange, useThread, useThreadMembers,
+  type Thread,
+} from '../../../../model/thread'
+import { sendText } from '../../../../model/verbs'
+import { useCommands } from '../../../../model/commands'
+import { TESTID, testid } from '../../../../model/testids'
 
 // `console-chat-layout` (secondary views) + `console-conversation-tree` (the
 // incident timeline, the parent chain, read-only before escalation).
@@ -43,25 +45,12 @@ import type {
 type SecondaryView = 'transcript' | 'runs' | 'graph' | 'sequence' | 'yaml'
 
 export function ThreadPane({ name, onBack }: Readonly<{ name: string; onBack?: () => void }>) {
-  const { data, isLoading, error, refetch } = useConversation(name)
+  // The thread model owns the data, the stream, the mark-read on open and the
+  // derived facts — called HERE, unconditionally, so every hook runs on every
+  // render, loading or not (rules of hooks).
+  const thread = useThread(name)
+  const { detail: data, isLoading, error, refetch } = thread
   const [view, setView] = useState<SecondaryView>('transcript')
-  const markRead = useMarkRead()
-  // Called HERE, unconditionally — every hook below this line must run on
-  // every render, loading or not, or React's hook count desyncs the moment
-  // the query settles (rules of hooks).
-  const vocabulary = useVocabulary()
-  const summary = data?.conversation
-  const reported = useRef('')
-  const activity = summary?.lastActivity ?? summary?.created ?? ''
-  const joinedUnread = Boolean(summary?.joined && summary?.unread)
-
-  useEffect(() => {
-    if (!summary || !joinedUnread) return
-    const stamp = `${summary.name}:${activity}`
-    if (reported.current === stamp) return
-    reported.current = stamp
-    markRead.mutate({ names: [summary.name] })
-  }, [summary?.name, joinedUnread, activity])
 
   // Switching conversations resets any secondary view back to the transcript
   // — a reader who left the Graph open on one conversation should not find
@@ -72,10 +61,7 @@ export function ThreadPane({ name, onBack }: Readonly<{ name: string; onBack?: (
   if (error || !data) return <ErrorState title="Conversation not found">{String(error)}</ErrorState>
 
   const c = data.conversation
-  const pipelineIcon = vocabulary.data?.entries.find((e) => e.kind === 'pipeline' && e.name === c.pipeline)?.icon
-  const title = stripLeadingIcon(c.title || c.name)
-  const isRoot = Boolean(c.coordinator)
-  const isMember = Boolean(c.causedBy)
+  const { pipelineIcon, title, isRoot, isMember } = thread
 
   return (
     <div style={{ flex: 1, minWidth: 0, background: 'var(--ao-surface)', display: 'flex', flexDirection: 'column' }}>
@@ -139,7 +125,7 @@ export function ThreadPane({ name, onBack }: Readonly<{ name: string; onBack?: (
         )}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {view === 'runs' && <RunTimeline detail={data} />}
+        {view === 'runs' && <RunTimeline thread={thread} />}
         {view === 'graph' && <ConversationGraphTab name={name} />}
         {view === 'sequence' && <Sequence events={data.events ?? []} />}
         {view === 'yaml' && (
@@ -151,7 +137,7 @@ export function ThreadPane({ name, onBack }: Readonly<{ name: string; onBack?: (
           </div>
         )}
         {view === 'transcript' && (
-          <TranscriptBody isRoot={isRoot} isMember={isMember} conversation={c} detail={data} onSentOffline={() => refetch()} />
+          <TranscriptBody isRoot={isRoot} isMember={isMember} conversation={c} thread={thread} onSentOffline={() => void refetch?.()} />
         )}
       </div>
     </div>
@@ -159,17 +145,17 @@ export function ThreadPane({ name, onBack }: Readonly<{ name: string; onBack?: (
 }
 
 function TranscriptBody({
-  isRoot, isMember, conversation, detail, onSentOffline,
+  isRoot, isMember, conversation, thread, onSentOffline,
 }: Readonly<{
   isRoot: boolean
   isMember: boolean
   conversation: ConversationSummary
-  detail: NonNullable<ReturnType<typeof useConversation>['data']>
+  thread: Thread
   onSentOffline: () => void
 }>) {
-  if (isRoot) return <CoordinatorBody conversation={conversation} detail={detail} onSentOffline={onSentOffline} />
+  if (isRoot) return <CoordinatorBody conversation={conversation} thread={thread} onSentOffline={onSentOffline} />
   if (isMember) return <MemberOwnBody conversation={conversation} />
-  return <ConversationThread detail={detail} onSentOffline={onSentOffline} />
+  return <ConversationThread thread={thread} onSentOffline={onSentOffline} />
 }
 
 function ViewButton({ active, onClick, children }: Readonly<{ active: boolean; onClick: () => void; children: React.ReactNode }>) {
@@ -187,24 +173,9 @@ function ViewButton({ active, onClick, children }: Readonly<{ active: boolean; o
  * to (the uncaused root's own `coordinator` field), never an invented noun.
  */
 function MemberCrumb({ conversation }: Readonly<{ conversation: ConversationSummary }>) {
-  const membersParams = useMemo(() => new URLSearchParams({ limit: '200' }), [])
-  const members = useConversations(membersParams)
-  const items = members.data?.items ?? []
-  const chain: ConversationSummary[] = []
-  const byName = new Map(items.map((c) => [c.name, c]))
-  let cur: ConversationSummary | undefined = byName.get(conversation.name) ?? conversation
-  const seen = new Set<string>()
-  while (cur) {
-    chain.unshift(cur)
-    if (!cur.causedBy || seen.has(cur.name)) break
-    seen.add(cur.name)
-    cur = byName.get(cur.causedBy.parent)
-  }
   // The conversation itself is never part of its OWN breadcrumb — its title
-  // is already the pane's heading, one line below this. Showing it twice is
-  // what made the crumb read as a second heading rather than a trail.
-  const ancestors = chain.slice(0, -1)
-  const coordinatorName = chain[0]?.coordinator
+  // is already the pane's heading, one line below this.
+  const { coordinator: coordinatorName, ancestors } = useMemberChain(conversation)
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: '0.85em', color: 'var(--ao-text-subtle)' }}>
       <Icon icon="aops:agent" />
@@ -220,33 +191,12 @@ function MemberCrumb({ conversation }: Readonly<{ conversation: ConversationSumm
             to={`/conversations/${step.name}`}
             style={i === ancestors.length - 1 ? { fontWeight: 700, color: 'var(--ao-text)' } : undefined}
           >
-            <PlainText>{step.causedBy?.entry ?? stripLeadingIcon(step.title || step.name)}</PlainText>
+            <PlainText>{chainStepLabel(step)}</PlainText>
           </Link>
         </span>
       ))}
     </div>
   )
-}
-
-/** Every input any of `runs` recorded a non-empty text for, oldest first — the
- * durable half of a conversation's questions (`Run.inputs`, invariants.md: "A
- * CONVERSATION'S MESSAGES ARE KUBERNETES-API STATE"). */
-function recordedInputs(runs: Run[] | undefined): RecordedInput[] {
-  return (runs ?? []).flatMap((r) => (r.inputs ?? []).filter((i) => i.text))
-}
-
-/** The text a conversation was actually given — its first recorded input.
- * For a member this IS its task: `invoke` addresses no human channel, so this
- * is the only place that text lives (see `RecordedInput.surface`). */
-function firstTaskInput(runs: Run[] | undefined): RecordedInput | undefined {
-  return recordedInputs(runs)[0]
-}
-
-/** The most recent run that actually answered, oldest-finished-last. */
-function lastResult(runs: Run[] | undefined): { text: string; at?: string } | undefined {
-  const withResult = (runs ?? []).filter((r) => r.result)
-  const r = withResult.at(-1)
-  return r ? { text: r.result!, at: r.finishedAt || r.startedAt } : undefined
 }
 
 /** `text`, parsed and rendered exactly as an agent's own message would be
@@ -265,18 +215,20 @@ function AgentText({ text }: Readonly<{ text: string }>) {
  */
 function MemberInvocation({ member }: Readonly<{ member: ConversationSummary }>) {
   const [expanded, setExpanded] = useState(false)
-  const detail = useConversation(member.name, expanded)
+  const exchange = useMemberExchange(member.name, expanded)
   const entry = member.causedBy?.entry ?? member.name
   const done = member.phase === 'Closed'
   return (
     <details
+      data-testid={testid.memberInvocation(member.name)}
+      data-expanded={expanded}
       style={{
         background: 'var(--ao-surface-alt)', border: '1px solid var(--ao-border)', borderRadius: 8,
         padding: '8px 14px',
       }}
       onToggle={(e) => setExpanded((e.target as HTMLDetailsElement).open)}
     >
-      <summary style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <summary data-testid={TESTID.memberInvocationToggle} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <Icon icon="aops:agent" />
         <span>
           {'↳ invoked '}
@@ -290,7 +242,7 @@ function MemberInvocation({ member }: Readonly<{ member: ConversationSummary }>)
         {member.errored && <Label isCompact color="red">run failed</Label>}
       </summary>
       <div style={{ padding: '10px 2px 2px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {expanded && <ExpandedInvocation detail={detail} entry={entry} />}
+        {expanded && <ExpandedInvocation exchange={exchange} entry={entry} />}
         <div>
           <Link to={`/conversations/${member.name}`}>Open {member.name} on its own →</Link>
         </div>
@@ -301,16 +253,15 @@ function MemberInvocation({ member }: Readonly<{ member: ConversationSummary }>)
 
 /** The expanded half of one `MemberInvocation` — its own loading/error states,
  * kept apart so the collapsed summary above never pays for them. */
-function ExpandedInvocation({ detail, entry }: Readonly<{ detail: ReturnType<typeof useConversation>; entry: string }>) {
-  if (detail.isLoading && !detail.data) return <Loading />
-  if (detail.error || !detail.data) return <ErrorState title="Could not load this member">{String(detail.error)}</ErrorState>
-  return <MemberInvocationExchange detail={detail.data} entry={entry} />
+function ExpandedInvocation({ exchange, entry }: Readonly<{ exchange: ReturnType<typeof useMemberExchange>; entry: string }>) {
+  if (exchange.isLoading && !exchange.loaded) return <Loading />
+  if (exchange.error || !exchange.loaded) return <ErrorState title="Could not load this member">{String(exchange.error)}</ErrorState>
+  return <MemberInvocationExchange exchange={exchange} entry={entry} />
 }
 
 /** The two labelled sub-blocks a member invocation expands to. */
-function MemberInvocationExchange({ detail, entry }: Readonly<{ detail: ConversationDetail; entry: string }>) {
-  const task = firstTaskInput(detail.conversation.runs)
-  const result = lastResult(detail.conversation.runs)
+function MemberInvocationExchange({ exchange, entry }: Readonly<{ exchange: ReturnType<typeof useMemberExchange>; entry: string }>) {
+  const { task, result } = exchange
   return (
     <>
       <div>
@@ -327,72 +278,6 @@ function MemberInvocationExchange({ detail, entry }: Readonly<{ detail: Conversa
       </div>
     </>
   )
-}
-
-/**
- * The coordinator's OWN run that was executing when it invoked a member.
- * `invoke` is a synchronous tool call made mid-run, and runs are strictly
- * serial (invariants.md: "Strictly serial per conversation"), so at most one
- * of the coordinator's own runs can have been in flight at the member's
- * creation instant.
- */
-function invokingRun(runs: Run[] | undefined, memberCreatedAt: number): Run | undefined {
-  if (!memberCreatedAt) return undefined
-  return (runs ?? []).find((r) => {
-    const start = Date.parse(r.startedAt || '') || 0
-    if (!start || memberCreatedAt < start) return false
-    if (!r.finishedAt) return true // still running when this member was created
-    return memberCreatedAt <= (Date.parse(r.finishedAt) || 0)
-  })
-}
-
-/**
- * Where a member's invoke card belongs in transcript time order (item #15 QA,
- * bug 1). `member.created` is when the MEMBER OBJECT was created — which
- * happens mid-run, as soon as `invoke` is called — well before the
- * coordinator's OWN reasoning for that same run is recorded
- * (`status.runs[].result`, written only once the whole run finishes).
- * Sorting the card by its own creation time therefore always placed it
- * BEFORE the reasoning that explains it, reversing the mockup's
- * decide-then-act order: measured live, a member created 90 seconds into a
- * two-minute run sorted ahead of that run's own reasoning text by over a
- * minute.
- *
- * A first attempt anchored the card to `run.finishedAt` on the theory that it
- * is "the same clock the reasoning text sorts by" — it is NOT. Measured
- * live: `run.finishedAt` (the manager's own recorded stamp) and the
- * reasoning message's own `at` (timestamped by the console's live buffer at
- * RECEIPT, which this conversation's transcript keeps using even on a fresh
- * reload, since the buffer lives in the console's own process, not the
- * browser) differed by two real seconds on an otherwise ordinary run —
- * `run.finishedAt` sorted the invoke card BEFORE the very reasoning message
- * it was supposed to tie with.
- *
- * The fix anchors to the reasoning message's OWN rendered timestamp
- * directly, not a second computation of it: the first `agent`-kind
- * transcript message at or after this run's `startedAt` is that run's own
- * result, by the strictly-serial-runs invariant above, so there is exactly
- * one candidate and no guessing which one it is.
- *
- * Falls back to the run's own `finishedAt`/`startedAt`, then to the member's
- * own creation time, when no run's window covers it — `status.runs[]` keeps
- * only the last 10 (api/v1alpha1/conversation_types.go), so an old member's
- * invoking run may have scrolled out of both the run list and the
- * transcript's live buffer alike.
- */
-function invokeCardAt(runs: Run[] | undefined, member: ConversationSummary, transcript: Message[] | null | undefined): number {
-  const createdAt = Date.parse(member.created || '') || 0
-  const run = invokingRun(runs, createdAt)
-  if (!run) return createdAt
-  const startedAt = Date.parse(run.startedAt || '') || 0
-  const fallback = Date.parse(run.finishedAt || run.startedAt || '') || createdAt
-  if (!startedAt) return fallback
-  const reasoningAt = (transcript ?? [])
-    .filter((m) => m.kind === 'agent')
-    .map((m) => Date.parse(m.at) || 0)
-    .filter((at) => at >= startedAt)
-    .sort((a, b) => a - b)[0]
-  return reasoningAt ?? fallback
 }
 
 /**
@@ -415,22 +300,20 @@ function invokeCardAt(runs: Run[] | undefined, member: ConversationSummary, tran
  * read-only — spec's other permitted case, not a bug.
  */
 function CoordinatorBody({
-  conversation, detail, onSentOffline,
+  conversation, thread, onSentOffline,
 }: Readonly<{
   conversation: ConversationSummary
-  detail: NonNullable<ReturnType<typeof useConversation>['data']>
+  thread: Thread
   onSentOffline: () => void
 }>) {
-  const membersParams = useMemo(() => new URLSearchParams({ limit: '200' }), [])
-  const members = useConversations(membersParams)
+  const members = useThreadMembers(conversation, thread.detail?.transcript)
   const budget = conversation.budget
-  if (members.isLoading && !members.data) return <Loading />
-  if (members.error || !members.data) return <ErrorState title="Could not load member conversations">{String(members.error)}</ErrorState>
+  if (members.isLoading && !members.loaded) return <Loading />
+  if (members.error || !members.loaded) return <ErrorState title="Could not load member conversations">{String(members.error)}</ErrorState>
 
-  const directMembers = members.data.items.filter((m) => m.causedBy?.parent === conversation.name)
-  const extraItems = directMembers.map((m) => ({
+  const extraItems = members.members.map(({ member: m, at }) => ({
     key: `invoke-${m.name}`,
-    at: invokeCardAt(conversation.runs, m, detail.transcript),
+    at,
     node: <MemberInvocation member={m} />,
   }))
   if (conversation.escalatedAt) {
@@ -469,7 +352,7 @@ function CoordinatorBody({
           </DescriptionList>
         </div>
       )}
-      <ConversationThread detail={detail} onSentOffline={onSentOffline} extraItems={extraItems} />
+      <ConversationThread thread={thread} onSentOffline={onSentOffline} extraItems={extraItems} />
     </div>
   )
 }
@@ -486,22 +369,10 @@ function counted(used: number | undefined, max: number | undefined): string {
  * own (invariants.md: "A CAUSED CONVERSATION BINDS NO HUMAN CHANNEL").
  */
 function MemberOwnBody({ conversation }: Readonly<{ conversation: ConversationSummary }>) {
-  const detail = useConversation(conversation.name)
-  if (detail.isLoading && !detail.data) return <Loading />
-  if (detail.error || !detail.data) return <ErrorState title="Could not load this member">{String(detail.error)}</ErrorState>
-  const runs = detail.data.conversation.runs
-  const task = firstTaskInput(runs)
-  const result = lastResult(runs)
-  const messages: Message[] = []
-  if (task?.text) {
-    messages.push({
-      id: 'task', thread: conversation.name, kind: 'signal', text: task.text,
-      at: task.receivedAt || conversation.created || '',
-    })
-  }
-  if (result?.text) {
-    messages.push({ id: 'result', thread: conversation.name, kind: 'agent', text: result.text, at: result.at || '' })
-  }
+  const exchange = useMemberExchange(conversation.name)
+  if (exchange.isLoading && !exchange.loaded) return <Loading />
+  if (exchange.error || !exchange.conversation) return <ErrorState title="Could not load this member">{String(exchange.error)}</ErrorState>
+  const messages = memberTranscript(conversation, exchange.conversation.runs)
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '8px 24px 0' }}>
@@ -517,26 +388,28 @@ function MemberOwnBody({ conversation }: Readonly<{ conversation: ConversationSu
 /** The ordinary thread: transcript + composer + quick chips — reused for a
  * plain pipeline conversation AND a Coordinator root's own transcript. */
 function ConversationThread({
-  detail, onSentOffline, extraItems,
+  thread, onSentOffline, extraItems,
 }: Readonly<{
-  detail: NonNullable<ReturnType<typeof useConversation>['data']>
+  thread: Thread
   onSentOffline: () => void
   /** Rows to interleave into the transcript by time — a root's member
    * invocations. Absent for an ordinary pipeline conversation. */
   extraItems?: TimelineExtraItem[]
 }>) {
-  const session = useSession()
-  const connected = useStream((s) => s.connected)
-  const live = useStream((s) => s.events)
+  const detail = thread.detail!
+  const name = detail.conversation.name
+  const commands = useCommands()
+  const connected = commands.connection === 'connected'
   const [text, setText] = useState('')
   const vocabulary = useVocabulary()
   const [dismissed, setDismissed] = useState(false)
   const [cursor, setCursor] = useState(0)
   const textRef = useRef<HTMLTextAreaElement>(null)
-  const commands = dismissed ? null : matchEntries(text, vocabulary.data?.entries ?? [], 'thread')
-  const activeCommand = commands ? Math.min(cursor, commands.length - 1) : 0
+  const typeahead = dismissed ? null : matchEntries(text, vocabulary.data?.entries ?? [], 'thread')
+  const activeCommand = typeahead ? Math.min(cursor, typeahead.length - 1) : 0
   const [error, setError] = useState<string>()
-  const [busy, setBusy] = useState(false)
+  // Sending is the command's state, the model's — not a flag this view keeps.
+  const busy = commands.sending(name)
   // `/close` gets a confirm dialog (item 22) — `/exit` never does, since it
   // only releases the runtime and nothing about the conversation is lost.
   const [confirmingClose, setConfirmingClose] = useState(false)
@@ -554,31 +427,23 @@ function ConversationThread({
       if (!busy && text.trim()) void send(text)
       return
     }
-    if (!commands) return
+    if (!typeahead) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setCursor((c) => (c + 1) % commands.length)
+      setCursor((c) => (c + 1) % typeahead.length)
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      setCursor((c) => (c - 1 + commands.length) % commands.length)
+      setCursor((c) => (c - 1 + typeahead.length) % typeahead.length)
     } else if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault()
-      chooseCommand(commands[activeCommand])
+      chooseCommand(typeahead[activeCommand])
     } else if (e.key === 'Escape') {
       e.preventDefault()
       setDismissed(true)
     }
   }
 
-  const canWrite = (session.data?.canWrite ?? false) && detail.conversation.joined && !detail.archived
-  const messages = detail.transcript ?? []
-  const pipelineIcon = vocabulary.data?.entries.find(
-    (e) => e.kind === 'pipeline' && e.name === detail.conversation.pipeline,
-  )?.icon
-  const events = useMemo(
-    () => mergeEvents(detail.events ?? [], eventsFor(detail.conversation.name, live)),
-    [detail.events, detail.conversation.name, live],
-  )
+  const { canWrite, messages, pipelineIcon, events } = thread
   // The composer's own insert path — now ALSO how an interactive offered
   // choice lands text, wired straight into `Timeline` (B2: a message's
   // choices render WITH it, only the latest message's set interactive).
@@ -588,16 +453,13 @@ function ConversationThread({
   }
 
   async function postMessage(toSend: string) {
-    setBusy(true)
     setError(undefined)
-    try {
-      await api.send(detail.conversation.name, toSend)
+    const outcome = await sendText(name, toSend)
+    if (outcome.ok) {
       setText('')
       if (!connected) onSentOffline()
-    } catch (e) {
-      setError((e as ApiError).message)
-    } finally {
-      setBusy(false)
+    } else {
+      setError(outcome.error)
     }
   }
 
@@ -637,7 +499,7 @@ function ConversationThread({
         <div style={{ padding: '8px 24px' }}>
           <Alert variant="info" isInline title="This conversation has no console thread">
             <p><PlainText>{detail.joinHint.reason}</PlainText></p>
-            <ClipboardCopy isReadOnly>{detail.joinHint.fix}</ClipboardCopy>
+            <ClipboardCopy isReadOnly data-testid={TESTID.joinHintFix}>{detail.joinHint.fix}</ClipboardCopy>
           </Alert>
         </div>
       )}
@@ -665,17 +527,17 @@ function ConversationThread({
             onRunCommand={(cmd) => void send(cmd)}
           />
           <div style={{ position: 'relative' }}>
-            {commands && (
+            {typeahead && (
               <ul
                 aria-label="commands"
-                data-testid="command-typeahead"
+                data-testid={TESTID.commandTypeahead}
                 style={{
                   position: 'absolute', bottom: '100%', left: 0, right: 0, zIndex: 200, marginBottom: 4,
                   maxHeight: '40vh', overflowY: 'auto', background: 'var(--ao-surface)', border: '1px solid var(--ao-border)',
                   borderRadius: 8, listStyle: 'none', padding: 4,
                 }}
               >
-                {commands.map((cmd, i) => (
+                {typeahead.map((cmd, i) => (
                   <li key={cmd.name}>
                     <button
                       type="button"
@@ -728,7 +590,7 @@ function CloseConfirmModal({
 }: Readonly<{ onConfirm: (dontAskAgain: boolean) => void; onCancel: () => void }>) {
   const [dontAskAgain, setDontAskAgain] = useState(false)
   return (
-    <Modal isOpen onClose={onCancel} variant="small" aria-label="confirm close" data-testid="close-confirm-modal">
+    <Modal isOpen onClose={onCancel} variant="small" aria-label="confirm close" data-testid={TESTID.closeConfirmModal}>
       <ModalHeader title="Close this conversation?" />
       <ModalBody>
         <p>
@@ -737,13 +599,14 @@ function CloseConfirmModal({
         </p>
         <Checkbox
           id="close-confirm-skip"
+          data-testid={TESTID.closeConfirmSkip}
           label="Don't ask again"
           isChecked={dontAskAgain}
           onChange={(_e, v) => setDontAskAgain(v)}
         />
       </ModalBody>
       <ModalFooter>
-        <Button variant="danger" onClick={() => onConfirm(dontAskAgain)} data-testid="close-confirm-ok">
+        <Button variant="danger" onClick={() => onConfirm(dontAskAgain)} data-testid={TESTID.closeConfirmOk}>
           Close
         </Button>
         <Button variant="link" onClick={onCancel}>Cancel</Button>
@@ -883,10 +746,11 @@ function RunEntry({ run }: Readonly<{ run: Run }>) {
   )
 }
 
-function RunTimeline({ detail }: Readonly<{ detail: NonNullable<ReturnType<typeof useConversation>['data']> }>) {
-  const runs = detail.conversation.runs ?? []
+function RunTimeline({ thread }: Readonly<{ thread: Thread }>) {
+  const { runs } = thread
+  const detail = thread.detail!
   return (
-    <div data-testid="runs-view" style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
+    <div data-testid={TESTID.runsView} style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
       <Card>
         <CardTitle>Runs</CardTitle>
         <CardBody>

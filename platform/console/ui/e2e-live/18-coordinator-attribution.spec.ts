@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID, testid } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
 // Table item #18 — `AttributeCoordinator` regression, through the real
@@ -20,11 +21,11 @@ const f = loadFixtures()
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/conversations')
-  await expect(page.getByTestId('inbox')).toBeVisible()
+  await expect(page.getByTestId(TESTID.inbox)).toBeVisible()
 })
 
 test('#18 the row names its coordinator, not a guessed pipeline, after the Coordinator CR is deleted', async ({ page }) => {
-  const row = page.getByTestId(`row-${f.conversations.coordDeletedRoot}`)
+  const row = page.getByTestId(testid.row(f.conversations.coordDeletedRoot))
   await expect(row).toBeVisible({ timeout: 20_000 })
 
   // Positive: the chip names the REAL coordinator this conversation
@@ -38,7 +39,7 @@ test('#18 the row names its coordinator, not a guessed pipeline, after the Coord
 
 test('#18 the thread pane attributes it the same way when opened directly', async ({ page }) => {
   await page.goto(`/conversations/${f.conversations.coordDeletedRoot}`)
-  await expect(page.getByTestId('timeline')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId(TESTID.timeline)).toBeVisible({ timeout: 20_000 })
   // A root, even one whose Coordinator is gone, still shows no breadcrumb —
   // it was never caused by anything, which has nothing to do with whether
   // its own Coordinator still exists.

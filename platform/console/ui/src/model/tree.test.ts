@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildTree, descendantsOf, partitionSelection, rootNameOf } from './tree'
-import type { ConversationSummary } from '../../../../api/types'
+import type { ConversationSummary } from '../api/types'
 
 function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
   return {

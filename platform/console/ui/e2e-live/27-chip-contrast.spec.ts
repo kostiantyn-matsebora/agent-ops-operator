@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { TESTID, testid } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
 // Item #27 — the purple coordinator-name chip (`ConversationRow.tsx`'s
@@ -36,7 +37,7 @@ function contrastRatio(a: string, b: string): number {
 }
 
 async function chipColors(page: Page, chipText: string): Promise<{ color: string; bg: string }> {
-  const chip = page.getByTestId(`row-${f.conversations.coordOpenRoot}`).getByText(chipText, { exact: true }).first()
+  const chip = page.getByTestId(testid.row(f.conversations.coordOpenRoot)).getByText(chipText, { exact: true }).first()
   // Measured live (not reasoned): every real ancestor's `backgroundColor` is
   // `rgba(0, 0, 0, 0)` — PatternFly's Label paints its fill on the `::before`
   // PSEUDO-ELEMENT of `.pf-v6-c-label__content` (`label.css`:
@@ -56,13 +57,13 @@ async function chipColors(page: Page, chipText: string): Promise<{ color: string
 
 test('#27 the purple coordinator chip stays legible in both themes', async ({ page }) => {
   await page.goto('/conversations')
-  await expect(page.getByTestId('inbox')).toBeVisible()
-  const row = page.getByTestId(`row-${f.conversations.coordOpenRoot}`)
+  await expect(page.getByTestId(TESTID.inbox)).toBeVisible()
+  const row = page.getByTestId(testid.row(f.conversations.coordOpenRoot))
   await expect(row).toBeVisible({ timeout: 20_000 })
 
   for (const theme of ['light', 'dark'] as const) {
-    await page.locator(`#theme-${theme}`).dispatchEvent('click')
-    await expect(page.getByTestId('theme-switcher')).toHaveAttribute('data-applied', theme)
+    await page.getByTestId(testid.theme(theme)).getByRole('button').dispatchEvent('click')
+    await expect(page.getByTestId(TESTID.themeSwitcher)).toHaveAttribute('data-applied', theme)
 
     const { color, bg } = await chipColors(page, f.coordinators.open)
     const ratio = contrastRatio(color, bg)

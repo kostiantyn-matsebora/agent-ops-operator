@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
 // Table item #16 — the Runs view keeps a run's raw result text UNCHANGED,
@@ -11,25 +12,25 @@ const f = loadFixtures()
 
 test('#16 Runs view: raw text unchanged, turns/tool-calls tables only where the run actually reported them', async ({ page }) => {
   await page.goto(`/conversations/${f.conversations.runsTask}`)
-  await expect(page.getByTestId('timeline')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId(TESTID.timeline)).toBeVisible({ timeout: 20_000 })
   await page.getByRole('button', { name: 'Runs', exact: true }).click()
 
   // Scoped to the Runs panel, never the bare page: the sidebar's own row for
   // this same conversation shows the identical result text as its snippet,
   // so an unscoped getByText matches both and fails strict mode.
-  const runsView = page.getByTestId('runs-view')
+  const runsView = page.getByTestId(TESTID.runsView)
   await expect(runsView).toBeVisible()
 
   // Run 1 (`calls`): raw result text verbatim, plus both tables with real values.
   await expect(runsView.getByText('[stub] made two model calls and one tool call', { exact: true })).toBeVisible()
   // PatternFly's <Table> renders role="grid", not the implicit HTML "table"
   // role — matched on the `aria-label` attribute directly instead.
-  const turnsTable = runsView.locator('table[aria-label="turns"]')
+  const turnsTable = runsView.getByRole('table', { name: 'turns', exact: true })
   await expect(turnsTable).toBeVisible()
   await expect(turnsTable.getByText('stub-model').first()).toBeVisible()
   await expect(turnsTable.getByText('tool_use')).toBeVisible()
   await expect(turnsTable.getByText('end_turn')).toBeVisible()
-  const toolCallsTable = runsView.locator('table[aria-label="tool calls"]')
+  const toolCallsTable = runsView.getByRole('table', { name: 'tool calls', exact: true })
   await expect(toolCallsTable).toBeVisible()
   await expect(toolCallsTable.getByText('mcp__stub__lookup')).toBeVisible()
   await expect(toolCallsTable.getByText('stub', { exact: true })).toBeVisible()

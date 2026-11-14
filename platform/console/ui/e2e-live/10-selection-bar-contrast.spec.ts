@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID, testid } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
 // Table item #10 — the selection bar's text must actually be legible
@@ -33,7 +34,7 @@ function contrastRatio(a: string, b: string): number {
 }
 
 async function selectionBarContrast(page: import('@playwright/test').Page): Promise<{ text: string; bg: string; ratio: number }> {
-  const bar = page.getByTestId('selection-bar')
+  const bar = page.getByTestId(TESTID.selectionBar)
   const [text, bg] = await bar.evaluate((el) => {
     const s = getComputedStyle(el)
     return [s.color, s.backgroundColor]
@@ -44,11 +45,11 @@ async function selectionBarContrast(page: import('@playwright/test').Page): Prom
 test('#10 the selection bar text is legible against its background in both themes', async ({ page }) => {
   const name = f.conversations.prefixTask.name
   await page.goto('/conversations')
-  await expect(page.getByTestId('inbox')).toBeVisible()
-  await expect(page.getByTestId(`row-${name}`)).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId(TESTID.inbox)).toBeVisible()
+  await expect(page.getByTestId(testid.row(name))).toBeVisible({ timeout: 20_000 })
   await page.getByRole('button', { name: 'Select', exact: true }).click()
-  await page.locator(`#select-${name}`).check()
-  await expect(page.getByTestId('selection-bar')).toBeVisible()
+  await page.getByTestId(testid.select(name)).check()
+  await expect(page.getByTestId(TESTID.selectionBar)).toBeVisible()
 
   for (const theme of ['light', 'dark'] as const) {
     // Each button carries a hover Tooltip, and the PREVIOUS button's own
@@ -59,8 +60,8 @@ test('#10 the selection bar text is legible against its background in both theme
     // element is actually on top at those coordinates, which was the
     // lingering tooltip. `dispatchEvent` fires the click on the TARGET
     // NODE directly, regardless of what visually overlaps it.
-    await page.locator(`#theme-${theme}`).dispatchEvent('click')
-    await expect(page.getByTestId('theme-switcher')).toHaveAttribute('data-applied', theme)
+    await page.getByTestId(testid.theme(theme)).getByRole('button').dispatchEvent('click')
+    await expect(page.getByTestId(TESTID.themeSwitcher)).toHaveAttribute('data-applied', theme)
 
     const { text, bg, ratio } = await selectionBarContrast(page)
     // A minimum bar, well short of strict WCAG AA (4.5) to avoid pinning a

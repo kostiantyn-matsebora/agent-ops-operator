@@ -4,7 +4,9 @@ import {
   ModalHeader, Popover, TextArea, TextInput,
 } from '@patternfly/react-core'
 import { useSession, useSources, useVocabulary } from '../../../api/hooks'
-import { api, ApiError } from '../../../api/client'
+import { useCommands } from '../../../model/commands'
+import { NEW_CONVERSATION, startConversation } from '../../../model/verbs'
+import { TESTID, testid } from '../../../model/testids'
 import { PlainText } from '../components/Text'
 import { ComposerHint } from '../components/ComposerHint'
 import { Icon } from '../components/Icon'
@@ -141,7 +143,8 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [error, setError] = useState<string>()
-  const [busy, setBusy] = useState(false)
+  // Starting is the command's state, the model's.
+  const busy = useCommands().sending(NEW_CONVERSATION)
   const [started, setStarted] = useState<string>()
   const cardsRef = useRef<HTMLDivElement>(null)
 
@@ -290,7 +293,7 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
           </>
         }
       >
-        <Button variant="secondary" isAriaDisabled data-testid="new-conversation-unavailable">
+        <Button variant="secondary" isAriaDisabled data-testid={TESTID.newConversationUnavailable}>
           New conversation
         </Button>
       </Popover>
@@ -298,32 +301,26 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
   }
 
   async function start() {
-    setBusy(true)
     setError(undefined)
-    try {
-      const fullTask = selected ? `${ADDRESS_PREFIX}${selected} ${task}` : task
-      await api.start(fullTask, wired[0]?.name)
-      setOpen(false)
-      setTask('')
-      setSelected(null)
-      setFilter('')
-      setStarted(selected ?? wired[0]?.pipeline)
-      onStarted?.()
-    } catch (e) {
+    const fullTask = selected ? `${ADDRESS_PREFIX}${selected} ${task}` : task
+    const outcome = await startConversation(fullTask, wired[0]?.name)
+    if (!outcome.ok) {
       // The server's reason is the useful one — it carries the Wired=False text
-      // and the fix.
-      const err = e as ApiError
-      setError(
-        [err.message, err.body.message as string, err.body.fix as string].filter(Boolean).join(' — '),
-      )
-    } finally {
-      setBusy(false)
+      // and the fix (the model's describeError joins all three).
+      setError(outcome.error)
+      return
     }
+    setOpen(false)
+    setTask('')
+    setSelected(null)
+    setFilter('')
+    setStarted(selected ?? wired[0]?.pipeline)
+    onStarted?.()
   }
 
   return (
     <>
-      <Button variant="primary" onClick={() => setOpen(true)} data-testid="new-conversation">
+      <Button variant="primary" onClick={() => setOpen(true)} data-testid={TESTID.newConversation}>
         New conversation
       </Button>
       {started && (
@@ -383,7 +380,7 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
                     ref={cardsRef}
                     role="radiogroup"
                     aria-label="Pick a destination"
-                    data-testid="destination-cards"
+                    data-testid={TESTID.destinationCards}
                     style={{
                       display: 'flex',
                       flexDirection: 'column',
@@ -402,7 +399,7 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
                           role="radio"
                           aria-checked={isSelected}
                           tabIndex={isRovingTarget ? 0 : -1}
-                          data-testid={`destination-${entry.name}`}
+                          data-testid={testid.destination(entry.name)}
                           data-destination={entry.name}
                           onClick={() => setSelected(entry.name)}
                           onKeyDown={onCardKeyDown}
@@ -457,7 +454,7 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
                     value={filter}
                     onChange={(_e, v) => setFilter(v)}
                     style={{ marginTop: '0.5rem' }}
-                    data-testid="destination-filter"
+                    data-testid={TESTID.destinationFilter}
                   />
                 </>
               )}
@@ -488,7 +485,7 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
             onClick={start}
             isDisabled={busy || !task.trim()}
             isLoading={busy}
-            data-testid="start-conversation"
+            data-testid={TESTID.startConversation}
           >
             {selected ? `Start with ${selected}` : 'Start'}
           </Button>

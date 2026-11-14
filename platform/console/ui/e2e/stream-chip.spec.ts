@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import type { AddressInfo } from 'node:net'
+import { TESTID } from '../src/model/testids'
 
 // The masthead chip, in a real browser.
 //
@@ -151,19 +152,22 @@ test.describe('the masthead stream chip', () => {
   test('shows live while the stream is healthy', async ({ page }) => {
     await page.goto(h.url)
 
-    await expect(page.getByText('live', { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('stream disconnected')).toHaveCount(0)
+    // The chip states the connection the model reports, whatever a look calls it.
+    const chip = page.getByTestId(TESTID.connection)
+    await expect(chip).toBeVisible({ timeout: 15_000 })
+    await expect(chip).toHaveAttribute('data-state', 'connected', { timeout: 15_000 })
   })
 
   test('recovers on its own after the browser gives up on the stream', async ({ page }) => {
     await page.goto(h.url)
-    await expect(page.getByText('live', { exact: true })).toBeVisible({ timeout: 15_000 })
+    const chip = page.getByTestId(TESTID.connection)
+    await expect(chip).toHaveAttribute('data-state', 'connected', { timeout: 15_000 })
 
     // The console starts refusing with an HTTP error — EventSource closes for
     // good and will never retry by itself.
     const opensBefore = h.opens()
     h.setMode('http-error')
-    await expect(page.getByText('stream disconnected')).toBeVisible({ timeout: 20_000 })
+    await expect(chip).toHaveAttribute('data-state', 'disconnected', { timeout: 20_000 })
 
     // The client must actually ASK again and be REFUSED, or the
     // permanent-failure path is never exercised and this test proves nothing —
@@ -174,7 +178,7 @@ test.describe('the masthead stream chip', () => {
     // The console comes back. Before this fix nothing reopened the stream, so
     // the chip stayed wrong until the page was reloaded.
     h.setMode('ok')
-    await expect(page.getByText('live', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(chip).toHaveAttribute('data-state', 'connected', { timeout: 30_000 })
 
     // It recovered by RECONNECTING, not because the page reloaded.
     expect(h.opens()).toBeGreaterThan(opensWhileDown)

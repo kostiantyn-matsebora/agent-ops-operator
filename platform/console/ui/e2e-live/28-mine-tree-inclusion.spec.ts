@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID, testid, ANY_ROW } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 import { ManagerClient } from './support/manager'
 
@@ -20,20 +21,20 @@ const f = loadFixtures()
 
 test('"Mine" shows a self-started root together with the member it invoked, even though the member itself is never "mine"', async ({ page }) => {
   await page.goto('/conversations')
-  await expect(page.getByTestId('inbox')).toBeVisible()
+  await expect(page.getByTestId(TESTID.inbox)).toBeVisible()
 
   const marker = `e2e-ui-mine-tree-${f.stamp}-${Date.now()}`
-  await page.getByTestId('new-conversation').click()
-  await expect(page.getByTestId('destination-cards')).toBeVisible()
-  await page.getByTestId(`destination-${f.coordinators.open}`).click()
+  await page.getByTestId(TESTID.newConversation).click()
+  await expect(page.getByTestId(TESTID.destinationCards)).toBeVisible()
+  await page.getByTestId(testid.destination(f.coordinators.open)).click()
   await page.getByLabel('task', { exact: true }).fill(`echo ${marker}`)
-  const startBtn = page.getByTestId('start-conversation')
+  const startBtn = page.getByTestId(TESTID.startConversation)
   await expect(startBtn).toBeEnabled()
   await startBtn.click()
   await expect(page.getByText(/is answering/)).toBeVisible({ timeout: 20_000 })
 
   await page.goto('/conversations')
-  const rootRow = page.locator('li', { hasText: marker })
+  const rootRow = page.getByTestId(ANY_ROW).filter({ hasText: marker })
   await expect(rootRow).toBeVisible({ timeout: 20_000 })
   const rootTestId = await rootRow.getAttribute('data-testid')
   const rootName = rootTestId?.replace(/^row-/, '')
@@ -43,8 +44,8 @@ test('"Mine" shows a self-started root together with the member it invoked, even
   const memberName = await manager.invoke(f.coordinators.open, rootName, 'domain', `echo mine-tree-member-${f.stamp}`)
 
   await page.goto('/conversations')
-  await page.getByTestId('scope-Mine').click()
-  await expect(page.getByTestId(`row-${rootName}`)).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByTestId(`row-${memberName}`)).toBeVisible({ timeout: 20_000 })
+  await page.getByTestId(testid.scope('Mine')).click()
+  await expect(page.getByTestId(testid.row(rootName))).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId(testid.row(memberName))).toBeVisible({ timeout: 20_000 })
   await page.screenshot({ path: 'e2e-live/proofs/28-mine-tree-inclusion.png', fullPage: true })
 })

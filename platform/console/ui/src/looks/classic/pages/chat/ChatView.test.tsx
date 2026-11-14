@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { api } from '../../../../api/client'
 import { ChatView } from './ChatView'
+import { TESTID, testid } from '../../../../model/testids'
 import type { ConversationSummary, VocabularyEntry } from '../../../../api/types'
 
 // unread defaults true: the default scope (`{kind: 'all'}`) is now an UNREAD
@@ -51,7 +51,10 @@ vi.mock('../../../../api/hooks', () => ({
   useReopenConversation: () => ({ mutate: vi.fn() }),
 }))
 
-vi.mock('../../../../api/client', () => ({ api: { send: vi.fn() } }))
+// The request a row's exit makes, observed at the API edge. Hoisted rather
+// than imported, so this look's test reaches the client only through the mock.
+const send = vi.hoisted(() => vi.fn())
+vi.mock('../../../../api/client', () => ({ api: { send } }))
 
 vi.mock('./ThreadPane', () => ({ ThreadPane: ({ name }: { name: string }) => <div data-testid="thread-pane">{name}</div> }))
 
@@ -509,7 +512,7 @@ describe('the per-row menu actions reach the real conversation', () => {
     renderAt('/conversations')
     await userEvent.click(screen.getByLabelText('actions for a'))
     await userEvent.click(screen.getByText('Exit runtime'))
-    expect(api.send).toHaveBeenCalledWith('a', '/exit')
+    expect(send).toHaveBeenCalledWith('a', '/exit')
   })
 
   it('"Close" hands the row to the selection bar\'s own close flow, selected alone', async () => {
@@ -532,5 +535,17 @@ describe('the per-row menu actions reach the real conversation', () => {
     expect(screen.getByLabelText('select a')).toBeChecked()
     expect(screen.getByLabelText('select b')).not.toBeChecked()
     items = original
+  })
+})
+
+describe('the list renders the model contract’s identifiers', () => {
+  it('the show-closed toggle and each row’s selection box are the checkable controls themselves', async () => {
+    renderAt('/conversations')
+    expect(screen.getByTestId(TESTID.showClosed)).toBe(screen.getByLabelText('Show closed'))
+    await userEvent.click(screen.getByRole('button', { name: 'Select' }))
+    const box = screen.getByTestId(testid.select('a'))
+    expect(box).toHaveAttribute('type', 'checkbox')
+    await userEvent.click(box)
+    expect(box).toBeChecked()
   })
 })

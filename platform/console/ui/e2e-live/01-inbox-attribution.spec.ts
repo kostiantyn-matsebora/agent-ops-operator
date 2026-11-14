@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID, testid } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
 // Table items #1, #7, #13 — what a conversation ROW in the list actually
@@ -10,11 +11,11 @@ const f = loadFixtures()
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/conversations')
-  await expect(page.getByTestId('inbox')).toBeVisible()
+  await expect(page.getByTestId(TESTID.inbox)).toBeVisible()
 })
 
 test('#1 a coordinator root shows its coordinator name as a chip', async ({ page }) => {
-  const row = page.getByTestId(`row-${f.conversations.coordOpenRoot}`)
+  const row = page.getByTestId(testid.row(f.conversations.coordOpenRoot))
   await expect(row).toBeVisible({ timeout: 20_000 })
   await expect(row.getByText(f.coordinators.open, { exact: true })).toBeVisible()
   await page.screenshot({ path: 'e2e-live/proofs/01-coordinator-chip.png', fullPage: true })
@@ -22,7 +23,7 @@ test('#1 a coordinator root shows its coordinator name as a chip', async ({ page
 
 test('#1 a redundant "<pipeline>: " title prefix is stripped, with the pipeline shown only as the chip', async ({ page }) => {
   const { name, title, pipeline } = f.conversations.prefixTask
-  const row = page.getByTestId(`row-${name}`)
+  const row = page.getByTestId(testid.row(name))
   await expect(row).toBeVisible({ timeout: 20_000 })
   // The chip names the pipeline...
   await expect(row.getByText(pipeline!, { exact: true })).toBeVisible()
@@ -37,7 +38,7 @@ test('#1 a redundant "<pipeline>: " title prefix is stripped, with the pipeline 
 
 test('#1 a title with an UNRELATED colon is left untouched', async ({ page }) => {
   const { name, title, pipeline } = f.conversations.colonTask
-  const row = page.getByTestId(`row-${name}`)
+  const row = page.getByTestId(testid.row(name))
   await expect(row).toBeVisible({ timeout: 20_000 })
   // The chip still names the pipeline...
   await expect(row.getByText(pipeline!, { exact: true })).toBeVisible()
@@ -48,7 +49,7 @@ test('#1 a title with an UNRELATED colon is left untouched', async ({ page }) =>
 
 test('#13 "observed" appears exactly once per row — the chip, never also the snippet', async ({ page }) => {
   const { name } = f.conversations.observedChat
-  const row = page.getByTestId(`row-${name}`)
+  const row = page.getByTestId(testid.row(name))
   await expect(row).toBeVisible({ timeout: 20_000 })
   await expect(row.getByText('observed', { exact: true })).toBeVisible()
   const rowText = await row.innerText()

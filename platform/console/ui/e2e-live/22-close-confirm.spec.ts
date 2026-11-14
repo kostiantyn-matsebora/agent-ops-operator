@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { TESTID } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
 // Item #22 — `/close` is destructive enough to be worth a confirm dialog
@@ -12,7 +13,7 @@ const f = loadFixtures()
 
 async function openAndSend(page: Page, name: string, text: string) {
   await page.goto(`/conversations/${name}`)
-  await expect(page.getByTestId('timeline')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId(TESTID.timeline)).toBeVisible({ timeout: 20_000 })
   const composer = page.getByLabel('message', { exact: true })
   await expect(composer).toBeVisible()
   await composer.fill(text)
@@ -22,7 +23,7 @@ async function openAndSend(page: Page, name: string, text: string) {
 test('#22 "/close" asks for confirmation; Cancel sends nothing', async ({ page }) => {
   await openAndSend(page, f.conversations.closeConfirmCancel, '/close')
 
-  const modal = page.getByTestId('close-confirm-modal')
+  const modal = page.getByTestId(TESTID.closeConfirmModal)
   await expect(modal).toBeVisible()
   await expect(modal.getByText('Close this conversation?')).toBeVisible()
 
@@ -38,10 +39,10 @@ test('#22 "/close" asks for confirmation; Cancel sends nothing', async ({ page }
 test('#22 confirming with "Don\'t ask again" closes immediately, and skips the modal on the NEXT /close in this browser', async ({ page }) => {
   // First conversation: confirm WITH the opt-out checked.
   await openAndSend(page, f.conversations.closeConfirmSkipA, '/close')
-  const modal = page.getByTestId('close-confirm-modal')
+  const modal = page.getByTestId(TESTID.closeConfirmModal)
   await expect(modal).toBeVisible()
-  await page.locator('#close-confirm-skip').check()
-  await modal.getByTestId('close-confirm-ok').click()
+  await page.getByTestId(TESTID.closeConfirmSkip).check()
+  await modal.getByTestId(TESTID.closeConfirmOk).click()
   await expect(modal).toHaveCount(0)
   // The real backend actually closed it — proven by the archived banner
   // appearing and the composer disappearing, not merely the modal closing.
@@ -51,13 +52,13 @@ test('#22 confirming with "Don\'t ask again" closes immediately, and skips the m
   // Second, still-open conversation, same browser context (same localStorage):
   // the opt-out from above is honoured, so /close sends AT ONCE, no modal ever.
   await openAndSend(page, f.conversations.closeConfirmSkipB, '/close')
-  await expect(page.getByTestId('close-confirm-modal')).toHaveCount(0)
+  await expect(page.getByTestId(TESTID.closeConfirmModal)).toHaveCount(0)
   await expect(page.getByText('This thread was archived')).toBeVisible({ timeout: 20_000 })
 })
 
 test('#22 "/exit" never shows the confirm dialog, with or without the opt-out', async ({ page }) => {
   await openAndSend(page, f.conversations.closeConfirmExit, '/exit')
-  await expect(page.getByTestId('close-confirm-modal')).toHaveCount(0)
+  await expect(page.getByTestId(TESTID.closeConfirmModal)).toHaveCount(0)
   // /exit only releases the runtime pod — the conversation itself stays open,
   // so the composer is still here and nothing is archived.
   await expect(page.getByText('This thread was archived')).toHaveCount(0)

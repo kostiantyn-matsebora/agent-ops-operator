@@ -3,43 +3,18 @@ import { Badge, Tooltip } from '@patternfly/react-core'
 import {
   ArchiveIcon, ExclamationCircleIcon, HashtagIcon, InProgressIcon, ListIcon, UserIcon,
 } from '@patternfly/react-icons'
-import { useInboxCounts, useVocabulary } from '../../../../api/hooks'
+import { sameScope, scopeKey, useInboxScopes, type Scope } from '../../../../model/conversationList'
+import { TESTID, testid } from '../../../../model/testids'
 import { Icon } from '../../components/Icon'
 import { PlainText } from '../../components/Text'
 import { INBOX_COLLAPSED_WIDTH } from './layout'
 
 // Ported from `prototype/C-rail.html` (expanded) and `C-collapsed.html`
-// (the icon strip) — scope order and wording read from there.
-//
-// `console-chat-layout` spec named this scope "All", counting every
-// conversation regardless of read state, with a separate "Unread" scope
-// beside it. A later decision made every OTHER fixed scope (Working, Mine,
-// Errored), each Pipeline/Coordinator, and Closed an unread count
-// (ChatView.tsx's TREE_PREDICATE) — which made the dedicated "Unread" scope
-// redundant (every category already had its own unread count one level
-// down) and it was removed. All itself did NOT change: it is still every
-// conversation a person can open, read or not, same as it always was.
+// (the icon strip) — scope order and wording read from there. The scopes and
+// their counts are the list model's (model/conversationList.ts); this file
+// only draws them.
 
-export type Scope =
-  | { kind: 'all' }
-  | { kind: 'working' }
-  | { kind: 'mine' }
-  | { kind: 'errored' }
-  | { kind: 'pipeline' | 'coordinator'; name: string }
-  | { kind: 'closed' }
-  // Not a conversation filter — picking it navigates straight to the
-  // channel's general feed (GeneralFeedPane), same as clicking a row does
-  // for an ordinary conversation. ChatView.tsx intercepts it before it ever
-  // becomes the list's own query scope.
-  | { kind: 'general' }
-
-export function scopeKey(s: Scope): string {
-  return 'name' in s ? `${s.kind}:${s.name}` : s.kind
-}
-
-export function sameScope(a: Scope, b: Scope): boolean {
-  return scopeKey(a) === scopeKey(b)
-}
+export { sameScope, scopeKey, type Scope } from '../../../../model/conversationList'
 
 interface InboxProps {
   activeScope: Scope
@@ -89,7 +64,7 @@ function Row({
       type="button"
       onClick={onClick}
       aria-current={active || undefined}
-      data-testid={`scope-${label}`}
+      data-testid={testid.scope(label)}
       style={{
         all: 'unset', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px',
         fontSize: '0.9em', cursor: 'pointer', width: '100%', boxSizing: 'border-box',
@@ -107,32 +82,16 @@ function Row({
 }
 
 export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed, showClosed }: Readonly<InboxProps>) {
-  const counts = useInboxCounts(showClosed)
-  const vocabulary = useVocabulary()
-  const scopes = counts.data?.scopes ?? {}
-  const entries = vocabulary.data?.entries ?? []
-  const pipelines = entries.filter((e) => e.kind === 'pipeline' || e.kind === 'coordinator')
-
-  // All reads `rootTotal` — every conversation a person can open, read or
-  // not, respecting showClosed like every scope but its own list already
-  // does. Every OTHER count below is UNREAD, ANDed with its own scope's
-  // predicate: the dedicated Unread scope is GONE, because once Working,
-  // Mine, Errored, each Pipeline/Coordinator and Closed all carried their own
-  // unread count, a blanket one added nothing a category-scoped click
-  // couldn't already answer. Every one of these still matches its own list
-  // exactly (ChatView.tsx's TREE_PREDICATE), so none needs a tooltip
-  // explaining a gap — there isn't one.
-  const fixed: { scope: Scope; icon: ReactNode; label: string; count?: number }[] = [
-    { scope: { kind: 'all' }, icon: <ListIcon />, label: 'All', count: counts.data?.rootTotal },
-    { scope: { kind: 'working' }, icon: <InProgressIcon />, label: 'Working', count: scopes.working },
-    { scope: { kind: 'mine' }, icon: <UserIcon />, label: 'Mine', count: scopes.mine },
-    { scope: { kind: 'errored' }, icon: <ExclamationCircleIcon />, label: 'Errored', count: scopes.errored },
-  ]
+  const { general, fixed: fixedScopes, targets, closed } = useInboxScopes(showClosed)
+  const FIXED_ICONS: Record<string, ReactNode> = {
+    all: <ListIcon />, working: <InProgressIcon />, mine: <UserIcon />, errored: <ExclamationCircleIcon />,
+  }
+  const fixed = fixedScopes.map((f) => ({ ...f, icon: FIXED_ICONS[f.scope.kind] }))
 
   if (collapsed) {
     return (
       <div
-        data-testid="inbox-collapsed"
+        data-testid={TESTID.inboxCollapsed}
         style={{
           width: INBOX_COLLAPSED_WIDTH, flex: 'none', background: 'var(--ao-surface)',
           borderRight: '1px solid var(--ao-border)', display: 'flex', flexDirection: 'column',
@@ -141,8 +100,8 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
       >
         <Tooltip content="General feed">
           <IconButton
-            active={sameScope(activeScope, { kind: 'general' })}
-            onClick={() => onSelectScope({ kind: 'general' })}
+            active={sameScope(activeScope, general.scope)}
+            onClick={() => onSelectScope(general.scope)}
           >
             <HashtagIcon />
           </IconButton>
@@ -159,12 +118,12 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
           </Tooltip>
         ))}
         <Divider />
-        {pipelines.map((e) => (
-          <Tooltip key={e.name} content={scopes[e.name] ? `${e.name} · ${scopes[e.name]} unread` : e.name}>
+        {targets.map((e) => (
+          <Tooltip key={e.label} content={e.count ? `${e.label} · ${e.count} unread` : e.label}>
             <IconButton
-              active={sameScope(activeScope, { kind: e.kind as 'pipeline' | 'coordinator', name: e.name })}
-              onClick={() => onSelectScope({ kind: e.kind as 'pipeline' | 'coordinator', name: e.name })}
-              badge={scopes[e.name]}
+              active={sameScope(activeScope, e.scope)}
+              onClick={() => onSelectScope(e.scope)}
+              badge={e.count}
             >
               <Icon icon={e.icon || 'aops:agent'} size="1.1em" />
             </IconButton>
@@ -173,8 +132,8 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
         <Divider />
         <Tooltip content="Closed">
           <IconButton
-            active={sameScope(activeScope, { kind: 'closed' })}
-            onClick={() => onSelectScope({ kind: 'closed' })}
+            active={sameScope(activeScope, closed.scope)}
+            onClick={() => onSelectScope(closed.scope)}
           >
             <ArchiveIcon />
           </IconButton>
@@ -195,7 +154,7 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
 
   return (
     <div
-      data-testid="inbox"
+      data-testid={TESTID.inbox}
       style={{
         width: '100%', background: 'var(--ao-surface)', display: 'flex', flexDirection: 'column',
         overflowY: 'auto', height: '100%',
@@ -204,9 +163,9 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
       <Section title="CHANNEL">
         <Row
           icon={<HashtagIcon />}
-          label="General feed"
-          active={sameScope(activeScope, { kind: 'general' })}
-          onClick={() => onSelectScope({ kind: 'general' })}
+          label={general.label}
+          active={sameScope(activeScope, general.scope)}
+          onClick={() => onSelectScope(general.scope)}
         />
       </Section>
       <Section title="INBOX">
@@ -221,16 +180,16 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
           />
         ))}
       </Section>
-      {pipelines.length > 0 && (
+      {targets.length > 0 && (
         <Section title="PIPELINES & COORDINATORS">
-          {pipelines.map((e) => (
+          {targets.map((e) => (
             <Row
-              key={e.name}
+              key={e.label}
               icon={<Icon icon={e.icon || 'aops:agent'} size="1.1em" />}
-              label={e.name}
-              count={scopes[e.name]}
-              active={sameScope(activeScope, { kind: e.kind as 'pipeline' | 'coordinator', name: e.name })}
-              onClick={() => onSelectScope({ kind: e.kind as 'pipeline' | 'coordinator', name: e.name })}
+              label={e.label}
+              count={e.count}
+              active={sameScope(activeScope, e.scope)}
+              onClick={() => onSelectScope(e.scope)}
             />
           ))}
         </Section>
@@ -238,10 +197,10 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
       <Section title="CLOSED">
         <Row
           icon={<ArchiveIcon />}
-          label="Archive"
-          count={scopes.closed}
-          active={sameScope(activeScope, { kind: 'closed' })}
-          onClick={() => onSelectScope({ kind: 'closed' })}
+          label={closed.label}
+          count={closed.count}
+          active={sameScope(activeScope, closed.scope)}
+          onClick={() => onSelectScope(closed.scope)}
         />
       </Section>
       <div

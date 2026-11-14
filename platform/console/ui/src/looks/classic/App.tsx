@@ -11,7 +11,8 @@ import {
 } from '@patternfly/react-icons'
 import globalBreakpointXl from '@patternfly/react-tokens/dist/esm/t_global_breakpoint_xl'
 import { useLiveStream, useSession, useUnreadCount } from '../../api/hooks'
-import { api } from '../../api/client'
+import { signOut } from '../../model/session'
+import { TESTID } from '../../model/testids'
 import { Logo } from '../../components/Logo'
 import { Empty, Loading } from './components/States'
 import { ThemeSwitcher } from './components/ThemeSwitcher'
@@ -153,7 +154,11 @@ export function App() {
                 {/* A stream that is down and a system that is idle look
                     identical on a graph. Saying which is the difference between
                     a stale console and a wrong one. */}
-                <Label status={connected ? 'success' : 'warning'}>
+                <Label
+                  status={connected ? 'success' : 'warning'}
+                  data-testid={TESTID.connection}
+                  data-state={connected ? 'connected' : 'disconnected'}
+                >
                   {connected ? 'live' : 'stream disconnected'}
                 </Label>
               </ToolbarItem>
@@ -201,7 +206,7 @@ export function App() {
                   <Button
                     variant="secondary"
                     onClick={() => {
-                      void api.logout().then(() => session.refetch())
+                      void signOut().then(() => session.refetch())
                     }}
                   >
                     Sign out
@@ -216,7 +221,7 @@ export function App() {
   )
 
   const sidebar = (
-    <PageSidebar isSidebarOpen={navOpen}>
+    <PageSidebar isSidebarOpen={navOpen} data-testid={TESTID.appNav}>
       <PageSidebarBody isFilled>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Nav aria-label="console">

@@ -1,5 +1,6 @@
 import { ToggleGroup, ToggleGroupItem, Tooltip } from '@patternfly/react-core'
 import { resolve, useThemeStore, type ThemeChoice } from '../../../theme/useTheme'
+import { TESTID, testid } from '../../../model/testids'
 
 // The theme switcher.
 //
@@ -19,7 +20,7 @@ export function ThemeSwitcher() {
   const applied = resolve(choice)
 
   return (
-    <ToggleGroup aria-label="colour theme" data-testid="theme-switcher" data-applied={applied}>
+    <ToggleGroup aria-label="colour theme" data-testid={TESTID.themeSwitcher} data-applied={applied}>
       {OPTIONS.map((o) => (
         <Tooltip
           key={o.id}
@@ -28,6 +29,7 @@ export function ThemeSwitcher() {
           <ToggleGroupItem
             aria-label={`${o.label} theme`}
             buttonId={`theme-${o.id}`}
+            data-testid={testid.theme(o.id)}
             isSelected={choice === o.id}
             onChange={() => setChoice(o.id)}
             text={

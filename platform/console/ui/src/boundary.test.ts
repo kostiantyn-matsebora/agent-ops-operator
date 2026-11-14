@@ -16,22 +16,6 @@ type Sources = Record<string, string>
 const PRESENTATION = [/^@patternfly\//, /^react-dom(\/|$)/, /^react-markdown$/, /^rehype-/, /^remark-/, /^highlight\.js/, /^victory/]
 const STYLESHEET = /\.(css|scss|sass|less)(\?|$)/
 
-/**
- * Classic's imports of api/client from before the model layer existed.
- * Rule 2 holds for every other file now. Section 2 moves classic onto the model
- * one view at a time, and each entry goes as its file does — a listed file that
- * no longer imports api/client fails below, so the list only shrinks.
- */
-const CLASSIC_CLIENT_ALLOWLIST = new Set([
-  'looks/classic/App.tsx',
-  'looks/classic/pages/Login.tsx',
-  'looks/classic/pages/NewConversation.tsx',
-  'looks/classic/pages/chat/ChatView.tsx',
-  'looks/classic/pages/chat/ChatView.test.tsx',
-  'looks/classic/pages/chat/SelectionBar.tsx',
-  'looks/classic/pages/chat/ThreadPane.tsx',
-])
-
 const SPECIFIER = [
   /(?:^|[\s;])(?:import|export)\s[^'"`;]*?\bfrom\s*['"]([^'"]+)['"]/g, // import x from 'y', export { x } from 'y'
   /(?:^|[\s;])import\s*['"]([^'"]+)['"]/g, // import 'side-effect.css'
@@ -94,9 +78,7 @@ export function violations(sources: Sources): string[] {
       if (look && target) {
         const other = lookOf(target)
         if (other && other !== look && other !== 'shared') found.push(`${file}: look ${look} imports look ${other} (${spec})`)
-        if (target === 'api/client.ts' && !CLASSIC_CLIENT_ALLOWLIST.has(file)) {
-          found.push(`${file}: look imports api/client`)
-        }
+        if (target === 'api/client.ts') found.push(`${file}: look imports api/client`)
       }
     }
   }
@@ -117,12 +99,6 @@ describe('the layer boundary', () => {
     expect(violations(tree)).toEqual([])
   })
 
-  it('keeps classic’s api/client allowlist to files that still need it', () => {
-    const stale = [...CLASSIC_CLIENT_ALLOWLIST].filter(
-      (f) => !specifiers(tree[f] ?? '').some((s) => resolve(f, s, new Set(Object.keys(tree))) === 'api/client.ts'),
-    )
-    expect(stale).toEqual([])
-  })
 })
 
 describe('the boundary check itself', () => {
@@ -175,14 +151,14 @@ describe('the boundary check itself', () => {
     ])
   })
 
-  it('names a look that imports api/client, outside classic’s allowlist', () => {
+  it('names every look that imports api/client, classic included', () => {
     expect(
       violations({
         ...ok,
         'looks/workspace/y.tsx': "import { api } from '../../api/client'\nimport type { S } from '../../api/types'",
         'looks/classic/App.tsx': "import { api } from '../../api/client'",
       }),
-    ).toEqual(['looks/workspace/y.tsx: look imports api/client'])
+    ).toEqual(['looks/classic/App.tsx: look imports api/client', 'looks/workspace/y.tsx: look imports api/client'])
   })
 
   it('ignores an import mentioned only in a comment', () => {

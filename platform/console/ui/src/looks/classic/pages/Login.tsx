@@ -3,7 +3,7 @@ import {
   ActionGroup, Alert, Bullseye, Button, Card, CardBody, CardTitle,
   Form, FormGroup, TextInput,
 } from '@patternfly/react-core'
-import { api } from '../../../api/client'
+import { signIn } from '../../../model/session'
 
 /**
  * The token IS the boundary: whoever holds it can read every CR the console's
@@ -21,14 +21,10 @@ export function LoginPage({ configured, onLogin }: { configured: boolean; onLogi
     e.preventDefault()
     setBusy(true)
     setError('')
-    try {
-      await api.login(token)
-      onLogin()
-    } catch {
-      setError('That token was not accepted.')
-    } finally {
-      setBusy(false)
-    }
+    const accepted = await signIn(token)
+    setBusy(false)
+    if (accepted) onLogin()
+    else setError('That token was not accepted.')
   }
 
   return (

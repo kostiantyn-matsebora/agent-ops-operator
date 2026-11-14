@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID, testid, ANY_ROW } from '../src/model/testids'
 import { ManagerClient } from './support/manager'
 import { loadFixtures } from './support/fixtures'
 
@@ -20,20 +21,20 @@ test('#30 switching from a narrow scope to a wider one does not tag every row as
   await manager.postTask(SOURCE_TASKS, marker, marker, `echo ${marker}`)
 
   await page.goto('/conversations')
-  await expect(page.getByTestId('inbox')).toBeVisible()
-  const newRow = page.locator('li', { hasText: marker })
+  await expect(page.getByTestId(TESTID.inbox)).toBeVisible()
+  const newRow = page.getByTestId(ANY_ROW).filter({ hasText: marker })
   await expect(newRow).toBeVisible({ timeout: 20_000 })
   // Let its own "new" tag (a real arrival, correctly tagged) clear, so it
   // cannot be confused with the tag this test is checking does NOT appear.
   await expect(newRow.getByText('new', { exact: true })).toBeHidden({ timeout: 10_000 })
 
   // Narrow to a scope this plain task never qualifies for.
-  await page.getByTestId('scope-Errored').click()
-  await expect(page.locator('li', { hasText: marker })).toHaveCount(0)
+  await page.getByTestId(testid.scope('Errored')).click()
+  await expect(page.getByTestId(ANY_ROW).filter({ hasText: marker })).toHaveCount(0)
 
   // Widen back out. The task existed the whole time — it did not just arrive.
-  await page.getByTestId('scope-All').click()
-  await expect(page.locator('li', { hasText: marker })).toBeVisible()
-  await expect(page.locator('li', { hasText: marker }).getByText('new', { exact: true })).toHaveCount(0)
+  await page.getByTestId(testid.scope('All')).click()
+  await expect(page.getByTestId(ANY_ROW).filter({ hasText: marker })).toBeVisible()
+  await expect(page.getByTestId(ANY_ROW).filter({ hasText: marker }).getByText('new', { exact: true })).toHaveCount(0)
   await page.screenshot({ path: 'e2e-live/proofs/30-no-spurious-new-on-widen.png', fullPage: true })
 })

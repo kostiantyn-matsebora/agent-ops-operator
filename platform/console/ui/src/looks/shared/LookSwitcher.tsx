@@ -1,6 +1,7 @@
 import { useContext, useId } from 'react'
 import { useLookStore } from '../../theme/useLook'
 import { LookContext } from './LookContext'
+import { TESTID } from '../../model/testids'
 
 // The look switcher, rendered by every look's header.
 //
@@ -20,7 +21,7 @@ export function LookSwitcher({ className }: Readonly<{ className?: string }>) {
   return (
     <span
       className={className}
-      data-testid="look-switcher"
+      data-testid={TESTID.lookSwitcher}
       data-active={active}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
     >

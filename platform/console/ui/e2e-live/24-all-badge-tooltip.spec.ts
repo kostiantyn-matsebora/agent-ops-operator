@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { testid } from '../src/model/testids'
 
 // Item #24 — the "All" scope's count badge explains the gap between its
 // number (every conversation, server-side, before any filter) and the rows a
@@ -9,7 +10,7 @@ import { expect, test } from '@playwright/test'
 
 test('#24 hovering the "All" badge explains why it does not match the visible rows', async ({ page }) => {
   await page.goto('/conversations')
-  const allRow = page.getByTestId('scope-All')
+  const allRow = page.getByTestId(testid.scope('All'))
   await expect(allRow).toBeVisible()
 
   const badge = allRow.getByText(/^\d+$/)

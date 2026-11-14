@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID, testid } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
 // Table items #4 and #5 — a Coordinator is an addressable destination
@@ -16,21 +17,21 @@ const f = loadFixtures()
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/conversations')
-  await expect(page.getByTestId('inbox')).toBeVisible()
+  await expect(page.getByTestId(TESTID.inbox)).toBeVisible()
 })
 
 test('#4 every Ready pipeline/coordinator renders as its own card the instant the modal opens, with ZERO text typed', async ({ page }) => {
-  await page.getByTestId('new-conversation').click()
-  const cards = page.getByTestId('destination-cards')
+  await page.getByTestId(TESTID.newConversation).click()
+  const cards = page.getByTestId(TESTID.destinationCards)
   await expect(cards).toBeVisible()
 
   // The negative is the whole point of the fix: nothing was typed into
   // EITHER box, and the cards are already there.
-  await expect(page.getByTestId('destination-filter')).toHaveValue('')
+  await expect(page.getByTestId(TESTID.destinationFilter)).toHaveValue('')
   await expect(page.getByLabel('task', { exact: true })).toHaveValue('')
 
-  const coordinatorCard = page.getByTestId(`destination-${f.coordinators.open}`)
-  const pipelineCard = page.getByTestId('destination-e2e-console')
+  const coordinatorCard = page.getByTestId(testid.destination(f.coordinators.open))
+  const pipelineCard = page.getByTestId(testid.destination('e2e-console'))
   await expect(coordinatorCard).toBeVisible()
   await expect(pipelineCard).toBeVisible()
   // A real Pipeline is offered on exactly the same footing as a Coordinator
@@ -43,15 +44,15 @@ test('#4 every Ready pipeline/coordinator renders as its own card the instant th
 })
 
 test('#4 the filter box narrows the visible cards without ever blanking the list', async ({ page }) => {
-  await page.getByTestId('new-conversation').click()
-  const cards = page.getByTestId('destination-cards')
+  await page.getByTestId(TESTID.newConversation).click()
+  const cards = page.getByTestId(TESTID.destinationCards)
   await expect(cards).toBeVisible()
   const before = await cards.getByRole('radio').count()
   expect(before).toBeGreaterThan(1)
 
-  await page.getByTestId('destination-filter').fill('e2e-console')
-  await expect(page.getByTestId('destination-e2e-console')).toBeVisible()
-  await expect(page.getByTestId(`destination-${f.coordinators.open}`)).toHaveCount(0)
+  await page.getByTestId(TESTID.destinationFilter).fill('e2e-console')
+  await expect(page.getByTestId(testid.destination('e2e-console'))).toBeVisible()
+  await expect(page.getByTestId(testid.destination(f.coordinators.open))).toHaveCount(0)
   const after = await cards.getByRole('radio').count()
   expect(after).toBeGreaterThan(0)
   expect(after).toBeLessThan(before)
@@ -65,19 +66,19 @@ test('#5 the empty "Select a conversation" state offers no starter chips — by 
   // (#4, above) already lists every Ready destination as its own card the
   // instant it opens. There is nothing left to start FROM here.
   await expect(page.getByText('Select a conversation')).toBeVisible()
-  await expect(page.getByTestId('quick-chips')).toHaveCount(0)
+  await expect(page.getByTestId(TESTID.quickChips)).toHaveCount(0)
   await page.screenshot({ path: 'e2e-live/proofs/05-empty-state-no-chips.png', fullPage: true })
 })
 
 test('#4/#5 picking a card, typing a task, and Start really creates a conversation against the real backend', async ({ page }) => {
-  await page.getByTestId('new-conversation').click()
-  await expect(page.getByTestId('destination-cards')).toBeVisible()
+  await page.getByTestId(TESTID.newConversation).click()
+  await expect(page.getByTestId(TESTID.destinationCards)).toBeVisible()
 
-  const startBtn = page.getByTestId('start-conversation')
+  const startBtn = page.getByTestId(TESTID.startConversation)
   await expect(startBtn).toHaveText('Start')
   await expect(startBtn).toBeDisabled()
 
-  await page.getByTestId('destination-e2e-console').click()
+  await page.getByTestId(testid.destination('e2e-console')).click()
   await expect(startBtn).toHaveText('Start with e2e-console')
   // Selecting a destination alone never enables Start — a task is still required.
   await expect(startBtn).toBeDisabled()

@@ -1,4 +1,4 @@
-import type { ConversationSummary } from '../../../../api/types'
+import type { ConversationSummary } from '../api/types'
 
 // Derived client-side by following `causedBy` to the uncaused root (design
 // D-F) — the snapshot the list already fetched holds every conversation it

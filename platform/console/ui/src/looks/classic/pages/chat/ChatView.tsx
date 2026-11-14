@@ -1,24 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Checkbox, SearchInput } from '@patternfly/react-core'
 import { BarsIcon } from '@patternfly/react-icons'
 import {
-  useConversations, useMarkRead, useMarkUnread, usePipelineIcon, useReopenConversation, useSession,
+  useMarkRead, useMarkUnread, usePipelineIcon, useReopenConversation, useSession,
 } from '../../../../api/hooks'
-import { api } from '../../../../api/client'
 import { useShell } from '../../../../shell'
 import { Empty, ErrorState, Loading } from '../../components/States'
 import {
   DEFAULT_LAYOUT, INBOX_COLLAPSED_WIDTH, MIN_INBOX_WIDTH, MIN_LIST_WIDTH, MIN_THREAD_WIDTH, useLayout,
 } from './layout'
 import { Splitter } from './Splitter'
-import { Inbox, sameScope, scopeKey, type Scope } from './Inbox'
+import { Inbox } from './Inbox'
 import { ConversationRow } from './ConversationRow'
 import { SelectionBar } from './SelectionBar'
 import { ThreadPane } from './ThreadPane'
 import { GENERAL_FEED_NAME, GeneralFeedPane } from './GeneralFeedPane'
-import { buildTree, rootNameOf } from './tree'
-import type { ConversationSummary } from '../../../../api/types'
+import {
+  sameScope, scopeKey, selectionState, useArrivals, useConversationList, type Scope,
+} from '../../../../model/conversationList'
+import { exitRuntime } from '../../../../model/verbs'
+import { TESTID } from '../../../../model/testids'
 
 // `console-chat-layout`: one view, four columns, switching in place.
 // Composition from `prototype/C-rail.html` and `C-collapsed.html`.
@@ -29,38 +31,6 @@ const NARROW_WIDTH = 900
  * list (MIN_LIST_WIDTH) inside the remaining width once the app shell's own
  * rail is accounted for — a true phone width, not merely a narrowed window. */
 const MOBILE_WIDTH = 560
-const PAGE_SIZE = 100
-
-function scopeParams(scope: Scope, search: string): URLSearchParams {
-  const p = new URLSearchParams()
-  if (scope.kind === 'closed') p.set('phase', 'Closed')
-  else if (scope.kind === 'pipeline') {
-    p.set('pipeline', scope.name)
-    // A Pipeline conversation never causes a member (only a Coordinator
-    // invokes — terminology.md), so there is no tree for `?unread=true` to
-    // break here the way it would for the scopes below.
-    p.set('unread', 'true')
-  }
-  // A Coordinator scope has no server-side filter param (the backend tracks
-  // it only as a `scopes` count, console.go/convapi.go — not mine to add):
-  // narrowed CLIENT-SIDE below instead of widening the request shape here.
-  //
-  // All, Working, Errored and Mine are the SAME shape of problem: each is an
-  // independent per-row predicate server-side (convapi.go's `matches`), with
-  // no tree awareness at all. `?mine=true` kept a root but dropped every
-  // member (a member is never Mine — it was invoked, never originated, so it
-  // carries no OriginReader). `?unread=true` would just as readily keep an
-  // unread MEMBER while dropping its own root, or the reverse — either way
-  // the tree has nothing to attach to. All four are narrowed CLIENT-SIDE
-  // below instead: if anything anywhere in a tree matches, the WHOLE tree
-  // shows, each row rendering its own real status regardless of why the tree
-  // qualified (a root can show up already read, because the member beside it
-  // is what made the tree match).
-  if (search) p.set('q', search)
-  p.set('limit', String(PAGE_SIZE))
-  return p
-}
-
 function useBelowWidth(px: number): boolean {
   const [below, setBelow] = useState(() => typeof window !== 'undefined' && window.innerWidth < px)
   useEffect(() => {
@@ -83,97 +53,6 @@ function useNarrow(): boolean {
  * full-screen drawer instead of a column. */
 function useMobile(): boolean {
   return useBelowWidth(MOBILE_WIDTH)
-}
-
-/**
- * Expands a per-row predicate into a per-TREE one: if anything anywhere in a
- * tree matches, every row of that tree is kept — never just the matching row
- * in isolation, which is what left a "Mine" root with none of its own
- * members, and would do the same to Unread/Working/Errored. Each kept row
- * still renders its own real status; this only decides whether the tree
- * shows at all.
- */
-function withTreeContext(
-  raw: ConversationSummary[],
-  matches: (c: ConversationSummary) => boolean,
-): ConversationSummary[] {
-  const byName = new Map(raw.map((c) => [c.name, c]))
-  const rootNameOf = (c: ConversationSummary): string => {
-    let cur = c
-    for (let hop = 0; cur.causedBy && hop < 64; hop++) {
-      const parent = byName.get(cur.causedBy.parent)
-      if (!parent) break
-      cur = parent
-    }
-    return cur.name
-  }
-  const qualifyingRoots = new Set<string>()
-  for (const c of raw) {
-    if (matches(c)) qualifyingRoots.add(rootNameOf(c))
-  }
-  return raw.filter((c) => qualifyingRoots.has(rootNameOf(c)))
-}
-
-/** Rows whose ancestor chain passes through a collapsed root are hidden — the caret, not a filter. */
-function visibleRows(
-  tree: ReturnType<typeof buildTree>,
-  items: ConversationSummary[],
-  collapsedRoots: Set<string>,
-): ReturnType<typeof buildTree> {
-  const byName = new Map(items.map((c) => [c.name, c]))
-  return tree.filter(({ row }) => {
-    let cur: ConversationSummary | undefined = row
-    while (cur?.causedBy) {
-      if (collapsedRoots.has(cur.causedBy.parent)) return false
-      cur = byName.get(cur.causedBy.parent)
-    }
-    return true
-  })
-}
-
-function dropName(set: Set<string>, name: string): Set<string> {
-  if (!set.has(name)) return set
-  const next = new Set(set)
-  next.delete(name)
-  return next
-}
-
-// Arrivals move (console-thread-live-cues): a name the previous snapshot did
-// not have gets the tint and the "new" tag — the row itself, plus the inbox's
-// own unread badges, are the whole of the signal. A popup for every arrival
-// was removed: it fired once per row on every page that happened to be open,
-// which is spam rather than a cue. `seenNames` starts `null` so the FIRST
-// load never fires one.
-//
-// `scopeKey` resets that "first load" state per SCOPE. Without it, switching
-// from a narrow scope (a few rows) to a wider one (e.g. "All") compared the
-// wider scope's full list against the narrow scope's small `seenNames` set —
-// every row the narrow scope never had looked like a fresh arrival, so
-// opening "All" tagged the entire list "new" even though nothing had.
-function useArrivals(
-  data: { items: ConversationSummary[] } | undefined,
-  setNewNames: React.Dispatch<React.SetStateAction<Set<string>>>,
-  scopeKey: string,
-) {
-  const seenNames = useRef<Set<string> | null>(null)
-  const seenScope = useRef<string | null>(null)
-  useEffect(() => {
-    if (!data) return
-    if (seenScope.current !== scopeKey) {
-      seenScope.current = scopeKey
-      seenNames.current = null
-    }
-    const current = new Set(data.items.map((c) => c.name))
-    const prevSeen = seenNames.current
-    seenNames.current = current
-    if (prevSeen === null) return
-    const arrived = data.items.filter((c) => !prevSeen.has(c.name))
-    if (arrived.length === 0) return
-    setNewNames((prev) => new Set([...prev, ...arrived.map((c) => c.name)]))
-    for (const c of arrived) {
-      setTimeout(() => setNewNames((prev) => dropName(prev, c.name)), 4000)
-    }
-  }, [data, setNewNames, scopeKey])
 }
 
 function ListBody({
@@ -249,68 +128,9 @@ function withMembership(names: Set<string>, rowName: string, present: boolean): 
   return next
 }
 
-/** The rows a bulk action may touch, and whether every one is selected. */
-function selectionState(items: ConversationSummary[], selected: Set<string>) {
-  const selectableRows = items.filter((c) => !c.deleting).map((c) => c.name)
-  const allSelected = selectableRows.length > 0 && selectableRows.every((n) => selected.has(n))
-  return { selectableRows, allSelected }
-}
-
 /** The inbox pane's width, the narrow strip when it is collapsed. */
 function inboxPaneWidth(layout: { inboxCollapsed: boolean; inboxWidth: number }): number {
   return layout.inboxCollapsed ? INBOX_COLLAPSED_WIDTH : layout.inboxWidth
-}
-
-// `/exit` is fully recoverable (invariants.md: "`/exit` RELEASES THE
-// RUNTIME") so it needs no confirmation and runs the same way a thread
-// command chip does — an ordinary message, never a dedicated endpoint.
-function exitRuntime(rowName: string) {
-  void api.send(rowName, '/exit')
-}
-
-// Every OTHER scope here but All and Closed is unread, ANDed with its own
-// predicate: Working/Mine/Errored/Coordinator check what they are named for
-// plus unread.
-const TREE_PREDICATE: Partial<Record<Scope['kind'], (c: ConversationSummary) => boolean>> = {
-  working: (c) => c.phase === 'Working' && Boolean(c.unread),
-  errored: (c) => Boolean(c.errored) && Boolean(c.unread),
-  mine: (c) => Boolean(c.mine) && Boolean(c.unread),
-  coordinator: (c) => Boolean(c.unread),
-}
-
-/** The rows a scope shows, narrowed client-side from the server's snapshot. */
-function visibleItems(all: ConversationSummary[], scope: Scope, showClosed: boolean): ConversationSummary[] {
-  let raw = all
-  if (scope.kind === 'coordinator') {
-    // `c.causedBy` truthy alone is not enough — it admits a member of ANY
-    // coordinator, not just this scope's. A member carries no field naming
-    // which coordinator it ultimately belongs to, only its immediate
-    // parent (`causedBy.parent`), so membership is decided by walking to
-    // the uncaused root — within the UNFILTERED snapshot, since the
-    // walk needs every ancestor still present — and checking THAT root's
-    // own `coordinator` field.
-    const byName = new Map(raw.map((c) => [c.name, c]))
-    raw = raw.filter((c) => byName.get(rootNameOf(all, c))?.coordinator === scope.name)
-  }
-  // All is NOT an unread filter — it is every conversation a person can
-  // open, full stop, narrowed only by the generic "hide closed" rule below
-  // (so it still respects showClosed). Closed carries no predicate at all —
-  // it is the archive, and a read conversation still belongs in it the same
-  // way a read email still belongs in "All Mail"; the server already narrowed
-  // `raw` to phase=Closed (scopeParams above), so there is nothing left to
-  // AND here, and no "show closed" checkbox either.
-  const predicate = TREE_PREDICATE[scope.kind]
-  if (predicate) {
-    raw = withTreeContext(raw, predicate)
-  }
-  // Closed conversations are hidden by default everywhere except the
-  // dedicated Closed scope, where showing them is the whole point —
-  // narrowed CLIENT-SIDE, like the coordinator scope above, since there is
-  // no server-side "exclude closed" param to ask for instead.
-  if (!showClosed && scope.kind !== 'closed') {
-    raw = raw.filter((c) => c.phase !== 'Closed')
-  }
-  return raw
 }
 
 /** The thread pane's content: the general feed, one conversation, or the empty prompt. */
@@ -350,15 +170,15 @@ export function ChatView() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [highlighted, setHighlighted] = useState<string | undefined>()
   const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(new Set())
-  const [newNames, setNewNames] = useState<Set<string>>(new Set())
   const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
   // Every root name this component has ever applied the persisted fold
   // default to — so a root the viewer explicitly expanded (or collapsed) by
   // hand is never silently re-folded just because the tree re-rendered.
   const seededRootsRef = useRef<Set<string>>(new Set())
 
-  const params = useMemo(() => scopeParams(scope, search), [scope, search])
-  const { data, isLoading, error } = useConversations(params)
+  const { data, isLoading, error, items, rows, collapsibleNames } = useConversationList({
+    scope, search, showClosed, flatten, collapsedRoots,
+  })
   const session = useSession()
   const iconFor = usePipelineIcon()
   const canWrite = session.data?.canWrite ?? false
@@ -367,13 +187,10 @@ export function ChatView() {
   const markRead = useMarkRead()
   const markUnread = useMarkUnread()
 
-  const items = useMemo(() => visibleItems(data?.items ?? [], scope, showClosed), [data, scope, showClosed])
+  // Arrivals move (console-thread-live-cues): the row itself, plus the inbox's
+  // own unread badges, are the whole of the signal — no popup.
+  const { newNames, clear: clearNew } = useArrivals(data, scopeKey(scope))
 
-  useArrivals(data, setNewNames, scopeKey(scope))
-
-  const tree = useMemo(() => buildTree(items, !flatten), [items, flatten])
-  const rows = useMemo(() => visibleRows(tree, items, collapsedRoots), [tree, items, collapsedRoots])
-  const collapsibleNames = useMemo(() => tree.filter((t) => t.memberCount > 0).map((t) => t.row.name), [tree])
   const anyCollapsed = collapsibleNames.some((n) => collapsedRoots.has(n))
 
   // Applies the persisted fold default to every root the FIRST time it is
@@ -401,10 +218,6 @@ export function ChatView() {
     useShell.getState().setNavCollapsed(true)
     return () => useShell.getState().setNavCollapsed(prev)
   }, [])
-
-  function clearNew(rowName: string) {
-    setNewNames((prev) => dropName(prev, rowName))
-  }
 
   function toggleSelect(rowName: string, checked: boolean) {
     setSelected((prev) => withMembership(prev, rowName, checked))
@@ -493,13 +306,13 @@ export function ChatView() {
   return (
     <section
       ref={workspaceRef}
-      data-testid="chat-view"
+      data-testid={TESTID.chatView}
       aria-label="conversations workspace"
       tabIndex={-1}
       style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}
     >
       {showingList && mobile && mobileInboxOpen && (
-        <div data-testid="mobile-inbox-drawer" style={{ width: '100%', flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div data-testid={TESTID.mobileInboxDrawer} style={{ width: '100%', flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <Inbox
             activeScope={scope}
             onSelectScope={(s) => {
@@ -596,6 +409,7 @@ export function ChatView() {
               {scope.kind !== 'closed' && (
                 <Checkbox
                   id="show-closed"
+                  data-testid={TESTID.showClosed}
                   label="Show closed"
                   isChecked={showClosed}
                   onChange={(_e, checked) => setShowClosed(checked)}
@@ -635,7 +449,7 @@ export function ChatView() {
                       onMarkRead={() => markRead.mutate({ names: [row.name] })}
                       onMarkUnread={() => markUnread.mutate({ names: [row.name] })}
                       onReopen={() => reopen.mutate(row.name)}
-                      onExitRuntime={() => exitRuntime(row.name)}
+                      onExitRuntime={() => void exitRuntime(row.name)}
                       onClose={() => closeRow(row.name)}
                       onDelete={() => deleteRow(row.name)}
                       collapsed={collapsedRoots.has(row.name)}

@@ -1,74 +1,26 @@
 import { forwardRef } from 'react'
 import { Checkbox, Label } from '@patternfly/react-core'
-import { Icon, stripLeadingIcon } from '../../components/Icon'
+import { Icon } from '../../components/Icon'
 import { PlainText } from '../../components/Text'
 import { relativeAge } from './format'
 import { prefersReducedMotion } from './motion'
 import { RowMenu } from './RowMenu'
 import type { ConversationSummary } from '../../../../api/types'
+import { phaseDot, rowTag, rowTitle, rowUnread, type RowStatus } from '../../../../model/conversationList'
+import { testid } from '../../../../model/testids'
 
 // Ported from `prototype/States.html` (row states) and `C-rail.html` /
 // `D-incident.html` (the grid, the caret, the member line) — composition and
 // wording read from there, behaviour from the `console-unread` and
 // `console-conversation-tree` specs.
 
-/**
- * Strips a leading "`<name>`: " from a title, ONLY when `<name>` is exactly
- * the name the row's own chip already shows (`RowBadges` above) — the
- * coordinator for a root, the pipeline otherwise. Any other colon-prefixed
- * text (an agent's own "esphome: ...", "homeassistant: ...") is content and
- * stays untouched: this never strips a prefix it cannot attribute to the chip.
- */
-export function stripNamePrefix(title: string, name: string | undefined): string {
-  if (!name) return title
-  const prefix = `${name}: `
-  return title.startsWith(prefix) ? title.slice(prefix.length) : title
-}
+// The row's facts — title, snippet, tag, status, unread — are the list
+// model's (model/conversationList.ts). Re-exported for the tests that pinned
+// them here first.
+export { phaseDot, rowSnippet, rowTag } from '../../../../model/conversationList'
+export { stripNamePrefix } from '../../../../model/titles'
 
-/** The snippet line: the last counted message, or why the row has no message yet. */
-export function rowSnippet(row: ConversationSummary): string {
-  if (row.deleting) return 'deleting'
-  if (row.phase === 'Closed') return row.closeReason ? `closed · ${row.closeReason}` : `closed · ${row.runCount} run(s)`
-  if (row.blocked) return `${row.blocked.storage ? 'storage' : 'blocked'}: ${row.blocked.reason}`
-  if (row.phase === 'Pending') return 'pending · waiting for a slot'
-  if (row.lastMessage) {
-    const who = row.lastMessage.sender ? `${row.lastMessage.sender}: ` : ''
-    return row.presence ? `working · ${who}${row.lastMessage.text}` : `${who}${row.lastMessage.text}`
-  }
-  if (row.presence) return `${row.pipeline || 'the agent'} is working…`
-  return ''
-}
-
-/**
- * The small tag on the right of the snippet line — absent most of the time.
- *
- * `observed` (`!row.joined`) is GONE: measured live, it showed on every
- * unattended alert-investigator row in every screenshot, since the viewer
- * never "joins" an automated conversation by replying to it. A tag on
- * effectively 100% of rows distinguishes nothing and is pure noise.
- */
-export function rowTag(row: ConversationSummary, isNew: boolean): string | undefined {
-  if (isNew) return 'new'
-  if (row.errored) return 'run failed'
-  if (row.phase === 'Closed') {
-    // A coordinator's root closed WITHOUT escalating is visible and distinct
-    // (console-conversation-tree: "An incident nobody was told about is
-    // visible") — never confused with an ordinary closed thread.
-    if (row.coordinator && !row.escalatedAt && row.closeReason) return 'nobody notified'
-    return 'closed'
-  }
-  return undefined
-}
-
-type DotState = 'working' | 'pending' | 'failed' | 'idle' | 'none'
-
-export function phaseDot(row: ConversationSummary): DotState {
-  if (row.presence) return 'working'
-  if (row.errored) return 'failed'
-  if (row.phase === 'Pending' || row.phase === 'Queued') return 'pending'
-  if (row.phase === 'Closed') return 'none'
-  return 'idle'
-}
+type DotState = RowStatus
 
 const DOT_COLOR: Record<DotState, string | undefined> = {
   working: 'var(--ao-brand)',
@@ -148,7 +100,7 @@ function RowBadges({
       )}
       {unread && (
         <span
-          data-testid={`unread-${row.name}`}
+          data-testid={testid.unread(row.name)}
           aria-label={`${row.unreadCount} unread`}
           style={{
             minWidth: 20, height: 20, padding: '0 6px', borderRadius: 10, background: 'var(--ao-brand)',
@@ -248,16 +200,8 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
   ref,
 ) {
   const isRoot = Boolean(row.coordinator)
-  const isMember = Boolean(row.causedBy)
-  // A root is attributed by its coordinator, a member by the entry it was
-  // invoked as (`causedBy.entry` — `row.pipeline` is unset on a member, so
-  // comparing against it left the prefix in place), and everything else by
-  // its pipeline.
-  let nameForStrip = row.pipeline
-  if (isRoot) nameForStrip = row.coordinator
-  else if (isMember) nameForStrip = row.causedBy?.entry
-  const title = stripNamePrefix(stripLeadingIcon(row.title || row.name), nameForStrip)
-  const unread = (row.unreadCount ?? 0) > 0
+  const title = rowTitle(row)
+  const unread = rowUnread(row)
   const dot = phaseDot(row)
   const tag = rowTag(row, isNew)
   const tint = rowTint(row, isRoot)
@@ -298,7 +242,7 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
       // the marker ... still appear"). `isNew` is cleared the moment the row
       // is first opened, by whoever tracks arrivals.
       className={isNew && !prefersReducedMotion() ? 'ao-row-arrive' : undefined}
-      data-testid={`row-${row.name}`}
+      data-testid={testid.row(row.name)}
       style={{
         display: 'flex',
         // A root's divider spans the FULL row — it closes out an entire
@@ -321,6 +265,7 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
         <span style={{ flex: 'none', paddingLeft: 12, paddingRight: 10, paddingTop: 13, alignSelf: 'start' }}>
           <Checkbox
             id={`select-${row.name}`}
+            data-testid={testid.select(row.name)}
             aria-label={`select ${title}`}
             isChecked={selected}
             isDisabled={row.deleting}
@@ -352,7 +297,7 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
         type="button"
         onClick={onOpen}
         aria-label={`open ${title}`}
-        data-testid={`open-${row.name}`}
+        data-testid={testid.open(row.name)}
         style={{
           all: 'unset',
           display: 'grid',

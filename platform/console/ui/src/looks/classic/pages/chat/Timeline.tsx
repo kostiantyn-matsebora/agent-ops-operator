@@ -8,6 +8,8 @@ import { Blocks, Fold, agentText } from '../../components/Blocks'
 import { parse } from '../../../../api/blocks'
 import { fence } from '../../../../api/fence'
 import type { ActivityEvent, Choice, Message } from '../../../../api/types'
+import { groupRunEvents, runEventLabel, type RunGroup } from '../../../../model/run'
+import { TESTID } from '../../../../model/testids'
 
 // Ported from `prototype/C-rail.html` and `States.html` ("In the thread") —
 // the divider, the jump pill and the run-event lines read from there.
@@ -19,15 +21,8 @@ import type { ActivityEvent, Choice, Message } from '../../../../api/types'
 // structure.
 const COUNTED_KINDS = new Set(['signal', 'agent', 'relay'])
 
-const RUN_EVENT_KINDS: Record<string, string> = {
-  'run.dispatched': 'run dispatched',
-  'runtime.starting': 'runtime starting',
-  'context.restored': 'context restored',
-  'context.checkpoint': 'context checkpoint',
-  'context.skipped': 'context skipped',
-  'context.failed': 'context failed',
-  'run.completed': 'run completed',
-}
+// Run lifecycle events are grouped and labelled by the run model
+// (model/run.ts); this file draws each group as its own inline line.
 
 const SPEAKERS: Record<string, string> = { local: 'you', relay: 'user', agent: 'agent', ack: 'agent-ops', signal: 'signal' }
 function speaker(kind: string): string {
@@ -138,40 +133,17 @@ function MessageChoices({ choices, interactive, onSelect }: Readonly<{
   )
 }
 
-/** One run's events folded to a single summary line, expandable. */
-interface RunGroup {
-  runId: string
-  events: ActivityEvent[]
-  at: number
-}
-
-/** Groups consecutive run-shaped events sharing one `runId` (design D-G). */
-function groupRunEvents(events: ActivityEvent[]): RunGroup[] {
-  const groups = new Map<string, RunGroup>()
-  const order: string[] = []
-  for (const e of events) {
-    if (!RUN_EVENT_KINDS[e.kind]) continue
-    const key = e.runId || e.cursor
-    if (!groups.has(key)) {
-      groups.set(key, { runId: e.runId || '', events: [], at: Date.parse(e.ts) || 0 })
-      order.push(key)
-    }
-    groups.get(key)!.events.push(e)
-  }
-  return order.map((k) => groups.get(k)!)
-}
-
 function RunEventLine({ group }: Readonly<{ group: RunGroup }>) {
   const [expanded, setExpanded] = useState(false)
-  const summary = group.events.map((e) => RUN_EVENT_KINDS[e.kind] || e.kind).join(' · ')
+  const summary = group.events.map((e) => runEventLabel(e.kind)).join(' · ')
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0 3px 48px', fontSize: '0.8em', color: 'var(--ao-text-subtle)' }}>
+    <div data-testid={TESTID.runEvents} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0 3px 48px', fontSize: '0.8em', color: 'var(--ao-text-subtle)' }}>
       <span aria-hidden style={{ width: 14, height: 1, background: 'var(--ao-border)' }} />
       {expanded ? (
         <span>
           {group.events.map((e) => (
             <span key={e.cursor} style={{ marginRight: 10 }}>
-              <PlainText>{RUN_EVENT_KINDS[e.kind] || e.kind}</PlainText>
+              <PlainText>{runEventLabel(e.kind)}</PlainText>
               {e.latencyMs ? ` (${(e.latencyMs / 1000).toFixed(1)}s)` : ''}
             </span>
           ))}
@@ -297,7 +269,7 @@ export function Timeline({
 
   return (
     <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div ref={listRef} onScroll={onScroll} data-testid="timeline" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 24px' }}>
+      <div ref={listRef} onScroll={onScroll} data-testid={TESTID.timeline} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 24px' }}>
         {activityGap && (
           <div style={{ textAlign: 'center', fontSize: '0.8em', color: 'var(--ao-text-subtle)', padding: '6px 0' }}>
             — some activity here was not recorded —
@@ -315,7 +287,7 @@ export function Timeline({
             const within = prev && Date.parse(m.at) - Date.parse(prev.at) < 60_000
             const startsGroup = !sameSpeaker || !within
             return (
-              <article key={m.id} style={{ display: 'grid', gridTemplateColumns: '2em 1fr', columnGap: '0.75em', padding: startsGroup ? '0.85em 0 0.15em' : '0.15em 0' }}>
+              <article key={m.id} data-testid={TESTID.message} data-kind={m.kind} style={{ display: 'grid', gridTemplateColumns: '2em 1fr', columnGap: '0.75em', padding: startsGroup ? '0.85em 0 0.15em' : '0.15em 0' }}>
                 {m.id === firstUnreadId && (
                   <div
                     ref={dividerRef}
@@ -363,7 +335,7 @@ export function Timeline({
                 </div>
               )}
               <span
-                data-testid="typing"
+                data-testid={TESTID.typing}
                 aria-label="working"
                 style={{ display: 'inline-flex', gap: 4, padding: '8px 12px', borderRadius: 14, background: 'var(--ao-surface-alt)', border: '1px solid var(--ao-border)' }}
               >
@@ -376,7 +348,7 @@ export function Timeline({
       {!atBottom && arrivedSinceScrolledUp > 0 && (
         <Button
           onClick={jumpToEnd}
-          data-testid="jump-pill"
+          data-testid={TESTID.jumpPill}
           style={{ position: 'absolute', right: 28, bottom: 16, borderRadius: 16 }}
         >
           {`↓ ${arrivedSinceScrolledUp} new message${arrivedSinceScrolledUp === 1 ? '' : 's'}`}

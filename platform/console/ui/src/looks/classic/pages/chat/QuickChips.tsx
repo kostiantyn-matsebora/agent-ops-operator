@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Button, Tooltip } from '@patternfly/react-core'
 import { ArchiveIcon, SignOutAltIcon } from '@patternfly/react-icons'
 import { useVocabulary } from '../../../../api/hooks'
+import { TESTID } from '../../../../model/testids'
 
 // Ported from `prototype/States.html`'s chip row, with ONE explicit
 // deviation from it: the user instructed directly, more than once, that
@@ -50,7 +51,7 @@ export function QuickChips({ canWrite, onRunCommand }: Readonly<QuickChipsProps>
 
   return (
     <div
-      data-testid="quick-chips"
+      data-testid={TESTID.quickChips}
       style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}
     >
       {threadCommands.map((e) => (

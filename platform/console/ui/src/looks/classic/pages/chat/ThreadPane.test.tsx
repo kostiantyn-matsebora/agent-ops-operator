@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { ThreadPane } from './ThreadPane'
+import { TESTID, testid } from '../../../../model/testids'
 import type { ConversationDetail, ConversationSummary } from '../../../../api/types'
 
 function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
@@ -724,5 +725,38 @@ describe('the Sequence tab', () => {
     expect(screen.getByText('∅ → ∅')).toBeInTheDocument()
     expect(screen.getByText('error')).toBeInTheDocument()
     expect(screen.getByText('1.50s')).toBeInTheDocument()
+  })
+})
+
+describe('the thread renders the model contract’s identifiers', () => {
+  it('marks each message with its kind and each run’s lifecycle line', () => {
+    renderPane('root-escalated')
+    const messages = screen.getAllByTestId(TESTID.message)
+    expect(messages.map((m) => m.getAttribute('data-kind'))).toEqual(['agent'])
+    // Neither fixture event names a run, so each is its own line.
+    expect(screen.getAllByTestId(TESTID.runEvents).map((l) => l.textContent)).toEqual(['run dispatched', 'run completed'])
+  })
+
+  it('a member invocation says whether it is expanded, and its toggle changes that', async () => {
+    renderPane('root-1')
+    const invocation = screen.getByTestId(testid.memberInvocation('mid-1'))
+    expect(invocation).toHaveAttribute('data-expanded', 'false')
+    await userEvent.click(within(invocation).getByTestId(TESTID.memberInvocationToggle))
+    expect(invocation).toHaveAttribute('data-expanded', 'true')
+  })
+
+  it('the join hint’s fix is a textbox carrying the command', () => {
+    DETAILS['joinhint-2'] = detailFor(conv('joinhint-2'), {
+      joinHint: { reason: 'r', fix: 'kubectl patch coordinator x' },
+    })
+    renderPane('joinhint-2')
+    expect(within(screen.getByTestId(TESTID.joinHintFix)).getByRole('textbox')).toHaveValue('kubectl patch coordinator x')
+  })
+
+  it('the close dialog’s opt-out is the checkable control itself', async () => {
+    renderPane('plain-1')
+    await userEvent.type(screen.getByLabelText('message'), '/close')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(screen.getByTestId(TESTID.closeConfirmSkip)).toHaveAttribute('type', 'checkbox')
   })
 })

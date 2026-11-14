@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Button } from '@patternfly/react-core'
 import { useCloseConversations, useDeleteConversations, useMarkRead, useMarkUnread } from '../../../../api/hooks'
-import { ApiError } from '../../../../api/client'
+import { errorMessage } from '../../../../model/commands'
+import { TESTID } from '../../../../model/testids'
 import { CloseSelectedModal, workingCount } from '../CloseConversations'
 import { DeleteSelectedModal, deletableNames } from '../DeleteConversations'
-import { descendantsOf, partitionSelection } from './tree'
+import { descendantsOf, partitionSelection } from '../../../../model/tree'
 import type { CloseResponse, ConversationSummary, DeleteResponse } from '../../../../api/types'
 
 // `console-chat-layout` D-I and `console-quick-actions`: the SAME actions
@@ -102,7 +103,7 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
 
   return (
     <div
-      data-testid="selection-bar"
+      data-testid={TESTID.selectionBar}
       style={{
         display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', flexWrap: 'wrap',
         // `--ao-brand-strong` INVERTS lightness between the two themes (a dark
@@ -125,7 +126,7 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
         size="sm"
         isDisabled={names.length === 0 || markRead.isPending}
         onClick={() => markRead.mutate({ names }, { onSuccess: onDone })}
-        data-testid="mark-read"
+        data-testid={TESTID.markRead}
       >
         Mark read
       </Button>
@@ -135,7 +136,7 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
           size="sm"
           isDisabled={names.length === 0 || markUnread.isPending}
           onClick={() => markUnread.mutate({ names }, { onSuccess: onDone })}
-          data-testid="mark-unread"
+          data-testid={TESTID.markUnread}
         >
           Mark unread
         </Button>
@@ -147,7 +148,7 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
           isDanger
           isDisabled={names.length === 0}
           onClick={() => setCloseOpen(true)}
-          data-testid="close-selected"
+          data-testid={TESTID.closeSelected}
         >
           {`Close…${countSuffix(names.length)}`}
         </Button>
@@ -159,7 +160,7 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
           isDanger
           isDisabled={!selectedAllClosed}
           onClick={() => setDeleteOpen(true)}
-          data-testid="delete-selected"
+          data-testid={TESTID.deleteSelected}
         >
           {`Delete${countSuffix(names.length)}`}
         </Button>
@@ -174,7 +175,7 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
           memberCount={closeMemberCount}
           working={workingCount(items, new Set(closeSend))}
           result={mergedCloseResult}
-          error={close.error ? (close.error as ApiError).message : undefined}
+          error={close.error ? errorMessage(close.error) : undefined}
           busy={close.isPending}
           onConfirm={runClose}
           onClose={dismissClose}
@@ -186,7 +187,7 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
           names={deleteSend}
           memberCount={deleteMemberCount}
           result={mergedDeleteResult}
-          error={del.error ? (del.error as ApiError).message : undefined}
+          error={del.error ? errorMessage(del.error) : undefined}
           busy={del.isPending}
           onConfirm={runDelete}
           onClose={dismissDelete}
