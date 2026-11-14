@@ -30,7 +30,8 @@
 
 - [ ] 5.1 The SignalAdapter reconciler injects `CONVERSATION_NAMESPACE` as a literal value beside `POD_NAMESPACE`. Channel adapters are unchanged
 - [ ] 5.2 `signals/k8s-events/selfexclude.go`: mechanism 4 drops every event in `CONVERSATION_NAMESPACE` when it differs from `POD_NAMESPACE`, unconfigurably, with no object read
-- [ ] 5.3 Reconcile the mechanism numbering in `selfexclude.go`'s comments with the spec
+- [ ] 5.3 Add `agentops-mcp-conv-` to the name-prefix rule, so an MCP ConfigMap is excluded under nats, where it carries no owner reference
+- [ ] 5.4 Reconcile the mechanism numbering in `selfexclude.go`'s comments with the spec
 
 ## 6. Console — backend-developer
 
@@ -66,7 +67,7 @@
 - [ ] 9.4 The kube store's conformance suite passes with the pair, Signals in Control and Conversations and ConversationInputs in Conversations
 - [ ] 9.5 The expected-references condition names every reference kind with no Secret read
 - [ ] 9.6 The SignalAdapter reconciler injects `CONVERSATION_NAMESPACE` in both layouts
-- [ ] 9.7 `signals/k8s-events`: mechanism 4 drops an unprefixed claim's event split, is not overridable, and does not apply when the namespaces are equal
+- [ ] 9.7 `signals/k8s-events`: mechanism 4 drops an unprefixed claim's event split, is not overridable, and does not apply when the namespaces are equal, and the name-prefix rule drops an `agentops-mcp-conv-` ConfigMap
 - [ ] 9.8 Console: pods from both namespaces reach the Infrastructure view
 - [ ] 9.9 Chart render tests: two manager Roles and no new ClusterRole, runtime accounts, claims and both CronJobs in Conversations, the context-probe label, the floor account in both namespaces bound to nothing, namespace `keep`, the single-namespace render matching today's
 - [ ] 9.10 `TestEveryWiredFlowIsAllowed` and `TestNetworkPolicyIsOptIn` pass in both layouts
@@ -92,7 +93,7 @@
 - [ ] 11.5 `docs/security.md`: the moved trust boundary, the state-read token beside agent code, re-run `threat-model.py`
 - [ ] 11.6 `docs/integrations/kubernetes.md` and `docs/console.md`: route accounts and runtime pods in the conversations namespace
 - [ ] 11.7 `docs/CHANGELOG.md` `[20.0.0]`, with the Upgrade section as the migration of record: close, Secrets, PV rebind, upgrade, kube cleanup, verify, rollback
-- [ ] 11.8 `.claude/rules/`: `invariants.md` (the placement rule), `structure.md`, `gotchas.md` for anything the system lane surfaced
+- [ ] 11.8 `.claude/rules/`: `terminology.md` (control and conversations namespace, the namespace pair), `invariants.md` (the placement rule), `structure.md`, `gotchas.md` for anything the system lane surfaced
 - [ ] 11.9 Re-run `python3 .github/scripts/docs-generate.py` and pass `--check`
 
 ### Adopter site

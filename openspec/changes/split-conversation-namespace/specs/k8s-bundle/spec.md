@@ -13,7 +13,7 @@ The MCP server's NetworkPolicy SHALL admit runtime pods from the conversations
 namespace.
 
 #### Scenario: Route accounts render beside the pods
-- **WHEN** the bundle renders its observe and admin routes in a split release
+- **WHEN** the bundle renders its observing and acting routes in a split release
 - **THEN** both route ServiceAccounts are in the conversations namespace and every ClusterRoleBinding subject names them there
 
 #### Scenario: Wiring renders in the release namespace
