@@ -1,246 +1,246 @@
 ## Context
 
-The manager resolves one namespace at startup (`NAMESPACE`, default
-`agent-ops`) and hands the same string to everything: the controller-runtime
-cache (`DefaultNamespaces: {namespace: {}}`), the `OpQueue`, the `Router`, the
-HTTP API `Server`, and every `client.InNamespace(...)` call. Runtime pods are
-created in `conv.Namespace`, which is that same namespace by construction. The
-chart's manager Role, runtime ServiceAccount, runtime RBAC subjects and home PVC
-all key on `.Release.Namespace`.
+The manager resolves one namespace at startup (`NAMESPACE`, from the downward
+API) and hands it to everything:
 
-That single string is doing two different jobs — *where the wiring lives* and
-*where agent code runs* — and this change separates them. Facts that constrain
-how:
+- the controller-runtime cache (`DefaultNamespaces: {namespace: {}}`)
+- leader election
+- the state store, under either backend
+- the reconcilers, the router, the HTTP API, the orphan sweeper
 
-- **OwnerRef GC is namespace-local.** A cross-namespace ownerRef is invalid; the
-  garbage collector treats the owner as absent and deletes the dependent. The
-  Conversation must therefore live wherever its pod, its MCP ConfigMap and its
-  `ConversationInput` objects live.
-- **The kubelet resolves Secret and ConfigMap references in the POD's
-  namespace.** `internal/runtimepod/podspec.go` mounts the repo-auth Secret,
-  injects `GIT_TOKEN` via `secretKeyRef`, and mounts raw MCP
-  `configMapRef`/`secretRef`; `internal/mcpcompile` emits `valueFrom` env for
-  every MCPConfig header/env entry. **The manager reads no Secrets**, so it
-  cannot copy or even validate them — moving the pods moves the requirement.
-- **Adapters hold projected transport credentials** (`AGENTOPS_CRED_<CHANNEL>_*`
-  via `envFrom`). They belong on the control side.
-- **The adapter and runtime HTTP contracts are namespace-free** — channels,
-  conversations and ops are named, never namespaced. Nothing in
-  `docs/contracts.md` changes.
-- **The operator grants adapters and runtimes no RBAC.** This change must not
-  become the exception; the conversations namespace gets a ServiceAccount, and
-  what it may do stays an external grant.
+The chart keys the manager Role, every runtime account, every claim, the
+housekeeping and context-probe CronJobs and every NetworkPolicy on
+`.Release.Namespace`.
+
+That one string does two jobs: **where the control plane lives** and **where
+agent code runs**. This change separates them. These facts constrain how:
+
+| Fact | Consequence |
+|---|---|
+| The kubelet resolves a Secret, ConfigMap, ServiceAccount or PVC in the POD's namespace | everything a runtime pod runs as, mounts or resolves moves with it |
+| A cross-namespace ownerRef is invalid, and GC deletes the dependent | an owner and its dependents share a namespace, or no ownerRef is set |
+| The manager releases pod and ConfigMap explicitly under every backend | no behaviour depends on GC, so placement is free of it |
+| Under the `nats` backend (the default) a conversation is a record, not a CR | the split moves no CR there, only workloads and claims |
+| Under the `kube` backend the store writes `Conversation`, `ConversationInput` and `Signal` CRs | the kube store spans both namespaces, by kind |
+| The manager reads no Secret and holds no `secrets` verb | it cannot copy or validate a Secret, so moving pods moves the requirement to the adopter |
+| Every NetworkPolicy peer is a bare `podSelector` | each one names its own namespace only, and breaks silently across the split |
+| `/signal/*`, `/channel/*`, `/work`, `/state/*` carry no namespace | no HTTP contract changes |
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Agent code runs in a namespace that contains no control-plane object, no
-  transport credential, and no manager identity.
-- Isolation is enforceable by the mechanisms that key on namespaces: RBAC scope,
-  NetworkPolicy, ResourceQuota, admission policy.
-- One code path serves both layouts; single-namespace is the same code with two
-  equal names.
-- ownerRef GC, serial-per-conversation dispatch, and the adapter contracts are
-  unchanged.
+- Agent code runs in a namespace holding no control-plane object, no transport
+  credential and no manager identity.
+- Namespace-keyed controls apply to agents alone: RBAC scope, NetworkPolicy,
+  ResourceQuota, admission policy.
+- One code path. Single-namespace is two equal names, with no `if split`
+  branch.
+- The split is the default from chart 20.0.0, with the migration documented
+  in that release.
 
 **Non-Goals:**
 
-- Multi-tenancy — one conversations namespace, not one per pipeline or per
-  tenant. The manager watches exactly two namespaces.
-- Moving adapters out of the control namespace.
-- Copying, mirroring, or reading Secrets on the operator's behalf. Placing
-  credentials in the conversations namespace is an operator task, by design.
-- Migrating conversations that already exist (see Migration Plan).
+- Multi-tenancy. One conversations namespace per release, not one per Pipeline.
+- Moving adapters, MCP servers or NATS.
+- Copying, mirroring or reading Secrets for the adopter.
+- A transition release that watches conversations in both namespaces.
+- Restricting egress. The egress-proxy sidecar mediates it, unchanged.
 
 ## Decisions
 
-### 1. The split line is "conversation-scoped", and it follows ownerRefs
+### 1. The placement rule
 
-Moving to the conversations namespace: `Conversation`, `ConversationInput`,
-`agentops-conv-<name>` pods, `agentops-mcp-conv-<name>` ConfigMaps, the
-`agentops-runtime` ServiceAccount, and the home PVC.
+**An object moves if it is a runtime pod or something a runtime pod runs as,
+mounts or resolves, a workload sharing a runtime pod's claims, or
+conversation-scoped state.** Nothing else moves.
 
-Staying in the control namespace: the manager Deployment/Service/RBAC, adapter
-workloads and their SAs, and every wiring or identity CR — `Pipeline`,
-`Channel`, `SignalSource`, `ChannelAdapter`, `SignalAdapter`, `AgentProfile`,
-`AgentRuntime`, `MCPToolset`, `MCPConfig`.
+| Object | Namespace | Rule |
+|---|---|---|
+| runtime pod `agentops-conv-<name>` | conversations | it runs the agent |
+| MCP ConfigMap `agentops-mcp-conv-<name>` | conversations | mounted |
+| `Conversation`, `ConversationInput` (kube backend) | conversations | conversation-scoped state |
+| `rbac.runtime.serviceAccounts[]`, bundle route accounts | conversations | run as |
+| floor account `agentops-runtime`, bound to nothing | both | runtime pods and adapters both fall back to it |
+| chart claims (`agentops-context`, workspace, per-route) and manager claims `agentops-<pipeline>-<volume>` | conversations | mounted |
+| housekeeping and context-probe CronJobs | conversations | they mount the claims |
+| the chart's `stateReadAuth` Secret, a second render | conversations | housekeeping resolves it |
+| adopter Secrets a pod resolves | conversations | resolved |
+| manager, its Service, Lease, Role, nodes ClusterRole | control | control plane |
+| `Signal` and every other kube-store kind | control | not conversation-scoped |
+| NATS and command-bus StatefulSets and credentials | control | control plane |
+| every wiring and identity CR | control | wiring |
+| adapters, gateway, console, their accounts and credentials | control | transport credentials |
+| MCP servers (`mcp-aops`, `agentops-mcp-k8s`, home-assistant admin) | control | they hold their own reach |
 
-The rule that generates that list: **an object moves if a runtime pod's ownerRef
-chain or its kubelet-resolved references reach it.** Nothing else does.
+*Rejected:* move the pods alone. A pod cannot run as an account or mount a
+claim in another namespace, so the "small" version does not run.
 
-*Alternative rejected —* move only the pods. Smaller diff, but the pod can no
-longer ownerRef its Conversation, so GC has to be replaced by explicit cleanup
-plus an orphan sweep — trading a load-bearing invariant for the convenience of
-not moving four object kinds.
+### 2. A namespace pair replaces the single string
 
-### 2. `Namespaces{Control, Conversations}` replaces the single string
+`Namespaces{Control, Conversations}` is threaded wherever `Namespace string`
+is today. Each of the roughly 150 uses is classified once by the table in
+decision 1.
 
-A small value type is threaded where `Namespace string` is today
-(`ConversationReconciler`, `httpapi.Server`, `chat.Router`, `chat.OpQueue`).
-Each of the ~77 call sites is classified once, at review time, as control-plane
-or conversation-plane. Classification rule:
+- Single-namespace sets both to one value. The only difference between
+  layouts is two strings resolved at startup.
+- The cache is configured with both namespaces. Equal values collapse to one
+  entry.
+- Leader election stays in control.
+- `CONVERSATION_NAMESPACE` is read at startup, defaulting to `NAMESPACE`.
 
-| Lookup | Namespace |
-| --- | --- |
-| Pipeline, Channel, SignalSource, AgentProfile, AgentRuntime, MCPToolset, MCPConfig, adapters | Control |
-| Conversation, ConversationInput, runtime pods, MCP ConfigMap | Conversations |
+*Rejected:* keep `Namespace` and add `ConversationNamespace` beside it. The
+ambiguous name would survive at every call site, which is what makes the
+classification expensive.
 
-Single-namespace mode sets both fields to the same value, so there is no `if
-split` branch anywhere in the reconcilers — the only place the two layouts
-differ is the two strings resolved at startup.
+### 3. The kube store spans two namespaces, by kind
 
-*Alternative rejected —* keep one `Namespace` and add a `ConversationNamespace`
-alongside it. Same data, but it leaves the ambiguous name in place at every call
-site, which is exactly what made this change expensive to reason about.
+`kube.OpenStores` takes the pair. Conversations, runs and input blobs
+(`ConversationInput`) open in Conversations. Signals, cooldowns, receipts and
+adapter state open in Control.
 
-The cache is configured with both namespaces
-(`DefaultNamespaces: {control: {}, conversations: {}}`); when they are equal the
-map collapses to one entry on its own. Leader election stays in the control
-namespace.
+- Under kube, the synthetic ownerRef from pod and ConfigMap to the
+  `Conversation` CR stays valid, because they share a namespace.
+- Under nats nothing changes: `NoOwnerReference` holds as today.
+- The `OrphanSweeper` lists the conversations namespace.
+- The one-time kube-to-nats import reads conversation kinds from Conversations
+  and the rest from Control.
 
-### 3. RBAC stays namespace-scoped: two Roles, no ClusterRole
+### 4. RBAC: two manager Roles and a console Role, no new ClusterRole
 
-The manager gets a second Role + RoleBinding in the conversations namespace
-carrying only what belongs there — conversations, conversationinputs, their
-status subresources, pods, configmaps, events. The control-namespace Role loses
-those verbs where they are no longer used there (in split mode) but keeps them
-in single-namespace mode, which the template expresses by rendering the same
-rule block into whichever namespace(s) apply.
+| Role | Namespace | Rules |
+|---|---|---|
+| manager control Role | control | every wiring kind, `signals`, adapter Deployments, Services, configmaps, leases, events |
+| manager conversations Role | conversations | pods, configmaps, `conversations`, `conversationinputs` and status, PVC `get/list/watch/create`, events |
+| console read-only Role | conversations | pods `get/list/watch` |
 
-*Alternative rejected —* one ClusterRole bound twice. Fewer templates, but it
-grants cluster-wide read on Conversations to a manager that is deliberately
-namespace-bound, and the project's posture is that a namespace-scoped operator
-stays namespace-scoped.
+- In single-namespace mode both rule sets render into one Role, identical to
+  today's.
+- The nodes ClusterRole is unchanged. **No ClusterRole is added.**
+- Neither Role carries a `secrets` verb or a PVC `delete`.
+- Runtime grants stay cluster-wide ClusterRoleBindings. Only their subject
+  namespace changes.
 
-### 4. Secrets are the migration, and the chart cannot solve it
+*Rejected:* one ClusterRole bound twice. It grants cluster-wide Conversation
+reach to a manager that is namespace-bound by design.
 
-Everything a runtime pod resolves must exist in the conversations namespace:
+### 5. Secrets are the adopter's, and the manager names them
 
-- `AgentProfile.spec.repo.secretRef` — SSH deploy key volume and `GIT_TOKEN`
-- `AgentProfile.spec.env[].valueFrom` — secretKeyRef / configMapKeyRef
-- `MCPConfig` header and env `valueFrom` entries compiled by `internal/mcpcompile`
-- raw MCP `configMapRef` / `secretRef`
-- image pull secrets for runtime images
+Every reference a runtime pod resolves must exist in the conversations
+namespace:
 
-The manager reads no Secrets and will not start reading them, so a missing
-Secret surfaces the way it does today — the pod fails to start with the kubelet
-naming the missing key — plus a preflight: the reconciler resolves
-`AgentProfile` and `MCPConfig` references and reports names it expects in the
-conversations namespace on the Conversation's `ToolingResolved`-style condition,
-**without reading the objects**. Naming what is expected is not the same as
-reading it, and it turns a mystifying `CreateContainerConfigError` into a
-sentence.
+- `AgentProfile.spec.repository.auth.secretRef` (SSH volume, `GIT_TOKEN`)
+- `AgentProfile.spec.env[].valueFrom`
+- the runtime's model credential
+- `MCPConfig` header and env `valueFrom`, raw MCP `configMapRef`/`secretRef`
+- image pull secrets
 
-The chart documents the requirement, keeps `AgentProfile` in the control
-namespace (it is identity, not workload), and ships no secret-copying job — a
-controller that duplicates Secrets across namespaces is a credential-spreading
-machine, and this change exists to reduce that surface.
+The conversation reconciler sets a condition naming each expected reference,
+derived from the CRs alone. **Naming a reference is not reading it.** A
+`CreateContainerConfigError` becomes a sentence on the conversation.
 
-### 5. Cut over; do not migrate open conversations
+The chart's own generated `stateReadAuth` token renders into both namespaces
+from one lookup. That is the chart rendering its own credential, not a copy
+job. `docs/security.md` records that `allowPodExecution` now guards it too.
 
-After upgrade the manager watches the new conversations namespace only. Existing
-`Conversation` objects in the control namespace stop being reconciled: their
-pods keep running until they exit on idle TTL, and their chat threads go quiet.
-Operators drain them with `kubectl delete conversation -n <control-ns> --all`
-after confirming nothing is inflight; the chart's upgrade notes say so.
+*Rejected:* a Secret-mirroring controller. It spreads credentials into
+exactly the namespace this change exists to fence.
 
-CRs cannot be moved between namespaces — only recreated under new names, which
-changes the conversation name and therefore the runtime pod name, the MCP
-ConfigMap name, console transcripts, and every thread binding that would have to
-be re-patched. For an object designed to be short-lived (and, with `/close`,
-explicitly endable) that risk buys nothing.
+### 6. NetworkPolicy peers gain a namespace
 
-*Alternative rejected —* watch both namespaces during a transition release. It
-works, but it doubles the RBAC surface and keeps a second Conversation list
-alive in exactly the code paths this change is trying to make unambiguous.
+The gate stays `global.agentops.networkPolicy.enabled`, off by default.
 
-### 6. NetworkPolicies ship on by default
+- Every peer naming runtime pods or the manager across the split adds a
+  `namespaceSelector` on `kubernetes.io/metadata.name`. That covers the
+  manager's ingress, `mcp-aops`, the k8s MCP server and the home-assistant MCP
+  server.
+- The runtime ingress-deny policy renders in the conversations namespace.
+- No egress policy is added. The egress-proxy sidecar mediates egress.
+- `TestEveryWiredFlowIsAllowed` runs in both layouts.
 
-Two policies in the conversations namespace, gated by
-`networkPolicies.enabled` (default `true`):
+### 7. Signal adapters learn the conversations namespace
 
-- **default-deny ingress** — nothing dials a runtime pod; the pod always dials
-  out (`/work` long-poll), which is the existing contract.
-- **egress allow-list** — DNS (kube-dns, UDP/TCP 53) and the manager Service in
-  the control namespace on 8080. Everything else is denied unless
-  `networkPolicies.extraEgress` adds it.
+The SignalAdapter reconciler injects `CONVERSATION_NAMESPACE` beside
+`POD_NAMESPACE`, as a literal value. Channel adapters are unchanged.
 
-Agent internet access (package installs, provider APIs) is an explicit
-`extraEgress` entry rather than a default, because the default should be the
-posture an operator would have to justify weakening — not the one they would
-have to remember to tighten. MCP servers reachable from agents (e.g. the
-k8s-bundle MCP server) need their own entry; the bundle ships one for itself.
+`k8s-events` adds **mechanism 4**: every event in the conversations namespace
+is dropped, unconfigurably, whenever it differs from `POD_NAMESPACE`. That
+namespace holds only agent-ops machinery, and claims such as `agentops-context`
+match no excluded prefix.
 
-A CNI without policy support ignores these objects silently, so the chart's
-NOTES call that out — a policy that is present but not enforced is worse than a
-known absence.
+The signal-adapter contract moves to **2.5.0**. `ADP-4` already forbade the
+signal, so `ADP-10` names how to honour it rather than adding a duty.
 
-*Alternative rejected —* ship disabled. Nothing would ever turn it on, and the
-network boundary is most of what the namespace split buys.
+### 8. The console reads pods in both namespaces
 
-### 7. Console reads across both namespaces
+Conversations and Signals already come through `/state/*`. Only its pod watch
+widens, to both namespaces, so the Infrastructure view keeps runtime pods. The
+chart passes `CONVERSATION_NAMESPACE`, defaulting to `POD_NAMESPACE`.
 
-The console is a channel adapter with `kubernetesAccess: true` (identity only;
-its read-only Role is a chart grant). It gains a second read-only Role in the
-conversations namespace for conversations, conversationinputs and pods, and its
-`POD_NAMESPACE`-derived single namespace becomes an explicit pair passed as env
-(`CONTROL_NAMESPACE`, `CONVERSATION_NAMESPACE`), defaulting to `POD_NAMESPACE`
-for both so a hand-deployed console keeps working.
+### 9. The chart owns the namespace and keeps it
+
+`conversationNamespace` defaults to `agent-ops-conversations`.
+`createConversationNamespace` defaults to true. A namespace the chart creates
+carries the release labels and `helm.sh/resource-policy: keep`, so uninstall
+leaves it, its Secrets and its claims standing.
+
+### 10. Migration is release documentation, not code
+
+No code moves state. Chart 20.0.0's `CHANGELOG.md` Upgrade section is the
+migration of record, mirrored in `installation.md`'s upgrade section.
+
+| Backend | Open conversation after upgrade |
+|---|---|
+| nats | the record survives. Closed before upgrade, it reopens into the new namespace |
+| kube | its CR stays in the release namespace, unreconciled. The notes give the delete |
+
+Context survives only where the claim is carried. The notes give the PV
+rebind. A conversation promised context it no longer has fails its run, as
+`promised-and-lost` already requires.
 
 ## Risks / Trade-offs
 
-- **A missing Secret in the new namespace breaks every conversation at once, and
-  the failure is a kubelet error on a pod.** → The preflight condition names the
-  expected Secrets on the Conversation; upgrade notes list exactly which
-  references have to be re-created; `helm upgrade` does not delete the old ones,
-  so a rollback restores service.
-- **77 call sites reclassified by hand — a single miswired lookup yields a
-  NotFound that looks like a missing CR.** → The `Namespaces` type makes each
-  site name its plane explicitly; integration tests run the split layout so a
-  control-plane lookup pointed at the conversations namespace fails loudly in
-  CI, not in a cluster.
-- **Default-on NetworkPolicy can break agent workloads that reached something
-  undeclared.** → Enumerated allowances, `extraEgress` escape hatch, and a
-  single values flag to disable; NOTES warn when the CNI may not enforce.
-- **Open conversations are abandoned on upgrade.** → Accepted deliberately;
-  drain first, and the `/close` command from the capacity change makes draining
-  a chat action rather than a kubectl one.
-- **Two namespaces make `kubectl get` answers less obvious** ("where is my
-  conversation?"). → README and NOTES print both namespaces; console shows both
-  without the operator choosing.
-- **ResourceQuota on the conversations namespace can silently block pod
-  creation.** → Out of scope to configure, but the reconciler already surfaces
-  pod-creation errors on the Conversation, and the capacity cap makes the pod
-  count predictable.
+- **A missing Secret breaks every conversation at once.** → The expected-
+  references condition names it. `helm upgrade` deletes nothing in the old
+  namespace, so rolling `conversationNamespace` back restores service.
+- **A misclassified lookup surfaces as NotFound.** → The pair forces each
+  call site to name its plane. Envtest runs split, so a wrong plane fails in
+  CI.
+- **An uncarried claim loses context.** → The rebind procedure, and runs that
+  fail loudly rather than answer fresh.
+- **The state-read token now sits beside agent code.** → It grants read on
+  `/state/*` only, and reading a Secret needs pod execution, which stays off by
+  default.
+- **An old `k8s-events` image misses unprefixed objects in the new
+  namespace.** → The chart pins the matching image tag in the same release.
+- **"Where is my pod?"** → NOTES and `installation.md` print both namespaces.
 
 ## Migration Plan
 
-1. Upgrade with `conversationNamespace` set to the release namespace first if a
-   staged move is wanted — this is a no-op release that ships the two-namespace
-   code path in single-namespace configuration.
-2. Create the Secrets the runtime needs in the conversations namespace (repo
-   auth, profile env, MCP config env, image pull secrets).
-3. Drain open conversations (`/close`, or `kubectl delete conversation --all` in
-   the control namespace once nothing is inflight).
-4. Upgrade with `conversationNamespace: agent-ops-conversations`. New
-   conversations land in the new namespace; the runtime SA, PVC and
-   NetworkPolicies are created there.
-5. Verify with a live task against the stub runtime
-   (`POST /task {"pipeline":"…","task":"…"}`) and confirm the pod appears in the
+Written into the 20.0.0 Upgrade section, steps in order:
+
+1. Close every open conversation, so no pod or claim is in use.
+2. Create the conversations namespace, or let the chart create it.
+3. Create in it every Secret a runtime pod resolves (decision 5).
+4. Carry each claim across:
+   1. Set the bound PV's reclaim policy to `Retain`.
+   2. Delete the old claim, then clear the PV's `claimRef`.
+   3. Pre-create the claim in the new namespace, `volumeName` set to that PV.
+   4. Point the chart at it with `persistence.<volume>.existingClaim`. A
+      manager-created claim needs no setting, because the manager is
+      idempotent by existence.
+5. Apply the CRDs, then `helm upgrade`.
+6. Under kube, delete the unreconciled `Conversation` CRs left in the release
+   namespace.
+7. Verify with an ordinary signal and confirm the pod appears in the
    conversations namespace.
-6. Rollback is `conversationNamespace` back to the release namespace plus a
-   chart rollback; objects created in the new namespace are inert, and the PVC
-   carries `helm.sh/resource-policy: keep` so session history survives either
-   direction.
+
+**Rollback** is `conversationNamespace` set to the release namespace. Objects
+in the new namespace go inert. The claims carry `resource-policy: keep` either
+way.
 
 ## Open Questions
 
-- Should the conversations namespace be created by the chart at all, or always
-  pre-created by the operator? Defaulting to `createConversationNamespace: true`
-  is convenient but makes `helm uninstall` deletion semantics for a namespace
-  containing user Secrets worth pinning down (proposed: label it, never delete
-  it on uninstall).
-- Does the preflight Secret-name condition belong on the Conversation or on the
-  AgentProfile? The profile is where the reference is declared; the conversation
-  is where the failure is felt.
+None. Both earlier ones are settled: the chart creates and keeps the namespace
+(decision 9), and the expected-references condition sits on the conversation
+(decision 5).
