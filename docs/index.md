@@ -91,7 +91,7 @@ already in it.
   Isolated, serial and capped. One runaway conversation cannot take the others
   with it. An idle conversation is reaped.
 
-  The conversations namespace holds no manager or adapter credential, only a read-only state token.
+  The conversations namespace holds no manager or adapter credential. It holds the runtime Secrets you place there and a read-only state token.
 
 - Tools that come from the wiring
   {: .ao-icon-toolset}

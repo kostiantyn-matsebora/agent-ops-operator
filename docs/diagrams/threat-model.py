@@ -171,13 +171,13 @@ def render(p):
     s.append(badge(634, 158, 1, p))
     s.append(arrow(380, 272, 404, 272, p, tone="brand"))     # 2 agent -> MCP
     s.append(badge(392, 250, 2, p, tone="brand"))
-    s.append(arrow(114, 362, 114, 380, p, tone="brand"))     # 3 -> API
+    s.append(arrow(114, 374, 114, 380, p, tone="brand"))     # 3 -> API
     s.append(badge(138, 369, 3, p, tone="brand"))
-    s.append(arrow(292, 362, 292, 380, p, tone="brand", dashed=True))  # 4 -> Secrets
+    s.append(arrow(292, 374, 292, 380, p, tone="brand", dashed=True))  # 4 -> Secrets
     s.append(badge(316, 369, 4, p, tone="brand"))
-    s.append(arrow(470, 362, 470, 380, p, tone="brand"))     # 5 -> context
+    s.append(arrow(470, 374, 470, 380, p, tone="brand"))     # 5 -> context
     s.append(badge(494, 369, 5, p, tone="brand"))
-    s.append(arrow(648, 362, 648, 380, p, tone="danger"))    # 6 -> logs, UNMITIGATED
+    s.append(arrow(648, 374, 648, 380, p, tone="danger"))    # 6 -> logs, UNMITIGATED
     s.append(badge(672, 369, 6, p, tone="danger"))
 
     s.append(arrow(516, 124, 282, 124, p, tone="brand"))     # 7 neighbour -> state servers

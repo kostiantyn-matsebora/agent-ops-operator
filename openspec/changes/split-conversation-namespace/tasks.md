@@ -86,24 +86,24 @@
 
 ## 11. Documentation
 
-Ticked ahead of section 10 because the system lanes are dispatched to CI, not run here. Section 10 stays unticked until the pack runs.
+Left unticked until section 10 has run, so the documentation gate follows the system tests.
 
 ### Reference docs
 
-- [x] 11.1 `docs/concepts.md`: the two namespaces, the placement rule and its table
-- [x] 11.2 `docs/contracts.md`: no manager surface carries a namespace
-- [x] 11.3 `docs/contracts/signal-adapter.md` to 2.5.0: `POD_NAMESPACE` and `CONVERSATION_NAMESPACE` in `#environment`, `ADP-10`, `ADP-7` reworded, changelog and conformance rows
-- [x] 11.4 `docs/configuration.md`: `conversationNamespace`, `createConversationNamespace`
-- [x] 11.5 `docs/security.md`: the moved trust boundary, the state-read token beside agent code, re-run `threat-model.py`
-- [x] 11.6 `docs/integrations/kubernetes.md` and `docs/console.md`: route accounts and runtime pods in the conversations namespace
-- [x] 11.7 `docs/CHANGELOG.md` `[20.0.0]`, with the Upgrade section as the migration of record: close, Secrets, PV rebind, upgrade, kube cleanup, verify, rollback. The heading names 20.0.0 ahead of `Chart.yaml`, which stays at 19.0.1 until the release-time bump (7.11)
-- [x] 11.8 `.claude/rules/`: `terminology.md` (control and conversations namespace, the namespace pair), `invariants.md` (the placement rule), `structure.md`, `gotchas.md` — three entries added, including the egress-proxy-listener probe the system lane's own no-ingress test surfaced
-- [x] 11.9 Re-run `python3 .github/scripts/docs-generate.py` and pass `--check` (also caught and fixed a stale `--version 19.0.1` in `docs/installation.md`'s install commands)
+- [ ] 11.1 `docs/concepts.md`: the two namespaces, the placement rule and its table
+- [ ] 11.2 `docs/contracts.md`: no manager surface carries a namespace
+- [ ] 11.3 `docs/contracts/signal-adapter.md` to 2.5.0: `POD_NAMESPACE` and `CONVERSATION_NAMESPACE` in `#environment`, `ADP-10`, `ADP-7` reworded, changelog and conformance rows
+- [ ] 11.4 `docs/configuration.md`: `conversationNamespace`, `createConversationNamespace`
+- [ ] 11.5 `docs/security.md`: the moved trust boundary, the state-read token beside agent code, re-run `threat-model.py`
+- [ ] 11.6 `docs/integrations/kubernetes.md` and `docs/console.md`: route accounts and runtime pods in the conversations namespace
+- [ ] 11.7 `docs/CHANGELOG.md` `[20.0.0]`, with the Upgrade section as the migration of record: close, Secrets, PV rebind, upgrade, kube cleanup, verify, rollback. The heading names 20.0.0 ahead of `Chart.yaml`, which stays at 19.0.1 until the release-time bump (7.11)
+- [ ] 11.8 `.claude/rules/`: `terminology.md` (control and conversations namespace, the namespace pair), `invariants.md` (the placement rule), `structure.md`, `gotchas.md` — three entries added, including the egress-proxy-listener probe the system lane's own no-ingress test surfaced
+- [ ] 11.9 Re-run `python3 .github/scripts/docs-generate.py` and pass `--check` (also caught and fixed a stale `--version 19.0.1` in `docs/installation.md`'s install commands)
 
 ### Adopter site
 
-- [x] 11.10 `docs/installation.md`: both namespaces, Secret placement, the 19 to 20 upgrade mirroring the changelog
-- [x] 11.11 `docs/getting-started.md`: where the first conversation's pod appears
-- [x] 11.12 `docs/index.md` and `README.md`: the isolation claim
-- [x] 11.13 `docs/guides/agent-profile.md`, `agent-runtime.md`, `toolsets.md`: referenced Secrets belong in the conversations namespace
-- [x] 11.14 `docs/guides/pipeline.md`: claims are created in the conversations namespace
+- [ ] 11.10 `docs/installation.md`: both namespaces, Secret placement, the 19 to 20 upgrade mirroring the changelog
+- [ ] 11.11 `docs/getting-started.md`: where the first conversation's pod appears
+- [ ] 11.12 `docs/index.md` and `README.md`: the isolation claim
+- [ ] 11.13 `docs/guides/agent-profile.md`, `agent-runtime.md`, `toolsets.md`: referenced Secrets belong in the conversations namespace
+- [ ] 11.14 `docs/guides/pipeline.md`: claims are created in the conversations namespace
