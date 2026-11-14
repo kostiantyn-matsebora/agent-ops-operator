@@ -1,37 +1,31 @@
 package httpapi
 
 import (
-	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
-	"math/rand/v2"
 	"net/http"
-	"strconv"
-	"strings"
-	"time"
-
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/addressing"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 )
 
-// handleSignalInbound is PUBLICATION (signal-persistence D-2): validate the
-// batch, apply the source's attributeFilters, store one Signal CR per admitted
-// signal and acknowledge. It looks up no claimant, spends no cooldown, checks
-// no capacity and parses no addressing for routing — the consumer decides all
-// of that, later and on the leader.
+// handleSignalInbound is the ACCEPT step (async-signal-ingest design D-1/
+// D-3): validate the batch, look up the source, record the "signal
+// received" receipt and apply the source's attributeFilters, then enqueue
+// one ingest-signal task per ADMITTED signal on in.signal and reply. It
+// answers no chat command and stores no Signal itself — the in.signal
+// consumer (HandleIngestSignalTask, ingesttask.go) does both, later, with
+// the bus's own bounded retry and dead-letter record standing in for what
+// used to be the adapter's at-least-once re-send on a lost 5xx.
 //
-// The response is `200 {"queued": n}` where n counts signals stored or
-// deduplicated, written only after every admitted signal's CR exists. A store
-// that fails answers 5xx, and the adapter's at-least-once re-send repeats the
-// batch (a signal carrying a signalId that did land is then deduplicated).
+// The response is `202 {"invocationId","taskIds"}` plus `queued` (=
+// len(taskIds) — ACCEPTED, not stored, design D-4) and `reason` whenever
+// any signal was filtered. A fully filtered batch still replies 202, with
+// empty taskIds and queued: 0 (design D-3/Open Question 2): acceptAndEnqueue
+// runs with zero requests rather than this handler special-casing it.
 func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var in signalInboundReq
@@ -47,10 +41,10 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 	if source == nil {
 		return
 	}
-	// Receipt is recorded before anything is stored: the hop that happened is
-	// "this adapter handed the manager a signal", true whether the signal is
-	// later claimed, suppressed by cooldown or dropped. The initiationId in
-	// `detail` correlates it with the claim that follows.
+	// Receipt is recorded before anything is enqueued: the hop that happened
+	// is "this adapter handed the manager a signal", true whether the signal
+	// is later claimed, suppressed by cooldown or dropped. The initiationId
+	// in `detail` correlates it with the claim that follows.
 	for _, sig := range in.Signals {
 		s.Activity.Emit(activity.Event{
 			Kind:   activity.KindSignalReceived,
@@ -65,148 +59,56 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 		s.emitDropped(source, filteredOut, activity.CodeFiltered, ReasonFiltered)
 	}
 
-	answered, toStore, err := s.answerCommands(r.Context(), admitted)
+	reqs := make([]commandbus.SubmitRequest, 0, len(admitted))
+	for i := range admitted {
+		sig := admitted[i]
+		reqs = append(reqs, commandbus.SubmitRequest{
+			Queue:     SignalIngestQueue,
+			CommandID: ingestSignalCommandID(source.Name, &sig),
+			Key:       ingestSignalKey(source.Name, sig.InitiationID),
+			Payload:   ingestSignalPayload{Source: source.Name, Signal: sig}.encode(),
+		})
+	}
+	resp, err := s.acceptAndEnqueue(r.Context(), reqs...)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	stored, err := s.publish(r.Context(), source, toStore)
-	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
-		return
+	out := map[string]any{
+		"invocationId": resp.InvocationID,
+		"taskIds":      resp.TaskIDs,
+		"queued":       len(resp.TaskIDs),
 	}
-	out := map[string]any{"queued": answered + stored}
 	if len(filteredOut) > 0 {
 		out["reason"] = ReasonFiltered
 	}
-	writeJSON(w, 200, out)
+	writeJSON(w, 202, out)
 }
 
-// answerCommands answers, in place, the chat COMMANDS whose whole result is a
-// reply — the listing, a bare /<pipeline> asking for its task, /close and /exit
-// on a general surface. They open and continue nothing, so they are not
-// messages to queue and no Signal is stored for them. Everything else is
-// returned for publication, an addressed /<pipeline> <task> included. Returns
-// how many were answered.
-func (s *Server) answerCommands(ctx context.Context, signals []NormalizedSignal) (int, []NormalizedSignal, error) {
-	answered := 0
-	rest := make([]NormalizedSignal, 0, len(signals))
-	for _, sig := range signals {
-		if sig.Kind != KindChat {
-			rest = append(rest, sig)
-			continue
-		}
-		cmd, ok := addressing.Parse(strings.TrimSpace(sig.Payload))
-		if !ok || !chat.AnswersInPlace(cmd) {
-			rest = append(rest, sig)
-			continue
-		}
-		ch := s.chatChannel(ctx, sig)
-		if ch == nil {
-			continue // unknown channel: nowhere to answer, nothing to store
-		}
-		if err := s.Router.HandleCommand(ctx, ch, cmd,
-			sig.Labels[LabelChatSender], sig.Labels[LabelChatMessage], sig.Reader); err != nil {
-			return answered, nil, err
-		}
-		answered++
+// ingestSignalCommandID is the Submit-level dedup key for one admitted
+// signal (design D-1: "the deduplication key is the signalId"). A signal
+// carrying one dedups a repeated POST at the bus layer too, scoped to its
+// source — two sources naming the same signalId are unrelated messages,
+// exactly as publishOne's own AlreadyExists check already scopes by source
+// (ingesttask.go). A signal with none carries no sender-given dedup key at
+// all (today's publish never deduplicated one either), so it gets a fresh
+// commandID every accept: Submit-level dedup only ever suppresses a
+// signalId redelivery, never a signalId-less one.
+func ingestSignalCommandID(sourceName string, sig *NormalizedSignal) commandbus.CommandID {
+	if sig.SignalID != "" {
+		return commandbus.CommandID("ingest-signal:" + sourceName + ":" + sig.SignalID)
 	}
-	return answered, rest, nil
+	var buf [8]byte
+	_, _ = rand.Read(buf[:])
+	return commandbus.CommandID("ingest-signal:" + hex.EncodeToString(buf[:]))
 }
 
-// publish creates one Signal CR per signal, in order, owned by its source. It
-// returns how many were stored or deduplicated; the first failed store aborts
-// the batch (the caller answers 5xx).
-func (s *Server) publish(ctx context.Context, source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal) (int, error) {
-	n := 0
-	for i := range signals {
-		if err := s.publishOne(ctx, source, &signals[i]); err != nil {
-			return n, err
-		}
-		n++
-	}
-	return n, nil
-}
-
-// generatedSignalName names a Signal that carries no signalId: sig-<creation
-// time in base36>-<random>. Still generated, with no deduplication — but time
-// ordered, so the consumer's arrival order (creationTimestamp, then NAME) keeps
-// the order of messages published within one second, which a fully random
-// generateName suffix would lose.
-func generatedSignalName() string {
-	const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
-	suffix := make([]byte, generatedSuffixLen)
-	for i := range suffix {
-		suffix[i] = alphabet[rand.IntN(len(alphabet))]
-	}
-	return fmt.Sprintf("%s%0*s-%s", agentopsv1alpha1.SignalNamePrefix, generatedTimeLen,
-		strconv.FormatInt(time.Now().UnixNano(), 36), suffix)
-}
-
-// generatedTimeLen pads the base36 timestamp to a fixed width so names sort
-// as time does; generatedSuffixLen is the random tail that separates two
-// Signals published in the same nanosecond.
-const (
-	generatedTimeLen   = 13
-	generatedSuffixLen = 5
-)
-
-// publishOne stores one Signal. A signal carrying a signalId is created under
-// its deterministic name, and a create answered AlreadyExists IS the duplicate:
-// nothing is stored or changed, it still counts as acknowledged, and an
-// activity event records it. Publication stays lookup-free.
-func (s *Server) publishOne(ctx context.Context, source *agentopsv1alpha1.SignalSource, in *NormalizedSignal) error {
-	name := generatedSignalName()
-	if in.SignalID != "" {
-		name = agentopsv1alpha1.SignalNameFor(source.Name, in.SignalID)
-	}
-	// SourceID lets the store link the signal to its source (the kube backend
-	// turns it into the controller owner reference); the manager does not
-	// depend on that link, it releases a deleted source's signals itself.
-	_, err := s.Signals.Create(ctx, state.Key(name), state.SignalRecord{
-		SourceID:     string(source.UID),
-		SourceRef:    source.Name,
-		Adapter:      source.Spec.Adapter,
-		InitiationID: in.InitiationID,
-		SignalID:     in.SignalID,
-		Kind:         in.Kind,
-		Title:        in.Title,
-		Severity:     string(in.Severity),
-		Labels:       boundedLabels(in.Labels),
-		Reader:       in.Reader,
-		Payload:      in.Payload,
-	})
-	switch {
-	case err == nil:
-		log.FromContext(ctx).Info("signal stored", "signal", name, "source", source.Name)
-		return nil
-	case in.SignalID != "" && errors.Is(err, state.ErrAlreadyExists):
-		s.Activity.Emit(activity.Event{
-			Kind:   activity.KindSignalDropped,
-			From:   activity.Node(activity.NodeSignalSource, source.Name),
-			Status: activity.StatusOK,
-			Code:   activity.CodeDuplicate,
-			Detail: "re-send of an already stored message (" + in.InitiationID + ")",
-		})
-		return nil
-	default:
-		// Never acknowledged: the 5xx makes the adapter re-send.
-		return fmt.Errorf("store signal for %q: %w", in.InitiationID, err)
-	}
-}
-
-// chatChannel resolves the Channel a chat signal came from. Nil when it names
-// none or the Channel does not exist.
-func (s *Server) chatChannel(ctx context.Context, sig NormalizedSignal) *agentopsv1alpha1.Channel {
-	name := sig.Labels[LabelChatChannel]
-	if name == "" {
-		return nil
-	}
-	var ch agentopsv1alpha1.Channel
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &ch); err != nil {
-		return nil
-	}
-	return &ch
+// ingestSignalKey is the in.signal queue's ordering Key (design D-2):
+// source plus initiationId, NUL-separated so the two can never alias — the
+// same scoping v1alpha1.SignalNameFor's own scheme uses for (source,
+// signalId).
+func ingestSignalKey(sourceName, initiationID string) commandbus.Key {
+	return commandbus.Key(sourceName + "\x00" + initiationID)
 }
 
 // emitDropped records one signal.dropped per signal a batch lost, carrying the

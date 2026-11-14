@@ -21,6 +21,8 @@
 //	                                                    root by construction)
 //	/coordinate/close                           conv   the TARGET (root)
 //	/coordinate/escalate                        conv   the conversation
+//	/signal/inbound, one admitted signal   in.signal   source + initiationId
+//	  (async-signal-ingest)
 //
 // A conversation is its own cascade's root for every close-shaped verb
 // this package or internal/controller enqueues (design D-7, task 5.3):
@@ -52,9 +54,12 @@
 // already-closed descendant, deepest-first, ending with the target itself,
 // all sharing the target's name as Key (task 5.10).
 //
-// in.signal (source + initiationId) carries no producer in this change —
-// see the hand-back report for why handleSignalInbound's own publish/
-// answerCommands split was deferred rather than guessed at.
+// in.signal now has both a producer and a consumer (async-signal-ingest):
+// handleSignalInbound (publish.go) is the accept step, enqueuing one
+// ingest-signal task per admitted signal, and HandleIngestSignalTask
+// (ingesttask.go) is that queue's own consumer.Pool Handler — answering an
+// in-place chat command or creating the Signal CR, work that used to run
+// inside the request.
 package httpapi
 
 import (

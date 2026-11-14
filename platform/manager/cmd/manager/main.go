@@ -606,6 +606,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The "in.signal" queue's consumer.Pool (async-signal-ingest task 2.1):
+	// same shape as convPool above, on every replica, sized by the same
+	// commandBusConsumerConcurrency knob. HandleIngestSignalTask is what
+	// handleSignalInbound's own publish/answerCommands split moved into.
+	signalPool, err := consumer.New(consumer.Config{
+		Bus: bus, Queue: httpapi.SignalIngestQueue, Handler: api.HandleIngestSignalTask,
+		Concurrency: commandBusConsumerConcurrency(),
+	})
+	if err != nil {
+		setupLog.Error(err, "in.signal task consumer")
+		os.Exit(1)
+	}
+	if err := mgr.Add(manager.RunnableFunc(signalPool.Run)); err != nil {
+		setupLog.Error(err, "in.signal task consumer")
+		os.Exit(1)
+	}
+
 	// The metric set observes the activity log and samples the same in-memory
 	// state GET /status reports, into the registry already serving :9090. The
 	// counters exist so alerting never depends on anyone having a browser open.
