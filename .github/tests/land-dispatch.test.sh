@@ -123,7 +123,7 @@ assert_contains "$out" "unaddressed PRRT_b (b.go): reported fixed, but the patch
 assert_equals "PRRT_a" "$(cat "$tmp/work/.resolve-threads")"
 
 # #325: a finding's own `Where:` line can name a second file besides its
-# anchor path, and the correct fix lands there instead — PR #323 measured this
+# anchor path, and the correct fix lands there instead — #325 measured this
 # wrongly rejected as unaddressed.
 it "accepts a fix landing in a second file the finding's own Where line names (#325)"
 fresh_repo
