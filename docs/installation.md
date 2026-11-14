@@ -235,7 +235,7 @@ Read [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/
 first, since it is the only place migration steps live, keyed by chart version
 and newest first.
 
-**20.0.0 is BREAKING**: a release now resolves a second namespace, for
+**The next release is BREAKING**: a release now resolves a second namespace, for
 runtime pods and everything they run as, mount or resolve. Split by
 default — the chart creates `agent-ops-conversations` for you.
 
@@ -243,8 +243,8 @@ This needs a manual step per claim and per Secret you want to keep. Close
 every open conversation, place your Secrets in the new namespace, carry
 each claim across by PV rebind, then upgrade.
 
-The full procedure, in order, with commands, is the `[20.0.0]` entry's
-(`[Unreleased]` until the release ships) Upgrade section in [the
+The full procedure, in order, with commands, is the `[Unreleased]` entry's
+Upgrade section in [the
 changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
 Read it before you upgrade a production install.
 

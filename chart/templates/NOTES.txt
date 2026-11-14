@@ -8,7 +8,7 @@ Conversations (runtime pods, their claims): {{ $convNS }}
 Everything in this release lives in one namespace: {{ .Release.Namespace }}
 (conversationNamespace equals the release namespace — single-namespace layout.)
 {{- end }}
-Upgrading from chart < 20.0? See the [20.0.0] Upgrade section in
+Upgrading from chart < 20.0? See the [Unreleased] Upgrade section in
 docs/CHANGELOG.md BEFORE running `helm upgrade` — it splits conversation-scoped
 objects into a second namespace by default, and migrating in place needs
 Secrets placed there and a claim carried across first.
