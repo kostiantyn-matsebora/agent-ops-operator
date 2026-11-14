@@ -160,10 +160,28 @@ component. See
 
 ## Configure
 
-**Storage is the only setting that must be right before you install.**
-Everything else is a `helm upgrade` away and safe at its default, and every
-value the chart takes is in the
+**Storage and the conversations namespace are the only settings that must be
+right before you install.** Everything else is a `helm upgrade` away and safe
+at its default, and every value the chart takes is in the
 [configuration reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md).
+
+### Namespaces
+
+A release resolves two namespaces — see
+[Concepts]({{ '/concepts/#where-things-run-the-control-and-conversations-namespaces' | relative_url }})
+for what lives in each.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `global.agentops.conversationNamespace` | `agent-ops-conversations` | where runtime pods, their claims and their accounts run. The release namespace is the single-namespace layout |
+| `global.agentops.createConversationNamespace` | `true` | `false` means you create it, labeled however you need |
+
+Pick it before you install. Switching it later is a manual migration, not a
+plain upgrade: close every open conversation, move your Secrets, and rebind
+each claim's PV. The steps are the `conversationNamespace` upgrade path in
+[the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
+A namespace the chart created carries `helm.sh/resource-policy: keep`, so an
+uninstall leaves it, its Secrets and its claims standing.
 
 ### Storage
 
@@ -191,12 +209,6 @@ state somewhere of its own:
 [per-route storage](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#per-route-storage).
 
 ## Upgrade and uninstall
-
-**Switching `global.agentops.conversationNamespace` after install is a manual
-migration, not a plain upgrade.** Close every open conversation, move your
-Secrets, and rebind each claim's PV. The steps are the `conversationNamespace`
-upgrade path in [the changelog](https://kostiantyn-matsebora.github.io/agent-ops-operator/changelog/).
-The claims carry `helm.sh/resource-policy: keep` either way.
 
 **Apply the CRDs yourself, before every upgrade.** Helm never upgrades a CRD
 that came from a chart's `crds/` directory. An upgraded install keeps the OLD

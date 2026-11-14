@@ -19,7 +19,7 @@ path. Plugins are limited to the set Pages enables by default.
 | `getting-started.md` | the read-only DEMO walkthrough, console-first |
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
 | `security.md` | the THREAT MODEL — trust boundaries, the flows that cross them, the control on each, the platform's own posture and the residual risk. **No values table, no default, no control YAML**: those are `installation.md`'s |
-| `installation.md` | the REAL install: the commands, the first route, and the storage access mode — one decision, three keys (`accessModes`, `storageClassName`, and the state servers' own `nats.persistence.storageClassName`). **No exhaustive values** |
+| `installation.md` | the REAL install: the commands, the first route, the storage access mode — one decision, three keys (`accessModes`, `storageClassName`, and the state servers' own `nats.persistence.storageClassName`) — and the conversations namespace (`global.agentops.conversationNamespace`, `createConversationNamespace`). **No exhaustive values** |
 | `configuration.md` | every value the chart takes — a REFERENCE page read on GitHub, not a site page |
 | `integrations/<system>.md` | one integration each: what starts work, what it may reach, where it answers, what turning it on costs |
 | `runtimes/<vendor>.md` | one runtime each: what it EXECUTES, what it NEEDS from you, where its context lives, what turning it on costs |
@@ -27,9 +27,11 @@ path. Plugins are limited to the set Pages enables by default.
 
 - **THE LINE BETWEEN THE TWO IS IRREVERSIBILITY, not importance.** A setting
   belongs on `installation.md` only when a later `helm upgrade` cannot undo it —
-  which is the storage access mode alone. A PVC's `accessModes` and
-  `storageClassName` are both part of its immutable `spec`, so getting either
-  wrong means deleting the claim, not upgrading past it.
+  the storage access mode and the conversations namespace. A PVC's
+  `accessModes` and `storageClassName` are both part of its immutable `spec`,
+  so getting either wrong means deleting the claim, not upgrading past it.
+  Moving the conversations namespace means closing conversations and
+  rebinding every claim's PV.
   - **Two earlier "irreversible" settings were WRONG, not merely importance
     calls, and are gone rather than reworded.** CRD ownership named a decision
     that does not exist — Helm never deletes CRDs from a chart's `crds/`

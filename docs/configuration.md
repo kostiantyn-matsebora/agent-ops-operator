@@ -17,21 +17,9 @@ helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 
 ## Namespaces
 
-A release resolves two namespaces — see
-[Concepts](https://kostiantyn-matsebora.github.io/agent-ops-operator/concepts/#where-things-run-the-control-and-conversations-namespaces)
-for what lives in each.
-
-| Key | Default | Consequence |
-|---|---|---|
-| `global.agentops.conversationNamespace` | `agent-ops-conversations` | where runtime pods, their claims and their accounts run |
-| `global.agentops.createConversationNamespace` | `true` | `false` means you create it, labeled however you need |
-
-Setting `conversationNamespace` to the release namespace is the
-single-namespace layout: no namespace is created, and every object renders
-where this chart is installed, exactly as every release before the split.
-
-Switching it after install is a manual migration. See
-[Upgrade and uninstall](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/#upgrade-and-uninstall).
+The conversations namespace is set once, before install — see
+[Installation](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/#namespaces).
+Switching it later is a migration, not a `helm upgrade`.
 
 ## Storage
 

@@ -136,15 +136,18 @@ def render(p):
     # neighbour reaching either one.
     s.append(node(28, 100, 250, "state & bus servers", "credential required", p))
 
-    # The runtime pod — where model output actually executes, in the
-    # CONVERSATIONS namespace (a split release) — beside the
-    # control namespace, because crossing 2 goes between them.
-    s.append(boundary(28, 172, 340, 182, "runtime pod", p, tone="danger"))
-    s.append(node(42, 190, 312, "the agent container", "runs the model's output", p,
+    # The conversations namespace, beside the control namespace, because
+    # crossing 2 goes between them: a runtime pod, what it runs as and what
+    # it mounts live here, so a NetworkPolicy, quota or Role scoped to it is
+    # a boundary Kubernetes enforces. Equal namespaces are one box.
+    s.append(boundary(18, 160, 358, 206, "conversations namespace", p))
+    # The runtime pod — where model output actually executes.
+    s.append(boundary(28, 182, 340, 176, "runtime pod", p, tone="danger"))
+    s.append(node(42, 196, 312, "the agent container", "runs the model's output", p,
                   kind="untrusted"))
-    s.append(node(42, 248, 150, "egress proxy", "on by default", p, kind="control"))
-    s.append(node(204, 248, 150, "context-sync", "on by default", p, kind="control"))
-    s.append(node(42, 302, 312, "its ServiceAccount", "bound to nothing", p,
+    s.append(node(42, 252, 150, "egress proxy", "on by default", p, kind="control"))
+    s.append(node(204, 252, 150, "context-sync", "on by default", p, kind="control"))
+    s.append(node(42, 306, 312, "its ServiceAccount", "bound to nothing", p,
                   kind="control"))
 
     s.append(boundary(408, 172, 332, 182, "control namespace", p))
@@ -164,11 +167,11 @@ def render(p):
     # The crossings. Each number is a row in the page's threat table.
     s.append(arrow(610, 148, 610, 168, p))                   # 1 neighbour -> control ns
     s.append(badge(634, 158, 1, p))
-    s.append(arrow(372, 272, 402, 272, p, tone="brand"))     # 2 agent -> MCP
-    s.append(badge(387, 250, 2, p, tone="brand"))
-    s.append(arrow(114, 358, 114, 380, p, tone="brand"))     # 3 -> API
+    s.append(arrow(380, 272, 404, 272, p, tone="brand"))     # 2 agent -> MCP
+    s.append(badge(392, 250, 2, p, tone="brand"))
+    s.append(arrow(114, 366, 114, 380, p, tone="brand"))     # 3 -> API
     s.append(badge(138, 369, 3, p, tone="brand"))
-    s.append(arrow(292, 358, 292, 380, p, tone="brand", dashed=True))  # 4 -> Secrets
+    s.append(arrow(292, 366, 292, 380, p, tone="brand", dashed=True))  # 4 -> Secrets
     s.append(badge(316, 369, 4, p, tone="brand"))
     s.append(arrow(470, 358, 470, 380, p, tone="brand"))     # 5 -> context
     s.append(badge(494, 369, 5, p, tone="brand"))
