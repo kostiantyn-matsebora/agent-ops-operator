@@ -160,7 +160,7 @@ for the source and the reference material beside this file.
   it said the TTL deletes it. Behaviour is unchanged.
 - The signal adapter specification moves again to **2.4.0**.
   `POST /signal/inbound` now accepts, then processes: the success status
-  moves from `200` to `202`, and gains `invocationId` and one `taskId` per
+  moves from `200` to `202`, and gains `invocationId` and `taskIds`, one per
   admitted signal (`API-2`, `API-3` replaced). `queued` now means accepted,
   not stored. No shipped adapter checks for exactly `200`, so none stops
   conforming, and every shipped adapter's claimed version moves to `2.4.0`

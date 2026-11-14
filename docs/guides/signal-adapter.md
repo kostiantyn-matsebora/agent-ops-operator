@@ -175,10 +175,9 @@ for the full request and response shape.
 counts the signals accepted, one durably enqueued task each, and equals
 `taskIds`'s length.
 
-A `Signal` may not exist yet when the response is written, and the manager
-routes it afterwards, so the response never says whether a conversation
-opened. Treat any `2xx` as accepted, and ignore `invocationId`/`taskIds` if
-you have no use for them.
+A `Signal` may not exist yet when the response is written.
+The manager routes it afterwards, so the response never says whether a conversation opened.
+Treat any `2xx` as accepted, and ignore `invocationId`/`taskIds` if you have no use for them.
 
 A `5xx` means nothing was acknowledged: re-send the batch with the same ids.
 

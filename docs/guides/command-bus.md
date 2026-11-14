@@ -28,7 +28,7 @@ whichever replica next picks it up. The reply means accepted, not performed.
 |---|---|---|
 | `reopen`, `delete`, `reset-context`, `/channel/inbound` | the status you already got | the same status, plus `invocationId` and `taskIds` |
 | `/coordinate/close`, `/coordinate/escalate` | `200 {"ok":true}` | the same `200`, plus `invocationId` and `taskIds` |
-| `/signal/inbound` | `200 {"queued": n}` | `202`, plus `invocationId` and one `taskId` per admitted signal. `queued` still counts, now meaning accepted |
+| `/signal/inbound` | `200 {"queued": n}` | `202`, plus `invocationId` and `taskIds`, one per admitted signal. `queued` still counts, now meaning accepted |
 
 `reset-context` and `/signal/inbound` are the two endpoints whose status
 code changed, both from `200` to `202`. Every other endpoint's code was
