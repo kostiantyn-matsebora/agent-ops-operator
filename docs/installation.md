@@ -245,6 +245,7 @@ This needs a manual step per claim and per Secret you want to keep:
 2. Place your Secrets in the new namespace.
 3. Carry each claim across by PV rebind.
 4. Upgrade.
+5. Delete any `kube`-backend `Conversation` CRs left behind in the release namespace.
 
 The full procedure, in order, with commands, is the `[Unreleased]` entry's
 Upgrade section in [the

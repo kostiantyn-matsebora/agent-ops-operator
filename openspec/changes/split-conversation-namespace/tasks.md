@@ -50,7 +50,8 @@
 - [x] 7.8 `state-read-auth.yaml`: render the generated token into Conversations from the same lookup
 - [x] 7.9 `deployment.yaml`: pass `CONVERSATION_NAMESPACE` to the manager. `console.yaml`: pass it to the console and add its read-only pods Role in Conversations
 - [x] 7.10 `chart/charts/kubernetes`: route accounts and their binding subjects in Conversations, every other object in the release namespace
-- [ ] 7.11 Pin the matching manager, console and `signal-k8s-events` image tags, and bump `Chart.yaml` to 20.0.0 — **`Chart.yaml` bumped to 20.0.0. Image tags intentionally LEFT AS-IS** (manager 0.62.0, console 0.41.0, signal-k8s-events 0.6.0). This change's own CI has not yet published new tags for the backend-developer's concurrent work. See the deployment-engineer's report for the follow-up
+- [x] 7.11 Bump `Chart.yaml` to 20.0.0
+- [ ] 7.11a Pin the matching manager, console and `signal-k8s-events` image tags — intentionally LEFT AS-IS (manager 0.62.0, console 0.41.0, signal-k8s-events 0.6.0), since this change's own CI has not yet published new tags. Follow-up for the release
 - [x] 7.12 `NOTES.txt`: print both namespaces and point at the 20.0.0 Upgrade section
 
 ## 8. Chart: NetworkPolicy peers — deployment-engineer
@@ -71,8 +72,8 @@
 - [x] 9.8 Console: pods from both namespaces reach the Infrastructure view
 - [x] 9.9 Chart render tests: two manager Roles and no new ClusterRole, runtime accounts, claims and both CronJobs in Conversations, the context-probe label, the floor account in both namespaces bound to nothing, namespace `keep`, the single-namespace render matching today's
 - [x] 9.10 `TestEveryWiredFlowIsAllowed` and `TestNetworkPolicyIsOptIn` pass in both layouts
-- [x] 9.12 Envtest: the manager's cache syncs under the chart's own rendered Roles, impersonating its account, in both layouts (`TestManagerCacheSyncsUnderTheChartsRoles*`); the leader proxy finds the leader's pod in Control under a split (`TestLeaderProxyFindsTheLeaderInControlUnderASplit`)
-- [x] 9.11 `go build`, `go vet` and `go test ./...` in every module touched, run against this working copy's tree in the Go container
+- [x] 9.11 Envtest: the manager's cache syncs under the chart's own rendered Roles, impersonating its account, in both layouts (`TestManagerCacheSyncsUnderTheChartsRoles*`). The leader proxy finds the leader's pod in Control under a split (`TestLeaderProxyFindsTheLeaderInControlUnderASplit`)
+- [x] 9.12 `go build`, `go vet` and `go test ./...` in every module touched, run against this working copy's tree in the Go container
 
 ## 10. System tests
 

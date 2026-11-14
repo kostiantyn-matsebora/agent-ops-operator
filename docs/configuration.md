@@ -28,7 +28,7 @@ for what lives in each.
 
 Setting `conversationNamespace` to the release namespace is the
 single-namespace layout: no namespace is created, and every object renders
-where this chart is installed, exactly as every release before 20.0.0.
+where this chart is installed, exactly as every release before the split.
 
 This is a REVERSIBLE value. Switching it after install is the `conversationNamespace`
 upgrade path in [the changelog](https://kostiantyn-matsebora.github.io/agent-ops-operator/changelog/),

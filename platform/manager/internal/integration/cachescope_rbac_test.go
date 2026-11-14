@@ -69,14 +69,7 @@ func assertManagerCacheSyncs(t *testing.T, ctl, conv string) {
 
 	// RBAC really is enforced here, or a green result below proves nothing.
 	if ctl != conv {
-		probe, err := client.New(cfg, client.Options{Scheme: scheme})
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = probe.List(context.Background(), &agentopsv1alpha1.PipelineList{}, client.InNamespace(conv))
-		if !apierrors.IsForbidden(err) {
-			t.Fatalf("listing Pipelines in the conversations namespace must be forbidden to the manager, got %v", err)
-		}
+		assertPipelineListForbidden(t, cfg, conv)
 	}
 
 	opts := cachescope.Options(namespace.Namespaces{Control: ctl, Conversations: conv})
@@ -96,7 +89,23 @@ func assertManagerCacheSyncs(t *testing.T, ctl, conv string) {
 		informers[typeName(obj)] = inf
 	}
 	go func() { _ = c.Start(ctx) }()
+	waitInformersSynced(t, informers, ctl, conv)
+}
 
+func assertPipelineListForbidden(t *testing.T, cfg *rest.Config, conv string) {
+	t.Helper()
+	probe, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = probe.List(context.Background(), &agentopsv1alpha1.PipelineList{}, client.InNamespace(conv))
+	if !apierrors.IsForbidden(err) {
+		t.Fatalf("listing Pipelines in the conversations namespace must be forbidden to the manager, got %v", err)
+	}
+}
+
+func waitInformersSynced(t *testing.T, informers map[string]cache.Informer, ctl, conv string) {
+	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		var unsynced []string

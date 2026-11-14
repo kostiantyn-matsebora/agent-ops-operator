@@ -35,7 +35,8 @@ metadata:
     # No signal loops (invariants.md): a CronJob fails on a SCHEDULE, so
     # without an agentops label here a failing probe would open a
     # conversation about the storage the agent itself needs. This value is
-    # in signals/k8s-events' owned-label set and name-prefix list.
+    # in signals/k8s-events' owned-label set (self-exclusion mechanism 1,
+    # owner/label), not a name-prefix match.
     app.kubernetes.io/name: agentops-context-probe
 spec:
   schedule: {{ .Values.contextProbe.schedule | quote }}
