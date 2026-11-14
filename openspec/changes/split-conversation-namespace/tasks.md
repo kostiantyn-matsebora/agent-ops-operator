@@ -1,66 +1,103 @@
-## 1. Namespace pair plumbing
+## 1. Namespace pair in the manager — backend-developer
 
-- [ ] 1.1 Add a `Namespaces{Control, Conversations string}` type (new small package or `internal/controller`), with a constructor that defaults `Conversations` to `Control` when unset
-- [ ] 1.2 Resolve both in `cmd/manager/main.go` from `NAMESPACE` and `CONVERSATION_NAMESPACE`; log the pair at startup
-- [ ] 1.3 Configure the controller-runtime cache with both namespaces (`DefaultNamespaces`), collapsing to one entry when equal; keep `LeaderElectionNamespace` on the control namespace
-- [ ] 1.4 Replace the `Namespace string` field with the pair on `ConversationReconciler`, `httpapi.Server`, `chat.Router`, `chat.OpQueue`
+- [ ] 1.1 Add the `Namespaces{Control, Conversations}` value type, `Conversations` defaulting to `Control`
+- [ ] 1.2 Read `CONVERSATION_NAMESPACE` in `cmd/manager/main.go`, defaulting to `NAMESPACE`, and log the pair at startup
+- [ ] 1.3 Configure the cache with both namespaces (one entry when equal), keeping leader election in control
+- [ ] 1.4 Replace the single `Namespace` field with the pair on every struct `main.go` wires (router, reconcilers, HTTP server, orphan sweeper, `signalroute`, control-plane)
 
-## 2. Reclassify every namespace lookup
+## 2. Classify every namespace use — backend-developer
 
-- [ ] 2.1 `internal/controller/conversation_controller.go` — conversations, inputs, pods and MCP ConfigMaps use the conversations namespace; profile, runtime, toolset, MCPConfig and channel lookups use the control namespace
-- [ ] 2.2 `internal/httpapi/signals.go` — SignalSource/Pipeline/Channel reads control; Conversation and ConversationInput creation and listing use conversations
-- [ ] 2.3 `internal/httpapi/server.go` — `/work` dispatch reads the conversation from conversations and its profile/toolsets/channels from control; `/task` creates in conversations
-- [ ] 2.4 `internal/chat/router.go` — conversation lookup and creation in conversations; Channel and Pipeline reads in control
-- [ ] 2.5 `internal/chat/ops.go` and `internal/chat/pipelines.go` — channel/pipeline reads in control, conversation status patches in conversations
-- [ ] 2.6 `internal/controller/*_controller.go` for channels, signal sources, adapters and pipelines — confirm each stays entirely control-plane
-- [ ] 2.7 `internal/runtimepod/podspec.go` — build pods for the conversations namespace; verify `CONTROL_URL` still resolves the manager FQDN in the control namespace
+- [ ] 2.1 `internal/controller/conversation_controller.go`: pods, MCP ConfigMaps and `liveRuntimePods` use Conversations, every wiring read uses Control
+- [ ] 2.2 `internal/controller/pipeline_controller.go`: `ensureClaim` creates claims in Conversations
+- [ ] 2.3 `internal/controller/orphansweep.go`: list and delete in Conversations
+- [ ] 2.4 `internal/chat`, `internal/httpapi` (`status.go` pod reads included), `internal/signalroute`: pod reads in Conversations, wiring reads in Control
+- [ ] 2.5 Confirm the Channel, ChannelAdapter, SignalAdapter, SignalSource and Coordinator reconcilers stay entirely in Control
+- [ ] 2.6 `internal/runtimepod`: pods built for Conversations, `CONTROL_URL` still the manager's FQDN in Control
 
-## 3. Reference preflight
+## 3. The kube store spans two namespaces — backend-developer
 
-- [ ] 3.1 Collect the Secret/ConfigMap names a conversation's pod will resolve from `AgentProfile` (repo auth, env valueFrom) and its bound `MCPConfig`s, without reading any of them
-- [ ] 3.2 Report the collected names on a Conversation condition stating they are expected in the conversations namespace
-- [ ] 3.3 Assert no Secret read path is introduced (manager RBAC still grants no `secrets` verbs)
+- [ ] 3.1 `kube.OpenStores` takes the pair: conversations, runs and input blobs open in Conversations, signals, cooldowns, receipts and adapter state in Control
+- [ ] 3.2 The one-time kube-to-nats import reads each kind from its own namespace
+- [ ] 3.3 Under kube, the synthetic ownerRef names the `Conversation` CR in Conversations. Under nats, `NoOwnerReference` is unchanged
 
-## 4. Chart: namespaces, RBAC, placement
+## 4. Expected-references condition — backend-developer
 
-- [ ] 4.1 Add `conversationNamespace: agent-ops-conversations` and `createConversationNamespace: true` to `chart/values.yaml`, with a helper template resolving the effective namespace
-- [ ] 4.2 New template creating and labelling the conversations namespace with `helm.sh/resource-policy: keep`
-- [ ] 4.3 Split `chart/templates/rbac.yaml` into a control-namespace Role/RoleBinding and a conversations-namespace Role/RoleBinding, each carrying only what it uses
-- [ ] 4.4 Move the runtime ServiceAccount to the conversations namespace; update `chart/templates/runtime-rbac.yaml` binding subjects
-- [ ] 4.5 Place the home PVC in the conversations namespace (`chart/templates/pvc.yaml`), keeping the resource policy
-- [ ] 4.6 Pass `CONVERSATION_NAMESPACE` to the manager in `chart/templates/deployment.yaml`
-- [ ] 4.7 Update `chart/charts/k8s-bundle/` — runtime SA subject follows the split, identity/wiring CRs stay in the release namespace
-- [ ] 4.8 Bump `chart/Chart.yaml` and add upgrade notes to `chart/templates/NOTES.txt` (drain step, secret placement, both namespaces printed)
+- [ ] 4.1 Collect the Secret and ConfigMap names a conversation's pod will resolve (profile repo auth and env, runtime credential, MCP config `valueFrom` and raw refs, image pull secrets) from the CRs alone
+- [ ] 4.2 Set a condition on the conversation naming them as expected in the conversations namespace
+- [ ] 4.3 Confirm no Secret read path exists and the manager Roles carry no `secrets` verb
 
-## 5. NetworkPolicies
+## 5. Signal adapters and self-exclusion — backend-developer
 
-- [ ] 5.1 Add `networkPolicies.enabled: true` and `networkPolicies.extraEgress: []` to `chart/values.yaml`
-- [ ] 5.2 Default-deny ingress policy for the conversations namespace
-- [ ] 5.3 Egress policy allowing DNS and the manager Service in the control namespace, plus rendered `extraEgress` entries
-- [ ] 5.4 k8s-bundle contributes an egress allowance for its MCP server Service
-- [ ] 5.5 NOTES warning that a CNI without policy support ignores these objects
+- [ ] 5.1 The SignalAdapter reconciler injects `CONVERSATION_NAMESPACE` as a literal value beside `POD_NAMESPACE`. Channel adapters are unchanged
+- [ ] 5.2 `signals/k8s-events/selfexclude.go`: mechanism 4 drops every event in `CONVERSATION_NAMESPACE` when it differs from `POD_NAMESPACE`, unconfigurably, with no object read
+- [ ] 5.3 Reconcile the mechanism numbering in `selfexclude.go`'s comments with the spec
 
-## 6. Console
+## 6. Console — backend-developer
 
-- [ ] 6.1 Read `CONTROL_NAMESPACE` and `CONVERSATION_NAMESPACE` in `console/main.go`, both defaulting to `POD_NAMESPACE`
-- [ ] 6.2 Route the k8s reads in `console/kube.go` per kind — conversations and inputs from the conversations namespace, everything else from control
-- [ ] 6.3 Add a read-only Role/RoleBinding for the console SA in the conversations namespace in `chart/templates/console.yaml`, and pass the two namespace env vars
-- [ ] 6.4 Bump the console image tag alongside the manager
+- [ ] 6.1 `platform/console/config.go`: read `CONVERSATION_NAMESPACE`, defaulting to `POD_NAMESPACE`
+- [ ] 6.2 `platform/console/kube.go`: watch pods in both namespaces. Conversations and Signals stay on `/state/*`
 
-## 7. Tests
+## 7. Chart: namespace, placement, RBAC — deployment-engineer
 
-- [ ] 7.1 Extend the envtest suite to create both namespaces and run the reconcilers in split mode
-- [ ] 7.2 Integration test: a signal-originated conversation lands in the conversations namespace with its pod, MCP ConfigMap and inputs, while its pipeline/profile/channel are read from control
-- [ ] 7.3 Integration test: deleting the conversation garbage-collects its pod and ConfigMap (ownerRef intact across the split)
-- [ ] 7.4 Integration test: single-namespace mode (both values equal) reproduces current placement exactly
-- [ ] 7.5 Test the preflight condition names the expected Secret references without any Secret read
-- [ ] 7.6 Chart render tests: two Roles and no manager ClusterRole; runtime SA and PVC in the conversations namespace; NetworkPolicies present by default and absent when disabled
-- [ ] 7.7 Run the full build/vet/test matrix for the root module and every adapter module in the golang container
+- [ ] 7.1 `values.yaml`: `conversationNamespace: agent-ops-conversations`, `createConversationNamespace: true`, plus one helper resolving the effective namespace
+- [ ] 7.2 New template creating the namespace with the release labels and `helm.sh/resource-policy: keep`
+- [ ] 7.3 `rbac.yaml`: split the manager Role into a control Role and a conversations Role (pods, configmaps, conversations, conversationinputs and status, events, PVC `get/list/watch/create`). One Role when the namespaces are equal
+- [ ] 7.4 `rbac.yaml` and `runtime-rbac.yaml`: the floor account and every `rbac.runtime.serviceAccounts` entry render in Conversations, and every binding subject names them there
+- [ ] 7.5 `pvc.yaml`: every chart claim in Conversations, `resource-policy: keep` kept
+- [ ] 7.6 `housekeeping.yaml`, `context-probe.yaml`: both CronJobs in Conversations
+- [ ] 7.7 `state-read-auth.yaml`: render the generated token into Conversations from the same lookup
+- [ ] 7.8 `deployment.yaml`: pass `CONVERSATION_NAMESPACE` to the manager. `console.yaml`: pass it to the console and add its read-only pods Role in Conversations
+- [ ] 7.9 `chart/charts/kubernetes`: route accounts and their binding subjects in Conversations, every other object in the release namespace
+- [ ] 7.10 Pin the matching manager, console and `signal-k8s-events` image tags, and bump `Chart.yaml` to 20.0.0
+- [ ] 7.11 `NOTES.txt`: print both namespaces and point at the 20.0.0 Upgrade section
 
-## 8. Docs
+## 8. Chart: NetworkPolicy peers — deployment-engineer
 
-- [ ] 8.1 Document the two-namespace layout, what lives where, and the rule that generates the split in `docs/concepts.md`
-- [ ] 8.2 State explicitly in `docs/contracts.md` that adapter and runtime contracts carry no namespace
-- [ ] 8.3 Update `README.md` install/upgrade sections with both namespaces, the secret-placement requirement, and the drain step
-- [ ] 8.4 Update `CLAUDE.md` — namespace invariants, `Namespaces` pair, where runtime references must exist
-- [ ] 8.5 Add an upgrade guide entry covering secret re-creation and the abandoned-conversation cutover
+- [ ] 8.1 `networkpolicy.yaml`: add a `namespaceSelector` to every peer naming runtime pods or the manager across the split, and render the runtime ingress-deny policy in Conversations
+- [ ] 8.2 `coordination.yaml` (`mcp-aops`), `charts/kubernetes` MCP server policy, `charts/home-assistant` MCP admin policy: admit runtime pods from Conversations
+- [ ] 8.3 Check the `nats`, `commandbus`, `prometheus`, `pulse` and `telegram` policies, and record which need no change
+
+## 9. Unit tests
+
+- [ ] 9.1 Envtest runs the reconcilers split, with both namespaces created: a signal-opened conversation's pod and MCP ConfigMap land in Conversations while its wiring is read from Control
+- [ ] 9.2 Envtest: closing releases the pod and ConfigMap in Conversations, and the orphan sweeper deletes an unrecorded pod there
+- [ ] 9.3 Envtest: equal namespaces reproduce today's placement exactly
+- [ ] 9.4 The kube store's conformance suite passes with the pair, Signals in Control and Conversations and ConversationInputs in Conversations
+- [ ] 9.5 The expected-references condition names every reference kind with no Secret read
+- [ ] 9.6 The SignalAdapter reconciler injects `CONVERSATION_NAMESPACE` in both layouts
+- [ ] 9.7 `signals/k8s-events`: mechanism 4 drops an unprefixed claim's event split, is not overridable, and does not apply when the namespaces are equal
+- [ ] 9.8 Console: pods from both namespaces reach the Infrastructure view
+- [ ] 9.9 Chart render tests: two manager Roles and no new ClusterRole, runtime accounts, claims and both CronJobs in Conversations, namespace `keep`, the single-namespace render matching today's
+- [ ] 9.10 `TestEveryWiredFlowIsAllowed` and `TestNetworkPolicyIsOptIn` pass in both layouts
+- [ ] 9.11 `go build`, `go vet` and `go test ./...` in every module touched, run against this working copy's tree in the Go container
+
+## 10. System tests
+
+- [ ] 10.1 A system lane on k3d, built from this working copy: a split release opens a conversation from an ordinary signal, its pod runs in Conversations under a Conversations account, mounts its claim and reaches the manager
+- [ ] 10.2 The same lane with NetworkPolicies enforced: every wired flow passes and runtime pods accept no ingress
+- [ ] 10.3 The authorizer denies the manager pods in a third namespace and PVC `delete` in Conversations
+- [ ] 10.4 A missing Secret in Conversations fails the pod and the condition names it
+- [ ] 10.5 The migration on a 19.x release: close, place Secrets, PV rebind, upgrade, and a reopened conversation continues its context
+- [ ] 10.6 Run the system pack
+
+## 11. Documentation
+
+### Reference docs
+
+- [ ] 11.1 `docs/concepts.md`: the two namespaces, the placement rule and its table
+- [ ] 11.2 `docs/contracts.md`: no manager surface carries a namespace
+- [ ] 11.3 `docs/contracts/signal-adapter.md` to 2.5.0: `POD_NAMESPACE` and `CONVERSATION_NAMESPACE` in `#environment`, `ADP-10`, `ADP-7` reworded, changelog and conformance rows
+- [ ] 11.4 `docs/configuration.md`: `conversationNamespace`, `createConversationNamespace`
+- [ ] 11.5 `docs/security.md`: the moved trust boundary, the state-read token beside agent code, re-run `threat-model.py`
+- [ ] 11.6 `docs/integrations/kubernetes.md` and `docs/console.md`: route accounts and runtime pods in the conversations namespace
+- [ ] 11.7 `docs/CHANGELOG.md` `[20.0.0]`, with the Upgrade section as the migration of record: close, Secrets, PV rebind, upgrade, kube cleanup, verify, rollback
+- [ ] 11.8 `.claude/rules/`: `invariants.md` (the placement rule), `structure.md`, `gotchas.md` for anything the system lane surfaced
+- [ ] 11.9 Re-run `python3 .github/scripts/docs-generate.py` and pass `--check`
+
+### Adopter site
+
+- [ ] 11.10 `docs/installation.md`: both namespaces, Secret placement, the 19 to 20 upgrade mirroring the changelog
+- [ ] 11.11 `docs/getting-started.md`: where the first conversation's pod appears
+- [ ] 11.12 `docs/index.md` and `README.md`: the isolation claim
+- [ ] 11.13 `docs/guides/agent-profile.md`, `agent-runtime.md`, `toolsets.md`: referenced Secrets belong in the conversations namespace
+- [ ] 11.14 `docs/guides/pipeline.md`: claims are created in the conversations namespace

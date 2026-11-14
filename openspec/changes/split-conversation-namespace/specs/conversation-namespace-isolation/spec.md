@@ -1,175 +1,207 @@
 ## ADDED Requirements
 
-### Requirement: Conversation-scoped objects live in a dedicated namespace
-The deployment SHALL resolve two namespaces: a **control namespace** holding the
-manager, adapter workloads, and every wiring or identity CR (`Pipeline`,
-`Channel`, `SignalSource`, `ChannelAdapter`, `SignalAdapter`, `AgentProfile`,
-`AgentRuntime`, `MCPToolset`, `MCPConfig`); and a **conversations namespace**
-holding `Conversation` and `ConversationInput` CRs, runtime pods
-(`agentops-conv-<name>`), compiled MCP ConfigMaps (`agentops-mcp-conv-<name>`),
-the runtime ServiceAccount, and the home PVC. An object SHALL belong to the
-conversations namespace if and only if a runtime pod's owner chain or its
-kubelet-resolved references reach it. Adapter workloads SHALL remain in the
-control namespace because they carry projected transport credentials.
+### Requirement: Objects a runtime pod runs as, mounts or resolves live in the conversations namespace
+A release SHALL resolve two namespaces, a **control namespace** (the release
+namespace) and a **conversations namespace**. An object SHALL live in the
+conversations namespace if and only if a runtime pod runs as it, mounts it or
+resolves it, or it is conversation-scoped state.
 
-#### Scenario: Runtime pod is created in the conversations namespace
-- **WHEN** a conversation is dispatched with the split configured
-- **THEN** its runtime pod, its MCP ConfigMap, and its `ConversationInput` objects are all in the conversations namespace
+The conversations namespace SHALL hold:
 
-#### Scenario: Wiring stays in the control namespace
-- **WHEN** the manager resolves a conversation's pipeline, profile, channels, toolsets and MCP configs
-- **THEN** every one of those objects is read from the control namespace
+- runtime pods `agentops-conv-<name>` and MCP ConfigMaps `agentops-mcp-conv-<name>`
+- `Conversation` and `ConversationInput` CRs, under the `kube` state backend
+- the floor account `agentops-runtime`, every `rbac.runtime.serviceAccounts`
+  entry and every bundle route account
+- every persistence claim, chart-rendered or manager-created
+- the housekeeping and context-probe CronJobs
 
-#### Scenario: Adapters are not co-located with agent code
-- **WHEN** the chart renders a channel or signal adapter workload
-- **THEN** the workload and its ServiceAccount are in the control namespace
+The control namespace SHALL hold everything else, including the manager,
+every wiring and identity CR, `Signal` CRs and the rest of the state store,
+NATS, adapters, the gateway, the console and every MCP server.
 
-### Requirement: Owner references stay within one namespace
-Every object the manager creates on a conversation's behalf SHALL be created in
-the same namespace as its owning `Conversation`, so ownerRef garbage collection
-continues to remove runtime pods, MCP ConfigMaps and input objects when the
-conversation is deleted. The manager SHALL NOT create a cross-namespace owner
-reference.
+#### Scenario: A dispatched conversation's workload lands in the conversations namespace
+- **WHEN** a conversation is dispatched in a split release
+- **THEN** its runtime pod and its MCP ConfigMap are in the conversations namespace, and the pod runs as an account in that namespace
 
-#### Scenario: Deleting a conversation collects its dependents
-- **WHEN** a `Conversation` in the conversations namespace is deleted
-- **THEN** its runtime pod and its `agentops-mcp-conv-<name>` ConfigMap are garbage collected
+#### Scenario: Wiring is read from the control namespace
+- **WHEN** the manager resolves a conversation's Pipeline, profile, runtime, channels, toolsets and MCP configs
+- **THEN** every one of them is read from the control namespace
 
-#### Scenario: No cross-namespace ownership is emitted
-- **WHEN** any object is created for a conversation
-- **THEN** its owner reference names an object in its own namespace
+#### Scenario: Signals stay in the control namespace under kube
+- **WHEN** the `kube` state backend stores a Signal and a Conversation it opened
+- **THEN** the `Signal` CR is in the control namespace and the `Conversation` CR and its `ConversationInput`s are in the conversations namespace
 
-### Requirement: A single code path serves split and single-namespace layouts
-The manager SHALL carry a control/conversations namespace pair rather than a
-single namespace value, and every lookup SHALL name which of the two it uses.
-When the two resolve to the same namespace the behavior SHALL be identical to
-the previous single-namespace deployment, with no conditional branching between
-layouts. The controller-runtime cache SHALL be scoped to both namespaces, and
-leader election SHALL remain in the control namespace.
+#### Scenario: Transport credentials never share a namespace with agent code
+- **WHEN** the chart renders a channel adapter, a signal adapter, the gateway or the console
+- **THEN** the workload, its account and its credentials are in the control namespace
 
-#### Scenario: Single-namespace mode is unchanged
-- **WHEN** the conversations namespace is configured equal to the control namespace
-- **THEN** all objects are created in that one namespace and behavior matches the pre-split deployment
+### Requirement: One code path serves both layouts
+The manager SHALL carry a control and conversations namespace pair in place of
+a single namespace:
 
-#### Scenario: Cache covers both namespaces
+- the pair SHALL be read from `NAMESPACE` and `CONVERSATION_NAMESPACE`, the
+  latter defaulting to the former
+- every lookup SHALL name the plane it uses
+- equal values SHALL reproduce the single-namespace deployment with no branch
+  on layout
+
+The cache SHALL cover exactly the two namespaces, and leader election SHALL
+stay in the control namespace.
+
+#### Scenario: Equal namespaces reproduce today's layout
+- **WHEN** `CONVERSATION_NAMESPACE` equals `NAMESPACE`
+- **THEN** every object renders and is created in that one namespace, as before the split
+
+#### Scenario: The cache is two namespaces, never the cluster
 - **WHEN** the manager starts with two distinct namespaces
-- **THEN** it watches conversations in the conversations namespace and wiring CRs in the control namespace without cluster-wide watches
+- **THEN** it watches those two namespaces and no other
 
-#### Scenario: Leader election is unaffected by the split
-- **WHEN** the manager starts in split mode
-- **THEN** its lease is held in the control namespace
+#### Scenario: The lease stays in control
+- **WHEN** the manager runs split
+- **THEN** its leader-election Lease is in the control namespace
 
-### Requirement: Manager permissions stay namespace-scoped in both namespaces
-The chart SHALL grant the manager a Role and RoleBinding in each namespace
-carrying only the permissions used there — conversations, conversationinputs,
-their status subresources, pods, configmaps and events in the conversations
-namespace; wiring CRs, adapter workloads, services, serviceaccounts, configmaps
-and leases in the control namespace. No ClusterRole SHALL be introduced for the
-manager, and no reconciler SHALL create RBAC objects.
-
-#### Scenario: Two namespace-scoped Roles render
-- **WHEN** the chart is rendered in split mode
-- **THEN** a manager Role and RoleBinding exist in each namespace and no manager ClusterRole is created
-
-#### Scenario: Manager cannot read conversations cluster-wide
-- **WHEN** the manager lists conversations in an unrelated namespace
-- **THEN** the request is forbidden
-
-### Requirement: Runtime references resolve in the conversations namespace
-Because the kubelet resolves Secret and ConfigMap references in the pod's
-namespace, every reference a runtime pod consumes — `AgentProfile` repo auth
-(deploy key volume and `GIT_TOKEN`), `AgentProfile.spec.env[].valueFrom`,
-`MCPConfig` header and env `valueFrom` entries, raw MCP `configMapRef` /
-`secretRef`, and image pull secrets — SHALL exist in the conversations
-namespace. The manager SHALL NOT read, copy or mirror any Secret. The manager
-SHALL report the names it expects in the conversations namespace as a condition
-on the Conversation, derived from the referencing CRs alone and without reading
-the referenced objects.
-
-#### Scenario: Expected references are named without being read
-- **WHEN** a conversation is admitted whose profile declares a repo auth secret and whose MCP configs declare valueFrom env
-- **THEN** a condition on the conversation names those Secret names as expected in the conversations namespace, and no Secret is read through the API
-
-#### Scenario: Missing secret fails at the pod, with a pointer
-- **WHEN** a referenced Secret does not exist in the conversations namespace
-- **THEN** the runtime pod fails to start with the kubelet's error and the conversation's condition names the reference that is expected
-
-#### Scenario: No secret copying is performed
-- **WHEN** the split is enabled and Secrets exist only in the control namespace
-- **THEN** the manager does not create copies in the conversations namespace
-
-### Requirement: The chart configures the split with the split as the default
-The chart SHALL expose `conversationNamespace`, defaulting to
-`agent-ops-conversations`, and `createConversationNamespace`, defaulting to
-true. Setting `conversationNamespace` to the release namespace SHALL produce the
-single-namespace layout. A namespace the chart creates SHALL be labelled as
-belonging to the release and SHALL NOT be deleted on uninstall, because it holds
-operator-managed Secrets and the home PVC. The runtime ServiceAccount, the home
-PVC, and the subjects of runtime RBAC bindings SHALL be placed in the
+### Requirement: A conversation's workload is released explicitly in its own namespace
+The manager SHALL release a conversation's pod and MCP ConfigMap explicitly,
+in the conversations namespace, under every state backend. It SHALL NOT emit a
+cross-namespace owner reference. The orphan sweeper SHALL list the
 conversations namespace.
 
+#### Scenario: Closing releases the workload in the conversations namespace
+- **WHEN** a conversation in a split release is closed
+- **THEN** its pod and its MCP ConfigMap are deleted from the conversations namespace
+
+#### Scenario: No owner reference crosses a namespace
+- **WHEN** any object is created for a conversation
+- **THEN** it carries no owner reference, or one naming an object in its own namespace
+
+#### Scenario: An orphan in the conversations namespace is swept
+- **WHEN** a runtime pod in the conversations namespace has no conversation record
+- **THEN** the orphan sweeper deletes it
+
+### Requirement: The manager's permissions are namespaced in both namespaces
+The chart SHALL grant the manager one namespaced Role per namespace, each with
+only what is used there. The conversations-namespace Role SHALL cover pods,
+configmaps, `conversations`, `conversationinputs` and their status, events, and
+PVC `get`/`list`/`watch`/`create`.
+
+No ClusterRole SHALL be added for the manager. Neither Role SHALL carry a
+`secrets` verb or a PVC `delete`, `update` or `patch`.
+
+#### Scenario: Two Roles render, no new ClusterRole
+- **WHEN** the chart renders split
+- **THEN** a manager Role and RoleBinding exist in each namespace, and the only manager ClusterRole is the existing nodes grant
+
+#### Scenario: The manager cannot reach a third namespace
+- **WHEN** the manager lists pods in an unrelated namespace
+- **THEN** the request is forbidden
+
+#### Scenario: The storage invariant holds in the new namespace
+- **WHEN** the manager's access to PVCs in the conversations namespace is checked
+- **THEN** `create` is allowed and `delete`, `update` and `patch` are denied
+
+### Requirement: References a runtime pod resolves are the adopter's to place, and the manager names them
+Every Secret and ConfigMap a runtime pod resolves SHALL exist in the
+conversations namespace. That covers profile repo auth, profile env
+`valueFrom`, the runtime's model credential, MCP config `valueFrom` and raw
+references, and image pull secrets.
+
+The manager SHALL NOT read, copy or mirror a Secret. It SHALL set a condition
+on the conversation naming each expected reference, derived from the
+referencing CRs alone.
+
+#### Scenario: Expected references are named without a read
+- **WHEN** a conversation is admitted whose profile names a repo auth Secret and whose MCP config names a `valueFrom` Secret
+- **THEN** a condition on the conversation names both as expected in the conversations namespace, and no Secret is read through the API
+
+#### Scenario: A missing Secret fails at the pod, with a pointer
+- **WHEN** a referenced Secret is absent from the conversations namespace
+- **THEN** the pod fails with the kubelet's reason and the condition names the expected reference
+
+#### Scenario: No Secret is copied
+- **WHEN** Secrets exist only in the control namespace
+- **THEN** nothing creates a copy in the conversations namespace
+
+### Requirement: The chart splits by default and keeps the namespace it creates
+The chart SHALL expose `conversationNamespace`, defaulting to
+`agent-ops-conversations`, and `createConversationNamespace`, defaulting to
+true. Setting `conversationNamespace` to the release namespace SHALL render the
+single-namespace layout.
+
+A namespace the chart creates SHALL carry the release labels and
+`helm.sh/resource-policy: keep`. The chart SHALL render its generated
+state-read token into the conversations namespace for housekeeping.
+
 #### Scenario: Default install is split
-- **WHEN** the chart is installed with no namespace values set
-- **THEN** conversation objects target `agent-ops-conversations` and the namespace is created and labelled
+- **WHEN** the chart is installed with no namespace values
+- **THEN** conversation-scoped objects target `agent-ops-conversations`, which the chart creates and labels
 
 #### Scenario: Single namespace is one value away
 - **WHEN** `conversationNamespace` equals the release namespace
-- **THEN** no second namespace is created and every object renders in the release namespace
+- **THEN** no namespace is created and every object renders in the release namespace
 
 #### Scenario: Uninstall leaves the conversations namespace standing
 - **WHEN** the release is uninstalled
-- **THEN** the conversations namespace and the home PVC still exist
+- **THEN** the conversations namespace, its Secrets and its claims still exist
 
-#### Scenario: Runtime SA follows the pods
-- **WHEN** the chart renders runtime RBAC in split mode
-- **THEN** the runtime ServiceAccount is created in the conversations namespace and every binding names it there
+#### Scenario: Every runtime account follows the pods
+- **WHEN** the chart renders runtime RBAC split
+- **THEN** the floor account and every runtime account are in the conversations namespace, and every binding subject names them there
 
-### Requirement: The conversations namespace is network-isolated by default
-The chart SHALL ship NetworkPolicies for the conversations namespace gated by
-`networkPolicies.enabled`, defaulting to **true**: a default-deny ingress policy,
-and an egress policy allowing only DNS and the manager Service in the control
-namespace. Additional egress SHALL require explicit `networkPolicies.extraEgress`
-entries, including any agent access to the public internet and any MCP server a
-bundle ships. The chart NOTES SHALL warn that a CNI without policy support
-ignores these objects.
+### Requirement: NetworkPolicy peers name their namespace
+Under the existing `global.agentops.networkPolicy.enabled` gate, off by
+default, every peer selecting runtime pods or the manager across the split
+SHALL add a `namespaceSelector`. The runtime ingress-deny policy SHALL render
+in the conversations namespace. No egress policy SHALL be added.
+
+#### Scenario: Every wired flow survives the split
+- **WHEN** policies are enabled in a split release
+- **THEN** runtime pods reach the manager, `mcp-aops` and every bundle MCP server, and the manager's replicas reach each other
 
 #### Scenario: Runtime pods accept no ingress
-- **WHEN** the policies are enabled
-- **THEN** no ingress to runtime pods is permitted, and runtime pods still reach the manager's `/work` endpoint
+- **WHEN** policies are enabled in a split release
+- **THEN** a policy in the conversations namespace admits no ingress to runtime pods
 
-#### Scenario: Undeclared egress is denied
-- **WHEN** an agent attempts to reach a host not covered by DNS, the manager Service, or `extraEgress`
-- **THEN** the connection is denied
+#### Scenario: The gate's default is unchanged
+- **WHEN** the chart renders with no NetworkPolicy values
+- **THEN** no NetworkPolicy renders
 
-#### Scenario: Policies can be disabled wholesale
-- **WHEN** `networkPolicies.enabled=false`
-- **THEN** no NetworkPolicy objects render and traffic behavior is unchanged
+### Requirement: The manager's HTTP surfaces stay namespace-free
+`/work`, `/channel/*`, `/signal/*` and `/state/*` SHALL carry no namespace on
+any request or response. No adapter SHALL need adopter-set configuration for
+the split. `CONTROL_URL` SHALL keep addressing the manager Service by its
+fully qualified name in the control namespace.
 
-### Requirement: Adapter and runtime contracts remain namespace-free
-The `/channel/*`, `/signal/*` and `/work` contracts SHALL continue to identify
-channels, conversations and operations by name only, carrying no namespace.
-Adapters SHALL require no knowledge of the split, and `CONTROL_URL` SHALL
-continue to address the manager Service by its fully qualified name in the
-control namespace.
-
-#### Scenario: Adapters are unaffected by the split
-- **WHEN** the split is enabled
-- **THEN** existing channel and signal adapter images work unchanged with no new configuration
-
-#### Scenario: Runtime reaches the manager across namespaces
+#### Scenario: A runtime pod reaches the manager across namespaces
 - **WHEN** a runtime pod in the conversations namespace long-polls `/work`
-- **THEN** it reaches the manager Service in the control namespace via its FQDN
+- **THEN** it reaches the manager Service in the control namespace by its FQDN
 
-### Requirement: Existing conversations are not migrated
-Upgrading into the split SHALL NOT move or recreate `Conversation` objects that
-exist in the control namespace; the manager stops reconciling them. The upgrade
-documentation SHALL state that open conversations must be drained before
-upgrade and SHALL give the command to remove the stragglers.
+#### Scenario: Adapters need no new values
+- **WHEN** a release is split
+- **THEN** every channel and signal adapter runs with no adopter-set namespace configuration
 
-#### Scenario: Old conversations stop being reconciled
-- **WHEN** the manager is upgraded into split mode with conversations still present in the control namespace
-- **THEN** those conversations receive no further reconciliation and no error loop is produced
+### Requirement: The migration is documented in the release that ships the split
+The chart release that makes the split the default SHALL carry the migration
+in its `CHANGELOG.md` Upgrade section, mirrored in `installation.md`. No code
+SHALL move state between namespaces. The section SHALL give, in order:
 
-#### Scenario: Upgrade notes state the drain step
-- **WHEN** an operator reads the upgrade notes
-- **THEN** the notes instruct draining open conversations first and name the cleanup command
+1. closing open conversations
+2. placing Secrets in the conversations namespace
+3. carrying each claim across by PV rebind
+4. upgrading
+5. deleting `kube`-backend `Conversation` CRs left behind
+
+#### Scenario: A nats-backed conversation reopens into the new namespace
+- **WHEN** a conversation closed before the upgrade is reopened after it, under the `nats` backend
+- **THEN** its pod is created in the conversations namespace and its record is unchanged
+
+#### Scenario: A kube-backed conversation left behind is inert
+- **WHEN** the manager is upgraded split with `Conversation` CRs still in the release namespace
+- **THEN** those CRs receive no reconciliation and produce no error loop
+
+#### Scenario: An uncarried claim fails loudly
+- **WHEN** a conversation promised context reopens and its claim was not carried
+- **THEN** the run fails as promised-and-lost rather than answering fresh
+
+#### Scenario: The release notes give the procedure
+- **WHEN** an adopter reads the release's Upgrade section
+- **THEN** it lists the closing, Secret, PV rebind, upgrade and cleanup steps in order, with commands
