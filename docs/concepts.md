@@ -1062,7 +1062,7 @@ is conversation-scoped state. Nothing else moves:**
 No manager HTTP surface carries a namespace — see [contracts](contracts.md).
 
 {: .ao-callout}
-> **A Secret, ConfigMap, ServiceAccount or PVC a runtime pod resolves must
+> **A Secret or ConfigMap a runtime pod resolves must
 > exist in the conversations namespace, placed by you.** The manager never
 > reads a Secret through the API, so it cannot copy one there. It names what
 > a conversation's pod will need on the conversation's own conditions

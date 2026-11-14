@@ -156,11 +156,12 @@ credential, one flag, no clone:
 
 ```sh
 kubectl create namespace agent-ops
+kubectl create namespace agent-ops-conversations   # global.agentops.conversationNamespace, default shown
+kubectl -n agent-ops-conversations create secret generic agentops-claude \
+  --from-literal=oauthToken=$(claude setup-token)
+
 helm install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
   -n agent-ops --set global.demo.enabled=true
-
-kubectl -n agent-ops-conversations create secret generic agentops-claude \
-  --from-literal=oauthToken=$(claude setup-token)   # global.agentops.conversationNamespace, default shown
 ```
 
 **[Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/)**

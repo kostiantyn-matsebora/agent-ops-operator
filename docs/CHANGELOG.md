@@ -103,10 +103,12 @@ upgrading:
 
    ```sh
    kubectl apply -f chart/crds/
+   helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator -n agent-ops
    ```
 
    ```powershell
    kubectl apply -f chart/crds/
+   helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator -n agent-ops
    ```
 6. **Under the `kube` state backend, delete the `Conversation` CRs left in
    the release namespace** — they receive no reconciliation there.

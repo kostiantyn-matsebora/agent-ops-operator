@@ -89,10 +89,9 @@ already in it.
   {: .ao-icon-conversation}
 
   Isolated, serial and capped. One runaway conversation cannot take the others
-  with it.
+  with it. An idle conversation is reaped.
 
-  The conversations namespace holds no control-plane credential. An idle conversation is
-  reaped.
+  The conversations namespace holds no control-plane credential.
 
 - Tools that come from the wiring
   {: .ao-icon-toolset}
