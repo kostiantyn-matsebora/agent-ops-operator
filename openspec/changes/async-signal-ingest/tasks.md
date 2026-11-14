@@ -14,9 +14,9 @@
 
 ## 3. Unit tests — testing-specialist
 
-- [ ] 3.1 Update the roughly 15 cases in `internal/httpapi/publish_test.go` and `signals_test.go` that assert `200` or a `Signal` on return: status-only cases expect `202` with `taskIds`, and cases that need a `Signal` run the consumer first.
-- [ ] 3.2 Move the tests of `answerCommands` and `publishOne` to the consumer's package and add a redelivery case, an unwired-source case and a fully-filtered-batch case.
-- [ ] 3.3 Run `go build ./... && go vet ./... && go test ./...` in `platform/manager`, with `KUBEBUILDER_ASSETS` set so the envtest suite runs. In every `signals/*` module, run `go test ./...` to confirm no adapter changed behaviour.
+- [x] 3.1 Update the roughly 15 cases in `internal/httpapi/publish_test.go` and `signals_test.go` that assert `200` or a `Signal` on return: status-only cases expect `202` with `taskIds`, and cases that need a `Signal` run the consumer first.
+- [x] 3.2 Move the tests of `answerCommands` and `publishOne` to the consumer's package (`ingesttask_test.go`) and add a redelivery case, an unwired-source case and a fully-filtered-batch case. The redelivery case caught a real dedup gap in `publishOne`: its `AlreadyExists` branch matched only a sender-given `signalId`, so a no-`signalId` redelivery (named from the task's own UID) fell through to the store-failure path instead of deduplicating. Fixed in `ingesttask.go`.
+- [x] 3.3 Run `go build ./... && go vet ./... && go test ./...` in `platform/manager`, with `KUBEBUILDER_ASSETS` set so the envtest suite runs. In every `signals/*` module, run `go test ./...` to confirm no adapter changed behaviour. All green, module by module. The envtest-gated `internal/integration` suite needed its own fix: 68 cases across 24 files posted a signal and asserted on state a `200` used to guarantee synchronously. Added `drainIngestTasks` (mirroring the existing `drainConvTasks`) and updated every call site.
 
 ## 4. System tests — testing-specialist
 
