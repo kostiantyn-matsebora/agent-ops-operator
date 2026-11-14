@@ -32,7 +32,7 @@ default: false
 # A fresh component, starting at 0.1.0 — today's runtimes/claude code (spawn
 # per unit) moved here verbatim, published under its own name rather than
 # overwriting a tag runtimes/claude had already pushed.
-image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude-cli:0.1.0
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude-cli:0.1.1
 
 # WHERE THIS RUNTIME KEEPS ITS CONTEXT — include globs relative to $HOME, and
 # the declaration that turns context synchronisation ON.

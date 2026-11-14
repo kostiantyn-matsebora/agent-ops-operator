@@ -8,6 +8,36 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [19.0.1] — 2026-11-14
+
+A security patch. Six images are rebuilt on current base images, with no
+source change, so every published image passes the weekly vulnerability scan
+again.
+
+- `context-sync` 0.2.6, `egress-proxy` 0.2.7, `gateway-telegram` 0.7.1,
+  `mcp-pulse` 0.1.1, `runtime-claude-cli` 0.1.1, `runtime-ollama` 0.1.4.
+- Bundles `telegram` 0.6.1 and `pulse` 0.2.2, each shipping its rebuilt
+  image, above.
+
+### Security
+
+- Go standard library CVE-2026-111943 (`crypto/x509`), fixed by building
+  with Go 1.27.4. Affected `context-sync`, `egress-proxy`,
+  `gateway-telegram` and `mcp-pulse`.
+- Debian `apt` CVE-2026-109518, fixed in apt 2.6.2. Affected
+  `egress-proxy`, `runtime-claude-cli` and `runtime-ollama`.
+- Debian `libssl3` CVE-2026-84782, fixed in 3.0.22-1~deb12u2. Affected
+  `runtime-claude-cli` and `runtime-ollama`.
+
+### Fixed
+
+- The weekly image scan picked a component's newest tag by version sort,
+  which ranks a pre-release tag above its release. It judged
+  `manager` 0.62.0-state-store.1, an image no chart ships, and failed on a
+  finding `manager` 0.62.0 does not have. It now scans release tags only.
+
+No values or CRDs change. Upgrade with `helm upgrade` as usual.
+
 ## [19.0.0] — 2026-11-14
 
 **BREAKING.** The default state backend is now `nats`, the manager accepts
@@ -1112,53 +1142,11 @@ below, each image carries what landed on it since its last tag:
   the cursor past the listing on connect. No configuration changes. The
   bundle's pinned tag moves to 0.3.0.
 
-## [13.3.0] — 2026-08-28
-
-**A third runtime: `agentops-runtime-copilot` 0.1.0, shipped as the `copilot`
-bundle.** GitHub Copilot driven through its SDK, in process.
-
-The first vendor to own its own tool vocabulary, its own agent-definition
-format and its own session store. Every one of those is translated inside
-the runtime.
-
-A Pipeline binds the same toolsets it binds for claude. No manager, CRD or
-toolset change was needed.
-
-### Added
-
-- `chart/charts/copilot/` — OFF by default. `copilot.enabled: true` with a
-  GitHub token (`copilot.credentialsSecret.token`, or a Secret you manage)
-  renders one `AgentRuntime` named `copilot` through the parent's shared
-  renderer, inheriting `global.agentops.runtimeDefaults`. A route selects it
-  with `pipelines[].runtimeRef: copilot`. `copilot.model` and
-  `copilot.maxAiCredits` are optional.
-- The runtime translates the composed allowlist into Copilot's two layers:
-  `availableTools` (`Read` → `view`, `Bash` → `bash`, `mcp__s__t` →
-  `mcp:s-t`) and a permission callback that decides every call. An unmapped
-  pattern is withheld and logged. `mcp__<server>__*` is refused rather than
-  widened to every server. `Bash(kubectl:*)` is enforced per invocation. An
-  empty allowlist stays empty — Copilot's "no `tools:` means everything" never
-  applies — and a denial is fed back to the model, never a hang.
-- It reads `.github/agents/<agent>.agent.md`, Copilot's location, with the same
-  frontmatter shapes and `merge` / `overwrite` composition as the reference
-  runtime. Bound MCP servers reach Copilot from the same `mcp.json`, with
-  secret placeholders resolved in the pod.
-- The context id is minted by the runtime, so `runtimeContextId` is a handle
-  it chose. State lives under `$HOME/.copilot/session-state/<id>/`, declared to
-  `context-sync` by the bundle. A resume whose state is gone re-checks, then
-  FAILS with `continuity: unavailable` and a readable reason.
-- `docs/runtimes/copilot.md`, and the Copilot chip on the landing page.
-- CI runs `node --test` for the Node runtimes (`runtimes/claude`,
-  `runtimes/copilot`) when their directories change. Neither suite ran in CI
-  before.
-
-**Nothing changes for an install that does not enable the bundle.** The
-rendered manifest is identical.
-
 ## Older versions
 
 | Archive | Covers |
 |---|---|
+| [CHANGELOG-13.3.0.md](changelog/CHANGELOG-13.3.0.md) | chart 13.3.0 |
 | [CHANGELOG-13.2.0.md](changelog/CHANGELOG-13.2.0.md) | chart 13.2.0 |
 | [CHANGELOG-13.1.1.md](changelog/CHANGELOG-13.1.1.md) | chart 13.1.1 |
 | [CHANGELOG-13.1.0.md](changelog/CHANGELOG-13.1.0.md) | chart 13.1.0 |

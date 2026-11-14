@@ -348,7 +348,7 @@ mcpServer:
   enabled: false
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-mcp-pulse
-    tag: "0.1.0"
+    tag: "0.1.1"
   # REQUIRED when enabled: the Pulse base URL mcp-pulse forwards every tool
   # call to. Empty FAILS the render — never defaulted, mcp-pulse has no
   # in-cluster endpoint of its own to fall back onto.

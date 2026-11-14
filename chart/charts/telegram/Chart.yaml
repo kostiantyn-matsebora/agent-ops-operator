@@ -7,4 +7,4 @@ description: >-
   configured — the Channel and the chat SignalSource. Ships no Pipeline:
   NOTES.txt prints the one to apply.
 type: application
-version: 0.6.0
+version: 0.6.1
