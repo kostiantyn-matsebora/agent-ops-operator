@@ -34,7 +34,6 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
 
-
 // 10.1 The most basic end-to-end proof the split actually works: an
 // ordinary signal opens a conversation whose runtime pod lands in the
 // CONVERSATIONS namespace (never the release namespace), runs as an
