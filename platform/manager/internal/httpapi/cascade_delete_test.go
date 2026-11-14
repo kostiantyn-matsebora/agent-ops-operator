@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,7 +45,7 @@ func conversationExists(t *testing.T, c client.Client, name string) bool {
 func routerFor(t *testing.T, c client.WithWatch, ns string) *chat.Router {
 	t.Helper()
 	store := testConversations(t, c, ns)
-	return &chat.Router{Client: c, Reader: c, Conversations: store, Namespace: ns}
+	return &chat.Router{Client: c, Reader: c, Conversations: store, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns}}
 }
 
 // async-command-bus task 5.10: deleteCascadeOrder is pure — no client, no
@@ -90,7 +91,7 @@ func TestDeleteCascadeRequestsBuildsOneTaskPerConversationKeyedOnTheRoot(t *test
 		causedConv("root", ""), causedConv("mid", "root"), causedConv("leaf", "mid"),
 	).Build()
 	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"),
-		Namespace: "agent-ops", Router: routerFor(t, c, "agent-ops")}
+		Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Router: routerFor(t, c, "agent-ops")}
 
 	reqs, err := s.deleteCascadeRequests(context.Background(), "root")
 	if err != nil {
@@ -126,7 +127,7 @@ func TestDeleteCascadeRequestsBuildsOneTaskPerConversationKeyedOnTheRoot(t *test
 // going dead on not_found.
 func TestTaskDeleteOfAnAbsentConversationSucceeds(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).Build()
-	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops"}
+	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 	if err := s.taskDelete(context.Background(), &convtask.Payload{Verb: convtask.VerbDelete, Conversation: "never-existed"}); err != nil {
 		t.Fatalf("deleting an absent conversation must succeed, got %v", err)
 	}
@@ -134,7 +135,7 @@ func TestTaskDeleteOfAnAbsentConversationSucceeds(t *testing.T) {
 
 func TestTaskDeleteRemovesTheNamedConversation(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(causedConv("m", "")).Build()
-	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops"}
+	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 	if err := s.taskDelete(context.Background(), &convtask.Payload{Verb: convtask.VerbDelete, Conversation: "m"}); err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +150,7 @@ func TestTaskDeleteReportsAnUnrecognizedStoreFailure(t *testing.T) {
 		WithInterceptorFuncs(interceptor.Funcs{
 			Delete: func(context.Context, client.WithWatch, client.Object, ...client.DeleteOption) error { return boom },
 		}).Build()
-	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops"}
+	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 	if err := s.taskDelete(context.Background(), &convtask.Payload{Verb: convtask.VerbDelete, Conversation: "m"}); !errors.Is(err, boom) {
 		t.Fatalf("a delete failure must surface, got %v", err)
 	}
@@ -161,12 +162,11 @@ func TestDeleteCascadeRequestsReportsADescendantsFailure(t *testing.T) {
 		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error { return boom },
 	}).Build()
 	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"),
-		Namespace: "agent-ops", Router: routerFor(t, c, "agent-ops")}
+		Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Router: routerFor(t, c, "agent-ops")}
 	if _, err := s.deleteCascadeRequests(context.Background(), "root"); !errors.Is(err, boom) {
 		t.Fatalf("a list failure must surface, got %v", err)
 	}
 }
-
 
 // A name reused by a later conversation must not have its delete swallowed as
 // a repeat of the previous one's: the command id carries the record's ID.
@@ -176,7 +176,7 @@ func TestDeleteCommandIDDiffersAcrossTwoLivesOfOneName(t *testing.T) {
 		conv.UID = types.UID(uid)
 		c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(conv).Build()
 		s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"),
-			Namespace: "agent-ops", Router: routerFor(t, c, "agent-ops")}
+			Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Router: routerFor(t, c, "agent-ops")}
 		reqs, err := s.deleteCascadeRequests(context.Background(), "root")
 		if err != nil || len(reqs) != 1 {
 			t.Fatalf("requests: %v %v", reqs, err)

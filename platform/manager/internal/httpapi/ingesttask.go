@@ -84,7 +84,7 @@ func (s *Server) HandleIngestSignalTask(ctx context.Context, task commandbus.Tas
 			fmt.Errorf("ingest-signal task %s: decode payload: %w", task.UID, err))
 	}
 	var source agentopsv1alpha1.SignalSource
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: p.Source}, &source); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: p.Source}, &source); err != nil {
 		if apierrors.IsNotFound(err) {
 			return consumer.WithCode(commandbus.CodeNotFound,
 				fmt.Errorf("ingest-signal task %s: signal source %q: %w", task.UID, p.Source, err))
@@ -227,7 +227,7 @@ func (s *Server) chatChannel(ctx context.Context, sig NormalizedSignal) *agentop
 		return nil
 	}
 	var ch agentopsv1alpha1.Channel
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &ch); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: name}, &ch); err != nil {
 		return nil
 	}
 	return &ch

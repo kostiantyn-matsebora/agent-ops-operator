@@ -72,7 +72,7 @@ func (s *Server) announceContextReset(ctx context.Context, conv *state.Conversat
 	}
 	for _, ref := range conv.ChannelRefs {
 		var ch agentopsv1alpha1.Channel
-		key := types.NamespacedName{Namespace: s.Namespace, Name: ref}
+		key := types.NamespacedName{Namespace: s.Namespaces.Control, Name: ref}
 		if err := s.Reader.Get(ctx, key, &ch); err != nil {
 			continue // channel gone: nobody left to tell
 		}

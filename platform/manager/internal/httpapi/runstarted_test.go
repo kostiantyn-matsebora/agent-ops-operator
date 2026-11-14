@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func workReportServerAt(t *testing.T, dispatchedAt metav1.Time) *Server {
 
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 		WithObjects(conv, rt).WithStatusSubresource(conv).Build()
-	return &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Runs: testRuns(t, c, "agent-ops"), Client: c, Namespace: "agent-ops", Activity: activity.New(64)}
+	return &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Runs: testRuns(t, c, "agent-ops"), Client: c, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Activity: activity.New(64)}
 }
 
 // A recorded run must carry when it actually STARTED, not only when it

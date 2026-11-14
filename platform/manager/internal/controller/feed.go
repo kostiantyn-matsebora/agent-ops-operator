@@ -142,7 +142,7 @@ func (r *ConversationReconciler) pumpFeed(ctx context.Context, q workqueue.Typed
 }
 
 func (r *ConversationReconciler) request(key state.Key) reconcile.Request {
-	return reconcile.Request{NamespacedName: namespacedName(r.Namespace, string(key))}
+	return reconcile.Request{NamespacedName: namespacedName(r.Namespaces.Conversations, string(key))}
 }
 
 // startFeed is the Signal reconciler's event source (design D-14), the same

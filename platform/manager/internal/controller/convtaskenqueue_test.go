@@ -7,6 +7,7 @@ package controller
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ import (
 // these tests confirm is unchanged when Bus is nil.
 func routerOver(c client.Client, store state.Collection[state.ConversationRecord]) *chat.Router {
 	q := &chat.OpQueue{Conversations: store, Registry: chat.NewRegistry(), Bus: memory.Open()}
-	return &chat.Router{Client: c, Reader: c, Conversations: store, Namespace: claimTestNS, Ops: q}
+	return &chat.Router{Client: c, Reader: c, Conversations: store, Namespaces: namespace.Namespaces{Control: claimTestNS, Conversations: claimTestNS}, Ops: q}
 }
 
 func TestCloseBudgetExceededEnqueuesAConvTaskWhenBusIsSet(t *testing.T) {

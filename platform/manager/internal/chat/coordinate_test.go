@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"strings"
 	"testing"
 
@@ -29,7 +30,7 @@ func coordFixtureIntercepting(t *testing.T, funcs interceptor.Funcs, objs ...cli
 		WithObjects(objs...).
 		WithInterceptorFuncs(funcs).Build()
 	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
-	return &Router{Client: c, Reader: c, Conversations: newTestStore(c), Runs: newTestRuns(c), Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}, c
+	return &Router{Client: c, Reader: c, Conversations: newTestStore(c), Runs: newTestRuns(c), Blobs: newTestBlobs(c), Namespaces: namespace.Namespaces{Control: testNS, Conversations: testNS}, Ops: q}, c
 }
 
 // statusPatchRecorder is a SubResourceUpdate interceptor that records the name

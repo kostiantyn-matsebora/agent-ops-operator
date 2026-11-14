@@ -28,7 +28,16 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: agentops-context-probe
-  namespace: {{ .Release.Namespace }}
+  # split-conversation-namespace: the probe mounts the context claim, which
+  # now lives in the conversations namespace, so it moves there with it.
+  namespace: {{ include "agentops.conversationNamespace" . }}
+  labels:
+    # No signal loops (invariants.md): a CronJob fails on a SCHEDULE, so
+    # without an agentops label here a failing probe would open a
+    # conversation about the storage the agent itself needs. This value is
+    # not yet in signals/k8s-events' owned-label set (mechanism 2) or its
+    # name-prefix list (mechanism 1) — see this change's report.
+    app.kubernetes.io/name: agentops-context-probe
 spec:
   schedule: {{ .Values.contextProbe.schedule | quote }}
   concurrencyPolicy: Forbid
@@ -44,6 +53,9 @@ spec:
       # see, rather than another silent wait.
       activeDeadlineSeconds: {{ .Values.contextProbe.deadlineSeconds }}
       template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: agentops-context-probe
         spec:
           restartPolicy: Never
           {{- with .Values.nodeSelector }}

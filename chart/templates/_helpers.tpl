@@ -26,6 +26,44 @@ at an account that holds something. */ -}}
 agentops-runtime
 {{- end -}}
 
+{{- /* THE CONVERSATIONS NAMESPACE (split-conversation-namespace), resolved
+ONCE — every other template calls this rather than inlining the
+`global.agentops.conversationNamespace` / `.Release.Namespace` comparison,
+so there is exactly one place that decides where a runtime pod, everything
+it mounts or resolves, and the two CronJobs that mount the same claims live.
+
+Reads `global.` for the same forcing `agentops.runtimeServiceAccount` does:
+`chart/charts/kubernetes` calls this too, and a subchart sees no other
+parent scope. Empty (an operator clearing the value, or a subchart context
+with none set) falls back to the RELEASE namespace, which is what
+single-namespace mode is — the shipped default is the non-empty
+`agent-ops-conversations`, so a fresh install splits unless told not to. */ -}}
+{{- define "agentops.conversationNamespace" -}}
+{{- dig "agentops" "conversationNamespace" "" (.Values.global | default dict) | default .Release.Namespace -}}
+{{- end -}}
+
+{{- /* TRUE ("true" or "") WHEN THE TWO NAMESPACES DIFFER — the one place
+that decides whether a template renders ONE merged object (today's layout,
+byte-identical) or TWO split ones. Every such conditional in this chart
+calls this rather than comparing the two namespaces inline, which is what
+keeps "equal values reproduce today's render" a property of ONE helper
+instead of a rule every template has to remember to apply. */ -}}
+{{- define "agentops.namespacesSplit" -}}
+{{- if ne (include "agentops.conversationNamespace" .) .Release.Namespace -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{- /* WHETHER THE CHART CREATES THE CONVERSATIONS NAMESPACE. Returns "true"
+or "". Defaults true; an operator who already created it, or who points
+this release at a namespace another release owns, sets
+`global.agentops.createConversationNamespace: false`. */ -}}
+{{- define "agentops.createConversationNamespaceEnabled" -}}
+{{- if dig "agentops" "createConversationNamespace" true (.Values.global | default dict) -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{- /* THE DEFAULT IDENTITY a runtime declares, and therefore what a Pipeline
 naming no `serviceAccountName` inherits.
 
@@ -981,10 +1019,16 @@ that arrives, because for those installs it is.
 {{- $root := .root -}}
 {{- $ctx := $root.Values.persistence.context -}}
 {{- $resolved := $ctx.existingClaim | default $ctx.name -}}
+{{- /* split-conversation-namespace: a claim this chart renders now lands in
+the CONVERSATIONS namespace, not the release namespace — so the NEW name is
+looked up there. The OLD name is still looked up in the RELEASE namespace:
+an `agentops-home` claim can only predate this split (every namespace was
+one, then), so that is where an upgrade still finds it. */ -}}
+{{- $convNS := include "agentops.conversationNamespace" $root -}}
 {{- if and (not $root.Release.IsInstall) $ctx.enabled (ne $resolved "agentops-home") -}}
 {{- if lookup "v1" "PersistentVolumeClaim" $root.Release.Namespace "agentops-home" -}}
-{{- if not (lookup "v1" "PersistentVolumeClaim" $root.Release.Namespace $resolved) -}}
-{{- fail (printf "PersistentVolumeClaim \"agentops-home\" exists in namespace %q and this chart version no longer renders it: the context volume was renamed, and its default claim is now %q. Nothing copies a volume, so upgrading as-is would provision a second, EMPTY claim and every conversation in this install would answer without its accumulated context while every signal reported success. Keep the volume you have — this moves no data and is one line:\n\n  persistence:\n    context:\n      existingClaim: agentops-home\n\nOr, better, REBIND the volume under the new name — retain the PV, clear its claimRef, delete the old claim, and set persistence.context.volumeName to the PV. MATCH ITS STORAGE CLASS: a PV that was dynamically provisioned KEEPS its class, and a claim requesting a different one is refused with VolumeMismatch, so set persistence.context.storageClassName to that class. Only a statically created PV with no class takes \"-\"." $root.Release.Namespace $resolved) -}}
+{{- if not (lookup "v1" "PersistentVolumeClaim" $convNS $resolved) -}}
+{{- fail (printf "PersistentVolumeClaim \"agentops-home\" exists in namespace %q and this chart version no longer renders it: the context volume was renamed, and its default claim is now %q, rendered in namespace %q. Nothing copies a volume, so upgrading as-is would provision a second, EMPTY claim and every conversation in this install would answer without its accumulated context while every signal reported success. Keep the volume you have — this moves no data and is one line:\n\n  persistence:\n    context:\n      existingClaim: agentops-home\n\nOr, better, REBIND the volume under the new name (and, under this release's split, into the conversations namespace) — retain the PV, clear its claimRef, delete the old claim, and set persistence.context.volumeName to the PV. MATCH ITS STORAGE CLASS: a PV that was dynamically provisioned KEEPS its class, and a claim requesting a different one is refused with VolumeMismatch, so set persistence.context.storageClassName to that class. Only a statically created PV with no class takes \"-\"." $root.Release.Namespace $resolved $convNS) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

@@ -231,7 +231,7 @@ func (s *Server) taskResetContext(ctx context.Context, p *convtask.Payload) erro
 // them.
 func (s *Server) taskInboundMessage(ctx context.Context, p *convtask.Payload) error {
 	var ch agentopsv1alpha1.Channel
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: p.Channel}, &ch); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: p.Channel}, &ch); err != nil {
 		if apierrors.IsNotFound(err) {
 			return consumer.WithCode(commandbus.CodeNotFound, err)
 		}

@@ -73,6 +73,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/convtask"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/storagebreaker"
@@ -96,8 +97,11 @@ type Server struct {
 	// write an adapter's cursor (design D-4) — keyed by state.AdapterStateKey,
 	// never a raw annotation patch.
 	AdapterState state.Collection[string]
-	Namespace    string
-	Addr         string
+	// Namespaces is the control/conversations pair (split-conversation-
+	// namespace). Every wiring read in this package names Namespaces.Control;
+	// status.go's two runtime-pod lists name Namespaces.Conversations.
+	Namespaces namespace.Namespaces
+	Addr       string
 
 	// Runtime is the bootstrap execution config, the same fallback the
 	// reconciler builds pods from. Dispatch needs it to answer ONE question
@@ -239,7 +243,7 @@ func (s *Server) Handler() http.Handler {
 	// /control-plane/*: its own package, its own dedicated token — see
 	// internal/control-plane's doc comment for why this is not folded into
 	// adapterAuth/the coordinator token.
-	controlplane.RegisterRoutes(mux, s.ControlPlaneToken, s.Client, s.Reader, s.Namespace)
+	controlplane.RegisterRoutes(mux, s.ControlPlaneToken, s.Client, s.Reader, s.Namespaces.Control)
 	return s.leaderProxyMiddleware(mux)
 }
 
@@ -362,7 +366,7 @@ func (s *Server) anyAdapterAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		var channels agentopsv1alpha1.ChannelAdapterList
-		if err := s.Client.List(r.Context(), &channels, client.InNamespace(s.Namespace)); err == nil {
+		if err := s.Client.List(r.Context(), &channels, client.InNamespace(s.Namespaces.Control)); err == nil {
 			for i := range channels.Items {
 				want := chat.DeriveAdapterToken(s.AdapterToken, channels.Items[i].Name)
 				if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
@@ -372,7 +376,7 @@ func (s *Server) anyAdapterAuth(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 		var signals agentopsv1alpha1.SignalAdapterList
-		if err := s.Client.List(r.Context(), &signals, client.InNamespace(s.Namespace)); err == nil {
+		if err := s.Client.List(r.Context(), &signals, client.InNamespace(s.Namespaces.Control)); err == nil {
 			for i := range signals.Items {
 				want := chat.DeriveSignalAdapterToken(s.AdapterToken, signals.Items[i].Name)
 				if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
@@ -488,7 +492,7 @@ func (s *Server) resolveToolsets(ctx context.Context, conv *state.ConversationRe
 	byRef := make([][]string, 0, len(binding.Refs))
 	for _, ref := range binding.Refs {
 		var ts agentopsv1alpha1.MCPToolset
-		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref}, &ts); err != nil {
+		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: ref}, &ts); err != nil {
 			err = fmt.Errorf("bound MCPToolset %q: %w", ref, err)
 			s.setToolingCondition(ctx, conv, "ToolsetUnresolved", err.Error())
 			return nil, err
@@ -523,7 +527,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 		chatBound := false
 		for _, ref := range conv.ChannelRefs {
 			var ch agentopsv1alpha1.Channel
-			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref}, &ch); err != nil || ch.Spec.Adapter == "" {
+			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: ref}, &ch); err != nil || ch.Spec.Adapter == "" {
 				continue
 			}
 			chatBound = true
@@ -533,7 +537,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 		}
 	}
 	var profile agentopsv1alpha1.AgentProfile
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.ProfileRef}, &profile); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: conv.ProfileRef}, &profile); err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
 	tools, err := s.effectiveTooling(ctx, &conv)
@@ -547,7 +551,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	// declaration: it answers each message fresh and says so, instead of failing
 	// every follow-up for a configuration the operator deliberately chose.
 	contextID := ""
-	resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Conversations, s.Namespace, &conv, s.Runtime)
+	resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Conversations, s.Namespaces.Control, &conv, s.Runtime)
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -598,7 +602,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 // records no pipelineRef — so a blank answer is the honest one and never a
 // guess. Telemetry labelling only; nothing routes on it.
 func (s *Server) pipelineName(ctx context.Context, conv *state.ConversationRecord) string {
-	if p := chat.PipelineForConversation(ctx, s.Client, s.Namespace, conv); p != nil {
+	if p := chat.PipelineForConversation(ctx, s.Client, s.Namespaces.Control, conv); p != nil {
 		return p.Name
 	}
 	return ""
@@ -626,7 +630,7 @@ func (s *Server) runtimeName(ctx context.Context, conv *state.ConversationRecord
 	if conv != nil && conv.ProfileRef != "" {
 		var profile agentopsv1alpha1.AgentProfile
 		if err := s.Client.Get(ctx, types.NamespacedName{
-			Namespace: s.Namespace, Name: conv.ProfileRef}, &profile); err == nil {
+			Namespace: s.Namespaces.Control, Name: conv.ProfileRef}, &profile); err == nil {
 			if profile.Spec.RuntimeRef != nil && profile.Spec.RuntimeRef.Name != "" {
 				return profile.Spec.RuntimeRef.Name // DEPRECATED, one release
 			}
@@ -652,7 +656,7 @@ func (s *Server) pipelineRuntimeName(ctx context.Context, capability agentopsv1a
 
 func (s *Server) defaultRuntimeName(ctx context.Context) string {
 	var rt agentopsv1alpha1.AgentRuntime
-	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: "default"}, &rt); err == nil {
+	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: "default"}, &rt); err == nil {
 		return rt.Name
 	}
 	return "default"
@@ -1109,7 +1113,7 @@ func (s *Server) adapterAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		var adapters agentopsv1alpha1.ChannelAdapterList
-		if err := s.Client.List(r.Context(), &adapters, client.InNamespace(s.Namespace)); err == nil {
+		if err := s.Client.List(r.Context(), &adapters, client.InNamespace(s.Namespaces.Control)); err == nil {
 			for i := range adapters.Items {
 				want := chat.DeriveAdapterToken(s.AdapterToken, adapters.Items[i].Name)
 				if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
@@ -1174,7 +1178,7 @@ func (s *Server) stateAuth(next http.HandlerFunc) http.HandlerFunc {
 // that CR declares spec.stateAccess.
 func (s *Server) stateAdapterFor(ctx context.Context, got string) (name string, granted, found bool) {
 	var channels agentopsv1alpha1.ChannelAdapterList
-	if err := s.Client.List(ctx, &channels, client.InNamespace(s.Namespace)); err == nil {
+	if err := s.Client.List(ctx, &channels, client.InNamespace(s.Namespaces.Control)); err == nil {
 		for i := range channels.Items {
 			a := &channels.Items[i]
 			if subtle.ConstantTimeCompare([]byte(got), []byte(chat.DeriveAdapterToken(s.AdapterToken, a.Name))) == 1 {
@@ -1183,7 +1187,7 @@ func (s *Server) stateAdapterFor(ctx context.Context, got string) (name string, 
 		}
 	}
 	var sources agentopsv1alpha1.SignalAdapterList
-	if err := s.Client.List(ctx, &sources, client.InNamespace(s.Namespace)); err == nil {
+	if err := s.Client.List(ctx, &sources, client.InNamespace(s.Namespaces.Control)); err == nil {
 		for i := range sources.Items {
 			a := &sources.Items[i]
 			if subtle.ConstantTimeCompare([]byte(got), []byte(chat.DeriveSignalAdapterToken(s.AdapterToken, a.Name))) == 1 {
@@ -1441,7 +1445,7 @@ func (s *Server) reachConversation(w http.ResponseWriter, r *http.Request) (*sta
 	}
 	ctx := r.Context()
 	var ch agentopsv1alpha1.Channel
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: in.Channel}, &ch); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: in.Channel}, &ch); err != nil {
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown channel %q", in.Channel)})
 		return nil, false
 	}
@@ -1632,7 +1636,7 @@ func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	var ch agentopsv1alpha1.Channel
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: in.Channel}, &ch); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: in.Channel}, &ch); err != nil {
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown channel %q", in.Channel)})
 		return
 	}
@@ -1689,7 +1693,7 @@ func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var list agentopsv1alpha1.ChannelList
-	if err := s.Client.List(r.Context(), &list, client.InNamespace(s.Namespace)); err != nil {
+	if err := s.Client.List(r.Context(), &list, client.InNamespace(s.Namespaces.Control)); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1722,7 +1726,7 @@ func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) stateChannel(r *http.Request, w http.ResponseWriter, name string) *agentopsv1alpha1.Channel {
 	var ch agentopsv1alpha1.Channel
-	if err := s.Reader.Get(r.Context(), types.NamespacedName{Namespace: s.Namespace, Name: name}, &ch); err != nil {
+	if err := s.Reader.Get(r.Context(), types.NamespacedName{Namespace: s.Namespaces.Control, Name: name}, &ch); err != nil {
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown channel %q", name)})
 		return nil
 	}

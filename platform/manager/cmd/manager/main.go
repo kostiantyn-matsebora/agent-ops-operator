@@ -29,6 +29,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/metrics"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/storagebreaker"
 )
@@ -186,7 +187,11 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(false)))
 	setupLog := ctrl.Log.WithName("setup")
 
-	namespace := env("NAMESPACE", "agent-ops")
+	// The namespace pair (split-conversation-namespace): CONVERSATION_NAMESPACE
+	// defaults to NAMESPACE, so a single-namespace install resolves to two
+	// equal strings and takes the exact same code path as the pair diverging —
+	// nothing here or downstream ever branches on whether they differ.
+	namespaces := namespace.Resolve(env("NAMESPACE", "agent-ops"), os.Getenv("CONVERSATION_NAMESPACE"))
 
 	// The state backend is validated before anything connects to a cluster: a
 	// name this binary does not carry is a deployment mistake, and it must stop
@@ -222,23 +227,32 @@ func main() {
 		replicaIdentity = "unknown"
 	}
 
+	// The cache covers exactly the two namespaces — one entry when they are
+	// equal, which is what today's single-namespace cache already was.
+	cacheNamespaces := map[string]cache.Config{namespaces.Control: {}}
+	if namespaces.Distinct() {
+		cacheNamespaces[namespaces.Conversations] = cache.Config{}
+	}
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Cache: cache.Options{
-			DefaultNamespaces: map[string]cache.Config{namespace: {}},
+			DefaultNamespaces: cacheNamespaces,
 		},
-		Metrics:                 metricsserver.Options{BindAddress: env("METRICS_ADDR", ":9090")},
-		HealthProbeBindAddress:  env("PROBE_ADDR", ":8081"),
-		LeaderElection:          true,
-		LeaderElectionID:        "agentops-manager.agentops.dev",
-		LeaderElectionNamespace: namespace,
+		Metrics:                metricsserver.Options{BindAddress: env("METRICS_ADDR", ":9090")},
+		HealthProbeBindAddress: env("PROBE_ADDR", ":8081"),
+		LeaderElection:         true,
+		LeaderElectionID:       "agentops-manager.agentops.dev",
+		// Leader election stays pinned to the CONTROL namespace always — the
+		// Lease is a control-plane object, whatever the conversations
+		// namespace resolves to.
+		LeaderElectionNamespace: namespaces.Control,
 	})
 	if err != nil {
 		setupLog.Error(err, "manager")
 		os.Exit(1)
 	}
 
-	stores, err := newStateStores(backend, mgr, namespace)
+	stores, err := newStateStores(backend, mgr, namespaces)
 	if err != nil {
 		setupLog.Error(err, "state store", "backend", backend)
 		os.Exit(1)
@@ -253,7 +267,7 @@ func main() {
 	// task 5's wiring. The "in.signal" queue carries no producer or
 	// consumer yet: no accept handler in this change enqueues onto it — see
 	// this change's hand-back report for why.
-	bus, err := newCommandBus(mgr, namespace, commandBusBackend)
+	bus, err := newCommandBus(mgr, namespaces.Control, commandBusBackend)
 	if err != nil {
 		setupLog.Error(err, "command bus", "backend", commandBusBackend)
 		os.Exit(1)
@@ -282,9 +296,13 @@ func main() {
 	// queue of every Channel naming it. The informer cache answers which, so a
 	// replica that has just restarted claims at once instead of waiting for the
 	// bus feed to show it a channel.
-	ops.ChannelsFor = channelsForAdapter(mgr.GetClient(), namespace)
-	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: namespace, Ops: ops, Activity: acts}
-	controlURL := env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080")
+	// Wiring-only read: every Channel this answers from is a control-plane CR.
+	ops.ChannelsFor = channelsForAdapter(mgr.GetClient(), namespaces.Control)
+	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespaces, Ops: ops, Activity: acts}
+	// CONTROL_URL keeps addressing the manager's own FQDN in the CONTROL
+	// namespace always — a runtime pod dials out of the conversations
+	// namespace to reach it, never the reverse.
+	controlURL := env("CONTROL_URL", "http://agentops-manager."+namespaces.Control+".svc.cluster.local:8080")
 
 	// OpQueue.Run (task 6): the watch-fed Pending/Settled/Stats mirror, plus
 	// one consumer.Pool per Registry-registered in-process channel type —
@@ -327,6 +345,10 @@ func main() {
 		MasterToken: os.Getenv("ADAPTER_TOKEN"),
 		// The identity an adapter naming none runs as. The CHART owns the name.
 		FloorServiceAccount: os.Getenv(controller.FloorServiceAccountEnv),
+		// CONVERSATION_NAMESPACE (signal-adapter-lifecycle ADP-10): a literal
+		// value, equal to POD_NAMESPACE in a single-namespace release. Channel
+		// adapters get no such field — they carry no runtime-pod concern.
+		ConversationNamespace: namespaces.Conversations,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "signaladapter controller")
 		os.Exit(1)
@@ -346,6 +368,10 @@ func main() {
 	// pipelines at decision time (pipeline-first, source-level fallback).
 	exitOnSetupError("pipeline controller", (&controller.PipelineReconciler{
 		Client: mgr.GetClient(),
+		// A bound claim is a workload sharing a runtime pod's claims (the
+		// placement rule), so it renders in CONVERSATIONS even though the
+		// Pipeline naming it is control-plane wiring.
+		ConversationsNamespace: namespaces.Conversations,
 	}).SetupWithManager(mgr))
 
 	// AgentCapability: validation-only, exactly like Pipeline's own inline
@@ -377,7 +403,7 @@ func main() {
 		Conversations:          stores.Conversations,
 		Runs:                   stores.Runs,
 		Blobs:                  stores.Blobs,
-		Namespace:              namespace,
+		Namespaces:             namespaces,
 		Scheme:                 mgr.GetScheme(),
 		MaxActiveConversations: maxActive,
 		// Under nats a conversation is a record, not a Kubernetes object: an
@@ -438,7 +464,7 @@ func main() {
 		Runtime: runtimepod.Config{
 			Image:          env("RUNTIME_IMAGE", ""),
 			ServiceAccount: env("RUNTIME_SA", "agentops-runtime"),
-			ControlURL:     env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080"),
+			ControlURL:     controlURL,
 			IdleTTLMinutes: envInt("RUNTIME_IDLE_TTL_M", 1),
 			// THE RELEASE-WIDE CLAIMS, and the only place they enter the
 			// manager. They are the bottom of the persistence chain — what a
@@ -495,7 +521,8 @@ func main() {
 		if err := mgr.Add(&controller.OrphanSweeper{
 			Client:        mgr.GetClient(),
 			Conversations: stores.Conversations,
-			Namespace:     namespace,
+			// Pods and MCP ConfigMaps both render in CONVERSATIONS.
+			Namespace: namespaces.Conversations,
 		}); err != nil {
 			setupLog.Error(err, "orphan sweeper")
 			os.Exit(1)
@@ -519,13 +546,15 @@ func main() {
 		Signals:         stores.Signals,
 		CooldownWindows: stores.Cooldowns,
 		Receipts:        stores.Receipts,
-		Namespace:       namespace,
-		Activity:        acts,
-		Ops:             ops,
-		Cooldowns:       cooldowns,
-		Runtime:         reconciler.Runtime,
-		MaxQueued:       envIntNonNegative("MAX_QUEUED_CONVERSATIONS", 50),
-		Identity:        replicaIdentity,
+		// SignalSource, the Lease and every claimant it resolves are all
+		// control-plane reads.
+		Namespace: namespaces.Control,
+		Activity:  acts,
+		Ops:       ops,
+		Cooldowns: cooldowns,
+		Runtime:   reconciler.Runtime,
+		MaxQueued: envIntNonNegative("MAX_QUEUED_CONVERSATIONS", 50),
+		Identity:  replicaIdentity,
 		// Chart values, never constants. Zero (unset, unparseable or
 		// non-positive) falls back to each Default*; a bad duration also logs
 		// a warning naming the variable (envDurationOr).
@@ -548,7 +577,7 @@ func main() {
 		Blobs:         stores.Blobs,
 		Signals:       stores.Signals,
 		AdapterState:  stores.AdapterState,
-		Namespace:     namespace,
+		Namespaces:    namespaces,
 		Addr:          env("API_ADDR", ":8080"),
 		Ops:           ops,
 		Router:        router,
@@ -627,7 +656,7 @@ func main() {
 	utilruntime.Must(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	utilruntime.Must(mgr.AddReadyzCheck("readyz", healthz.Ping))
 
-	setupLog.Info("starting agentops manager", "namespace", namespace)
+	setupLog.Info("starting agentops manager", "controlNamespace", namespaces.Control, "conversationsNamespace", namespaces.Conversations)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "run")
 		os.Exit(1)

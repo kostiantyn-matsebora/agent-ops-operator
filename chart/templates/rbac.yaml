@@ -1,6 +1,106 @@
 {{- if .Values.serviceAccounts.runtime }}
 {{- fail "serviceAccounts.runtime moved to global.agentops.runtimeDefaults.serviceAccountName (a subchart can read no other parent scope) — move the value and leave this key empty. Note that it is now a REFERENCE this chart does not create: the chart renders only its own floor account, `agentops-runtime`" }}
 {{- end }}
+{{- /*
+THE MANAGER'S RBAC, SPLIT BY PLANE (split-conversation-namespace decision 4).
+
+Two rule sets, never one inlined Role:
+
+  agentops.managerControlOnlyRules        every wiring/identity kind, signals,
+                                           adapter Deployments, serviceaccounts,
+                                           Services, leases
+  agentops.managerConversationsOnlyRules  pods, Conversation/ConversationInput
+                                           and their status, PVC create/list/
+                                           get/watch — NO delete/update/patch
+  agentops.managerSharedRules             configmaps, events — the manager
+                                           touches both in both planes
+
+SPLIT: a Role per namespace, each carrying its own rules PLUS the shared
+ones. EQUAL NAMESPACES: ONE Role carrying the union of all three — same
+permissions, byte-identical in substance to the pre-split single Role,
+because every resource/verb pair below was already there; only the grouping
+changed.
+
+Neither Role carries a `secrets` verb, anywhere. Neither carries PVC
+`delete`, `update` or `patch` — the operator may bring storage into being
+and must never take it away (invariants.md: "Storage: operator may create,
+never destroy").
+*/ -}}
+{{- /*
+Every rule-chunk below starts at COLUMN ZERO — a `{{- define -}}` template's
+trailing `-}}` trims ALL following whitespace, including the leading indent
+of its first content line, so a chunk written pre-indented loses exactly
+that much on its first line only (measured: a stray "- apiGroups" with no
+leading spaces, next to correctly-indented "resources"/"verbs" lines below
+it). Every call site below pipes the result through `| indent 2` instead,
+which indents EVERY line uniformly — the pattern `agentops.runtimeReadRules`
+/ `agentops.runtimeWriteRules` already use from `kubernetes/mcp-server.yaml`.
+*/ -}}
+{{- define "agentops.managerControlOnlyRules" -}}
+- apiGroups: ["agentops.dev"]
+  resources: ["agentprofiles", "mcpconfigs", "channels", "signalsources", "signals", "agentruntimes", "channeladapters", "signaladapters", "pipelines", "agentcapabilities", "coordinators", "controlplaneprobes"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# MCPToolset is read-only to the manager: no status to write, nothing owned.
+- apiGroups: ["agentops.dev"]
+  resources: ["mcptoolsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["agentops.dev"]
+  resources: ["agentprofiles/status", "mcpconfigs/status", "channels/status", "signalsources/status", "signals/status", "agentruntimes/status", "channeladapters/status", "signaladapters/status", "pipelines/status", "agentcapabilities/status", "coordinators/status"]
+  verbs: ["get", "update", "patch"]
+# ChannelAdapter/SignalAdapter reconcilers: own adapter workloads + their
+# zero-RBAC SAs (own namespace only)
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["serviceaccounts"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+# Adapter reconcilers: own the Service of port-declaring adapters
+# (agentops-signal-<name>, agentops-adapter-<name>)
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+{{- end -}}
+
+{{- define "agentops.managerConversationsOnlyRules" -}}
+- apiGroups: ["agentops.dev"]
+  resources: ["conversations", "conversationinputs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["agentops.dev"]
+  resources: ["conversations/status", "conversationinputs/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "create", "delete", "patch"]
+# Pipeline reconciler: renders the claim for a persistence binding that names
+# a PersistentVolume, because a pod can mount only a claim.
+#
+# NO `delete`, AND THAT OMISSION IS THE RULE. The operator may bring storage
+# into being and must never take it away: a claim it created outlives the
+# Pipeline that asked for it, holding the accumulated context of every
+# conversation that route started. That is the one thing here whose loss
+# cannot be repaired by reconciling again — so it is guarded twice, by the
+# absent ownerRef and by this absent verb.
+#
+# No `update` or `patch` either. The claim is rendered once and then belongs
+# to whoever edits it; a controller that could rewrite it could shrink it.
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create"]
+{{- end -}}
+
+{{- define "agentops.managerSharedRules" -}}
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+{{- end -}}
+
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -34,19 +134,35 @@ kind: ServiceAccount
 metadata:
   name: {{ include "agentops.floorServiceAccount" . }}
   namespace: {{ .Release.Namespace }}
+{{- if include "agentops.namespacesSplit" . }}
+---
+# THE FLOOR, ALSO IN THE CONVERSATIONS NAMESPACE (split-conversation-namespace
+# decision 1): a runtime pod now runs THERE, and each side may only use an
+# account in its OWN namespace — so the account a pod falls back to has to
+# exist on both sides of the split. Bound to nothing here either.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "agentops.floorServiceAccount" . }}
+  namespace: {{ include "agentops.conversationNamespace" . }}
+{{- end }}
 {{- range $i, $extra := (.Values.rbac.runtime.serviceAccounts | default list) }}
 {{- if $extra.create | default true }}
 ---
 # An ADDITIONAL runtime identity, for a Pipeline to name. It is what makes a
 # second trust level expressible without cloning the AgentRuntime that used to
 # be the only place an account could live.
+#
+# RENDERED IN THE CONVERSATIONS NAMESPACE: it is what a runtime pod runs as,
+# and a runtime pod runs there now.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ $extra.name }}
-  namespace: {{ $.Release.Namespace }}
+  namespace: {{ include "agentops.conversationNamespace" $ }}
 {{- end }}
 {{- end }}
+{{- if include "agentops.namespacesSplit" . }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -54,60 +170,8 @@ metadata:
   name: {{ .Values.serviceAccounts.manager }}
   namespace: {{ .Release.Namespace }}
 rules:
-  # ControlPlaneProbe carries no status subresource (nothing to resolve), so
-  # it sits in this full-CRUD group rather than growing a status entry below
-  # — unlike mcptoolsets it IS manager-owned and manager-written, the
-  # /control-plane/* surface's own CRUD handlers are its only caller.
-  - apiGroups: ["agentops.dev"]
-    resources: ["conversations", "conversationinputs", "agentprofiles", "mcpconfigs", "channels", "signalsources", "signals", "agentruntimes", "channeladapters", "signaladapters", "pipelines", "agentcapabilities", "coordinators", "controlplaneprobes"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # MCPToolset is read-only to the manager: no status to write, nothing owned.
-  - apiGroups: ["agentops.dev"]
-    resources: ["mcptoolsets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["agentops.dev"]
-    resources: ["conversations/status", "conversationinputs/status", "agentprofiles/status", "mcpconfigs/status", "channels/status", "signalsources/status", "signals/status", "agentruntimes/status", "channeladapters/status", "signaladapters/status", "pipelines/status", "agentcapabilities/status", "coordinators/status"]
-    verbs: ["get", "update", "patch"]
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch", "create", "delete", "patch"]
-  # ChannelAdapter reconciler: owns adapter workloads + their zero-RBAC SAs
-  # (own namespace only)
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["serviceaccounts"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
-  # Adapter reconcilers: own the Service of port-declaring adapters
-  # (agentops-signal-<name>, agentops-adapter-<name>)
-  - apiGroups: [""]
-    resources: ["services"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Pipeline reconciler: renders the claim for a persistence binding that names
-  # a PersistentVolume, because a pod can mount only a claim.
-  #
-  # NO `delete`, AND THAT OMISSION IS THE RULE. The operator may bring storage
-  # into being and must never take it away: a claim it created outlives the
-  # Pipeline that asked for it, holding the accumulated context of every
-  # conversation that route started. That is the one thing here whose loss
-  # cannot be repaired by reconciling again — so it is guarded twice, by the
-  # absent ownerRef and by this absent verb.
-  #
-  # No `update` or `patch` either. The claim is rendered once and then belongs
-  # to whoever edits it; a controller that could rewrite it could shrink it.
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "create"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "patch"]
-  - apiGroups: ["coordination.k8s.io"]
-    resources: ["leases"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+{{ include "agentops.managerControlOnlyRules" . | indent 2 }}
+{{ include "agentops.managerSharedRules" . | indent 2 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -122,6 +186,59 @@ subjects:
   - kind: ServiceAccount
     name: {{ .Values.serviceAccounts.manager }}
     namespace: {{ .Release.Namespace }}
+---
+# THE MANAGER'S CONVERSATIONS-NAMESPACE ROLE. The SAME ServiceAccount — a
+# RoleBinding's subject may name an account from a namespace other than the
+# binding's own, which is how one identity is granted in two places without
+# a second account to audit.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Values.serviceAccounts.manager }}-conversations
+  namespace: {{ include "agentops.conversationNamespace" . }}
+rules:
+{{ include "agentops.managerConversationsOnlyRules" . | indent 2 }}
+{{ include "agentops.managerSharedRules" . | indent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Values.serviceAccounts.manager }}-conversations
+  namespace: {{ include "agentops.conversationNamespace" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Values.serviceAccounts.manager }}-conversations
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccounts.manager }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Values.serviceAccounts.manager }}
+  namespace: {{ .Release.Namespace }}
+rules:
+{{ include "agentops.managerControlOnlyRules" . | indent 2 }}
+{{ include "agentops.managerConversationsOnlyRules" . | indent 2 }}
+{{ include "agentops.managerSharedRules" . | indent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Values.serviceAccounts.manager }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Values.serviceAccounts.manager }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccounts.manager }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- if .Values.rbac.drainAware }}
 ---
 # DRAIN AWARENESS — the manager's ONLY cluster-scoped grant, and opt-in.

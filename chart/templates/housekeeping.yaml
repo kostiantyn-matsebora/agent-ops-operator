@@ -14,7 +14,9 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ $h.serviceAccountName }}
-  namespace: {{ .Release.Namespace }}
+  # split-conversation-namespace: housekeeping mounts the claim ROOTS, which
+  # now live in the conversations namespace, so it moves there with them.
+  namespace: {{ include "agentops.conversationNamespace" . }}
   labels:
     app.kubernetes.io/name: agentops-housekeeping
 {{/*
@@ -33,7 +35,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: agentops-housekeeping
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "agentops.conversationNamespace" . }}
   labels:
     app.kubernetes.io/name: agentops-housekeeping
 spec:

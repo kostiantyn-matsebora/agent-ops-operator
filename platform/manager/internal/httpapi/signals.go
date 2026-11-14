@@ -190,7 +190,7 @@ func (s *Server) signalAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		var adapters agentopsv1alpha1.SignalAdapterList
-		if err := s.Client.List(r.Context(), &adapters, client.InNamespace(s.Namespace)); err == nil {
+		if err := s.Client.List(r.Context(), &adapters, client.InNamespace(s.Namespaces.Control)); err == nil {
 			for i := range adapters.Items {
 				want := chat.DeriveSignalAdapterToken(s.AdapterToken, adapters.Items[i].Name)
 				if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
@@ -263,7 +263,7 @@ func (s *Server) handleSignalSources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var list agentopsv1alpha1.SignalSourceList
-	if err := s.Client.List(r.Context(), &list, client.InNamespace(s.Namespace)); err != nil {
+	if err := s.Client.List(r.Context(), &list, client.InNamespace(s.Namespaces.Control)); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -295,7 +295,7 @@ func (s *Server) handleSignalSources(w http.ResponseWriter, r *http.Request) {
 // signalSource resolves a SignalSource by name, enforcing the token scope.
 func (s *Server) signalSource(r *http.Request, w http.ResponseWriter, name string) *agentopsv1alpha1.SignalSource {
 	var src agentopsv1alpha1.SignalSource
-	if err := s.Reader.Get(r.Context(), types.NamespacedName{Namespace: s.Namespace, Name: name}, &src); err != nil {
+	if err := s.Reader.Get(r.Context(), types.NamespacedName{Namespace: s.Namespaces.Control, Name: name}, &src); err != nil {
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown signal source %q", name)})
 		return nil
 	}

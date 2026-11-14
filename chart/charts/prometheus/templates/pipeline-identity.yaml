@@ -18,11 +18,14 @@ suppresses the one rendered here.
 {{- if include "prometheus.routeAccountRendered" (dict "ctx" $ "p" $p) }}
 {{- $sa := include "prometheus.routeServiceAccount" (dict "ctx" $ "route" $p.name) }}
 ---
+# split-conversation-namespace: route ServiceAccounts follow the runtime
+# pods they identify — rendered in the CONVERSATIONS namespace, never the
+# release namespace this bundle's other objects use.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ $sa }}
-  namespace: {{ $.Release.Namespace }}
+  namespace: {{ include "agentops.conversationNamespace" $ }}
   labels:
     app.kubernetes.io/name: agentops-prometheus
 {{- $rbac := $cfg.rbac | default dict }}
@@ -46,7 +49,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
-    namespace: {{ $.Release.Namespace }}
+    namespace: {{ include "agentops.conversationNamespace" $ }}
 {{- end }}
 {{- range $rbac.bindClusterRoles | default list }}
 ---
@@ -61,7 +64,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
-    namespace: {{ $.Release.Namespace }}
+    namespace: {{ include "agentops.conversationNamespace" $ }}
 {{- end }}
 {{- end }}
 {{- end }}

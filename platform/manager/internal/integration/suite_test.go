@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -115,7 +116,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	backend, err := kube.OpenStores(storeClient, ns)
+	backend, err := kube.OpenStores(storeClient, namespace.Namespaces{Control: ns, Conversations: ns})
 	if err != nil {
 		panic(err)
 	}
@@ -150,7 +151,7 @@ func reconcilerWithOps(ops *chat.OpQueue) *controller.ConversationReconciler {
 func reconcilerWithCap(ops *chat.OpQueue, cap int) *controller.ConversationReconciler {
 	return &controller.ConversationReconciler{
 		Client:        k8sClient,
-		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns},
 		Scheme:                 scheme,
 		MaxActiveConversations: cap,
 		Ops:                    ops,
@@ -187,7 +188,7 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 		Client: routingClient, Reader: k8sClient,
 		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Signals: stores.Signals,
 		AdapterState: stores.AdapterState,
-		Namespace:    ns,
+		Namespaces:   namespace.Namespaces{Control: ns, Conversations: ns},
 		// A deployment that CAN carry context: continuity is now promised only
 		// where the conversation resolved somewhere to keep it, so a fixture with
 		// no context volume would (correctly) withhold every handle and make the
@@ -198,7 +199,7 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 		// The router carries the SAME runtime config, exactly as main.go wires
 		// it: /exit reports whether a released conversation keeps its context,
 		// and it must not answer that differently from dispatch.
-		Router:                 &chat.Router{Client: routingClient, Reader: k8sClient, Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Ops: ops, Activity: acts, Runtime: rt},
+		Router:                 &chat.Router{Client: routingClient, Reader: k8sClient, Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns}, Ops: ops, Activity: acts, Runtime: rt},
 		AdapterToken:           "test-adapter-token",
 		Activity:               acts,
 		Version:                "test",

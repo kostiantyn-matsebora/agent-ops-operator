@@ -30,6 +30,13 @@ type Config struct {
 
 	ListenAddr string
 	Namespace  string
+	// ConversationsNamespace is CONVERSATION_NAMESPACE (split-conversation-
+	// namespace), defaulting to Namespace — a single-namespace release is
+	// the two fields holding one equal value, never a branch on whether they
+	// differ. Runtime pods render there, so the Infrastructure view's pod
+	// watch covers it too (kube.go), beside Namespace's own agentops.dev and
+	// install-kind watches, which stay control-plane only.
+	ConversationsNamespace string
 
 	// UIToken is the fallback browser token for channels declaring no
 	// credentials. An UNCONFIGURED token authorizes nobody and is

@@ -21,6 +21,7 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/signalroute"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
@@ -65,7 +66,7 @@ func startReplica(t *testing.T, nsName string, mod func(*controller.SignalReconc
 	// The expiry sweep is a manager runnable in production (cmd/manager), and
 	// like every runnable it works only while this replica leads. A short
 	// period stands in for the production one.
-	backend, err := kube.OpenStores(storeClient, nsName, kube.WithSweepInterval(200*time.Millisecond))
+	backend, err := kube.OpenStores(storeClient, namespace.Namespaces{Control: nsName, Conversations: nsName}, kube.WithSweepInterval(200*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}

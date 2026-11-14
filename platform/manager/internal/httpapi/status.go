@@ -138,7 +138,7 @@ func (s *Server) leaderIdentity(ctx context.Context) string {
 	// APIReader, not the cache: leader-election RBAC grants get/create/update on
 	// leases, not list/watch, so a cached read would start an informer that is
 	// forbidden and never syncs.
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: LeaseName}, &lease); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: LeaseName}, &lease); err != nil {
 		return ""
 	}
 	if lease.Spec.HolderIdentity == nil {
@@ -207,7 +207,7 @@ func (s *Server) leaderProxyTarget(ctx context.Context) string {
 		podName = holder[:i]
 	}
 	var pods corev1.PodList
-	if err := s.Client.List(ctx, &pods, client.InNamespace(s.Namespace),
+	if err := s.Client.List(ctx, &pods, client.InNamespace(s.Namespaces.Conversations),
 		client.MatchingLabels{managerPodLabel: managerPodLabelValue}); err != nil {
 		return ""
 	}
@@ -233,7 +233,7 @@ func (s *Server) listenPort() string {
 // ceiling, and conversations that want a pod and have none.
 func (s *Server) runtimeSlots(ctx context.Context) (runtimeSlots, error) {
 	var pods corev1.PodList
-	if err := s.Client.List(ctx, &pods, client.InNamespace(s.Namespace),
+	if err := s.Client.List(ctx, &pods, client.InNamespace(s.Namespaces.Conversations),
 		client.MatchingLabels{runtimepod.LabelApp: runtimepod.LabelAppValue}); err != nil {
 		return runtimeSlots{}, err
 	}
@@ -311,7 +311,7 @@ func (s *Server) MetricsSample() metrics.Sample {
 	// Pipelines are listed ONCE and matched per conversation: attributing each
 	// conversation independently would list the pipeline set per row, on every
 	// scrape.
-	pipelines := chat.ReadyPipelines(ctx, s.Client, s.Namespace)
+	pipelines := chat.ReadyPipelines(ctx, s.Client, s.Namespaces.Control)
 	if convs, err := s.Conversations.List(ctx, state.ByAll, ""); err == nil {
 		for i := range convs {
 			c := &convs[i]
@@ -363,7 +363,7 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	name := r.PathValue("name")
 	var p agentopsv1alpha1.Pipeline
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &p); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: name}, &p); err != nil {
 		writeJSON(w, 404, map[string]string{"error": "unknown pipeline " + name})
 		return
 	}
@@ -383,7 +383,7 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var profile agentopsv1alpha1.AgentProfile
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: capability.ProfileName()}, &profile); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: capability.ProfileName()}, &profile); err != nil {
 		out.Unresolved = append(out.Unresolved, "AgentProfile/"+capability.ProfileName())
 	} else {
 		out.Runtime = s.pipelineRuntimeName(ctx, capability, &profile)
@@ -398,7 +398,7 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 		for _, ref := range capability.Toolsets.Refs {
 			out.Toolsets = append(out.Toolsets, ref.Name)
 			var ts agentopsv1alpha1.MCPToolset
-			if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &ts); err != nil {
+			if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: ref.Name}, &ts); err != nil {
 				out.Unresolved = append(out.Unresolved, "MCPToolset/"+ref.Name)
 				continue
 			}
@@ -417,7 +417,7 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 		for _, ref := range capability.MCPConfigs.Refs {
 			out.MCPConfigs = append(out.MCPConfigs, ref.Name)
 			var cfg agentopsv1alpha1.MCPConfig
-			if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &cfg); err != nil {
+			if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: ref.Name}, &cfg); err != nil {
 				out.Unresolved = append(out.Unresolved, "MCPConfig/"+ref.Name)
 				continue
 			}

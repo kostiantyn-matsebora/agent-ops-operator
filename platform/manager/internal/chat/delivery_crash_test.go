@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"testing"
 
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -26,7 +27,7 @@ func TestDeliveryPassToleratesACrashBetweenTheRunMarkerAndTheNote(t *testing.T) 
 	store := newTestStore(c)
 	testRuns := newTestRuns(c)
 	q := &OpQueue{Conversations: store, Runs: testRuns, Registry: NewRegistry(), Bus: testBus()}
-	r := &Router{Client: c, Reader: c, Conversations: store, Runs: testRuns, Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}
+	r := &Router{Client: c, Reader: c, Conversations: store, Runs: testRuns, Blobs: newTestBlobs(c), Namespaces: namespace.Namespaces{Control: testNS, Conversations: testNS}, Ops: q}
 
 	if err := testRuns.Append(ctx, "conv-1", state.Run{RunID: "run-1", Status: "ok", DeliveryTracked: true}); err != nil {
 		t.Fatal(err)
@@ -65,7 +66,7 @@ func TestDeliveryPassResendsAReplyWhoseRunMarkerNeverLanded(t *testing.T) {
 	store := newTestStore(c)
 	testRuns := newTestRuns(c)
 	q := &OpQueue{Conversations: store, Runs: testRuns, Registry: NewRegistry(), Bus: testBus()}
-	r := &Router{Client: c, Reader: c, Conversations: store, Runs: testRuns, Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}
+	r := &Router{Client: c, Reader: c, Conversations: store, Runs: testRuns, Blobs: newTestBlobs(c), Namespaces: namespace.Namespaces{Control: testNS, Conversations: testNS}, Ops: q}
 	if err := testRuns.Append(ctx, "conv-1", state.Run{RunID: "run-1", Status: "ok", DeliveryTracked: true}); err != nil {
 		t.Fatal(err)
 	}

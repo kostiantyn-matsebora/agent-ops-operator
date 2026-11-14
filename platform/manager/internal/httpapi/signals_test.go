@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -39,8 +40,8 @@ func sigServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	// needs the SAME value on s.Bus or acceptAndEnqueue has nothing to submit to.
 	bus := memory.Open()
 	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Activity: acts, Bus: bus}
-	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: sigTestNamespace, Ops: q, Activity: acts}
-	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Signals: testSignals(t, c, sigTestNamespace), Namespace: sigTestNamespace, AdapterToken: "sig-test-master",
+	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespaces: namespace.Namespaces{Control: sigTestNamespace, Conversations: sigTestNamespace}, Ops: q, Activity: acts}
+	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Signals: testSignals(t, c, sigTestNamespace), Namespaces: namespace.Namespaces{Control: sigTestNamespace, Conversations: sigTestNamespace}, AdapterToken: "sig-test-master",
 		Ops: q, Router: router, Activity: acts, Bus: bus}, c
 }
 

@@ -1,30 +1,30 @@
 ## 1. Namespace pair in the manager — backend-developer
 
-- [ ] 1.1 Add the `Namespaces{Control, Conversations}` value type, `Conversations` defaulting to `Control`
-- [ ] 1.2 Read `CONVERSATION_NAMESPACE` in `cmd/manager/main.go`, defaulting to `NAMESPACE`, and log the pair at startup
-- [ ] 1.3 Configure the cache with both namespaces (one entry when equal), keeping leader election in control
-- [ ] 1.4 Replace the single `Namespace` field with the pair on every struct `main.go` wires (router, reconcilers, HTTP server, orphan sweeper, `signalroute`, control-plane)
+- [x] 1.1 Add the `Namespaces{Control, Conversations}` value type, `Conversations` defaulting to `Control`
+- [x] 1.2 Read `CONVERSATION_NAMESPACE` in `cmd/manager/main.go`, defaulting to `NAMESPACE`, and log the pair at startup
+- [x] 1.3 Configure the cache with both namespaces (one entry when equal), keeping leader election in control
+- [x] 1.4 Replace the single `Namespace` field with the pair on every struct `main.go` wires (router, reconcilers, HTTP server, orphan sweeper, `signalroute`, control-plane)
 
 ## 2. Classify every namespace use — backend-developer
 
-- [ ] 2.1 `internal/controller/conversation_controller.go`: pods, MCP ConfigMaps and `liveRuntimePods` use Conversations, every wiring read uses Control
-- [ ] 2.2 `internal/controller/pipeline_controller.go`: `ensureClaim` creates claims in Conversations
-- [ ] 2.3 `internal/controller/orphansweep.go`: list and delete in Conversations
-- [ ] 2.4 `internal/chat`, `internal/httpapi` (`status.go` pod reads included), `internal/signalroute`: pod reads in Conversations, wiring reads in Control
-- [ ] 2.5 Confirm the Channel, ChannelAdapter, SignalAdapter, SignalSource and Coordinator reconcilers stay entirely in Control
-- [ ] 2.6 `internal/runtimepod`: pods built for Conversations, `CONTROL_URL` still the manager's FQDN in Control
+- [x] 2.1 `internal/controller/conversation_controller.go`: pods, MCP ConfigMaps and `liveRuntimePods` use Conversations, every wiring read uses Control
+- [x] 2.2 `internal/controller/pipeline_controller.go`: `ensureClaim` creates claims in Conversations
+- [x] 2.3 `internal/controller/orphansweep.go`: list and delete in Conversations
+- [x] 2.4 `internal/chat`, `internal/httpapi` (`status.go` pod reads included), `internal/signalroute`: pod reads in Conversations, wiring reads in Control
+- [x] 2.5 Confirm the Channel, ChannelAdapter, SignalAdapter, SignalSource and Coordinator reconcilers stay entirely in Control
+- [x] 2.6 `internal/runtimepod`: pods built for Conversations, `CONTROL_URL` still the manager's FQDN in Control
 
 ## 3. The kube store spans two namespaces — backend-developer
 
-- [ ] 3.1 `kube.OpenStores` takes the pair: conversations, runs and input blobs open in Conversations, signals, cooldowns, receipts and adapter state in Control
-- [ ] 3.2 The one-time kube-to-nats import reads each kind from its own namespace
-- [ ] 3.3 Under kube, the synthetic ownerRef names the `Conversation` CR in Conversations. Under nats, `NoOwnerReference` is unchanged
+- [x] 3.1 `kube.OpenStores` takes the pair: conversations, runs and input blobs open in Conversations, signals, cooldowns, receipts and adapter state in Control
+- [x] 3.2 The one-time kube-to-nats import reads each kind from its own namespace
+- [x] 3.3 Under kube, the synthetic ownerRef names the `Conversation` CR in Conversations. Under nats, `NoOwnerReference` is unchanged
 
 ## 4. Expected-references condition — backend-developer
 
-- [ ] 4.1 Collect the Secret and ConfigMap names a conversation's pod will resolve (profile repo auth and env, runtime credential, MCP config `valueFrom` and raw refs, image pull secrets) from the CRs alone
-- [ ] 4.2 Set a condition on the conversation naming them as expected in the conversations namespace
-- [ ] 4.3 Confirm no Secret read path exists and the manager Roles carry no `secrets` verb
+- [x] 4.1 Collect the Secret and ConfigMap names a conversation's pod will resolve (profile repo auth and env, runtime credential, MCP config `valueFrom` and raw refs, image pull secrets) from the CRs alone
+- [x] 4.2 Set a condition on the conversation naming them as expected in the conversations namespace
+- [x] 4.3 Confirm no Secret read path exists and the manager Roles carry no `secrets` verb
 
 ## 5. Signal adapters and self-exclusion — backend-developer
 
@@ -40,24 +40,24 @@
 
 ## 7. Chart: namespace, placement, RBAC — deployment-engineer
 
-- [ ] 7.1 `values.yaml`: `conversationNamespace: agent-ops-conversations`, `createConversationNamespace: true`, plus one helper resolving the effective namespace
-- [ ] 7.2 New template creating the namespace with the release labels and `helm.sh/resource-policy: keep`
-- [ ] 7.3 `rbac.yaml`: split the manager Role into a control Role and a conversations Role (pods, configmaps, conversations, conversationinputs and status, events, PVC `get/list/watch/create`). One Role when the namespaces are equal
-- [ ] 7.4 `rbac.yaml` and `runtime-rbac.yaml`: every `rbac.runtime.serviceAccounts` entry renders in Conversations with every binding subject naming it there, and the floor account renders in both namespaces, bound to nothing
-- [ ] 7.5 `pvc.yaml`: every chart claim in Conversations, `resource-policy: keep` kept
-- [ ] 7.6 `housekeeping.yaml`, `context-probe.yaml`: both CronJobs in Conversations
-- [ ] 7.7 `context-probe.yaml`: give the CronJob and its pods an agentops `app.kubernetes.io/name`, since `agentops-context-probe` matches no self-exclusion prefix
-- [ ] 7.8 `state-read-auth.yaml`: render the generated token into Conversations from the same lookup
-- [ ] 7.9 `deployment.yaml`: pass `CONVERSATION_NAMESPACE` to the manager. `console.yaml`: pass it to the console and add its read-only pods Role in Conversations
-- [ ] 7.10 `chart/charts/kubernetes`: route accounts and their binding subjects in Conversations, every other object in the release namespace
-- [ ] 7.11 Pin the matching manager, console and `signal-k8s-events` image tags, and bump `Chart.yaml` to 20.0.0
-- [ ] 7.12 `NOTES.txt`: print both namespaces and point at the 20.0.0 Upgrade section
+- [x] 7.1 `values.yaml`: `conversationNamespace: agent-ops-conversations`, `createConversationNamespace: true`, plus one helper resolving the effective namespace
+- [x] 7.2 New template creating the namespace with the release labels and `helm.sh/resource-policy: keep`
+- [x] 7.3 `rbac.yaml`: split the manager Role into a control Role and a conversations Role (pods, configmaps, conversations, conversationinputs and status, events, PVC `get/list/watch/create`). One Role when the namespaces are equal
+- [x] 7.4 `rbac.yaml` and `runtime-rbac.yaml`: every `rbac.runtime.serviceAccounts` entry renders in Conversations with every binding subject naming it there, and the floor account renders in both namespaces, bound to nothing
+- [x] 7.5 `pvc.yaml`: every chart claim in Conversations, `resource-policy: keep` kept
+- [x] 7.6 `housekeeping.yaml`, `context-probe.yaml`: both CronJobs in Conversations
+- [x] 7.7 `context-probe.yaml`: give the CronJob and its pods an agentops `app.kubernetes.io/name`, since `agentops-context-probe` matches no self-exclusion prefix
+- [x] 7.8 `state-read-auth.yaml`: render the generated token into Conversations from the same lookup
+- [x] 7.9 `deployment.yaml`: pass `CONVERSATION_NAMESPACE` to the manager. `console.yaml`: pass it to the console and add its read-only pods Role in Conversations
+- [x] 7.10 `chart/charts/kubernetes`: route accounts and their binding subjects in Conversations, every other object in the release namespace
+- [ ] 7.11 Pin the matching manager, console and `signal-k8s-events` image tags, and bump `Chart.yaml` to 20.0.0 — **`Chart.yaml` bumped to 20.0.0. Image tags intentionally LEFT AS-IS** (manager 0.62.0, console 0.41.0, signal-k8s-events 0.6.0). This change's own CI has not yet published new tags for the backend-developer's concurrent work. See the deployment-engineer's report for the follow-up
+- [x] 7.12 `NOTES.txt`: print both namespaces and point at the 20.0.0 Upgrade section
 
 ## 8. Chart: NetworkPolicy peers — deployment-engineer
 
-- [ ] 8.1 `networkpolicy.yaml`: add a `namespaceSelector` to every peer naming runtime pods or the manager across the split, and render the runtime ingress-deny policy in Conversations
-- [ ] 8.2 `coordination.yaml` (`mcp-aops`), `charts/kubernetes` MCP server policy, `charts/home-assistant` MCP admin policy: admit runtime pods from Conversations
-- [ ] 8.3 Check the `nats`, `commandbus`, `prometheus`, `pulse` and `telegram` policies, and record which need no change
+- [x] 8.1 `networkpolicy.yaml`: add a `namespaceSelector` to every peer naming runtime pods or the manager across the split, and render the runtime ingress-deny policy in Conversations
+- [x] 8.2 `coordination.yaml` (`mcp-aops`), `charts/kubernetes` MCP server policy, `charts/home-assistant` MCP admin policy: admit runtime pods from Conversations
+- [x] 8.3 Check the `nats`, `commandbus`, `prometheus`, `pulse` and `telegram` policies, and record which need no change — nats, commandbus and telegram need no change (control-plane-to-control-plane peers only). prometheus and pulse's OWN deployed MCP-server policies DID reference `agentops-runtime`, and needed the same namespaceSelector fix as kubernetes/home-assistant's MCP servers (fixed, beyond this task's original premise — see report)
 
 ## 9. Unit tests
 

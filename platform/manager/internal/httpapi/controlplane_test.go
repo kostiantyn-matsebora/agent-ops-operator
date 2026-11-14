@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func cpTestServer(t *testing.T) *Server {
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).Build()
 	return &Server{
-		Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops",
+		Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"},
 		AdapterToken:      cpTestAdapterToken,
 		ControlPlaneToken: cpTestControlPlaneToken,
 	}
@@ -139,7 +140,7 @@ func TestControlPlaneValidTokenWritesAndReadsAProbe(t *testing.T) {
 // adapterAuth's own zero-value behaviour.
 func TestControlPlaneUnconfiguredTokenRefusesWith503(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).Build()
-	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops", AdapterToken: cpTestAdapterToken}
+	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, AdapterToken: cpTestAdapterToken}
 
 	rec := cpRequest(s, "GET", "/control-plane/probes/p1", "anything", "")
 	if rec.Code != 503 {

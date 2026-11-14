@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"testing"
 	"time"
 
@@ -31,10 +32,10 @@ func busServer(t *testing.T, objs ...client.Object) (*Server, client.Client, com
 	// own "conv" queue side, exactly as cmd/manager wires one Bus value
 	// into both.
 	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: bus}
-	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
+	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Ops: q}
 	s := &Server{
 		Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs,
-		Namespace: "agent-ops", AdapterToken: "bus-test-master", Ops: q, Router: router, Bus: bus,
+		Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, AdapterToken: "bus-test-master", Ops: q, Router: router, Bus: bus,
 	}
 	return s, c, bus
 }

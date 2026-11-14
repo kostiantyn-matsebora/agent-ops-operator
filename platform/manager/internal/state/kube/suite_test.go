@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
@@ -84,7 +85,7 @@ func newNamespace(t testing.TB) string {
 // backend refuses.
 func openBackend(t testing.TB, c client.WithWatch, ns string, opts ...Option) *Backend {
 	t.Helper()
-	b, err := OpenStores(c, ns, opts...)
+	b, err := OpenStores(c, namespace.Namespaces{Control: ns, Conversations: ns}, opts...)
 	if err != nil {
 		t.Fatalf("OpenStores: %v", err)
 	}

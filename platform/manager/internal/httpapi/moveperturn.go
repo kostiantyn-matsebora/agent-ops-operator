@@ -163,7 +163,7 @@ func (s *Server) coordinatorRoster(ctx context.Context, conv *state.Conversation
 		return nil
 	}
 	var co agentopsv1alpha1.Coordinator
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.CoordinatorRef}, &co); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: conv.CoordinatorRef}, &co); err != nil {
 		return nil
 	}
 	names := make([]string, 0, len(co.Spec.Agents))

@@ -122,7 +122,7 @@ func (s *Server) callerChannel(ctx context.Context, name, token string) (*agento
 		return nil, errWrongToken
 	}
 	var ch agentopsv1alpha1.Channel
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &ch); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: name}, &ch); err != nil {
 		return nil, errWrongToken
 	}
 	want := chat.DeriveChannelReaderToken(s.AdapterToken, ch.Name)
