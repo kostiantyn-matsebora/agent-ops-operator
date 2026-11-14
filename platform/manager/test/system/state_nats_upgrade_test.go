@@ -282,6 +282,25 @@ func assertKubeRecordsUntouched(t *testing.T, ctx context.Context, e *Env, befor
 	}
 }
 
+// writeSignalsUntilStopped posts one signal a second until stop closes,
+// counting every response that is not the accept step's 202.
+func writeSignalsUntilStopped(e *Env, t *testing.T, stamp string, stop <-chan struct{}, failed *int32) {
+	for i := 0; ; i++ {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		id := fmt.Sprintf("e2e-nats-rolling-%s-%d", stamp, i)
+		code, out := postSignalRaw(e, t, SourceTasks, id)
+		if code != 202 { // 202 is the accept step's own success now (design D-4)
+			atomic.AddInt32(failed, 1)
+			t.Logf("write %d during the rolling nats upgrade: %d %s", i, code, out)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 // 5.6 — a rolling nats image change (the StatefulSet's own RollingUpdate,
 // one pod at a time, ordinal descending under podManagementPolicy: Parallel
 // — see chart/charts/nats/templates/_helpers.tpl) must never fail a write
@@ -308,20 +327,7 @@ func TestNatsRollingServerImageUpgradeKeepsWritesSucceeding(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; ; i++ {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			id := fmt.Sprintf("e2e-nats-rolling-%s-%d", stamp, i)
-			code, out := postSignalRaw(e, t, SourceTasks, id)
-			if code != 200 {
-				atomic.AddInt32(&failed, 1)
-				t.Logf("write %d during the rolling nats upgrade: %d %s", i, code, out)
-			}
-			time.Sleep(time.Second)
-		}
+		writeSignalsUntilStopped(e, t, stamp, stop, &failed)
 	}()
 
 	upgradeErr := e.Upgrade(ctx, "nats.image.tag=e2e-rolling-"+stamp)

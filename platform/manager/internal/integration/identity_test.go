@@ -98,12 +98,13 @@ func TestTwoPipelinesOneRuntimeTwoIdentities(t *testing.T) {
 	reconcilePipeline(t, "id-act-pipe")
 	srv := apiServer()
 
-	if rec := taskSignal(t, srv, "id-src-observe", "id-observe-1", "look", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "id-src-observe", "id-observe-1", "look", nil); rec.Code != 202 {
 		t.Fatalf("observe signal: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := taskSignal(t, srv, "id-src-actor", "id-act-1", "fix", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "id-src-actor", "id-act-1", "fix", nil); rec.Code != 202 {
 		t.Fatalf("act signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 
 	byAccount := map[string]string{}
 	for _, c := range convsForProfile(t, "id-prof-twoid") {
@@ -145,9 +146,10 @@ func TestEditingAPipelineDoesNotMoveARunningConversationsIdentity(t *testing.T) 
 	reconcilePipeline(t, "id-frozen-pipe")
 	srv := apiServer()
 
-	if rec := taskSignal(t, srv, "id-src-frozen", "frozen-1", "work", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "id-src-frozen", "frozen-1", "work", nil); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := onlyConv(t, "id-prof-frozen")
 	if conv.Spec.ServiceAccountName != "sa-at-creation" {
 		t.Fatalf("the conversation must snapshot the account: got %q", conv.Spec.ServiceAccountName)
@@ -189,9 +191,10 @@ func TestCorrectingTheRuntimeReachesExistingConversations(t *testing.T) {
 	reconcilePipeline(t, "id-heal-pipe")
 	srv := apiServer()
 
-	if rec := taskSignal(t, srv, "id-src-heal", "heal-1", "work", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "id-src-heal", "heal-1", "work", nil); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := onlyConv(t, "id-prof-heal")
 	if got := podFor(t, conv.Name).Spec.Containers[0].Image; got != "example/agent:typo" {
 		t.Fatalf("image = %q, want the typo it was created with", got)
@@ -238,9 +241,10 @@ func TestNamingNeitherFieldChangesNothing(t *testing.T) {
 	reconcilePipeline(t, "id-noop-pipe")
 	srv := apiServer()
 
-	if rec := taskSignal(t, srv, "id-src-noop", "noop-1", "work", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "id-src-noop", "noop-1", "work", nil); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := onlyConv(t, "id-prof-noop")
 	if conv.Spec.ServiceAccountName != "" {
 		t.Fatalf("no account was named anywhere, so none is snapshotted: got %q "+
@@ -283,9 +287,10 @@ func TestDeprecatedProfileRuntimeRefStillDispatches(t *testing.T) {
 	reconcilePipeline(t, "id-deprecated-pipe")
 	srv := apiServer()
 
-	if rec := taskSignal(t, srv, "id-src-deprecated", "dep-1", "work", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "id-src-deprecated", "dep-1", "work", nil); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := onlyConv(t, "id-prof-deprecated")
 	// Resolved at creation, so a later profile edit does not move it either.
 	if conv.Spec.RuntimeRef == nil || conv.Spec.RuntimeRef.Name != "id-rt-deprecated" {
@@ -320,9 +325,10 @@ func TestThePipelineWinsOverTheDeprecatedProfileRef(t *testing.T) {
 	reconcilePipeline(t, "id-bothrefs-pipe")
 	srv := apiServer()
 
-	if rec := taskSignal(t, srv, "id-src-bothrefs", "both-1", "work", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "id-src-bothrefs", "both-1", "work", nil); rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := onlyConv(t, "id-prof-bothrefs")
 	if got := podFor(t, conv.Name).Spec.Containers[0].Image; got != "example/agent:new" {
 		t.Fatalf("image = %q — the Pipeline sits ABOVE the deprecated profile ref, so adopting the "+

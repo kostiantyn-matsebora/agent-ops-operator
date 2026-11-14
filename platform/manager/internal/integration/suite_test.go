@@ -228,6 +228,19 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 // for by reconciling the Signals a post created, synchronously.
 var lastServer *httpapi.Server
 
+// pendingSignalRouteBefore is the signalNames() snapshot taken immediately
+// before the most recent POST /signal/inbound, recorded by rawAdapterReq
+// (channel_test.go) and postSignal (signaladapter_test.go) rather than
+// consumed on the spot: since async-signal-ingest, accepting a signal no
+// longer stores it (that now happens later, on whichever replica's
+// consumer.Pool next claims the in.signal task), so there is nothing yet to
+// route at accept time. drainIngestTasks reads this snapshot once it has
+// actually drained the queue — the point at which the Signals a post implied
+// finally exist — and clears it, calling consumeNewSignals(before) to stand
+// in for the leader's SIGNAL ROUTING consumer exactly as it always did,
+// just one hop later than it used to.
+var pendingSignalRouteBefore map[string]bool
+
 // drainConvTasks is the "conv" queue's own analogue of postSignal's own
 // consumeNewSignals: an accept handler only ENQUEUES a task
 // (acceptAndEnqueue, internal/httpapi/accept.go) — the work itself runs on
@@ -293,6 +306,66 @@ func drainConvTasks(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// drainIngestTasks is the "in.signal" queue's own counterpart to
+// drainConvTasks, mirroring its shape exactly (async-signal-ingest design
+// D-1/D-5): handleSignalInbound (accept.go/publish.go) only ENQUEUES one
+// ingest-signal task per admitted signal now — the store itself
+// (HandleIngestSignalTask, ingesttask.go) runs later, on whichever
+// replica's consumer.Pool next claims it, same as HandleConvTask. No
+// manager process runs in these tests to do that claiming, so
+// drainIngestTasks stands in for it, running every task currently pending
+// or scheduled on httpapi.SignalIngestQueue to completion against
+// lastServer, then — once the queue has actually drained, the point at
+// which the Signals a post implied finally exist — standing in for the
+// leader's separate SIGNAL ROUTING consumer too, exactly as a plain 200
+// used to trigger automatically before this change: see
+// pendingSignalRouteBefore's own comment for why that hop moved here.
+func drainIngestTasks(t *testing.T) {
+	t.Helper()
+	srv := lastServer
+	if srv == nil || srv.Bus == nil {
+		return // nothing was wired to enqueue onto — nothing to drain
+	}
+	pool, err := consumer.New(consumer.Config{
+		Bus: srv.Bus, Queue: httpapi.SignalIngestQueue, Handler: srv.HandleIngestSignalTask,
+		Concurrency: 1, ConsumerID: "test-drain",
+	})
+	if err != nil {
+		t.Fatalf("drainIngestTasks: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = pool.Run(ctx)
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		stats, err := srv.Bus.Stats(context.Background(), httpapi.SignalIngestQueue, commandbus.KindDefault)
+		if err != nil {
+			cancel()
+			<-done
+			t.Fatalf("drainIngestTasks: stats: %v", err)
+		}
+		if stats.Pending == 0 && stats.Running == 0 && stats.Scheduled == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatalf("drainIngestTasks: in.signal queue did not drain within 10s: %+v", stats)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if pendingSignalRouteBefore != nil {
+		before := pendingSignalRouteBefore
+		pendingSignalRouteBefore = nil
+		consumeNewSignals(before)
+	}
 }
 
 // acceptedTaskIDs decodes an accept handler's response body (acceptAndEnqueue's
@@ -507,9 +580,10 @@ func postBatchAndFindCombinedConversation(t *testing.T, ctx context.Context, h h
 		{"initiationId": "batch-a", "labels": labels, "payload": "alert-a"},
 		{"initiationId": "batch-a", "labels": labels, "payload": "alert-a2"},
 	})
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":2`) {
+	if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"queued":2`) {
 		t.Fatalf("batch: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	var conv *agentopsv1alpha1.Conversation
@@ -543,7 +617,11 @@ func postBatchAndFindCombinedConversation(t *testing.T, ctx context.Context, h h
 func assertCooldownSuppressesDuplicateInitiationID(t *testing.T, h http.Handler, labels map[string]string) {
 	t.Helper()
 	rec := postSignal(t, h, testMasterToken, "am", []map[string]any{{"initiationId": "batch-a", "labels": labels}})
-	if rec.Code != 200 || droppedForCooldown(t, "batch-a") < 2 {
+	if rec.Code != 202 {
+		t.Fatalf("cooldown accept: %d %s", rec.Code, rec.Body.String())
+	}
+	drainIngestTasks(t)
+	if droppedForCooldown(t, "batch-a") < 2 {
 		t.Fatalf("cooldown: %s", rec.Body.String())
 	}
 }
@@ -564,9 +642,10 @@ func assertRepeatOutsideCooldownBecomesRecurrence(t *testing.T, ctx context.Cont
 	waitForRoutingCacheToObserve(t, conv, conv.ResourceVersion)
 	backdateCooldown(t, "am", "batch-a")
 	h2 := apiServer().Handler()
-	if rec := postSignal(t, h2, testMasterToken, "am", []map[string]any{{"initiationId": "batch-a"}}); rec.Code != 200 {
+	if rec := postSignal(t, h2, testMasterToken, "am", []map[string]any{{"initiationId": "batch-a"}}); rec.Code != 202 {
 		t.Fatal("recurrence post")
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	count := 0

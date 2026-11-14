@@ -42,9 +42,10 @@ func TestAlertConversationNameHintsAtTheAlert(t *testing.T) {
 		{"initiationId": "name-alert-1", "labels": map[string]string{"alertname": "x"},
 			"title": "NodeDown — ns-prod"},
 	})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := findConversationByTitle(t, "NodeDown — ns-prod")
 	t.Cleanup(func() { cleanupConversation(t, conv.Name) })
 	if conv.Name != "alert-node-down-ns" {
@@ -64,9 +65,10 @@ func TestJobConversationNameHintsAtTheTitle(t *testing.T) {
 		{"initiationId": "name-job-1", "labels": map[string]string{"alertname": "nightly"},
 			"title": "Nightly backup of prod-db", "payload": "run it", "kind": "job"},
 	})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	conv := findConversationByTitle(t, "Nightly backup of prod-db")
 	t.Cleanup(func() { cleanupConversation(t, conv.Name) })
 	if conv.Name != "job-nightly-backup-prod" {
@@ -85,9 +87,10 @@ func TestChatConversationWithNoCaptionNamesTheSource(t *testing.T) {
 	reconcilePipeline(t, "name-chat-empty-pipe")
 	srv := apiServer()
 
-	if rec := chatSignal(t, srv, "ops-room", "chan-name-chat-empty", ""); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "ops-room", "chan-name-chat-empty", ""); rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsBoundTo(t, "chan-name-chat-empty")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -109,9 +112,10 @@ func TestChatConversationWithSymbolOnlyCaptionNamesTheSource(t *testing.T) {
 	reconcilePipeline(t, "name-chat-sym-pipe")
 	srv := apiServer()
 
-	if rec := chatSignal(t, srv, "ops-room-two", "chan-name-chat-sym", "👍"); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "ops-room-two", "chan-name-chat-sym", "👍"); rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsBoundTo(t, "chan-name-chat-sym")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -138,9 +142,10 @@ func TestChatConversationWithWordsNamesFromTheMessage(t *testing.T) {
 	reconcilePipeline(t, "name-chat-words-pipe")
 	srv := apiServer()
 
-	if rec := chatSignal(t, srv, "src-name-chat-words", "chan-name-chat-words", "why is the api pod crashlooping?"); rec.Code != 200 {
+	if rec := chatSignal(t, srv, "src-name-chat-words", "chan-name-chat-words", "why is the api pod crashlooping?"); rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsBoundTo(t, "chan-name-chat-words")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))

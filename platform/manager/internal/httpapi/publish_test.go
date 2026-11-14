@@ -8,11 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
@@ -32,6 +29,15 @@ func respBody(t *testing.T, s *Server, source string, signals ...map[string]any)
 	return rec.Code, out
 }
 
+// taskIDCount reads resp["taskIds"] (JSON-decoded into map[string]any, so a
+// []any of strings) back to a plain count — the respBody-flavoured
+// counterpart of acceptendpoints_test.go's acceptedIDs, which works from the
+// *httptest.ResponseRecorder directly instead.
+func taskIDCount(resp map[string]any) int {
+	ids, _ := resp["taskIds"].([]any)
+	return len(ids)
+}
+
 func TestPublishStoresASignalOwnedBySourceAndRoutesNothing(t *testing.T) {
 	// No Pipeline claims the source: an unclaimed signal is STILL stored and
 	// acknowledged — the drop is the consumer's decision, not publication's.
@@ -42,8 +48,8 @@ func TestPublishStoresASignalOwnedBySourceAndRoutesNothing(t *testing.T) {
 		"initiationId": "pub-1", "kind": "alert", "title": "disk", "severity": "warning",
 		"payload": "disk 91%", "labels": map[string]string{"team": "ops"},
 	})
-	if code != 200 || resp["queued"] != float64(1) {
-		t.Fatalf("want 200 queued=1, got %d %v", code, resp)
+	if code != 202 || resp["queued"] != float64(1) || taskIDCount(resp) != 1 {
+		t.Fatalf("want 202 queued=1 with one taskId, got %d %v", code, resp)
 	}
 	if _, has := resp["conversations"]; has {
 		t.Fatalf("the response must no longer carry conversations: %v", resp)
@@ -52,6 +58,9 @@ func TestPublishStoresASignalOwnedBySourceAndRoutesNothing(t *testing.T) {
 		t.Fatalf("an unrouted-at-publish signal carries no reason: %v", resp)
 	}
 
+	// Accepted, not yet performed: the in.signal consumer (ingesttask.go)
+	// does the actual store (async-signal-ingest D-1).
+	drainAllIngestTasks(t, s, taskIDCount(resp))
 	assertStoredSignal(t, c, source)
 	assertNothingRouted(t, s, c, source)
 }
@@ -109,9 +118,10 @@ func TestPublishEveryAdmittedSignalIsItsOwnSignal(t *testing.T) {
 		map[string]any{"initiationId": "same", "payload": "b"},
 		map[string]any{"initiationId": "other", "payload": "c"},
 	)
-	if code != 200 || resp["queued"] != float64(3) {
-		t.Fatalf("want queued=3, got %d %v", code, resp)
+	if code != 202 || resp["queued"] != float64(3) {
+		t.Fatalf("want 202 queued=3, got %d %v", code, resp)
 	}
+	drainAllIngestTasks(t, s, taskIDCount(resp))
 	if n := len(listSignals(t, c)); n != 3 {
 		t.Fatalf("three signals, two sharing an initiationId, are three Signals — got %d", n)
 	}
@@ -122,21 +132,31 @@ func TestPublishSignalIDDeduplicates(t *testing.T) {
 	s, c := sigServer(t, source)
 	sig := map[string]any{"initiationId": "i-1", "signalId": "m-1", "payload": "x"}
 
-	for i := 0; i < 2; i++ {
-		code, resp := respBody(t, s, source.Name, sig)
-		if code != 200 || resp["queued"] != float64(1) {
-			t.Fatalf("send %d: want 200 queued=1, got %d %v", i, code, resp)
-		}
+	// The FIRST accept actually enqueues; drain it once so the Signal exists.
+	code, resp := respBody(t, s, source.Name, sig)
+	if code != 202 || resp["queued"] != float64(1) || taskIDCount(resp) != 1 {
+		t.Fatalf("send 0: want 202 queued=1 with one taskId, got %d %v", code, resp)
 	}
+	drainAllIngestTasks(t, s, taskIDCount(resp))
+
+	// The SECOND accept of the identical signalId dedups at the commandbus's
+	// own Submit layer (ingestSignalCommandID keys on source+signalId,
+	// design D-1): it resolves to the SAME already-settled task, so there is
+	// nothing new to drain — publishOne's own AlreadyExists dedup is never
+	// even reached for THIS resend (see
+	// TestHandleIngestSignalTaskSignalIDRedeliveryAcrossDifferentTasksDeduplicates
+	// in ingesttask_test.go for that path, exercised directly).
+	code, resp = respBody(t, s, source.Name, sig)
+	if code != 202 || resp["queued"] != float64(1) {
+		t.Fatalf("send 1: want 202 queued=1, got %d %v", code, resp)
+	}
+
 	sigs := listSignals(t, c)
 	if len(sigs) != 1 {
 		t.Fatalf("a re-send with the same signalId must yield one Signal, got %d", len(sigs))
 	}
 	if want := agentopsv1alpha1.SignalNameFor(source.Name, "m-1"); sigs[0].Name != want {
 		t.Fatalf("name = %q, want the derived %q", sigs[0].Name, want)
-	}
-	if dup := countCode(s, activity.CodeDuplicate); dup != 1 {
-		t.Fatalf("want exactly one duplicate event, got %d", dup)
 	}
 }
 
@@ -159,14 +179,26 @@ func TestPublishSameSignalIDTwiceInOneBatchYieldsOne(t *testing.T) {
 		map[string]any{"initiationId": "i-1", "signalId": "m-1", "payload": "x"},
 		map[string]any{"initiationId": "i-1", "signalId": "m-1", "payload": "x"},
 	)
-	if code != 200 || resp["queued"] != float64(2) {
-		t.Fatalf("want 200 queued=2 (stored or deduplicated), got %d %v", code, resp)
+	if code != 202 || resp["queued"] != float64(2) {
+		t.Fatalf("want 202 queued=2 (both accepted), got %d %v", code, resp)
+	}
+	// Both entries share one CommandID (ingestSignalCommandID keys on
+	// source+signalId, design D-1), so the SECOND Submit call resolves to
+	// the first (still-Queued) task rather than minting its own — one real
+	// task behind two accepted entries, never two. (The Signal-layer
+	// AlreadyExists dedup this used to exercise is covered directly, at the
+	// consumer, by
+	// TestHandleIngestSignalTaskSignalIDRedeliveryAcrossDifferentTasksDeduplicates
+	// in ingesttask_test.go.)
+	ids, _ := resp["taskIds"].([]any)
+	if len(ids) != 2 || ids[0] != ids[1] {
+		t.Fatalf("both entries of one batch sharing a signalId must resolve to the SAME task, got %v", ids)
+	}
+	if _, err := drainOneIngestTask(t, s); err != nil {
+		t.Fatal(err)
 	}
 	if n := len(listSignals(t, c)); n != 1 {
 		t.Fatalf("want one Signal, got %d", n)
-	}
-	if dup := countCode(s, activity.CodeDuplicate); dup != 1 {
-		t.Fatalf("want one duplicate event, got %d", dup)
 	}
 }
 
@@ -174,7 +206,8 @@ func TestPublishResendAfterRoutedChangesNothing(t *testing.T) {
 	source := sigTestSource("routed-src", "routed-adapter")
 	s, c := sigServer(t, source)
 	sig := map[string]any{"initiationId": "i-1", "signalId": "m-1", "payload": "x"}
-	respBody(t, s, source.Name, sig)
+	_, resp0 := respBody(t, s, source.Name, sig)
+	drainAllIngestTasks(t, s, taskIDCount(resp0))
 
 	got := listSignals(t, c)[0]
 	got.Status.Phase = agentopsv1alpha1.SignalRouted
@@ -188,9 +221,11 @@ func TestPublishResendAfterRoutedChangesNothing(t *testing.T) {
 	}
 
 	code, resp := respBody(t, s, source.Name, sig)
-	if code != 200 || resp["queued"] != float64(1) {
-		t.Fatalf("want 200 queued=1, got %d %v", code, resp)
+	if code != 202 || resp["queued"] != float64(1) {
+		t.Fatalf("want 202 queued=1, got %d %v", code, resp)
 	}
+	// The resend dedups at Submit (same CommandID, design D-1) to the
+	// already-settled first task — nothing new to drain.
 	after := listSignals(t, c)
 	if len(after) != 1 || after[0].Status.Phase != agentopsv1alpha1.SignalRouted ||
 		after[0].ResourceVersion != got.ResourceVersion {
@@ -214,9 +249,15 @@ func TestPublishConcurrentRaceYieldsOneSignal(t *testing.T) {
 	}
 	wg.Wait()
 	for i, code := range codes {
-		if code != 200 {
-			t.Fatalf("request %d answered %d, every racer must be acknowledged", i, code)
+		if code != 202 {
+			t.Fatalf("request %d answered %d, every racer must be accepted", i, code)
 		}
+	}
+	// Every racer's Submit shares one CommandID (source+signalId): the bus
+	// mutex serializes them, so exactly one real task was ever created —
+	// one to drain, regardless of how many racers there were.
+	if _, err := drainOneIngestTask(t, s); err != nil {
+		t.Fatal(err)
 	}
 	if n := len(listSignals(t, c)); n != 1 {
 		t.Fatalf("a concurrent race on one signalId must yield one Signal, got %d", n)
@@ -227,7 +268,8 @@ func TestPublishSameSignalIDOnTwoSourcesYieldsTwoSignals(t *testing.T) {
 	a, b := sigTestSource("src-a", "ad"), sigTestSource("src-b", "ad")
 	s, c := sigServer(t, a, b)
 	for _, src := range []string{a.Name, b.Name} {
-		respBody(t, s, src, map[string]any{"initiationId": "i-1", "signalId": "m-1", "payload": "x"})
+		_, resp := respBody(t, s, src, map[string]any{"initiationId": "i-1", "signalId": "m-1", "payload": "x"})
+		drainAllIngestTasks(t, s, taskIDCount(resp))
 	}
 	sigs := listSignals(t, c)
 	if len(sigs) != 2 || sigs[0].Name == sigs[1].Name {
@@ -238,9 +280,10 @@ func TestPublishSameSignalIDOnTwoSourcesYieldsTwoSignals(t *testing.T) {
 func TestPublishSameInitiationIDDifferentSignalIDsAreTwoMessages(t *testing.T) {
 	source := sigTestSource("two-src", "ad")
 	s, c := sigServer(t, source)
-	respBody(t, s, source.Name,
+	_, resp := respBody(t, s, source.Name,
 		map[string]any{"initiationId": "i-1", "signalId": "m-1", "payload": "x"},
 		map[string]any{"initiationId": "i-1", "signalId": "m-2", "payload": "y"})
+	drainAllIngestTasks(t, s, taskIDCount(resp))
 	if n := len(listSignals(t, c)); n != 2 {
 		t.Fatalf("want 2 Signals, got %d", n)
 	}
@@ -250,8 +293,12 @@ func TestPublishWithoutSignalIDDoesNotDeduplicate(t *testing.T) {
 	source := sigTestSource("nodedup-src", "ad")
 	s, c := sigServer(t, source)
 	sig := map[string]any{"initiationId": "i-1", "payload": "x"}
-	respBody(t, s, source.Name, sig)
-	respBody(t, s, source.Name, sig)
+	// A signal with no signalId gets a FRESH CommandID every accept
+	// (ingestSignalCommandID), so each resend is its own task — no Submit-
+	// level dedup to interfere with here, unlike the signalId cases above.
+	_, resp1 := respBody(t, s, source.Name, sig)
+	_, resp2 := respBody(t, s, source.Name, sig)
+	drainAllIngestTasks(t, s, taskIDCount(resp1)+taskIDCount(resp2))
 	sigs := listSignals(t, c)
 	if len(sigs) != 2 || sigs[0].Name == sigs[1].Name {
 		t.Fatalf("no signalId means two Signals under generated names: %+v", sigs)
@@ -286,116 +333,22 @@ func TestPublishInvalidSignalIDRefusesTheWholeBatch(t *testing.T) {
 	source := sigTestSource("okid-src", "ad")
 	s, _ := sigServer(t, source)
 	if code, resp := respBody(t, s, source.Name,
-		map[string]any{"initiationId": "i-1", "signalId": strings.Repeat("a", 256), "payload": "x"}); code != 200 {
+		map[string]any{"initiationId": "i-1", "signalId": strings.Repeat("a", 256), "payload": "x"}); code != 202 {
 		t.Fatalf("a 256-byte signalId is valid: %d %v", code, resp)
 	}
 }
 
-func TestPublishFailedStoreIsNotAcknowledgedAndResendIsDeduplicated(t *testing.T) {
-	source := sigTestSource("fail-src", "ad")
-	base := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(source)
-	var mu sync.Mutex
-	creates := 0
-	failSecond := interceptor.Funcs{Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-		if _, isSignal := obj.(*agentopsv1alpha1.Signal); isSignal {
-			mu.Lock()
-			creates++
-			n := creates
-			mu.Unlock()
-			if n == 2 {
-				return apierrors.NewInternalError(fmt.Errorf("etcd unavailable"))
-			}
-		}
-		return cl.Create(ctx, obj, opts...)
-	}}
-	c := base.WithInterceptorFuncs(failSecond).Build()
-	s := &Server{Reader: c, Conversations: testConversations(t, c, sigTestNamespace), Signals: testSignals(t, c, sigTestNamespace), Client: c, Namespace: sigTestNamespace, AdapterToken: "sig-test-master", Activity: activity.New(16)}
+// TestPublishFailedStoreIsNotAcknowledgedAndResendIsDeduplicated moved to
+// ingesttask_test.go as
+// TestHandleIngestSignalTaskFailedStoreFailsTheTaskAndARetrySucceeds — the
+// store (publishOne) now runs in the in.signal consumer, not inside the
+// request, so a store failure no longer answers the ACCEPT call with a
+// 5xx (design D-1: the adapter is told 202 regardless, and the dead/
+// retried task is what's visible instead).
 
-	batch := []map[string]any{
-		{"initiationId": "i-1", "signalId": "m-1", "payload": "x"},
-		{"initiationId": "i-2", "signalId": "m-2", "payload": "y"},
-	}
-	rec := postSig(s, source.Name, batch)
-	if rec.Code != 500 || !strings.Contains(rec.Body.String(), `"error"`) {
-		t.Fatalf("a failed store must answer 5xx with an error, got %d %s", rec.Code, rec.Body.String())
-	}
-	// the adapter's at-least-once re-send: m-1 landed and is deduplicated, m-2 is stored
-	rec = postSig(s, source.Name, batch)
-	if rec.Code != 200 {
-		t.Fatalf("re-send: %d %s", rec.Code, rec.Body.String())
-	}
-	if n := len(listSignals(t, c)); n != 2 {
-		t.Fatalf("after the re-send both messages exist exactly once, got %d", n)
-	}
-}
-
-func chatChannelObj(name, adapter string) *agentopsv1alpha1.Channel {
-	ch := &agentopsv1alpha1.Channel{}
-	ch.Name, ch.Namespace = name, sigTestNamespace
-	ch.Spec.Adapter = adapter
-	return ch
-}
-
-func chatPost(t *testing.T, s *Server, source, channel, payload string) (int, map[string]any) {
-	t.Helper()
-	return respBody(t, s, source, map[string]any{
-		"initiationId": "chat-" + payload, "kind": KindChat, "payload": payload,
-		"labels": map[string]string{LabelChatChannel: channel},
-	})
-}
-
-func TestPublishChatCommandsThatOnlyAnswerStoreNoSignal(t *testing.T) {
-	for _, text := range []string{"/pipelines", "/k8s-ops", "/close", "/exit"} {
-		t.Run(text, func(t *testing.T) {
-			source := sigTestSource("cmd-src", "tg")
-			ch := chatChannelObj("cmd-chan", "cmdtype")
-			s, c := sigServer(t, source, ch, sigTestPipeline("k8s-ops", source.Name))
-			code, resp := chatPost(t, s, source.Name, ch.Name, text)
-			if code != 200 {
-				t.Fatalf("%d %v", code, resp)
-			}
-			if n := len(listSignals(t, c)); n != 0 {
-				t.Fatalf("%s answers in place and stores no Signal, got %d", text, n)
-			}
-			if op := claimOp(s.Ops, "cmdtype"); op == nil || op.Message == nil {
-				t.Fatalf("%s must be answered on the surface", text)
-			}
-		})
-	}
-}
-
-func TestPublishAddressedAndPlainChatAreStoredVerbatim(t *testing.T) {
-	source := sigTestSource("chat-src", "tg")
-	ch := chatChannelObj("chat-chan", "chattype")
-	s, c := sigServer(t, source, ch, sigTestPipeline("k8s-ops", source.Name))
-
-	for _, text := range []string{"/k8s-ops check nodes", "are we up?"} {
-		if code, resp := chatPost(t, s, source.Name, ch.Name, text); code != 200 || resp["queued"] != float64(1) {
-			t.Fatalf("%q: %d %v", text, code, resp)
-		}
-	}
-	sigs := listSignals(t, c)
-	if len(sigs) != 2 {
-		t.Fatalf("want 2 Signals, got %d", len(sigs))
-	}
-	seen := map[string]bool{}
-	for _, sg := range sigs {
-		seen[sg.Spec.Payload] = true
-		if sg.Spec.Kind != KindChat || sg.Spec.Labels[LabelChatChannel] != ch.Name {
-			t.Fatalf("chat Signal lost its kind or surface label: %+v", sg.Spec)
-		}
-	}
-	if !seen["/k8s-ops check nodes"] || !seen["are we up?"] {
-		t.Fatalf("payloads must be stored verbatim: %v", seen)
-	}
-	var convs agentopsv1alpha1.ConversationList
-	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil || len(convs.Items) != 0 {
-		t.Fatalf("no conversation exists until a consumer processes it: %v %d", err, len(convs.Items))
-	}
-	if op := claimOp(s.Ops, "chattype"); op != nil {
-		t.Fatalf("publication tells no surface anything: %+v", op)
-	}
-}
+// chatChannelObj, chatPost and the chat-command tests that used them moved
+// to ingesttask_test.go — answerCommands now runs in the in.signal consumer
+// (design D-5), not inside handleSignalInbound.
 
 func TestBoundedLabelsKeepsTheReservedSurfaceLabel(t *testing.T) {
 	in := map[string]string{LabelChatChannel: "c"}
@@ -408,28 +361,8 @@ func TestBoundedLabelsKeepsTheReservedSurfaceLabel(t *testing.T) {
 	}
 }
 
-func validObjectName(name string) bool {
-	for _, r := range name {
-		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
-			return false
-		}
-	}
-	return true
-}
-
-func TestGeneratedSignalNamesSortInPublishOrderAndAreValid(t *testing.T) {
-	prev := ""
-	for i := 0; i < 200; i++ {
-		name := generatedSignalName()
-		if len(name) != len("sig-")+generatedTimeLen+1+generatedSuffixLen || !strings.HasPrefix(name, "sig-") {
-			t.Fatalf("unexpected shape %q", name)
-		}
-		if !validObjectName(name) {
-			t.Fatalf("%q is not a valid object name", name)
-		}
-		if prev != "" && name[:len(name)-generatedSuffixLen-1] < prev[:len(prev)-generatedSuffixLen-1] {
-			t.Fatalf("names must sort by time: %q after %q", name, prev)
-		}
-		prev = name
-	}
-}
+// validObjectName and the test of the generated-name scheme moved to
+// ingesttask_test.go — generatedSignalName/generatedTimeLen/generatedSuffixLen
+// no longer exist (async-signal-ingest D-6): a signal with no signalId is
+// now named via signalNameFromTask, tested there as
+// TestSignalNameFromTaskIsDeterministicDistinctAndValid.

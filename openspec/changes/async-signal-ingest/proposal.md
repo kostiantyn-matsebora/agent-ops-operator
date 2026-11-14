@@ -10,8 +10,10 @@ command bus. `/signal/inbound` still does its work inside the HTTP request:
 
 A fault in any step is a `5xx` the adapter must re-send. There is no bounded
 retry and no dead-letter record, and the task stream (`/state/tasks`) cannot
-show this path. The `in.signal` queue is already declared in the bus inventory
-with no producer or consumer. This change gives it both.
+show this path.
+
+The `in.signal` queue is already declared in the bus inventory, with no
+producer or consumer. This change gives it both.
 
 ## What Changes
 
@@ -45,10 +47,14 @@ with no producer or consumer. This change gives it both.
   consumer, after acceptance, not inside the request.
 - `signal-adapter-contract`: the inbound response is `202` with the invocation
   and task ids, and `queued` counts accepted signals.
+- `async-operations`: the command table gains `ingest-signal` on `in.signal`,
+  keyed by source and `initiationId`.
+- `command-bus`: the queue inventory table gains `in.signal`, declared as a
+  lease-and-retry queue with the retry values already shipped.
 
-Depends on `async-command-bus` (#473) being archived. The accept step and the
-queue table this change extends are defined in that change's own specs, which
-are not yet in `openspec/specs/`.
+`async-command-bus` (#473) is archived, so this change folds `ingest-signal`
+and `in.signal` directly into `async-operations` and `command-bus` rather
+than deferring it to its own archive, as task 5.4 originally planned.
 
 ## Impact
 

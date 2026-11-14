@@ -32,10 +32,16 @@ func sigServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 		WithObjects(objs...).Build()
 	acts := activity.New(64)
 	store, runs, blobs := testConversations(t, c, sigTestNamespace), testRuns(t, c, sigTestNamespace), testBlobs(c, sigTestNamespace)
-	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Activity: acts, Bus: memory.Open()}
+	// One shared Bus, exactly as cmd/manager wires a single commandbus.Bus
+	// into both the OpQueue and the Server's own accept step (busutil_test.go's
+	// busServer, the "conv" queue's own fixture, follows the same rule) — the
+	// in.signal queue handleSignalInbound now enqueues onto (async-signal-ingest)
+	// needs the SAME value on s.Bus or acceptAndEnqueue has nothing to submit to.
+	bus := memory.Open()
+	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Activity: acts, Bus: bus}
 	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: sigTestNamespace, Ops: q, Activity: acts}
 	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Signals: testSignals(t, c, sigTestNamespace), Namespace: sigTestNamespace, AdapterToken: "sig-test-master",
-		Ops: q, Router: router, Activity: acts}, c
+		Ops: q, Router: router, Activity: acts, Bus: bus}, c
 }
 
 // sigTestSource is a minimal SignalSource fixture.
@@ -149,9 +155,10 @@ func TestSignalInboundAbsentSeverityBehavesAsToday(t *testing.T) {
 	rec := postSig(s, source.Name, []map[string]any{
 		{"initiationId": "sev-absent-1", "payload": "hello"},
 	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	if rec.Code != 202 {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
 	}
+	drainAllIngestTasks(t, s, len(acceptedIDs(t, rec)))
 	sigs := listSignals(t, c)
 	if len(sigs) != 1 {
 		t.Fatalf("want 1 Signal, got %d", len(sigs))
@@ -175,9 +182,10 @@ func TestSignalInboundValidSeverityIsStoredOnTheSignal(t *testing.T) {
 			rec := postSig(s, source.Name, []map[string]any{
 				{"initiationId": "sev-valid-1", "payload": "hello", "severity": string(sev)},
 			})
-			if rec.Code != 200 {
-				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+			if rec.Code != 202 {
+				t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
 			}
+			drainAllIngestTasks(t, s, len(acceptedIDs(t, rec)))
 			sigs := listSignals(t, c)
 			if len(sigs) != 1 || sigs[0].Spec.Severity != sev {
 				t.Fatalf("severity %q not stored on the Signal: %+v", sev, sigs)
@@ -210,9 +218,10 @@ func TestSignalInboundAttributeFilterAdmitsMatchingSignal(t *testing.T) {
 	rec := postSig(s, source.Name, []map[string]any{
 		{"initiationId": "attrfilter-match-1", "payload": "hello", "labels": map[string]string{"team": "payments"}},
 	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	if rec.Code != 202 {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
 	}
+	drainAllIngestTasks(t, s, len(acceptedIDs(t, rec)))
 	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
@@ -236,8 +245,13 @@ func TestSignalInboundAttributeFilterDropsFailingSignalBeforeCooldown(t *testing
 	rec := postSig(s, source.Name, []map[string]any{
 		{"initiationId": "attrfilter-drop-1", "payload": "hello", "labels": map[string]string{"team": "search"}},
 	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	if rec.Code != 202 {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	// A fully filtered signal is never admitted, so nothing is ever enqueued
+	// — no task to drain (design D-3/Open Question 2).
+	if ids := acceptedIDs(t, rec); len(ids) != 0 {
+		t.Fatalf("a filtered signal must enqueue no task, got %v", ids)
 	}
 	var resp map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -245,6 +259,11 @@ func TestSignalInboundAttributeFilterDropsFailingSignalBeforeCooldown(t *testing
 	}
 	if resp["reason"] != ReasonFiltered {
 		t.Fatalf("reason = %v, want %q", resp["reason"], ReasonFiltered)
+	}
+	// A fully filtered batch (design D-3/Open Question 2): queued=0, exactly
+	// len(taskIds).
+	if resp["queued"] != float64(0) {
+		t.Fatalf("queued = %v, want 0", resp["queued"])
 	}
 
 	var convs agentopsv1alpha1.SignalList
@@ -300,9 +319,10 @@ func TestSignalInboundNilOrEmptyAttributeFiltersAdmitsEverything(t *testing.T) {
 			rec := postSig(s, source.Name, []map[string]any{
 				{"initiationId": "attrfilter-" + tc.name + "-1", "payload": "hello"},
 			})
-			if rec.Code != 200 {
-				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+			if rec.Code != 202 {
+				t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
 			}
+			drainAllIngestTasks(t, s, len(acceptedIDs(t, rec)))
 			var convs agentopsv1alpha1.SignalList
 			if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 				t.Fatal(err)
@@ -329,8 +349,8 @@ func TestSignalInboundAttributeFilterFailsClosedOnMalformedRequirement(t *testin
 	rec := postSig(s, source.Name, []map[string]any{
 		{"initiationId": "attrfilter-malformed-1", "payload": "hello", "labels": map[string]string{"team": "payments"}},
 	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	if rec.Code != 202 {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
 	}
 	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
@@ -358,8 +378,8 @@ func TestSignalInboundAttributeFilterReasonSetOnPartialBatchUnsetOnFullAdmit(t *
 		{"initiationId": "attrfilter-partial-ok", "payload": "fine", "labels": map[string]string{"team": "payments"}},
 		{"initiationId": "attrfilter-partial-bad", "payload": "boom", "labels": map[string]string{"team": "search"}},
 	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	if rec.Code != 202 {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
 	}
 	var resp map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -368,6 +388,7 @@ func TestSignalInboundAttributeFilterReasonSetOnPartialBatchUnsetOnFullAdmit(t *
 	if resp["reason"] != ReasonFiltered {
 		t.Fatalf("a partially-filtered batch must report reason=%q, got %v", ReasonFiltered, resp["reason"])
 	}
+	drainAllIngestTasks(t, s, len(acceptedIDs(t, rec)))
 	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
@@ -385,8 +406,8 @@ func TestSignalInboundAttributeFilterReasonSetOnPartialBatchUnsetOnFullAdmit(t *
 	rec2 := postSig(s2, cleanSource.Name, []map[string]any{
 		{"initiationId": "attrfilter-clean-1", "payload": "fine", "labels": map[string]string{"team": "payments"}},
 	})
-	if rec2.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec2.Code, rec2.Body.String())
+	if rec2.Code != 202 {
+		t.Fatalf("status = %d, want 202: %s", rec2.Code, rec2.Body.String())
 	}
 	var resp2 map[string]any
 	if err := json.Unmarshal(rec2.Body.Bytes(), &resp2); err != nil {
@@ -412,8 +433,8 @@ func TestSignalInboundLogFilteredFalseSuppressesFilteredDropEvent(t *testing.T) 
 	rec := postSig(s, source.Name, []map[string]any{
 		{"initiationId": "attrfilter-silent-1", "payload": "hello", "labels": map[string]string{"team": "search"}},
 	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	if rec.Code != 202 {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
 	}
 	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
@@ -431,34 +452,15 @@ func TestSignalInboundLogFilteredFalseSuppressesFilteredDropEvent(t *testing.T) 
 	}
 }
 
-// signalsource-attribute-filter: "Other drop reasons still log regardless of
-// logFiltered" — logFiltered:false gates only CodeFiltered, so the duplicate
-// record of a re-sent message is still emitted.
-func TestSignalInboundLogFilteredFalseDoesNotSuppressOtherDropCodes(t *testing.T) {
-	source := sigTestSource("attrfilter-dup-src", "attrfilter-t")
-	source.Spec.LogFiltered = falsePtr()
-	s, _ := sigServer(t, source)
-
-	for i := 0; i < 2; i++ {
-		rec := postSig(s, source.Name, []map[string]any{
-			{"initiationId": "attrfilter-dup-1", "signalId": "m-1", "payload": "hello"},
-		})
-		if rec.Code != 200 {
-			t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-		}
-	}
-
-	events, _ := s.Activity.Since("", 0)
-	found := false
-	for _, e := range events {
-		if e.Kind == activity.KindSignalDropped && e.Code == activity.CodeDuplicate {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("logFiltered must not suppress the duplicate event")
-	}
-}
+// "Other drop reasons still log regardless of logFiltered" (the duplicate
+// event on a re-sent signalId) moved to ingesttask_test.go
+// (TestHandleIngestSignalTaskLogFilteredFalseDoesNotSuppressTheDuplicateEvent)
+// — async-signal-ingest moved the Create, and the AlreadyExists check that
+// emits CodeDuplicate, into the in.signal consumer (publishOne,
+// ingesttask.go), and the commandbus's own CommandID dedup now intercepts an
+// accept-level resend of the same signalId before a second task (and so a
+// second publishOne call) is ever created, so this property is no longer
+// observable through POST /signal/inbound within the dedup window.
 
 // signalsource-attribute-filter: "A signal matching every requirement routes
 // normally" / "A signal failing one requirement is dropped" — exercised here
@@ -518,8 +520,8 @@ func checkAttributeFilterOperator(t *testing.T, name string, requirement agentop
 		{"initiationId": "op-admit-1", "payload": "fine", "labels": admitLabels},
 		{"initiationId": "op-drop-1", "payload": "boom", "labels": dropLabels},
 	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	if rec.Code != 202 {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
 	}
 	var resp map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -528,6 +530,7 @@ func checkAttributeFilterOperator(t *testing.T, name string, requirement agentop
 	if resp["reason"] != ReasonFiltered {
 		t.Fatalf("operator %s: reason = %v, want %q", name, resp["reason"], ReasonFiltered)
 	}
+	drainAllIngestTasks(t, s, len(acceptedIDs(t, rec)))
 
 	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
@@ -563,9 +566,10 @@ func TestSignalInboundAttributeFilterMultipleRequirementsRequiresAll(t *testing.
 		// still drop it, not be forgiven by the first one passing.
 		{"initiationId": "and-one-1", "payload": "boom", "labels": map[string]string{"team": "payments", "env": "staging"}},
 	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	if rec.Code != 202 {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
 	}
+	drainAllIngestTasks(t, s, len(acceptedIDs(t, rec)))
 	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
@@ -603,8 +607,8 @@ func TestSignalInboundAttributeFilterDropsChatKindSignal(t *testing.T) {
 			"labels": map[string]string{"team": "search", LabelChatChannel: "nonexistent-channel"},
 		},
 	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	if rec.Code != 202 {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
 	}
 	var resp map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {

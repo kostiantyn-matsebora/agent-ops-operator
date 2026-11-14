@@ -173,6 +173,15 @@ func channelsForAdapter(c client.Client, namespace string) func(ctx context.Cont
 	}
 }
 
+// exitOnSetupError stops the process, naming the step, when a controller's
+// setup failed.
+func exitOnSetupError(step string, err error) {
+	if err != nil {
+		ctrl.Log.WithName("setup").Error(err, step)
+		os.Exit(1)
+	}
+}
+
 func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(false)))
 	setupLog := ctrl.Log.WithName("setup")
@@ -335,32 +344,23 @@ func main() {
 
 	// Pipeline wiring: validation-only reconciler; routing reads Ready
 	// pipelines at decision time (pipeline-first, source-level fallback).
-	if err := (&controller.PipelineReconciler{
+	exitOnSetupError("pipeline controller", (&controller.PipelineReconciler{
 		Client: mgr.GetClient(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "pipeline controller")
-		os.Exit(1)
-	}
+	}).SetupWithManager(mgr))
 
 	// AgentCapability: validation-only, exactly like Pipeline's own inline
 	// capability. Unwired by construction — it carries no sources, no
 	// channels, nothing to route.
-	if err := (&controller.AgentCapabilityReconciler{
+	exitOnSetupError("agentcapability controller", (&controller.AgentCapabilityReconciler{
 		Client: mgr.GetClient(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "agentcapability controller")
-		os.Exit(1)
-	}
+	}).SetupWithManager(mgr))
 
 	// Coordinator: validation-only, exactly like Pipeline and AgentCapability.
 	// It originates no conversation itself — that lands with the `invoke`
 	// surface in a later phase of coordinated-agents (design D-B onward).
-	if err := (&controller.CoordinatorReconciler{
+	exitOnSetupError("coordinator controller", (&controller.CoordinatorReconciler{
 		Client: mgr.GetClient(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "coordinator controller")
-		os.Exit(1)
-	}
+	}).SetupWithManager(mgr))
 
 	maxActive, deprecatedCap := maxActiveConversations()
 	if deprecatedCap {
@@ -605,6 +605,17 @@ func main() {
 		setupLog.Error(err, "conv task consumer")
 		os.Exit(1)
 	}
+
+	// The "in.signal" queue's consumer.Pool (async-signal-ingest task 2.1):
+	// same shape as convPool above, on every replica, sized by the same
+	// commandBusConsumerConcurrency knob. HandleIngestSignalTask is what
+	// handleSignalInbound's own publish/answerCommands split moved into.
+	signalPool, err := consumer.New(consumer.Config{
+		Bus: bus, Queue: httpapi.SignalIngestQueue, Handler: api.HandleIngestSignalTask,
+		Concurrency: commandBusConsumerConcurrency(),
+	})
+	exitOnSetupError("in.signal task consumer", err)
+	exitOnSetupError("in.signal task consumer", mgr.Add(manager.RunnableFunc(signalPool.Run)))
 
 	// The metric set observes the activity log and samples the same in-memory
 	// state GET /status reports, into the registry already serving :9090. The

@@ -340,12 +340,16 @@ decides whether a signal is emitted at all — see
 ### Signal
 
 **The durable record of one published message, and its routing.**
-`/signal/inbound` only PUBLISHES: it validates, applies `attributeFilters`,
-creates the `Signal` and acknowledges.
+`/signal/inbound` accepts, then processes: it validates, applies
+`attributeFilters`, and durably enqueues one `ingest-signal` task per
+admitted signal, then acknowledges with `202`.
 
-A separate consumer, on the leader, routes it afterwards. Publish looks up
-no claimant, spends no cooldown and checks no capacity, so consumption can
-later be paused without stopping ingest.
+The `in.signal` consumer creates the `Signal` afterwards. Any replica may
+run it, since `in.signal` is bus-backed.
+
+A separate consumer, on the leader, routes it once the `Signal` exists.
+Publish looks up no claimant, spends no cooldown and checks no capacity, so
+consumption can later be paused without stopping ingest.
 
 **One `Signal` per message, never merged.** A repeat of an `initiationId` is
 its own `Signal`. The `Conversation` already accumulates an `initiationId`:
@@ -628,7 +632,7 @@ The counters keep the two apart:
 | Counter | Counts |
 |---|---|
 | `receivedTotal` | signals received |
-| ingest response `queued` | signals stored or deduplicated |
+| ingest response `queued` | signals accepted, each its own `ingest-signal` task |
 | a `Signal`'s `status.claimants[]` | one per server |
 
 **The `Wired` condition names every serving Pipeline, and that count is what to
@@ -1992,7 +1996,8 @@ create a second source of truth beside the backend it already has.
 |---|---|---|---|---|
 | Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | `kube`: the Kubernetes API's own guarantee | nothing |
 | Manager — op queue | outbound channel ops | the command bus's `out.<channel>` queues, one per Channel | `commandBus.backend: nats`: quorum-committed. `memory`: one process's heap | nothing: an op nobody acknowledged is offered again on any replica, and an acknowledged one is failed when its delivery TTL passes, with no report. A failure is final, so `ensure-topic`/input cards/run replies/`close-topic` re-derive from conversation state missing their own marker once the cool-off passes ([below](#ending-a-conversation)) |
-| Manager — accepted work (`close`, `exit`, `reopen`, `delete`, `reset-context`, `escalate`, inbound chat, `/coordinate/close`, `/coordinate/escalate`) | one task per accepted request, on the `conv` queue | the command bus's queue log | `commandBus.backend: nats`: quorum-committed. `memory`: one process's heap | nothing authoritative: the log is declared bounded and lossy, and the reconciler re-derives owed work exactly as after any restart. `/signal/inbound` is NOT in this row — it stays synchronous |
+| Manager — accepted work (`close`, `exit`, `reopen`, `delete`, `reset-context`, `escalate`, inbound chat, `/coordinate/close`, `/coordinate/escalate`) | one task per accepted request, on the `conv` queue | the command bus's queue log | `commandBus.backend: nats`: quorum-committed. `memory`: one process's heap | nothing authoritative: the log is declared bounded and lossy, and the reconciler re-derives owed work exactly as after any restart |
+| Manager — signal ingest (`ingest-signal`) | one task per admitted signal, on the `in.signal` queue | the command bus's queue log | `commandBus.backend: nats`: quorum-committed. `memory`: one process's heap | nothing authoritative: a dead task is visible in `/state/dead-letters` with its last error, and the adapter's own at-least-once re-send is the only replay — the adapter was already told `202` |
 | Manager — thread undelivered reply | `status.threads[].undeliveredReply` | the state store, on the `Conversation` record | `kube`: the Kubernetes API's own guarantee. `nats`: the same quorum-committed guarantee, on the `conversations` bucket's entry | nothing: re-derived until delivery succeeds |
 | Manager — ingest cooldown | `initiationId` suppression | the state store | `kube`: `SignalSource.status.cooldown[]`, the Kubernetes API's own guarantee. `nats`: the `cooldowns` bucket, quorum-committed | nothing inside the window |
 | Manager — source receipt counters | `receivedTotal` and `lastReceived` per source | the state store | `kube`: `SignalSource.status`, the Kubernetes API's own guarantee. `nats`: the `receipts` bucket, quorum-committed | nothing: each count is serialized by the backend, so no increment is lost |

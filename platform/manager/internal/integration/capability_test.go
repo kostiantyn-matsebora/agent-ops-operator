@@ -143,9 +143,10 @@ func TestSignalDrivenConversationIsEquipped(t *testing.T) {
 	rec := postSignal(t, apiServer().Handler(), testMasterToken, "sigdriven-src", []map[string]any{{
 		"initiationId": "sig-1", "labels": map[string]string{"alertname": "BackOff"}, "payload": "boom",
 	}})
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
+	if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	var name string

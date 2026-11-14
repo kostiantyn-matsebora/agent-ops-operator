@@ -565,14 +565,19 @@ surface](#the-state-read-surface)'s `/state/tasks/{id}`.
 | `POST /channel/inbound` | `202` (unchanged) | `invocationId`, `taskIds` |
 | `POST /coordinate/close` | `200` (unchanged) | `invocationId`, `taskIds` |
 | `POST /coordinate/escalate` | `200` (unchanged) | `invocationId`, `taskIds` |
+| `POST /signal/inbound` | `202` (was `200`) | `invocationId`, one `taskId` per admitted signal |
 
 **`reset-context` is the one endpoint whose status code changed.** Every
 other row's code was already `202` or `200`. Only the body and the timing of
 the underlying work changed.
 
-**`POST /signal/inbound` is NOT in this table.** It still validates, stores
-one `Signal` CR per admitted signal, and replies `200 {"queued": n}`
-synchronously, exactly as [the HTTP API section](#http-api) below describes.
+**`POST /signal/inbound` now follows the same accept-then-process pattern.**
+It validates and applies the source's `attributeFilters`, then durably
+enqueues one `ingest-signal` task per admitted signal, then replies. See [the
+HTTP API section](#http-api) below.
+
+- Its own queue is `in.signal`, not `conv`.
+- Any replica may accept it, since `in.signal` is bus-backed.
 
 A refusal that depends only on a cheap read against the request itself still
 answers immediately: `delete` of a conversation that is not yet `Closed`,
@@ -791,16 +796,23 @@ curl -s -X POST http://agentops-manager.<ns>.svc:8080/signal/inbound \
        "kind":"task","payload":"why is the api pod crashlooping?"}]}'
 ```
 
-**The manager publishes, then consumes.** Every admitted signal becomes its
-own `Signal` CR before the response is written, and the response
-(`{"queued": n}`) acknowledges that storage, never routing. A separate
-consumer on the leader then decides the claimants, cooldown and capacity and
-routes it.
+**The manager accepts, then processes.** `/signal/inbound` validates,
+applies the source's `attributeFilters`, and durably enqueues one
+`ingest-signal` task per admitted signal on `in.signal`, before replying
+`202 {invocationId, taskIds, queued, reason?}`.
 
-A `5xx` means nothing of the failing signal was stored: re-send with the
-same ids. An optional per-message `signalId` deduplicates the re-send.
+- Any replica may accept, since `in.signal` is bus-backed.
+- The `in.signal` consumer answers an in-place chat command, or creates the
+  signal's own `Signal` CR. A `Signal` may not exist yet when the response
+  is written.
+- A separate consumer, on the leader, then decides the claimants, cooldown
+  and capacity, and routes the `Signal`, exactly as before this change.
+
+A `5xx` means nothing of the failing signal was enqueued: re-send with the
+same ids. An optional per-message `signalId` deduplicates the re-send, once
+its task's consumer runs.
 
 The `conversations` field is withdrawn, and every routing outcome lives on
 the `Signal`. See [Concepts](concepts.md#signal) for the kind and
-[the adapter specification](contracts/signal-adapter.md), version 2.3.1, for
+[the adapter specification](contracts/signal-adapter.md), version 2.4.0, for
 the contract.

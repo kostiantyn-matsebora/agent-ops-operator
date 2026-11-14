@@ -89,9 +89,10 @@ func TestSharedSourceWiredNamesPipelineAndCoordinator(t *testing.T) {
 	rec := postSignal(t, h, testMasterToken, "src-mix", []map[string]any{
 		{"initiationId": "mix-1", "labels": map[string]string{"alertname": "SharedMix"}, "payload": "boom"},
 	})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	pipeConvs, coConvs := convsFromPipeline(t, "mix-pipe"), convsFromCoordinator(t, "mix-co")
 	if len(pipeConvs) != 1 || len(coConvs) != 1 {
 		t.Fatalf("each claimant needs its own conversation: pipeline=%d coordinator=%d", len(pipeConvs), len(coConvs))
@@ -116,9 +117,10 @@ func TestCoordinatorClaimedSignalOpensRootWithBoundChannelsAndBudget(t *testing.
 	rec := postSignal(t, h, testMasterToken, "src-co-root", []map[string]any{
 		{"initiationId": "co-root-1", "labels": map[string]string{"alertname": "CoRootAlert"}, "payload": "boom"},
 	})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsFromCoordinator(t, "co-root")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -161,9 +163,10 @@ func TestBareChatRoutesToSoleCoordinatorClaimant(t *testing.T) {
 	srv := apiServer()
 
 	rec := chatSignal(t, srv, "src-co-chat", "co-chat-chan", "investigate the outage")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsFromCoordinator(t, "co-chat")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation routed to the sole Coordinator claimant, got %d", len(convs))
@@ -191,9 +194,10 @@ func TestAmbiguousBareChatNamesPipelineAndCoordinator(t *testing.T) {
 	srv := apiServer()
 
 	rec := chatSignal(t, srv, "src-amb2", "chan-amb2", "who is on call?")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	if n := len(convsBoundTo(t, "chan-amb2")); n != 0 {
 		t.Fatalf("an ambiguous message must create nothing, got %d conversation(s)", n)
 	}
@@ -236,9 +240,10 @@ func TestAddressedCoordinatorBindsItsOwnChannelsPlusTheOriginSurface(t *testing.
 	srv := apiServer()
 
 	rec := chatSignal(t, srv, "src-co-addr", "co-addr-origin", "/co-addr investigate api latency")
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("addressed chat signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsFromCoordinator(t, "co-addr")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))

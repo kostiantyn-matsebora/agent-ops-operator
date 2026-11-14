@@ -273,9 +273,10 @@ func TestBacklogBoundLeavesAMachineSignalWaiting(t *testing.T) {
 	// first signal opens a conversation and the reconciler parks it Pending
 	if rec := postSignal(t, srv.Handler(), testMasterToken, "src-backlog", []map[string]any{{
 		"initiationId": "fp-b1", "labels": map[string]string{"alertname": "One"}, "payload": "one",
-	}}); rec.Code != 200 {
+	}}); rec.Code != 202 {
 		t.Fatalf("first signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	first := onlyConvFor(t, "prof-backlog")
 	t.Cleanup(func() { cleanupConversation(t, first) })
 	reconcileWith(t, rc, first)
@@ -292,9 +293,10 @@ func TestBacklogBoundLeavesAMachineSignalWaiting(t *testing.T) {
 	rec := postSignal(t, srv.Handler(), testMasterToken, "src-backlog", []map[string]any{{
 		"initiationId": "fp-b2", "labels": map[string]string{"alertname": "Two"}, "payload": "two",
 	}})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("second signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var out map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if _, has := out["reason"]; has || out["queued"] != float64(1) {
@@ -323,9 +325,10 @@ func TestBacklogBoundLeavesAMachineSignalWaiting(t *testing.T) {
 	h2 := apiServer().Handler()
 	if rec := postSignal(t, h2, testMasterToken, "src-backlog", []map[string]any{{
 		"initiationId": "fp-b1", "labels": map[string]string{"alertname": "One"}, "payload": "one again",
-	}}); rec.Code != 200 {
+	}}); rec.Code != 202 {
 		t.Fatalf("reuse signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var conv agentopsv1alpha1.Conversation
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: first}, &conv); err != nil {
 		t.Fatal(err)

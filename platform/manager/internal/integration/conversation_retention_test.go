@@ -207,9 +207,10 @@ func TestAClosedConversationIsNotReused(t *testing.T) {
 
 	if rec := postSignal(t, h, testMasterToken, "src-reuse", []map[string]any{
 		{"initiationId": "reuse-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "full"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("first signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	first := convsFromPipeline(t, "pipe-reuse")
 	if len(first) != 1 {
 		t.Fatalf("first signal must open one conversation, got %d", len(first))
@@ -235,9 +236,10 @@ func TestAClosedConversationIsNotReused(t *testing.T) {
 	h2 := apiServer().Handler()
 	if rec := postSignal(t, h2, testMasterToken, "src-reuse", []map[string]any{
 		{"initiationId": "reuse-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "still full"},
-	}); rec.Code != 200 {
+	}); rec.Code != 202 {
 		t.Fatalf("second signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	all := convsFromPipeline(t, "pipe-reuse")
 	if len(all) != 2 {
 		t.Fatalf("a signal matching a CLOSED conversation's id must open a new one, got %d", len(all))

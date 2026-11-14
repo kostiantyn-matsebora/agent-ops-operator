@@ -97,9 +97,10 @@ func actAssertSignalOpensClaimedConversation(t *testing.T, h http.Handler, acts 
 	rec := postSignal(t, h, testMasterToken, "src-act", []map[string]any{
 		{"initiationId": "act-fp-1", "labels": map[string]string{"alertname": "ActTest"}, "payload": "disk full"},
 	})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 
 	all, _ := acts.Since("", 0)
 	if got := firstOf(all, activity.KindSignalReceived); got == nil {
@@ -281,9 +282,10 @@ func TestActivityRecordsDroppedSignals(t *testing.T) {
 	rec := postSignal(t, srv.Handler(), testMasterToken, "src-actdrop", []map[string]any{
 		{"initiationId": "drop-fp-1", "payload": "nobody is listening"},
 	})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	all, _ := acts.Since("", 0)
 	e := firstOf(all, activity.KindSignalDropped)
 	if e == nil {

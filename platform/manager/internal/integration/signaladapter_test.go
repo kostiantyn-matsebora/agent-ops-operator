@@ -70,6 +70,10 @@ func mkSignalSource(t *testing.T, name, sourceType, credSecret string) {
 }
 
 // postSignal posts normalized signals for a source with the given token.
+// The accept is 202 now (async-signal-ingest) — nothing is stored yet, so
+// this only records the "before" snapshot for drainIngestTasks to route
+// once a test has drained the in.signal queue, matching rawAdapterReq's own
+// (channel_test.go) handling of the same endpoint.
 func postSignal(t *testing.T, srv http.Handler, token, source string, signals []map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"source": source, "signals": signals})
@@ -78,8 +82,8 @@ func postSignal(t *testing.T, srv http.Handler, token, source string, signals []
 	rec := httptest.NewRecorder()
 	before := signalNames()
 	srv.ServeHTTP(rec, req)
-	if rec.Code == 200 {
-		consumeNewSignals(before)
+	if rec.Code == 202 {
+		pendingSignalRouteBefore = before
 	}
 	return rec
 }
@@ -110,9 +114,10 @@ func assertUnwiredSourceDropsSignal(t *testing.T, h http.Handler) {
 	rec0 := postSignal(t, h, testMasterToken, "sig-unwired", []map[string]any{{
 		"initiationId": "u-1", "labels": map[string]string{"alertname": "x"},
 	}})
-	if rec0.Code != 200 {
-		t.Fatalf("an unwired signal is stored, then dropped by the consumer: %d %s", rec0.Code, rec0.Body.String())
+	if rec0.Code != 202 {
+		t.Fatalf("an unwired signal is accepted, then stored and dropped by the consumer: %d %s", rec0.Code, rec0.Body.String())
 	}
+	drainIngestTasks(t)
 	sig := onlySignalFor(t, "u-1")
 	if sig.Status.Phase != agentopsv1alpha1.SignalDropped || sig.Status.Reason != agentopsv1alpha1.SignalDropUnclaimed {
 		t.Fatalf("unwired drop expected: %+v", sig.Status)
@@ -127,9 +132,10 @@ func postJobSignalAndFindConversation(t *testing.T, ctx context.Context, h http.
 		"initiationId": "tick-1", "labels": map[string]string{"alertname": "nightly"},
 		"title": "🛠 Nightly job", "payload": "run the nightly checks", "kind": "job",
 	}})
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
+	if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	var conv *agentopsv1alpha1.Conversation
@@ -175,7 +181,11 @@ func assertDuplicateInitiationIDAbsorbedByCooldown(t *testing.T, h http.Handler)
 	rec := postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{
 		"initiationId": "tick-1", "labels": map[string]string{"alertname": "nightly"}, "kind": "job",
 	}})
-	if rec.Code != 200 || droppedForCooldown(t, "tick-1") != 1 {
+	if rec.Code != 202 {
+		t.Fatalf("the duplicate accept: %d %s", rec.Code, rec.Body.String())
+	}
+	drainIngestTasks(t)
+	if droppedForCooldown(t, "tick-1") != 1 {
 		t.Fatalf("the duplicate is stored, then dropped by cooldown: %s", rec.Body.String())
 	}
 }
@@ -200,6 +210,7 @@ func assertRecurrenceIntoSameConversation(t *testing.T, ctx context.Context, con
 	if !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("second tick: %s", rec.Body.String())
 	}
+	drainIngestTasks(t)
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Name}, conv)
 	if len(conv.Spec.Inputs) != 2 || conv.Spec.Inputs[1].Type != agentopsv1alpha1.InputRecurrence {
 		t.Fatalf("recurrence expected: %+v", conv.Spec.Inputs)

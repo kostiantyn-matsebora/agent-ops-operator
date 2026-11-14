@@ -65,10 +65,11 @@ func TestTaskSignalsOpenOneConversationEach(t *testing.T) {
 	srv := apiServer()
 
 	for i, id := range []string{"te-1", "te-2"} {
-		if rec := taskSignal(t, srv, "src-taskeach", id, fmt.Sprintf("ask %d", i), nil); rec.Code != 200 {
+		if rec := taskSignal(t, srv, "src-taskeach", id, fmt.Sprintf("ask %d", i), nil); rec.Code != 202 {
 			t.Fatalf("task %s: %d %s", id, rec.Code, rec.Body.String())
 		}
 	}
+	drainIngestTasks(t)
 	convs := convsForProfile(t, "prof-taskeach")
 	if len(convs) != 2 {
 		t.Fatalf("two posted tasks are two requests, want 2 conversations, got %d "+
@@ -104,10 +105,11 @@ func TestTaskSignalNeedsNoChannelLabel(t *testing.T) {
 	srv := apiServer()
 
 	rec := taskSignal(t, srv, "src-tasknochan", "tnc-1", "check the cluster", nil)
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("a task carries no %s label and must still be accepted: %d %s",
 			httpapi.LabelChatChannel, rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	convs := convsForProfile(t, "prof-tasknochan")
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
@@ -118,9 +120,10 @@ func TestTaskSignalNeedsNoChannelLabel(t *testing.T) {
 	}
 	// a task payload is never parsed as a chat command: it does not go through
 	// the chat router, so a leading slash is text
-	if rec := taskSignal(t, srv, "src-tasknochan", "tnc-2", "/etc/hosts is wrong", nil); rec.Code != 200 {
+	if rec := taskSignal(t, srv, "src-tasknochan", "tnc-2", "/etc/hosts is wrong", nil); rec.Code != 202 {
 		t.Fatalf("slash-prefixed task: %d %s", rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	for _, c := range convsForProfile(t, "prof-tasknochan") {
 		if c.Name == conv.Name {
 			continue

@@ -207,9 +207,10 @@ func postSignalAndFindConversation(t *testing.T, ctx context.Context, h http.Han
 	rec := postSignal(t, h, testMasterToken, source, []map[string]any{{
 		"initiationId": initiationID, "labels": map[string]string{"alertname": "ParityAlert"}, "payload": "boom",
 	}})
-	if rec.Code != 200 {
+	if rec.Code != 202 {
 		t.Fatalf("signal to %s: %d %s", source, rec.Code, rec.Body.String())
 	}
+	drainIngestTasks(t)
 	var conv *agentopsv1alpha1.Conversation
 	var list agentopsv1alpha1.ConversationList
 	if err := k8sClient.List(ctx, &list); err != nil {
