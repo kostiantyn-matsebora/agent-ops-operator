@@ -66,6 +66,10 @@ a manual step per claim you want to keep.
   references, image pull secrets — must exist in the conversations
   namespace.** The manager does not copy them there. See
   [Upgrade](#upgrade).
+- The chart renders every Secret it creates that a runtime pod resolves into
+  the conversations namespace, so a token-supplied credential needs no copy.
+  `agentops-ha-operator` renders in both namespaces, since the admin MCP server
+  and the log source read it from the release namespace too.
 - Under the `kube` state backend, `Conversation` and `ConversationInput` move
   to the conversations namespace. `Signal`s and the rest of the state store
   stay in control. Under `nats` (the default) nothing here is a CR, so
@@ -92,6 +96,10 @@ upgrading:
 3. **Create every Secret a runtime pod resolves in the new namespace** —
    profile repository auth, profile env, the runtime's model credential, MCP
    config references, image pull secrets.
+   The Secrets the chart creates itself from a token (the `claude` and
+   `copilot` runtime credential, the home-assistant control and operator
+   tokens, the pulse observer and operator tokens) are rendered there for you.
+   Only a Secret you reference by name, or create out of band, needs this step.
 4. **Carry each persistence claim across:**
    1. Set the bound PV's reclaim policy to `Retain`.
    2. Delete the old claim, then clear the PV's `claimRef`.

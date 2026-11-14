@@ -27,7 +27,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: {{ $cred.name | required "copilot.credentialsSecret.name is required when a token is supplied — it is the Secret this bundle creates and the runtime references" }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "agentops.conversationNamespace" . }}
   labels:
     app.kubernetes.io/name: agentops-runtime
 type: Opaque

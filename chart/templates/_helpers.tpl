@@ -42,6 +42,18 @@ single-namespace mode is — the shipped default is the non-empty
 {{- dig "agentops" "conversationNamespace" "" (.Values.global | default dict) | default .Release.Namespace -}}
 {{- end -}}
 
+{{- /* THE NAMESPACES A SECRET MUST EXIST IN WHEN BOTH A RUNTIME POD AND A
+CONTROL-NAMESPACE WORKLOAD READ IT, space separated. A Secret only a runtime
+pod reads renders in `agentops.conversationNamespace` alone, never here. The kubelet reads a Secret only from its own pod's namespace, and
+the manager copies none, so a credential a runtime pod's env or MCP header
+names has to be rendered into the conversations namespace as well as the
+release's own (an MCP server Deployment still reads it there). One namespace
+when the two are the same. Range over it with `splitList " "`. */ -}}
+{{- define "agentops.runtimeSecretNamespaces" -}}
+{{- .Release.Namespace -}}
+{{- if include "agentops.namespacesSplit" . }} {{ include "agentops.conversationNamespace" . }}{{ end -}}
+{{- end -}}
+
 {{- /* TRUE ("true" or "") WHEN THE TWO NAMESPACES DIFFER — the one place
 that decides whether a template renders ONE merged object (today's layout,
 byte-identical) or TWO split ones. Every such conditional in this chart
@@ -582,7 +594,9 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: {{ $cred.name }}
-  namespace: {{ $root.Release.Namespace }}
+  # The CONVERSATIONS namespace: the runtime pod that resolves it runs there,
+  # and the kubelet reads a Secret only from its own pod's namespace.
+  namespace: {{ include "agentops.conversationNamespace" $root }}
   labels:
     app.kubernetes.io/name: agentops-runtime
 type: Opaque

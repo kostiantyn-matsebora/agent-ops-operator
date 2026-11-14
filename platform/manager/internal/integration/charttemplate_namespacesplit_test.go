@@ -6,6 +6,7 @@
 package integration
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -192,5 +193,76 @@ func TestSingleNamespaceRenderMatchesThePreSplitShape(t *testing.T) {
 	}
 	if n := countDocsContaining(out, "kind: ServiceAccount\nmetadata:\n  name: agentops-runtime\n"); n != 1 {
 		t.Errorf("equal namespaces must render the floor exactly once, got %d", n)
+	}
+}
+
+// secretNamespaces returns, for the Secret named name, every namespace it
+// renders into.
+func secretNamespaces(out, name string) []string {
+	var ns []string
+	for _, doc := range splitDocs(out) {
+		if !strings.Contains(doc, "kind: Secret\nmetadata:") || !strings.Contains(doc, "\n  name: "+name+"\n") {
+			continue
+		}
+		for _, line := range strings.Split(doc, "\n") {
+			if v, ok := strings.CutPrefix(line, "  namespace: "); ok {
+				ns = append(ns, v)
+			}
+		}
+	}
+	return ns
+}
+
+// runtimeSecretArgs enables every bundle that creates a credential a runtime
+// pod resolves, each supplied as a token so the chart is the one making it.
+func runtimeSecretArgs() []string {
+	return append(pulseEnabledArgs(),
+		"--set", "claude.credentialsSecret.token=claude-tok",
+		"--set", "home-assistant.enabled=true",
+		"--set", "home-assistant.homeAssistant.endpoint=https://ha.example.org",
+		"--set", "home-assistant.homeAssistant.credentials.controlToken=control-tok",
+		"--set", "home-assistant.homeAssistant.credentials.operatorToken=operator-tok",
+	)
+}
+
+// runtimeSecrets are the chart-created Secrets a runtime pod resolves — the
+// agent's model credential, the home-assistant control and operator tokens,
+// and the pulse observer and operator MCP tokens.
+var runtimeSecrets = []string{
+	"agentops-claude", "agentops-ha-control", "agentops-ha-operator",
+	"agentops-pulse-observer", "agentops-pulse-operator",
+}
+
+// TestSplitRuntimeSecretsRenderWhereTheirReadersRun: the kubelet reads a Secret
+// only from its own pod's namespace and the manager copies none, so every
+// credential a runtime pod names must be rendered where the pod runs, with no
+// hand-copy. A Secret ONLY runtime pods read renders there alone — a second
+// copy in the release namespace would be a credential nothing reads. The one
+// exception is the home-assistant operator token, which the admin MCP server
+// and the log source also read from the release namespace.
+func TestSplitRuntimeSecretsRenderWhereTheirReadersRun(t *testing.T) {
+	out := helmTemplate(t, runtimeSecretArgs()...)
+	for _, name := range runtimeSecrets {
+		want := []string{"agent-ops-conversations"}
+		if name == "agentops-ha-operator" {
+			want = []string{"default", "agent-ops-conversations"}
+		}
+		got := secretNamespaces(out, name)
+		slices.Sort(got)
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s must render in exactly %v, rendered in %v", name, want, got)
+		}
+	}
+}
+
+// TestSingleNamespaceRuntimeSecretsRenderOnce: equal namespaces must not
+// render a Secret twice — two documents with one name is a duplicate.
+func TestSingleNamespaceRuntimeSecretsRenderOnce(t *testing.T) {
+	out := helmTemplate(t, append(runtimeSecretArgs(), "--set", "global.agentops.conversationNamespace=default")...)
+	for _, name := range runtimeSecrets {
+		if ns := secretNamespaces(out, name); len(ns) != 1 || ns[0] != "default" {
+			t.Errorf("%s must render exactly once, in the release namespace, got %v", name, ns)
+		}
 	}
 }
