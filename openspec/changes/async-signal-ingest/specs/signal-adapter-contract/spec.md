@@ -77,6 +77,11 @@ The success status moves from `200` to `202`, and `queued` moves from
 - **THEN** the response reports `queued: 1`, one task id and the filtered
   `reason`
 
+#### Scenario: One invalid signal refuses the whole batch
+
+- **WHEN** a batch posts one signal with `severity: fatal` and two valid signals
+- **THEN** the response is `400` and no task is enqueued for any of the three
+
 #### Scenario: An adapter that checks only for success keeps working
 
 - **WHEN** an adapter that treats any `2xx` as delivered posts a batch
