@@ -116,7 +116,7 @@ The `in.signal` consumer SHALL answer a chat signal that is an in-place command 
 
 For every other signal, the consumer SHALL create exactly one `Signal` as `signal-persistence` defines it, owned by its `SignalSource`. It SHALL look up no claimant and make no routing decision.
 
-- A signal carrying a `signalId` that already names a `Signal` SHALL be deduplicated: nothing is created or changed, a duplicate activity event is recorded and the task succeeds.
+- A signal carrying a `signalId` takes the name `sig-<h>` that `signal-persistence` defines. A create answered `AlreadyExists` IS the duplicate: nothing is created or changed, a duplicate activity event is recorded and the task succeeds. The consumer looks nothing up.
 - A redelivered task SHALL NOT create a second `Signal`, whether its first attempt failed before or after the create.
 - A signal without a `signalId` takes its `Signal` name from the task id. A redelivery recomputes the same name, finds it exists and succeeds, so it is never stored twice.
 

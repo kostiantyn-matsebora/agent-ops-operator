@@ -11,11 +11,15 @@ names the consumer's create.
 - A batch of N admitted signals yields N `Signal`s, even when several share
   an `initiationId`.
 - The one exception is a signal whose `signalId` names a `Signal` that
-  already exists. The consumer then creates and changes nothing, records a
-  duplicate activity event and succeeds.
+  already exists. The consumer's create is answered `AlreadyExists`, so it
+  changes nothing, records a duplicate activity event and succeeds.
 
-Publication SHALL look up no existing `Signal`, except by `signalId` for the
-duplicate rule above, and make NO routing decision:
+`POST /signal/inbound` is no longer leader-gated. Any replica enqueues the
+task, because the `in.signal` queue is bus-backed and any replica may accept.
+
+Publication SHALL look up no existing `Signal`, not even by `signalId`: the
+deterministic `sig-<h>` name makes a create answered `AlreadyExists` the
+duplicate. It SHALL make NO routing decision:
 
 - no claim lookup, no `Wired` check, no ambiguity check
 - no cooldown consulted or spent
@@ -46,8 +50,8 @@ exists once its task has run, and a task that exhausts its attempts is dead
 and visible, never silently lost.
 
 - A re-send of a signal carrying a `signalId` is deduplicated at
-  publication. The consumer finds the existing `Signal` by `signalId` and
-  creates nothing.
+  publication. The consumer creates it under its deterministic name, and
+  `AlreadyExists` means it creates nothing.
 - A re-send of a signal without one yields a further `Signal`. The
   consumer makes that safe — by cooldown and by equality reuse.
 - A redelivery of ONE task SHALL NOT yield a second `Signal`.

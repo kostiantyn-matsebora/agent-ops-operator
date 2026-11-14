@@ -88,9 +88,9 @@ Decision: the task derives the name from the task id when there is no `signalId`
 
 Alternative rejected: the existing generated name plus a lookup. Publication is lookup-free by design.
 
-### D-7: Folding into `async-operations` and `command-bus`
+### D-7: Folding into the capabilities `async-command-bus` (#473) adds
 
-No delta touches `async-operations` or `command-bus`. Their base specs do not exist on master until `async-command-bus` (#473) is archived.
+No delta touches `async-operations` or `command-bus`. Neither exists in `openspec/specs/` on master. They are the capabilities `async-command-bus` (#473) introduces and archives.
 
 At archive time, after #473:
 

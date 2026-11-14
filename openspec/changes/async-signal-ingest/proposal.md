@@ -46,8 +46,9 @@ with no producer or consumer. This change gives it both.
 - `signal-adapter-contract`: the inbound response is `202` with the invocation
   and task ids, and `queued` counts accepted signals.
 
-Depends on `async-command-bus` being archived: its `async-operations` and
-`command-bus` specs name the accept step and the queue table this change extends.
+Depends on `async-command-bus` (#473) being archived. The accept step and the
+queue table this change extends are defined in that change's own specs, which
+are not yet in `openspec/specs/`.
 
 ## Impact
 

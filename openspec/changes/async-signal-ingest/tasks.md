@@ -22,7 +22,7 @@
 
 - [ ] 4.1 Add a lane to `platform/manager/test/system/`: post a signal through the real endpoint, observe the task reach `succeeded` and the `Signal` appear, and repeat with a manager restart between accept and consume. Run it against THIS working copy's chart and images, not the default branch's.
 - [ ] 4.2 Add a lane for a handler that really fails: backoff, then a dead-letter record, with the adapter's `202` unchanged.
-- [ ] 4.3 Run the pack and record the verdict. A cluster-less remote session records this as not performed and dispatches the cluster tier instead.
+- [ ] 4.3 Run the pack and record the verdict. A cluster-less remote session dispatches the cluster tier and also proves the same outcomes in the envtest and conformance tiers, never leaving a lane unexercised.
 
 ## 5. Documentation — backend-developer
 
