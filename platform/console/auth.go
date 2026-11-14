@@ -305,7 +305,7 @@ func (a *API) handleSession(w http.ResponseWriter, r *http.Request) {
 	default:
 		source = "forward-auth"
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"authenticated": ok,
 		"configured":    a.token() != "",
 		"identity":      identity,
@@ -321,5 +321,11 @@ func (a *API) handleSession(w http.ResponseWriter, r *http.Request) {
 		"canWrite":     a.writesAllowed() && identity != "",
 		"canOriginate": a.originator != nil,
 		"metrics":      a.metricsBackend() != nil,
-	})
+	}
+	// omitted rather than empty when the install names no known look, so the
+	// browser's own resolution order is the only one that applies
+	if look := a.defaultLook(); look != "" {
+		body["defaultLook"] = look
+	}
+	writeJSON(w, http.StatusOK, body)
 }

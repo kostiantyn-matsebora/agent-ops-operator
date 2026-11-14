@@ -2,12 +2,12 @@
 
 Role: `frontend-developer`. Nothing here is visible to a viewer.
 
-- [ ] 1.1 Add `looks/registry.ts` with `classic` as the only entry, and verify a unit test lists it
-- [ ] 1.2 Move today's `pages/` and `components/` into `looks/classic/` with only import paths edited, and verify the existing `npm test` and `npm run typecheck` stay green
-- [ ] 1.3 Add the `useLookStore` beside the colour-scheme store with key `agentops-console-look`, and verify resolution order with a unit test (query, stored, install default, build default)
-- [ ] 1.4 Set `data-look` on the root and lazy-load the active look, and verify a test that only the active look's chunk loads
-- [ ] 1.5 Add the look switcher to the shared header and verify it lists every registered look and marks the active one
-- [ ] 1.6 Add the import-boundary test (model imports no component library or look, a look imports no other look) and verify it fails on a planted violation
+- [x] 1.1 Add `looks/registry.ts` with `classic` as the only entry, and verify a unit test lists it
+- [x] 1.2 Move today's `pages/` and `components/` into `looks/classic/` with only import paths edited, and verify the existing `npm test` and `npm run typecheck` stay green
+- [x] 1.3 Add the `useLookStore` beside the colour-scheme store with key `agentops-console-look`, and verify resolution order with a unit test (query, stored, install default, build default)
+- [x] 1.4 Set `data-look` on the root and lazy-load the active look, and verify a test that only the active look's chunk loads
+- [x] 1.5 Add the look switcher to the shared header and verify it lists every registered look and marks the active one
+- [x] 1.6 Add the import-boundary test (model imports no component library or look, a look imports no other look) and verify it fails on a planted violation
 
 ## 2. The model layer
 
@@ -62,15 +62,15 @@ Role: `testing-specialist`.
 
 - [ ] 6.1 Define the six named viewports once (phone, tablet portrait, tablet landscape, laptop, desktop, wide) with Playwright device presets for touch, and verify the list matches `console-looks`
 - [ ] 6.2 Add a mocked-tier spec that loads every page of every look at every viewport and asserts no sideways scroll, reachable controls and 44 pixel touch targets, and verify it fails on a planted overflow
-- [ ] 6.3 Run the `e2e-live` suite once per look at the desktop viewport and verify both runs pass in CI
+- [ ] 6.3 Parametrise the `e2e-live` suite to run once per look at the desktop viewport, pinning each with `?look=`, and verify the nightly job runs both
 - [ ] 6.4 Check the tablet layouts in both orientations by screenshot and read the images, per `visual-check.md`
 
 ## 7. The install default
 
 Role: `backend-developer` for the service, `deployment-engineer` for the chart.
 
-- [ ] 7.1 Return `defaultLook` in `Session` and read it from the channel config, and verify a Go test that an unknown value is dropped
-- [ ] 7.2 Add `console.defaultLook` to the chart with values schema and `configSchema` entry, and verify a render test for the default and for a value that is neither look failing with both named
+- [x] 7.1 Return `defaultLook` in `Session` and read it from the channel config, and verify a Go test that an unknown value is dropped
+- [x] 7.2 Add `console.defaultLook` to the chart with values schema and `configSchema` entry, and verify a render test for the default and for a value that is neither look failing with both named
 - [ ] 7.3 Wire it into the browser's resolution order, and verify a unit test that a viewer's stored choice wins
 - [ ] 7.4 Flip the build default to `workspace` and verify the first-visit test
 
@@ -82,12 +82,14 @@ Role: `testing-specialist`.
 - [ ] 8.2 Run `go build ./... && go vet ./... && go test ./...` in `platform/console` and verify green
 - [ ] 8.3 Run the chart render tests and verify green
 - [ ] 8.4 Verify coverage with the flags `build-test.md` names has no uncovered new behaviour
+- [ ] 8.5 Run the mocked browser tier (`npm run test:e2e`, the `console-e2e` gate) for every look, including the viewport matrix from 6.2, and verify green
 
 ## 9. System tests
 
 Role: `testing-specialist`.
 
-- [ ] 9.1 State why the cluster tier does not apply, since nothing here is decided by a kubelet, RBAC or an informer, and the browser tiers in section 6 carry the proof
+- [ ] 9.1 State why the manager's system pack gains no lane, since nothing here is decided by a kubelet, RBAC or an informer
+- [ ] 9.2 Run the `e2e-live` suite once per look against a real install (k3d or a local cluster, per `docs/testing.md`), and verify both runs pass with the specs reading only stable test identifiers
 
 ## 10. Documentation
 

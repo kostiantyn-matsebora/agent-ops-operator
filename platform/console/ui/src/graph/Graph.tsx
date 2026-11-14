@@ -3,10 +3,10 @@ import {
   Alert, Button, Label, Split, SplitItem, Stack, StackItem, ToggleGroup, ToggleGroupItem,
 } from '@patternfly/react-core'
 import type { ActivityEvent, EdgeTraffic, Topology } from '../api/types'
-import { PlainText } from '../components/Text'
+import { PlainText } from '../looks/classic/components/Text'
 import { ArrowDefs, BoxRect, EdgeLine, NodeMark, TrafficLayer } from './Canvas'
 import { AngleDoubleLeftIcon, AngleDoubleRightIcon } from '@patternfly/react-icons'
-import { PipelineName } from '../components/PipelineName'
+import { PipelineName } from '../looks/classic/components/PipelineName'
 import { useDisplay } from './display'
 import { compile, depthLevels, visible, type Scope, type ScopeDepth } from './filter'
 import { crossing, edgeLabel, edgeTone, hopIndex, tsOf, windowStats } from './hops'

@@ -71,6 +71,21 @@ that assumed them would fail the upgrade instead of the thing it was upgrading.
 {{- $writeEnabled := true }}
 {{- if hasKey $write "enabled" }}{{ $writeEnabled = $write.enabled }}{{ end }}
 {{- $metricsURL := ($c.metrics | default dict).url | default "" }}
+{{- /*
+The look a viewer gets when they have chosen none. `default` is right here,
+unlike `write`: an empty string is not a decision, and an upgrade with
+--reuse-values from a chart that predates the key must still render.
+
+The chart FAILS where the browser falls back, because the two differ in who
+can fix the value: an operator writing this learns of a typo at once, while a
+browser holding a stale choice must stay usable. The list mirrors the console's
+own knownLooks.
+*/ -}}
+{{- $looks := list "workspace" "classic" }}
+{{- $defaultLook := $c.defaultLook | default "workspace" }}
+{{- if not (has $defaultLook $looks) }}
+{{- fail (printf "console.defaultLook must be one of %s (got %q)" (join ", " $looks) $defaultLook) }}
+{{- end }}
 {{- $auth := $c.auth | default dict }}
 {{- $authEnabled := true }}
 {{- if hasKey $auth "enabled" }}{{ $authEnabled = $auth.enabled }}{{ end }}
@@ -254,6 +269,12 @@ spec:
         description: >-
           Optional Prometheus/VictoriaMetrics query endpoint for windows beyond
           the manager's in-memory activity buffer.
+      defaultLook:
+        type: string
+        enum: [workspace, classic]
+        description: >-
+          The look a viewer gets when they have chosen none. A viewer's own
+          choice wins; an unknown value is ignored and the build default used.
   credentialKeys:
     # documentation only — the manager never reads Secrets
     - key: uiToken
@@ -304,6 +325,8 @@ spec:
     {{- with $metricsURL }}
     metricsUrl: {{ . | quote }}
     {{- end }}
+    # the install's default look; a viewer's stored choice still wins
+    defaultLook: {{ $defaultLook | quote }}
 ---
 # The ORIGINATION identity. Externally served: no image, no workload — the
 # ChannelAdapter above already holds the process, and this CR exists to give it

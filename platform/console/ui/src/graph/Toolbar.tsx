@@ -4,7 +4,7 @@ import {
   MenuToggle, Select, SelectList, SelectOption, Stack, StackItem, Switch, TextInput,
   ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
-import { Icon } from '../components/Icon'
+import { Icon } from '../looks/classic/components/Icon'
 import { useDisplay } from './display'
 import type { HiddenSummary } from './filter'
 import type { EdgeLabel } from './hops'

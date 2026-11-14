@@ -1,5 +1,5 @@
 import { Alert, Button, FormSelect, FormSelectOption, Label, ToggleGroup, ToggleGroupItem } from '@patternfly/react-core'
-import { PlainText } from '../components/Text'
+import { PlainText } from '../looks/classic/components/Text'
 import { clock } from './Panel'
 import { INTERVALS, SPEEDS, describeNotHeld, frameHeld, frameTime, type ReplayWindow, type Step } from './replay'
 

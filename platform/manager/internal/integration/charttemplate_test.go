@@ -269,6 +269,53 @@ func TestConsoleAuthDisabledRequiresAnAuthenticator(t *testing.T) {
 	}
 }
 
+// ---- console default look ---------------------------------------------------
+
+// console.defaultLook travels as console.write.enabled does: a key of the
+// console Channel's config, defaulting to workspace, with a matching enum on the
+// ChannelAdapter's configSchema (console-visual-refresh D11).
+func TestConsoleDefaultLookReachesTheChannelConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"the default renders workspace", nil, `defaultLook: "workspace"`},
+		{"classic renders", []string{"--set", "console.defaultLook=classic"}, `defaultLook: "classic"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if ch := consoleChannel(t, helmTemplate(t, tc.args...)); !strings.Contains(ch, tc.want) {
+				t.Fatalf("the console Channel config must carry %s:\n%s", tc.want, ch)
+			}
+		})
+	}
+}
+
+// The chart fails where the browser falls back: an operator writing the value
+// learns of a typo at once, and the message names what would have worked.
+func TestConsoleDefaultLookRejectsAnUnknownLook(t *testing.T) {
+	msg := helmTemplateErr(t, "--set", "console.defaultLook=sparkly")
+	for _, want := range []string{"console.defaultLook", "workspace", "classic", "sparkly"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("the guard must name %q, got:\n%s", want, msg)
+		}
+	}
+}
+
+// The ChannelAdapter's configSchema declares the same two looks, so a
+// hand-edited Channel naming another one reports on ConfigValid.
+func TestConsoleConfigSchemaDeclaresTheDefaultLooks(t *testing.T) {
+	s := compiledAdapterSchema(t, helmTemplate(t), "ChannelAdapter", "console")
+	for _, look := range []string{"workspace", "classic"} {
+		if vs := configschema.Validate(s, []byte(`{"defaultLook":"`+look+`"}`)); len(vs) != 0 {
+			t.Fatalf("defaultLook %q must validate clean, got: %v", look, vs)
+		}
+	}
+	if vs := configschema.Validate(s, []byte(`{"defaultLook":"sparkly"}`)); len(vs) == 0 {
+		t.Fatal("an unknown defaultLook must be a configSchema violation")
+	}
+}
+
 // Console Ingress. Exposing the console is when its bearer token starts
 // crossing a network, so both the positive shapes and the two guards that
 // REFUSE a configuration are pinned here — a guard nobody tests is a guard that

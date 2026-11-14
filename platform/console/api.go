@@ -129,6 +129,24 @@ func (a *API) authIsExternal() bool {
 	return !enabled && a.externalAuthenticatorName() != ""
 }
 
+// knownLooks is the closed set of looks the install may name as its default.
+// It mirrors the chart's enum on console.defaultLook — the chart fails the
+// render on anything else, so this only meets a hand-edited Channel or a
+// console whose build and chart disagree.
+var knownLooks = map[string]bool{"workspace": true, "classic": true}
+
+// defaultLook is the install's named default look, read from the served
+// Channel's config the way every other console setting is. An unknown value is
+// DROPPED rather than refused: the browser then falls back to the build's own
+// default, and a viewer is never locked out of the UI by a typo in config.
+func (a *API) defaultLook() string {
+	look := strings.TrimSpace(a.adapter.PrimaryConfig().DefaultLook)
+	if !knownLooks[look] {
+		return ""
+	}
+	return look
+}
+
 // metricsBackend resolves the historical-metrics client the same way: the
 // served Channel's config first, the process env second.
 //

@@ -1072,6 +1072,11 @@ console:
     # are reported unavailable rather than drawn empty.
     #   url: http://vmselect.monitoring:8481/select/0/prometheus
     url: ""
+  # The look a viewer gets when they have chosen none: `workspace` or
+  # `classic`. A viewer's own choice (the Look switcher, or a `?look=` link)
+  # still wins, and changing this never rewrites a stored choice. Any other
+  # value fails the render.
+  defaultLook: workspace
   auth:
     # Use an existing Secret (key: uiToken) instead of generating one.
     existingSecret: ""
