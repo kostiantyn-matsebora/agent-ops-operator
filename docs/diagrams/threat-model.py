@@ -169,7 +169,7 @@ def render(p):
     # The crossings. Each number is a row in the page's threat table.
     s.append(arrow(610, 148, 610, 156, p))                 # 1 neighbour -> control ns
     s.append(badge(634, 158, 1, p))
-    s.append(arrow(380, 272, 404, 272, p, tone="brand"))     # 2 agent -> MCP
+    s.append(arrow(372, 272, 404, 272, p, tone="brand"))     # 2 agent -> MCP
     s.append(badge(392, 250, 2, p, tone="brand"))
     s.append(arrow(114, 374, 114, 380, p, tone="brand"))     # 3 -> API
     s.append(badge(138, 369, 3, p, tone="brand"))
