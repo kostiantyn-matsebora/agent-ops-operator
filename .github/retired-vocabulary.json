@@ -1351,6 +1351,28 @@
       ]
     },
     {
+      "id": "conversation-thread-claim",
+      "pattern": "status\\.threads\\[\\]\\.claim\\b",
+      "says": "the op's hand-over: the command bus holds the message, and nothing is written on the Conversation's thread entry (async-command-bus design D-17)",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "formerly",
+        "no longer",
+        "is gone",
+        "gone",
+        "deleted",
+        "replaced",
+        "superseded",
+        "is now",
+        "withdrawn",
+        "SHALL NOT write",
+        "unchanged",
+        "ignored"
+      ]
+    },
+    {
       "id": "channel-claim-window",
       "pattern": "(?i)\\bclaim window\\b",
       "says": "the delivery TTL, the time an adapter has from acknowledging an op to report it done (async-command-bus design D-17)",

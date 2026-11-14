@@ -14,13 +14,13 @@ every binding with nothing stored, and its transcript is a CACHE of
 ## Requirements
 
 ### Requirement: Console serves the channel adapter contract
-The console SHALL be a conforming channel adapter and the declared receipt-only one. It SHALL read ops over the manager's stream `GET /channel/ops/stream?adapter=console`, acknowledge each with `POST /channel/ops/{id}/ack` on receipt, and submit UI-typed user messages via `POST /channel/inbound`, authenticating every call with its injected per-adapter derived token. It SHALL call no `/done`, since the manager consumes each op at the acknowledgement. It SHALL tolerate an op offered more than once by rendering each op id once.
+The console SHALL be a conforming channel adapter and the declared receipt-only one: the manager deletes each op at the acknowledgement, with no delivery TTL and no report (`CHANNEL_RECEIPT_ADAPTERS`). It SHALL read ops over the manager's stream `GET /channel/ops/stream?adapter=console`, acknowledge each with `POST /channel/ops/{id}/ack` on receipt, and submit UI-typed user messages via `POST /channel/inbound`, authenticating every call with its injected per-adapter derived token. It SHALL call no `/done`, since the manager consumes each op at the acknowledgement. It SHALL tolerate an op offered more than once by rendering each op id once.
 
 #### Scenario: Ensure-topic binds a console thread
 - **WHEN** the console receives an `ensure-topic` op for a conversation
 - **THEN** it uses the thread id the manager assigned (`console-<uid>`, derived from the conversation's UID), so the same conversation maps to the same thread across console restarts
 
-#### Scenario: Redelivered op renders once
+#### Scenario: Re-offered op renders once
 - **WHEN** a `send` op is offered twice (a failed acknowledgement, a reconnect)
 - **THEN** the transcript shows the message exactly once, deduplicated by op id
 

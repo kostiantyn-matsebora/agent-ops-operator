@@ -82,7 +82,7 @@ the ordinary rule. Nothing about an input's timing relative to
 - **WHEN** a person replies in an uncaused root's thread before the agent has escalated
 - **THEN** the reply is delivered as an input, the same as any other bound conversation
 
-#### Scenario: Escalate posts the digest into the open thread
+#### Scenario: Escalate posts the message into the open thread
 - **WHEN** an uncaused root escalates with a message
 - **THEN** that message posts into every one of its already-bound channels as the message
 - **AND** no channel is newly bound by the call

@@ -234,7 +234,7 @@ report that there was nothing to clear. It SHALL NOT go dead.
 ### Requirement: A reply to a command means accepted
 A `202` from `close`, `exit`, `reopen`, `delete`, `reset-context` or
 `escalate` SHALL mean the command was accepted. So SHALL the `200` that the
-coordinator verbs `close` and `escalate` already return. It SHALL NOT mean it was
+Coordinator's `escalate` verb, and its `close` verb when a member closes itself, already return. It SHALL NOT mean it was
 performed. A caller that needs the outcome SHALL read the task.
 
 A refusal the caller could act on that depends only on cheap reads SHALL still

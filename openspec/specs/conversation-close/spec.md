@@ -190,7 +190,7 @@ a way to close. Deleting's cascade is the requirement added in this file.
 
 #### Scenario: A batch close is N ordinary closes
 - **WHEN** a surface closes several conversations in one gesture
-- **THEN** each conversation is closed through its own thread as an ordinary close, each becomes its own `close` task with its own invocation id, and a cascade's tasks share one
+- **THEN** each conversation is closed through its own thread as an ordinary close, each becomes its own `close` task with its own invocation id, and a cascade's tasks share one ordering key
 
 #### Scenario: Teardown is identical whatever ordered the close
 - **WHEN** a conversation is closed by a batch, by a hand-typed `/close`, or by the manager's idle timer
@@ -259,7 +259,7 @@ Reopening SHALL leave every materialized ref EXACTLY as it is. Refs are snapshot
 
 A reopened conversation is the SAME conversation with the same profile and the same capabilities, or it is a new conversation wearing an old name.
 
-A reopen whose referenced `AgentProfile` or `Channel` no longer exists SHALL FAIL, naming the missing object. A ref already missing at accept SHALL be refused with `409`. A ref that disappears after accept SHALL fail the task with `precondition_failed`.
+A reopen whose referenced `AgentProfile` or `Channel` no longer exists SHALL FAIL, naming the missing object. A ref already missing at accept SHALL be refused with `409`. A ref that disappears after accept SHALL send the task dead as `precondition_failed`.
 
 It SHALL NOT partially reopen and SHALL NOT silently drop a binding.
 
@@ -457,7 +457,7 @@ claimable.
 
 The ancestor's `close` task SHALL therefore check its descendants when it runs.
 It SHALL close any descendant still open itself before closing the ancestor.
-It SHALL fail with `precondition_failed` rather than close the ancestor over a
+It SHALL go dead as `precondition_failed` rather than close the ancestor over a
 descendant it could not close.
 
 The walk SHALL sweep once more after the ancestor closes. A run on the
@@ -494,7 +494,7 @@ found by that member's second sweep, and not after it.
 
 #### Scenario: A dead member task does not close the root over an open member
 - **WHEN** a member's `close` task goes dead and the root's task then becomes claimable
-- **THEN** the root's task closes the open member itself, or fails as `precondition_failed` and leaves the root open
+- **THEN** the root's task closes the open member itself, or goes dead as `precondition_failed` and leaves the root open
 
 #### Scenario: Already-closed descendants are skipped
 - **WHEN** a cascade reaches a member that is already `Closed`
@@ -521,7 +521,7 @@ A delete SHALL NOT enqueue a close as a side effect.
 
 A reopen whose referenced `AgentProfile` or `Channel` is already missing SHALL
 be refused at accept as the modified reopen requirement states. One that goes
-missing after accept SHALL fail its task with `precondition_failed`, naming the
+missing after accept SHALL send its task dead as `precondition_failed`, naming the
 missing object. Either way the conversation SHALL stay `Closed`.
 
 #### Scenario: A close reaches Closed when its task succeeds

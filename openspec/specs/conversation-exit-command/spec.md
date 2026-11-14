@@ -15,7 +15,8 @@ inputs, its run history and its stored context handle SHALL be untouched.
 It SHALL be recognised when the inbound message is processed, BEFORE the text
 becomes an input, for the same reason `/close` is: handing it to the agent would
 both dispatch a work unit for a command and leave the pod running. Recognition
-enqueues an `exit` task, and the pod is deleted when that task runs.
+hands the command to the `exit` task, which the last requirement of this
+capability owns.
 
 The next input SHALL admit the conversation again and give it a fresh runtime
 pod, resuming from its context handle — the behavior an eviction already
@@ -237,7 +238,8 @@ exactly the pair a person must not have to guess between.
 
 A `/exit` typed in a conversation's thread SHALL arrive as an inbound chat
 message. The manager SHALL accept it and enqueue one `exit` task on the
-conversation's root key. The pod SHALL be deleted when the task runs.
+conversation's root key, the ordering key of the conversation's root as
+`async-operations` defines it. The pod SHALL be deleted when the task runs.
 
 The accept reply SHALL be `202` with the invocation id and the task id, as
 `async-operations` states. It means accepted, not that the pod is gone. The
@@ -250,7 +252,9 @@ with no pod SHALL report that there was nothing to release and succeed.
 #### Scenario: An exit is accepted before it is done
 
 - **WHEN** `/exit` is sent in an idle conversation's thread
-- **THEN** the inbound message is accepted, an `exit` task is enqueued, and the pod is deleted when the task runs
+- **THEN** the inbound message is accepted
+- **AND** an `exit` task is enqueued
+- **AND** the pod is deleted when the task runs
 
 #### Scenario: A redelivered exit changes nothing twice
 

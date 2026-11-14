@@ -52,6 +52,13 @@ Origination from a chat surface stays on the signal lane, owned by `chat-signal-
 ### Requirement: Asynchronous operation completion
 The manager SHALL expose `POST /channel/ops/{id}/done` accepting the report of an acknowledged operation. For `ensure-topic` it is the thread id string to store in the conversation's status. For `close-topic` it is an empty body on success. For failures it is an error the manager records. A failure SHALL be final: the manager SHALL NOT redeliver the operation, and what is still owed is re-derived from conversation state only after the kind's cool-off.
 
+| Kind | Cool-off |
+|---|---|
+| stable (replies, inputs, notices) | 5 minutes |
+| ephemeral (acks) | 1 minute |
+| topic (`ensure-topic`, `close-topic`) | 5 minutes |
+| `delete-conversation` | none, never re-derived |
+
 The Conversation reconciler SHALL tolerate the pending window between enqueue and report: inputs stay queued, serial-per-conversation semantics hold, and runtime-pod handling proceeds per existing ordering rules.
 
 A failed `close-topic` or `delete-conversation` is the exception to the failure rule above: it SHALL be logged and SHALL write no Conversation condition. A failed `close-topic` SHALL NOT be exempt from re-derivation.
@@ -80,9 +87,9 @@ A failed `delete-conversation` is logged and not re-derived. No object remains t
 - **WHEN** an adapter reports a `close-topic` op failed
 - **THEN** the failure is logged, no Conversation condition is written, and a later reconciliation re-derives the op while the object exists
 
-#### Scenario: Failed delete-conversation is not regenerated
+#### Scenario: Failed delete-conversation is not re-derived
 - **WHEN** an adapter reports a `delete-conversation` op failed
-- **THEN** the failure is logged and no op is regenerated
+- **THEN** the failure is logged and no op is re-derived
 
 ### Requirement: Inbound messages enter through the shared router
 The manager SHALL expose `POST /channel/inbound` accepting `{channel, threadId, text, sender?}` as the CONTINUATION path only: `threadId` is REQUIRED, and the message SHALL be routed through the transport-neutral router as a reply input on the matching conversation (busy-ack preserved). Resulting acks SHALL flow back to the adapter as `send` operations, and the message SHALL be delivered to every OTHER bound channel that did not already display it as a `relay` message carrying its attribution as fields rather than composed into the text. Whether the originating surface displayed it is the serving adapter's declaration (`ChannelAdapter.spec.echoesOwnMessages`), not a property of the message — the decision is made PER DESTINATION. In-process (registry) providers SHALL use the same operation pipeline so routing behavior is identical for built-in and external types.

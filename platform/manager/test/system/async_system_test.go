@@ -742,6 +742,21 @@ func sortedCopy(in []string) []string {
 // every destination, the manager included.
 const consoleIsolation = "e2e-console-isolated"
 
+// replaceConsolePods deletes the console adapter's pods so the Deployment
+// recreates them, dropping any already-open stream.
+func replaceConsolePods(ctx context.Context, e *Env) error {
+	pods, err := e.K.Pods(ctx, "agentops.dev/adapter=console")
+	if err != nil {
+		return err
+	}
+	for i := range pods {
+		if err := e.K.Delete(ctx, &pods[i]); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 // stopConsoleConsumer holds the console adapter away from the manager, and lifts
 // the hold (restore) when the test calls it or ends. The ChannelAdapter
 // reconciler pins the console Deployment to one replica, so a scale to zero is
@@ -751,25 +766,12 @@ const consoleIsolation = "e2e-console-isolated"
 // is exactly the adapter that went away and comes back.
 func stopConsoleConsumer(t *testing.T, ctx context.Context, e *Env) (restore func()) {
 	t.Helper()
-	const selector = "agentops.dev/adapter=console"
 	policy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: consoleIsolation},
 		Spec: networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"agentops.dev/adapter": "console"}},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
 		},
-	}
-	replacePods := func(ctx context.Context) error {
-		pods, err := e.K.Pods(ctx, selector)
-		if err != nil {
-			return err
-		}
-		for i := range pods {
-			if err := e.K.Delete(ctx, &pods[i]); err != nil && !apierrors.IsNotFound(err) {
-				return err
-			}
-		}
-		return nil
 	}
 	done := false
 	restore = func() {
@@ -782,7 +784,7 @@ func stopConsoleConsumer(t *testing.T, ctx context.Context, e *Env) (restore fun
 			t.Errorf("lifting the console isolation: %v", err)
 		}
 		// Replaced so it reconnects at once instead of after its own backoff.
-		if err := replacePods(bg); err != nil {
+		if err := replaceConsolePods(bg, e); err != nil {
 			t.Errorf("replacing the console pod: %v", err)
 		}
 		if err := e.K.WaitDeploymentAvailable(bg, "agentops-adapter-console", 3*time.Minute); err != nil {
@@ -794,7 +796,7 @@ func stopConsoleConsumer(t *testing.T, ctx context.Context, e *Env) (restore fun
 	if err := e.K.Create(ctx, policy); err != nil && !apierrors.IsAlreadyExists(err) {
 		t.Fatalf("isolating the console adapter: %v", err)
 	}
-	if err := replacePods(ctx); err != nil {
+	if err := replaceConsolePods(ctx, e); err != nil {
 		t.Fatalf("replacing the console pod under the isolation: %v", err)
 	}
 	return restore

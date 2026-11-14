@@ -438,25 +438,32 @@ func awaitCloseInvocations(t *testing.T, frames <-chan string, names []string) m
 			if !ok || w.Queue != "conv" || !slices.Contains(names, w.Key) {
 				continue
 			}
-			if prior, seen := invocationOfTask[w.UID]; seen && prior != w.InvocationID {
-				t.Fatalf("task %s of conversation %s changed invocationId mid-flight: %q then %q", w.UID, w.Key, prior, w.InvocationID)
-			}
-			invocationOfTask[w.UID] = w.InvocationID
-			if w.InvocationID == "" {
-				continue
-			}
-			if prior, seen := invocationOf[w.Key]; seen && prior != w.InvocationID {
-				t.Fatalf("conversation %s was accepted under two invocations: %q and %q", w.Key, prior, w.InvocationID)
-			}
-			invocationOf[w.Key] = w.InvocationID
-			if w.State == "succeeded" {
-				succeeded[w.Key] = true
-			}
+			recordCloseFrame(t, w, invocationOfTask, invocationOf, succeeded)
 		case <-deadline:
 			t.Fatalf("not every close settled within the deadline: %v of %v", succeeded, names)
 		}
 	}
 	return invocationOf
+}
+
+// recordCloseFrame folds one accepted close task's frame into the maps
+// awaitCloseInvocations keeps, failing the test when an invocationId moves.
+func recordCloseFrame(t *testing.T, w taskStateWire, invocationOfTask, invocationOf map[string]string, succeeded map[string]bool) {
+	t.Helper()
+	if prior, seen := invocationOfTask[w.UID]; seen && prior != w.InvocationID {
+		t.Fatalf("task %s of conversation %s changed invocationId mid-flight: %q then %q", w.UID, w.Key, prior, w.InvocationID)
+	}
+	invocationOfTask[w.UID] = w.InvocationID
+	if w.InvocationID == "" {
+		return
+	}
+	if prior, seen := invocationOf[w.Key]; seen && prior != w.InvocationID {
+		t.Fatalf("conversation %s was accepted under two invocations: %q and %q", w.Key, prior, w.InvocationID)
+	}
+	invocationOf[w.Key] = w.InvocationID
+	if w.State == "succeeded" {
+		succeeded[w.Key] = true
+	}
 }
 
 // ---- 9.4 ------------------------------------------------------------------

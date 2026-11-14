@@ -292,14 +292,14 @@ a cluster the conformance suite does not run:
 3. **Ordering under parallel consumers.** Tasks sharing an ordering key run one
    at a time in submission order while tasks of other keys run alongside, with
    more than one consumer replica claiming.
-4. **Backoff, then dead letter.** A `conv` task whose handler
-   always fails retryably is retried with growing gaps and then goes dead. It
+4. **Backoff, then dead letter.** A task on the `conv` queue
+   (a `close` or `reopen`) whose handler always fails retryably is retried with growing gaps and then goes dead. It
    appears in the dead-letter listing, and its id is resubmittable after the
    cool-off.
 5. **A channel failure is final.** A channel message the adapter reports failed,
    or never reports before its delivery TTL, is not redelivered. It appears in
    the dead-letter listing, and reconciliation derives it again once its
-   id is released.
+   id is released after the park cool-off.
 
 Assertions SHALL read the task surface of the manager (`/state/tasks` and
 `/state/dead-letters`), never the bus server directly, because no component
@@ -319,7 +319,7 @@ but the manager reaches the server.
 
 #### Scenario: A failing channel message is not redelivered
 - **WHEN** an adapter acknowledges a channel message and reports it failed
-- **THEN** the bus never offers it again, the dead-letter listing carries it, and a later reconciliation delivers it once the surface recovers
+- **THEN** the bus never offers it again, the dead-letter listing carries it, and a later reconciliation delivers it once its id is released after the park cool-off
 
 #### Scenario: A failing task ends in a dead letter
 - **WHEN** a task whose handler fails retryably on every attempt is accepted

@@ -93,7 +93,7 @@ bus, retries delivery against its surface until that TTL.
 
 When the operation fails, whether the adapter reports it or its delivery TTL
 passes with no report, the failure is final: the bus SHALL park its id for a
-cool-off and then release it. The next reconciliation after the release
+cool-off and then release it. The cool-off is 5 minutes for a stable or topic message, 1 minute for an ephemeral one, and none for `delete-conversation`. The next reconciliation after the release
 re-derives it.
 
 An operation whose failure leaves its id suppressed forever is
@@ -137,7 +137,7 @@ that thread, cleared when delivery succeeds.
 - **THEN** the failure is final, the op's id is parked and then released, and reconciliation re-derives the reply so it reaches the thread without operator intervention
 
 #### Scenario: A dead reply is re-derived after its cool-off
-- **WHEN** a `send` op for a run reply fails, by a report or by its delivery TTL
+- **WHEN** a `send` op for a run reply is never reported before its delivery TTL passes
 - **THEN** its id is parked, then released, and reconciliation re-enqueues the same stable op id while the reply is still owed
 
 #### Scenario: Failed opening card is re-derived without a restart

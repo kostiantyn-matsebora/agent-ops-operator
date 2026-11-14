@@ -162,7 +162,10 @@ generated credential. An operator MAY instead supply a whole Secret by name.
 |---|---|
 | an explicitly configured value | `commandBus.nats.auth.user` and `commandBus.nats.auth.password` |
 | an existing Secret | `commandBus.nats.auth.existingSecret` |
-| generation | none, on install only, into `commandBus.nats.auth.secretName` |
+| generation | none, the chart generates it |
+
+Generation happens on install only, into the Secret named by
+`commandBus.nats.auth.secretName`.
 
 The Secret SHALL be rendered on install only when nothing is configured, SHALL
 carry the retention policy, and SHALL NOT be rendered on an upgrade.

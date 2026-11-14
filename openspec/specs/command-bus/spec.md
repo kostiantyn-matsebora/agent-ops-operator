@@ -80,7 +80,7 @@ A command id SHALL be suppressed while its task is in any of these states:
 A failure SHALL NOT be recorded as a success. A dead task SHALL NOT suppress
 its own recovery forever. After the park cool-off the id is released and the
 same command id SHALL be resubmittable. The failed attempt's log entries
-stays as history.
+stay as history.
 
 #### Scenario: A succeeded id is suppressed inside the window
 - **WHEN** a command id succeeded one minute ago and the queue's dedup window is ten minutes
