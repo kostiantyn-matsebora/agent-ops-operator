@@ -425,10 +425,13 @@ a contract change with a conformance scenario.
 |---|---|
 | `conv` | the root conversation of the `causedBy` tree |
 | `out.<channel>` | the conversation |
+| `in.signal` | the source and the signal's `initiationId` |
 
 The `out.<channel>` queues SHALL declare four kinds, each a complete declaration of its own and each a hand-over queue: `stable` (replies and inputs, delivery TTL 10 minutes), `ephemeral` (acks and notices, 2 minutes), `topic` (`ensure-topic` and `close-topic`, 5 minutes) and `delete-conversation` (5 minutes).
 
 A delivery TTL SHALL be declared per kind, never per adapter.
+
+`in.signal` SHALL be a lease-and-retry queue, not a hand-over queue: 5 maximum attempts, backoff from 1 second to 30 seconds with jitter, no time to live.
 
 Each queue SHALL declare:
 
@@ -450,6 +453,10 @@ Each queue SHALL declare:
 #### Scenario: One channel's backlog does not delay another
 - **WHEN** two channels of one adapter type are bound and one is unavailable
 - **THEN** the other's operations are claimed and delivered without waiting
+
+#### Scenario: in.signal retries before going dead
+- **WHEN** an `in.signal` task fails retryably four times
+- **THEN** its fifth attempt is its last, and a further retryable failure makes it dead
 
 ### Requirement: Delivery is at least once and handlers are idempotent
 The bus SHALL deliver a task at least once. A handler SHALL be idempotent: a
