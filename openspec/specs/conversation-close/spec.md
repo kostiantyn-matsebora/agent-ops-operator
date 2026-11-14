@@ -528,6 +528,6 @@ missing object. Either way the conversation SHALL stay `Closed`.
 - **WHEN** a close is accepted
 - **THEN** the conversation reaches `Closed` when the task succeeds
 
-#### Scenario: A reopen over a profile deleted after accept fails its task
+#### Scenario: A reopen over a profile deleted after accept sends its task dead
 - **WHEN** a reopen is accepted and the conversation's profile is deleted before the task runs
 - **THEN** the task goes dead as `precondition_failed` naming the profile and the conversation stays `Closed`

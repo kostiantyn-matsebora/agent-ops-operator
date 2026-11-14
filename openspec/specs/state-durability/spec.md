@@ -93,7 +93,7 @@ bus, retries delivery against its surface until that TTL.
 
 When the operation fails, whether the adapter reports it or its delivery TTL
 passes with no report, the failure is final: the bus SHALL park its id for a
-cool-off and then release it. The cool-off is 5 minutes for a stable or topic message, 1 minute for an ephemeral one, and none for `delete-conversation`. The next reconciliation after the release
+cool-off and then release it. The cool-off is 5 minutes for a stable or topic message, 1 minute for an ephemeral one. The next reconciliation after the release
 re-derives it.
 
 An operation whose failure leaves its id suppressed forever is
