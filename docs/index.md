@@ -85,7 +85,7 @@ already in it.
   Claude Code, Ollama and GitHub Copilot ship with it. Point it at your own
   image and the work contract is unchanged.
 
-- A pod per conversation, in its own namespace
+- A pod per conversation, in the conversations namespace
   {: .ao-icon-conversation}
 
   Isolated, serial and capped. One runaway conversation cannot take the others

@@ -239,14 +239,7 @@ and newest first.
 runtime pods and everything they run as, mount or resolve. Split by
 default — the chart creates `agent-ops-conversations` for you.
 
-This needs a manual step per claim and per Secret you want to keep:
-
-1. Close every open conversation.
-2. Place your Secrets in the new namespace.
-3. Carry each claim across by PV rebind.
-4. Upgrade.
-5. Delete any `kube`-backend `Conversation` CRs left behind in the release namespace.
-
+This needs a manual step per claim and per Secret you want to keep.
 The full procedure, in order, with commands, is the `[Unreleased]` entry's
 Upgrade section in [the
 changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).

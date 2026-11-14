@@ -17,7 +17,10 @@ import (
 	"time"
 )
 
-const kubeconfigFlag = "--kubeconfig"
+const (
+	kubeconfigFlag = "--kubeconfig"
+	allContainers  = "--all-containers"
+)
 
 // Resolved once, and used everywhere the harness shells out to kubectl or
 // helm — go:S4036 wants a caller to say explicitly where the binary comes
@@ -327,8 +330,8 @@ func (c *Cluster) Dump(dir string) {
 		if !ok || strings.ContainsAny(pod, ":/ ") {
 			continue
 		}
-		write("log-"+pod+".txt", "-n", Namespace, "logs", pod, "--all-containers", "--tail=2000")
-		write("log-"+pod+"-previous.txt", "-n", Namespace, "logs", pod, "--all-containers", "--previous", "--tail=500")
+		write("log-"+pod+".txt", "-n", Namespace, "logs", pod, allContainers, "--tail=2000")
+		write("log-"+pod+"-previous.txt", "-n", Namespace, "logs", pod, allContainers, "--previous", "--tail=500")
 		// A state server's own account of itself: what its meta group looks
 		// like and whether it considers the cluster healthy. A bucket refused
 		// with "no suitable peers" is invisible in the pod log alone.
@@ -349,7 +352,7 @@ func (c *Cluster) Dump(dir string) {
 		if !ok || strings.ContainsAny(pod, ":/ ") {
 			continue
 		}
-		write("conv-log-"+pod+".txt", "-n", ConversationsNamespace, "logs", pod, "--all-containers", "--tail=2000")
+		write("conv-log-"+pod+".txt", "-n", ConversationsNamespace, "logs", pod, allContainers, "--tail=2000")
 	}
 	fmt.Fprintf(os.Stderr, "diagnostics written to %s\n", dir)
 }

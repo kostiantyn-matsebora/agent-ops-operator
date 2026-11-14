@@ -938,7 +938,7 @@ the moment it exists.
 - **No component logs message content**, so the pod logs an agent can read carry
   no conversation text.
 
-What an agent gains in the operator's own namespace is pod names and specs
+What an agent gains in the control namespace is pod names and specs
 (credentials are `valueFrom` references, not values), Services, events and the
 compiled MCP ConfigMaps.
 

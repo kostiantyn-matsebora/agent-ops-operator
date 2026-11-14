@@ -160,7 +160,7 @@ helm install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-opera
 
 # the chart created agent-ops-conversations, where runtime pods resolve it
 kubectl -n agent-ops-conversations create secret generic agentops-claude \
-  --from-literal=oauthToken=$(claude setup-token)
+  --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key, see Getting started
 ```
 
 **[Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/)**

@@ -96,7 +96,7 @@ only what is used there:
 
 - the control-namespace Role SHALL cover every wiring and identity kind,
   `signals`, adapter Deployments, Services, configmaps, leases, events, and
-  a read (`get`/`list`/`watch`) on pods, for the manager's own replicas
+  a read (`get`/`list`/`watch`) on pods, which reaches EVERY pod in the control namespace because RBAC cannot scope a verb to the manager's own replicas
 - the conversations-namespace Role SHALL cover pods, configmaps,
   `conversations`, `conversationinputs` and their status, events, and PVC
   `get`/`list`/`watch`/`create`
@@ -109,6 +109,10 @@ No ClusterRole SHALL be added for the manager. Neither Role SHALL carry a
 #### Scenario: Two Roles render, no new ClusterRole
 - **WHEN** the chart renders split
 - **THEN** a manager Role and RoleBinding exist in each namespace, and the only manager ClusterRole is the existing nodes grant
+
+#### Scenario: The control-namespace Role reads pods
+- **WHEN** the chart renders split
+- **THEN** the control-namespace Role carries `get`, `list` and `watch` on `pods` and no pod write verb
 
 #### Scenario: The manager cannot reach a third namespace
 - **WHEN** the manager lists pods in an unrelated namespace
