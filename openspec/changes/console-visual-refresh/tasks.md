@@ -45,7 +45,7 @@ Role: `frontend-developer`. Restyle only. Each page keeps the sections, order an
 
 ## 5. Feedback and motion
 
-Role: `frontend-developer`, then `accessibility-expert` reviews 5.5.
+Role: `frontend-developer`. Task 5.5 is checked against WCAG 2.3.3, animation from interactions.
 
 - [ ] 5.1 Show command states on the row and in the thread, and verify a spec that a reply goes from sending to delivered on its event
 - [ ] 5.2 Show the in-flight counter and the connection state in the header, and verify a spec that a dropped stream pauses and a return resumes

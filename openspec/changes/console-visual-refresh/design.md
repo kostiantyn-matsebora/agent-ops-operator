@@ -31,7 +31,8 @@ the reference for composition. The specs are the reference for behaviour.
 **Non-Goals:**
 
 - Retiring `classic`. That is a later decision.
-- Any manager, CRD or channel-contract change.
+- Any manager, CRD or channel-contract change. The `configSchema` entry in D11 is
+  descriptive metadata the manager never reads, so it is not one.
 - A per-user look stored on the server.
 - Redesigning what a page says. Content stays, drawing changes.
 

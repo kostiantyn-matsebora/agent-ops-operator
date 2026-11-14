@@ -241,6 +241,13 @@ kbd{font-family:var(--mono);border:1px solid var(--border-strong);border-radius:
 code{color:color-mix(in srgb,var(--text) 65%,transparent);background:color-mix(in srgb,var(--text) 2.5%,transparent);border:0;font-size:.9em;font-weight:inherit;padding:.08em .3em;border-radius:4px}code.cmd{display:block;margin:6px 0;padding:6px 10px;border-radius:6px;background:color-mix(in srgb,var(--text) 6%,transparent);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}.sec code{font-size:12px}
 </style>
 
+.r{position:relative}
+.cp{position:absolute;top:2px;right:2px;width:28px;height:28px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:var(--surface);color:var(--subtle);cursor:pointer;opacity:0;transition:opacity .12s}
+.cp::before{content:"";position:absolute;inset:-8px}
+.r:hover .cp,.r:focus-within .cp,.cp:focus-visible{opacity:1}
+.cp:hover{color:var(--text)}.cp.done{opacity:1;color:var(--brand)}.cp.done::after{content:"Copied";position:absolute;right:32px;font-size:12px;white-space:nowrap}
+@media (hover:none){.cp{opacity:1}.cp::before{inset:-8px}}
+
 <style>
 .page{grid-column:3/-1;grid-row:1;overflow:auto;padding:16px 22px 28px;display:flex;flex-direction:column;gap:14px}
 .cols[data-page]:not([data-page="conv"]) :is(.lp,.spl2,.tp){display:none!important}
@@ -542,6 +549,7 @@ function runMeta(c,idx){
   return h+'<div class="rm">context checkpoint</div>';
 }
 const bubble=(text,at,sending)=>'<div class="msg own'+(sending?' pending':'')+'">'+inl(text)+'<small>'+(sending?'sending…':tm(at||new Date().toISOString())+' · delivered ✓')+'</small></div>';
+const CP={};
 function convItems(c){
   const it=[],d=T(c.created);
   let lastDay=d?d.toDateString():'';const dayDv=(t,k)=>{const q=T(t);if(!q||q.toDateString()===lastDay)return;lastDay=q.toDateString();it.push({k:'dv'+k,h:'<div class="dv">'+q.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})+'</div>'})};
@@ -575,7 +583,10 @@ function convItems(c){
   const out=[];
   it.forEach(x=>{
     if(/^rm/.test(x.k)&&out.length&&out[out.length-1].g){const p=out[out.length-1];p.h=p.h.replace(/<\/div>$/,x.h+'</div>');return}
-    if(/^(sig|m\d|x\d)/.test(x.k)&&!x.h.startsWith('<div class="ev">')){out.push({k:x.k,h:'<div class="r">'+x.h+'</div>',g:1})}else out.push(x)});
+    if(/^(sig|m\d|x\d)/.test(x.k)&&!x.h.startsWith('<div class="ev">')){
+      const mm=/^([mx])(\d+)$/.exec(x.k),src=x.k==='sig'?(c.signal?c.signal.title+'\n\n'+c.signal.text:''):mm?((mm[1]==='m'?c.transcript:c.msgs)[+mm[2]]||{}).text:'';
+      CP[x.k]=src||'';
+      out.push({k:x.k,h:'<div class="r">'+x.h+'<button class="cp" type="button" data-copy="'+x.k+'" aria-label="Copy message" title="Copy message"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 10.5V4a1 1 0 0 1 1-1h6.5"/></svg></button></div>',g:1})}else out.push(x)});
   out.forEach((o,i)=>{const n=out[i+1];if(o.g&&n&&/^(esc|nm|dv)/.test(n.k))o.h=o.h.replace('<div class="r">','<div class="r nb">')});
   return out;
 }
@@ -755,6 +766,8 @@ document.addEventListener('click',e=>{
   if(t.id==='showClosed'){S.showClosed=t.checked;saveL({showClosed:t.checked});paintSide();paintList();return}
   if(d.pick){S.multi.has(d.pick)?S.multi.delete(d.pick):S.multi.add(d.pick);paintSide();return}
   if(d.exp){S.exp.has(d.exp)?S.exp.delete(d.exp):S.exp.add(d.exp);paintList();return}
+  if(d.copy){const b=t.closest('.cp'),txt=CP[d.copy]||'';const ok=()=>{b.classList.add('done');b.setAttribute('aria-label','Copied');setTimeout(()=>{b.classList.remove('done');b.setAttribute('aria-label','Copy message')},1500)};
+    try{navigator.clipboard.writeText(txt).then(ok,()=>{const r=document.createRange();r.selectNodeContents(b.parentNode);const s=getSelection();s.removeAllRanges();s.addRange(r)})}catch(_){const r=document.createRange();r.selectNodeContents(b.parentNode);const s=getSelection();s.removeAllRanges();s.addRange(r)}return}
   if(d.menu){S.menu===d.menu?closeMenu():openMenu(d.menu,t);return}
   if(d.mk){const c=byId(S.menu);closeMenu();
     if(d.mk==='read')c.unread=0;if(d.mk==='unread')c.unread=1;
