@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
-  tag: 0.61.0
+  tag: 0.62.0
 
 # How many manager pods run at once. Safe above 1 now (durable-chat-ops-broker):
 # the Conversation reconciler claims an ensure-topic op on the Conversation CR
@@ -1050,7 +1050,11 @@ console:
     # with a size, so it works in a tab, a drawer, or wherever one lands next.
     # 0.40.0: a send carrying no thread id now surfaces on the channel's
     # general feed instead of completing as success with nothing to show.
-    tag: 0.40.0
+    # 0.41.0: reads Conversations and Signals through the manager's /state/*
+    # surface (spec.stateAccess) instead of a Kubernetes watch, takes channel
+    # ops over GET /channel/ops/stream, adds the read-only signals view, and
+    # waits out a refused manager connection instead of losing the send.
+    tag: 0.41.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
@@ -1489,7 +1493,9 @@ housekeeping:
   schedule: "17 3 * * *"
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-housekeeping
-    tag: 0.2.5
+    # 0.3.0: lists conversations through the manager's /state/* surface and
+    # holds no Kubernetes RBAC at all.
+    tag: 0.3.0
   # Reports what it would remove and removes nothing. Take it off only after a
   # run has named no directory belonging to a conversation you are keeping.
   dryRun: true
@@ -1524,7 +1530,8 @@ coordination:
   name: aops-coordinate
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-mcp-aops
-    tag: 0.1.0
+    # 0.2.0: tool descriptions say which tools are moves and which are reads.
+    tag: 0.2.0
   port: 8080
   resources: {}
   nodeSelector: {}
@@ -1613,7 +1620,8 @@ reaper:
     name: reaper-cron
     image:
       repository: ghcr.io/kostiantyn-matsebora/agentops-signal-cron
-      tag: 0.2.2
+      # 0.3.0: sends a per-tick signalId, so a re-fired tick is stored once.
+      tag: 0.3.0
     resources: {}
   # The SignalSource the scheduled tick posts to — claimed on the
   # chart-rendered Coordinator's own signalSourceRefs (design D-E), never on

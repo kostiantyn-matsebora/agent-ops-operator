@@ -18,7 +18,8 @@ alertmanager:
     # not a field the CRD no longer has, and a malformed register: block
     # degrades to a manual-registration message naming the parse problem
     # instead of failing silently.
-    tag: 0.8.1
+    # 0.9.0: sends a per-alert signalId, so a re-sent alert is stored once.
+    tag: 0.9.0
   resources: {}
   # Sender self-registration. VICTORIAMETRICS ONLY — it writes a
   # VMAlertmanagerConfig, and vanilla Alertmanager has no such object.

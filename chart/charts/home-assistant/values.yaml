@@ -92,7 +92,8 @@ logsAdapter:
     # 0.4.3: an unreadable system log now fails OPEN — a record still failing
     # when the log becomes unreadable is emitted, where it used to be dropped
     # as churn.
-    tag: 0.4.3
+    # 0.5.0: sends a per-record signalId, so a re-sent record is stored once.
+    tag: 0.5.0
   resources: {}
   # The log source. It is INERT until a Pipeline claims it — wiring is
   # pipeline-only, so either turn the `pipelines:` component below on or declare
