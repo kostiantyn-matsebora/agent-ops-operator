@@ -58,6 +58,8 @@
 | #259 | action checks the branch's own workflow copy vs master's | check out master's, restore after |
 | #53 | moving a station LABEL didn't restart the session | explicit `restart_ok` flag |
 | — | `run-name:` breaks a `workflow_run.name` match | match `.path` instead |
+| #325 | `land`'s self-dispatch (`workflow_dispatch`, always sent as the bot) required a standing grant even when a person placed `conveyor:fix` directly, with none needed | gate on `trigger.label_carried` too, not `trigger.sender.bot` alone |
+| #325 | `land-dispatch.py` checked only a finding's own anchor `path`, so a correct fix landed in a second file the finding's own `Where:` line named read as `unaddressed` | accept a patch touching any path the finding's `Where:` line names |
 
 ### Replica scaling — chat delivery and rollout races above 1 replica
 
