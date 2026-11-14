@@ -91,7 +91,7 @@ already in it.
   Isolated, serial and capped. One runaway conversation cannot take the others
   with it.
 
-  The namespace holds no control-plane credential. An idle conversation is
+  The conversations namespace holds no control-plane credential. An idle conversation is
   reaped.
 
 - Tools that come from the wiring

@@ -178,9 +178,12 @@ it.
 **The API server refuses both fields at once.** They decide who creates the
 claim, so both is two answers rather than a preference.
 
-**Either way, the claim is in the conversations namespace** — where the
+**Either way, the claim is in the conversations namespace**, where the
 runtime pod that mounts it runs. A `claimName` you pre-create belongs there
-too, not in the release namespace this Pipeline itself lives in.
+too.
+
+In a split layout that is not the release namespace. In a single-namespace
+layout the two are the same.
 
 {: .ao-callout}
 > **The claim outlives the route.** It carries no ownerRef on the Pipeline and

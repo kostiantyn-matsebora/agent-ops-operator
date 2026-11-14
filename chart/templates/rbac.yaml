@@ -48,7 +48,7 @@ which indents EVERY line uniformly — the pattern `agentops.runtimeReadRules`
 - apiGroups: ["agentops.dev"]
   resources: ["agentprofiles/status", "mcpconfigs/status", "channels/status", "signalsources/status", "signals/status", "agentruntimes/status", "channeladapters/status", "signaladapters/status", "pipelines/status", "agentcapabilities/status", "coordinators/status"]
   verbs: ["get", "update", "patch"]
-# ChannelAdapter/SignalAdapter reconcilers: own adapter workloads + their
+# ChannelAdapter reconciler: own adapter workloads + their
 # zero-RBAC SAs (own namespace only)
 - apiGroups: ["apps"]
   resources: ["deployments"]
