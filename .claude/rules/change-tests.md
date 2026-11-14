@@ -12,8 +12,8 @@ is finished:
 
 | Position | Section | Covers |
 |---|---|---|
-| last − 2 | **Unit tests** | what the change did — `go test ./...` in every module touched, `node --test` in a Node runtime, the chart's render tests for a template, `.github/tests/run.sh` for a workflow script |
-| last − 1 | **System tests** | anything a CLUSTER decides — the kubelet, RBAC, an informer, a pod's lifecycle, context continuity — as a lane in `platform/manager/test/system/`, and the pack run |
+| last − 2 | **Unit tests** | what the change did — `go test ./...` in every module touched, `node --test` in a Node runtime, the chart's render tests for a template, `.github/tests/run.sh` for a workflow script, `npm run test:e2e` (mocked browser tier) for `platform/console/ui` |
+| last − 1 | **System tests** | anything a CLUSTER decides — the kubelet, RBAC, an informer, a pod's lifecycle, context continuity — as a lane in `platform/manager/test/system/`, and the pack run. What the console RENDERS from real data — the `e2e-live` suite against a real install |
 | last | **Documentation** | both halves, see `documentation.md` |
 
 - **Not a bullet under the task it verifies.** A test line appended to
@@ -23,6 +23,10 @@ is finished:
   task stating why — "nothing here is decided by a cluster" — and it is ticked.
   An absent section and a forgotten one look identical. A stated "not
   applicable" is a claim a reviewer can dispute.
+- **A console change owes BOTH browser tiers.** It is mostly frontend, so a
+  plan with only vitest in its unit section and "not applicable" in its
+  system section ships specs written against a DOM nobody re-ran. Caught on
+  `console-visual-refresh`, whose generated plan ran neither.
 - **`docs/testing.md` owns what each tier can decide**, which is what settles
   whether the system tier applies. Rendering, parsing and what a reconciler
   writes are unit and envtest. What the kubelet or the authorizer does is the

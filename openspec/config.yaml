@@ -63,11 +63,16 @@ rules:
       The unit-test section covers what the change did: `go test ./...` in
       every module it touched, `node --test` in a Node runtime, the chart's
       render tests for a template, the script suite for a workflow script.
+      A change under platform/console/ui also runs the mocked browser tier,
+      `npm run test:e2e`, the `console-e2e` pull-request gate.
     - >-
       The system-test section is owed EVEN WHERE IT DOES NOT APPLY. Where a
       cluster decides something the change touched — the kubelet, RBAC, an
       informer, a pod's lifecycle, context continuity — the section adds or
-      extends a lane in platform/manager/test/system/ and runs the pack. Where
+      extends a lane in platform/manager/test/system/ and runs the pack. A
+      change to what the console renders runs the `e2e-live` browser suite
+      against a real install, since that is the only tier proving what a
+      viewer sees from real data. Where
       nothing a cluster decides changed, the section holds ONE task stating
       why, and it is ticked. An absent section and a forgotten one look
       identical; a stated "not applicable" is a claim a reviewer can dispute.
