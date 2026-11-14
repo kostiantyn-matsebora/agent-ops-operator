@@ -1,7 +1,7 @@
 ## 1. The field and the state — backend-developer
 
 - [ ] 1.1 Add `status.savedAt` to `ConversationStatus`, regenerate deepcopy and `chart/crds/`. Verify: `go build ./...` in `platform/manager` and the CRD diff shows only the new field.
-- [ ] 1.2 Carry `savedAt` on the conversation record in every `internal/state` backend, and on the `/state/conversations` read. Verify: the state conformance suite passes under `kube` and `nats`, with a saved case.
+- [ ] 1.2 Carry `savedAt` on the conversation record in every `internal/state` backend, and on `/state/conversations` and `/state/conversations/{name}`. Verify: the state conformance suite passes under `kube` and `nats`, with a saved case.
 
 ## 2. The verbs and commands — api-architect, backend-developer
 

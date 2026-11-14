@@ -44,7 +44,7 @@ idle timer's per-descendant close treat a member of a saved root as saved.
 Alternative, saving cascades `savedAt` to members: rejected, it writes N records and
 drifts when a member is added later.
 
-**D6. Housekeeping needs no change.** Its listing is phase-blind and a Closed
+**D6. The disk-reclaim workload needs no change.** The autoclose and autodelete skips are D4. This is only about `platform/housekeeping`. Its listing is phase-blind and a Closed
 conversation keeps its CR, so a saved one's disk state is never an orphan.
 
 **D7. Console** reads `savedAt` through `/state/conversations`, writes only through
