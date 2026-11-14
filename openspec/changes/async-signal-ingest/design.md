@@ -33,7 +33,9 @@ The `in.signal` queue is declared in the bus inventory: 5 attempts, backoff 1s t
 | Task visibility | `/state/tasks` shows the ingest path |
 | Thinner request | `answerCommands` and the CR write leave the request |
 
-The cost is a window where a signal is acknowledged and no `Signal` exists yet. The durable task covers it. A signal whose task dies is visible but not stored, and nothing re-sends it, because the adapter was told `202`. Dead-letter replay is outside this change (see Open Questions).
+The cost is a window where a signal is acknowledged and no `Signal` exists yet. The durable task covers it.
+
+A signal whose task dies is visible but not stored, and nothing re-sends it, because the adapter was told `202`. Dead-letter replay is outside this change (see Open Questions).
 
 ### D-2: One task per signal, not per batch
 
@@ -129,4 +131,4 @@ Tests of `answerCommands` and `publishOne` move to the consumer's package. A new
 2. **Fully filtered batch.** Settled: `202` with `queued: 0`, empty `taskIds` and `reason: filtered`.
 3. **Header rename.** The requirement "The inbound response acknowledges storage, never routing" no longer describes storage. The delta keeps the exact header so it MODIFIES cleanly. A rename (RENAMED then MODIFIED) is cleaner and costs one more delta entry.
 4. **Dedup requirement text.** "A re-send of the same message is deduplicated" still says "publication". D-1's delta defines publication as the consumer's create, so no third delta is made. Say so if a reader finds it unclear.
-5. **Contract version.** `2.4.0` is assumed from `2.3.0` on master. Confirm at archive if another change moved it first.
+5. **Contract version.** Settled: `2.4.0` (MINOR) from `2.3.0` on master, as the signal-adapter-contract delta states. Task 5.1 re-checks that `2.3.0` is still current.

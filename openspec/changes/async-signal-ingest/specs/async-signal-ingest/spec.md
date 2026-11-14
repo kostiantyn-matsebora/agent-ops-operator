@@ -76,7 +76,7 @@ When the source's `attributeFilters` refused part of the batch, `reason` is pres
 
 - `queued` counts the signals accepted, which equals the length of `taskIds`.
 - `queued` SHALL NOT claim a `Signal` exists.
-- A batch where every signal is filtered SHALL reply `202` with `taskIds: []`, `queued: 0` and `reason`, and no invocation task.
+- A batch where every signal is filtered SHALL reply `202` with `taskIds: []`, `queued: 0` and `reason`, and no task.
 - `conversations` SHALL NOT be returned.
 
 #### Scenario: The reply carries ids and the legacy fields
@@ -138,7 +138,7 @@ The `ingest-signal` task SHALL follow the retry policy the bus inventory declare
 - A task that exhausts its attempts SHALL be dead, and its record SHALL stay visible in the task stream with its last error.
 - A dead task SHALL NOT create a `Signal` afterwards by itself.
 - A failed or dead task SHALL NOT change the reply the adapter already received.
-- A non-retryable failure goes straight to dead.
+- A non-retryable failure goes straight to dead. A failure is non-retryable when retrying cannot change the outcome: the task's payload no longer decodes, or the `Signal` create is refused as invalid.
 
 #### Scenario: A transient failure is retried
 - **WHEN** the consumer's create of the `Signal` fails twice and then succeeds
