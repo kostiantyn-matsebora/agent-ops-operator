@@ -6,7 +6,7 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../components/States'
 import { Crumbs } from '../components/Crumbs'
-import { useQueues } from '../../../api/hooks'
+import { STUCK, queueAge, useQueuesPage } from '../../../model/queues'
 import { PlainText } from '../components/Text'
 import { PipelineName } from '../components/PipelineName'
 import type { StuckReason } from '../../../api/types'
@@ -17,32 +17,6 @@ import type { StuckReason } from '../../../api/types'
 // identical from outside: an agent has not replied — is it queued, or is it
 // stuck? Every row carries an age, and the flags name the CAUSE, because each
 // cause has a different fix.
-
-const STUCK: Record<StuckReason, { title: string; detail: string }> = {
-  'nothing-claiming': {
-    title: 'nothing claiming',
-    detail: 'ops are queued and no adapter is polling — the adapter is down or not running',
-  },
-  'adapter-wedged': {
-    title: 'adapter wedged',
-    detail: 'an adapter claimed these ops and never completed them — it is stuck mid-delivery',
-  },
-  'at-runtime-ceiling': {
-    title: 'at runtime ceiling',
-    detail: 'capacity-bound, not broken — raise MAX_ACTIVE_CONVERSATIONS or shed load',
-  },
-  'runtime-hung': {
-    title: 'runtime hung',
-    detail: 'inflight far beyond a typical run — the runtime is hung, not queued',
-  },
-}
-
-function age(seconds?: number): string {
-  if (!seconds) return '—'
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
-  return `${(seconds / 3600).toFixed(1)}h`
-}
 
 function StuckLabel({ reason }: { reason?: StuckReason }) {
   if (!reason) return null
@@ -55,7 +29,7 @@ function StuckLabel({ reason }: { reason?: StuckReason }) {
 }
 
 export function QueuesPage() {
-  const { data, isLoading, error } = useQueues()
+  const { data, isLoading, error } = useQueuesPage()
   if (isLoading && !data) return <Loading />
   if (error || !data) return <ErrorState title="Could not load queues">{String(error)}</ErrorState>
 
@@ -123,7 +97,7 @@ export function QueuesPage() {
                             </Td>
                             <Td dataLabel="Queued">{row.queued}</Td>
                             <Td dataLabel="Age">
-                              {row.inflight ? age(row.inflightAgeSeconds) : age(row.ageSeconds)}
+                              {row.inflight ? queueAge(row.inflightAgeSeconds) : queueAge(row.ageSeconds)}
                             </Td>
                             <Td dataLabel="Flag">
                               <StuckLabel reason={row.stuck} />
@@ -172,12 +146,12 @@ export function QueuesPage() {
                               {row.oldestClaimedOpId ? (
                                 <>
                                   <PlainText>{row.oldestClaimedOpId}</PlainText>{' '}
-                                  <small>claimed {age(row.oldestClaimedAgeSeconds)}</small>
+                                  <small>claimed {queueAge(row.oldestClaimedAgeSeconds)}</small>
                                 </>
                               ) : row.oldestQueuedOpId ? (
                                 <>
                                   <PlainText>{row.oldestQueuedOpId}</PlainText>{' '}
-                                  <small>queued {age(row.oldestQueuedAgeSeconds)}</small>
+                                  <small>queued {queueAge(row.oldestQueuedAgeSeconds)}</small>
                                 </>
                               ) : (
                                 '—'
@@ -225,7 +199,7 @@ export function QueuesPage() {
                           </Link>
                         </Td>
                         <Td dataLabel="Suppressed">{c.suppressed}</Td>
-                        <Td dataLabel="Window">{age(c.windowSeconds)}</Td>
+                        <Td dataLabel="Window">{queueAge(c.windowSeconds)}</Td>
                       </Tr>
                     ))}
                   </Tbody>

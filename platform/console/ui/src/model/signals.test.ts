@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   FILTER_ALL, asSignalStatus, claimantStateStatus, filterSignalRows, isSignalTrouble, signalFilterOptions, signalPhaseStatus,
 } from './signals'
-import type { InventoryRow } from '../../../api/types'
+import type { InventoryRow } from '../api/types'
 
 function row(source: string, phase: string, over: Partial<InventoryRow> = {}): InventoryRow {
   return {

@@ -7,7 +7,8 @@ import { Link } from 'react-router-dom'
 import { PlainText } from '../components/Text'
 import { Empty } from '../components/States'
 import type { SignalStatusWire } from '../../../api/types'
-import { FILTER_ALL, claimantStateStatus, isSignalTrouble, signalPhaseStatus } from './signals'
+import { deliveryHistory } from '../../../model/config'
+import { FILTER_ALL, claimantStateStatus, isSignalTrouble, signalPhaseStatus } from '../../../model/signals'
 
 // The Signal kind's own additions to the generic Configuration pages — console-signals
 // spec: filterable by source/phase on the list, and the full per-claimant
@@ -138,21 +139,14 @@ export function SignalRoutingCard({ status }: Readonly<{ status: SignalStatusWir
 
 /** The consumer and delivery history, verbatim from the status — only what the manager recorded is listed. */
 export function DeliveryHistory({ status }: Readonly<{ status: SignalStatusWire }>) {
-  const rows: [string, string | number | undefined][] = [
-    ['Attempts', status.attempts],
-    ['First attempt', status.firstAttemptAt],
-    ['Consumed by', status.consumedBy],
-    ['Consumed at', status.consumedAt],
-    ['Completed at', status.completedAt],
-  ]
-  const shown = rows.filter(([, v]) => v !== undefined && v !== '')
+  const shown = deliveryHistory(status)
   if (shown.length === 0) return null
   return (
     <DescriptionList isHorizontal isCompact aria-label="delivery history" style={{ marginBottom: 12 }}>
       {shown.map(([term, value]) => (
         <DescriptionListGroup key={term}>
           <DescriptionListTerm>{term}</DescriptionListTerm>
-          <DescriptionListDescription>{String(value)}</DescriptionListDescription>
+          <DescriptionListDescription>{value}</DescriptionListDescription>
         </DescriptionListGroup>
       ))}
     </DescriptionList>

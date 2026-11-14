@@ -7,32 +7,14 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../components/States'
 import { Crumbs } from '../components/Crumbs'
-import { healthVariant, useCharts, useOverview } from '../../../api/hooks'
+import {
+  PROBLEM_SOURCE, healthTone, sinceAge, useMetricsBackend, useOverviewPage,
+} from '../../../model/overview'
 import { PlainText } from '../components/Text'
-import { relativeAge } from './chat/format'
-import type { Overview, Problem, ProblemSource, StreamHealth } from '../../../api/types'
-
-// Problem.since is a condition's lastTransitionTime — absent on a pod- or
-// console-derived row, which carries no condition to date. An em dash names
-// that absence rather than a blank cell reading as a missed render.
-function sinceAge(since?: string): string {
-  if (!since) return '—'
-  const ms = Date.now() - new Date(since).getTime()
-  if (!Number.isFinite(ms) || ms < 0) return '—'
-  return `${relativeAge(ms / 1000)} ago`
-}
-
-const SOURCE_LABEL: Record<ProblemSource, { text: string; color: 'blue' | 'grey' | 'purple' }> = {
-  // A condition a reconciler wrote and a cross-reference the console derived
-  // carry different authority. Labelling them apart is what stops the console
-  // appearing to speak for the cluster.
-  reported: { text: 'reported', color: 'blue' },
-  pod: { text: 'pod', color: 'purple' },
-  derived: { text: 'console check', color: 'grey' },
-}
+import type { Overview, Problem, StreamHealth } from '../../../api/types'
 
 export function OverviewPage() {
-  const { data, isLoading, error } = useOverview()
+  const { data, isLoading, error } = useOverviewPage()
   if (isLoading) return <Loading />
   if (error || !data) return <ErrorState title="Could not load the overview">{String(error)}</ErrorState>
 
@@ -243,7 +225,7 @@ export function OverviewPage() {
                       </Td>
                       <Td dataLabel="Serves">{a.serves}</Td>
                       <Td dataLabel="Health">
-                        <Label status={healthVariant(a.health)}>
+                        <Label status={healthTone(a.health)}>
                           <PlainText>{a.reason || a.health}</PlainText>
                         </Label>
                       </Td>
@@ -297,8 +279,7 @@ function GapNotice({ lastGap }: { lastGap: StreamHealth['lastGap'] }) {
 }
 
 function TelemetryCard({ stream }: { stream: Overview['stream'] }) {
-  const charts = useCharts()
-  const backend = charts.data?.available ?? false
+  const backend = useMetricsBackend()
 
   return (
     <Card>
@@ -402,7 +383,7 @@ export function ProblemsCard({ problems }: Readonly<{ problems: Problem[] }>) {
                     <PlainText multiline>{p.message}</PlainText>
                   </Td>
                   <Td dataLabel="Source">
-                    <Label color={SOURCE_LABEL[p.source].color}>{SOURCE_LABEL[p.source].text}</Label>
+                    <Label color={PROBLEM_SOURCE[p.source].tone}>{PROBLEM_SOURCE[p.source].text}</Label>
                   </Td>
                   <Td dataLabel="Since">
                     {p.since ? (

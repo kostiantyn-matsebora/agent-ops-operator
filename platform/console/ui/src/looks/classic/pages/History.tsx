@@ -1,8 +1,7 @@
 import { Card, CardBody, CardExpandableContent, CardHeader, CardTitle, Grid, GridItem, Label } from '@patternfly/react-core'
 import { Chart, ChartAxis, ChartGroup, ChartLine, ChartThemeColor } from '@patternfly/react-charts/victory'
 import { Empty } from '../components/States'
-import { useChart } from '../../../api/hooks'
-import { useDisplay } from '../../../graph/display'
+import { HISTORY_CHARTS, useHistoryChart } from '../../../model/topology'
 
 // Historical charts, from the metrics backend.
 //
@@ -13,12 +12,6 @@ import { useDisplay } from '../../../graph/display'
 // Everything here is an AGGREGATE and is labelled as one: the cardinality rule
 // keeps ids out of metric labels, so no point can identify a conversation. Live,
 // per-item detail lives in the activity stream and /status.
-
-const CHARTS: { key: string; title: string; unit: string }[] = [
-  { key: 'throughput', title: 'Conversations started', unit: '/min' },
-  { key: 'runDurationP95', title: 'Run duration (p95)', unit: 's' },
-  { key: 'queueDepth', title: 'Channel ops queued', unit: '' },
-]
 
 export function HistoryCharts({
   available, expanded, onToggle,
@@ -37,7 +30,7 @@ export function HistoryCharts({
         <CardBody>
           {available ? (
             <Grid hasGutter>
-              {CHARTS.map((c) => (
+              {HISTORY_CHARTS.map((c) => (
                 <GridItem key={c.key} md={4}>
                   <HistoryChart chartKey={c.key} title={c.title} unit={c.unit} />
                 </GridItem>
@@ -65,11 +58,7 @@ function HistoryChart({
   title: string
   unit: string
 }) {
-  const windowSeconds = useDisplay((s) => s.windowSeconds)
-  // Charts deliberately ask for a LONGER range than the graph's window: their
-  // whole purpose is the horizon the buffer cannot reach.
-  const range = Math.max(windowSeconds, 6 * 3600)
-  const { data, error, isLoading } = useChart(chartKey, range, true)
+  const { data, error, isLoading } = useHistoryChart(chartKey)
 
   return (
     <Card>

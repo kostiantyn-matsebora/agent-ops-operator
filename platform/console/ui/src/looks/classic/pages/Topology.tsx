@@ -1,36 +1,15 @@
-import { useMemo } from 'react'
 import {
   Alert, Card, CardBody, CardTitle, Label, PageSection, Stack, StackItem,
 } from '@patternfly/react-core'
 import { ErrorState, Loading } from '../components/States'
-import { useActivityBuffer, useTopology } from '../../../api/hooks'
-import { useDisplay } from '../../../graph/display'
-import { useStream } from '../../../api/stream'
+import { useTopologyPage } from '../../../model/topology'
 import { Graph } from '../../../graph/Graph'
-import { mergeEvents } from '../../../graph/hops'
 import { PlainText } from '../components/Text'
 import { Crumbs } from '../components/Crumbs'
 import { HistoryCharts } from './History'
 
 export function TopologyPage() {
-  const windowSeconds = useDisplay((s) => s.windowSeconds)
-  const historyOpen = useDisplay((s) => s.historyOpen)
-  const { data, isLoading, error } = useTopology(windowSeconds)
-  const liveEvents = useStream((s) => s.events)
-  // What the console held when the page opened, then the stream on top: the
-  // window's rates and a replay read the same hops a pulse does.
-  const buffer = useActivityBuffer()
-  const events = useMemo(() => mergeEvents(buffer.data?.events ?? [], liveEvents), [buffer.data, liveEvents])
-  const bufferStart = data?.oldestEvent ? Date.parse(data.oldestEvent) : undefined
-
-  // A window longer than the buffer holds is reported as such rather than
-  // rendered as a quiet one — "we cannot see that far back" and "nothing
-  // happened" are different claims.
-  const bufferCovers = useMemo(() => {
-    if (!data?.oldestEvent) return true
-    const oldest = new Date(data.oldestEvent).getTime()
-    return Date.now() - oldest >= windowSeconds * 1000
-  }, [data?.oldestEvent, windowSeconds])
+  const { data, isLoading, error, events, bufferStart, bufferCovers, historyOpen, toggleHistory } = useTopologyPage()
 
   if (isLoading && !data) return <Loading />
   if (error || !data) return <ErrorState title="Could not load the topology">{String(error)}</ErrorState>
@@ -114,7 +93,7 @@ export function TopologyPage() {
           <HistoryCharts
             available={data.metricsAvailable}
             expanded={historyOpen}
-            onToggle={() => useDisplay.getState().setHistoryOpen(!historyOpen)}
+            onToggle={toggleHistory}
           />
         </StackItem>
       </Stack>

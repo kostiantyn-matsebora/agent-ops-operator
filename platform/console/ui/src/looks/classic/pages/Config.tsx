@@ -7,7 +7,10 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link, useParams } from 'react-router-dom'
 import { useState, type ReactNode } from 'react'
 import { Empty, ErrorState, Loading } from '../components/States'
-import { useDetail, useInventory, useKinds, usePipelineIcon } from '../../../api/hooks'
+import {
+  CHIP_COLUMNS, STATUS_COLUMNS, columnsFor, useConfigDetail, useConfigInventory,
+  useConfigKinds, usePipelineIconOf,
+} from '../../../model/config'
 import { PlainText } from '../components/Text'
 import { Crumbs } from '../components/Crumbs'
 import { Icon } from '../components/Icon'
@@ -17,14 +20,14 @@ import { ConditionChips, HealthChip, KeyValueChips, MetadataCard, age } from '..
 import { styleFor } from '../../../graph/shapes'
 import type { InventoryRow } from '../../../api/types'
 import { SignalFilters, SignalPhaseLabel, SignalRoutingCard } from './SignalRouting'
-import { FILTER_ALL, SIGNAL_PHASES, asSignalStatus, filterSignalRows, signalFilterOptions } from './signals'
+import { FILTER_ALL, SIGNAL_PHASES, asSignalStatus, filterSignalRows, signalFilterOptions } from '../../../model/signals'
 
 // Per-kind inventory → detail. Read-only, and that is a position rather than a
 // gap: Pipelines are the wiring, the wiring is GitOps-managed, and a console
 // that edits them competes with helmfile.
 
 export function ConfigPage() {
-  const { data, isLoading, error } = useKinds()
+  const { data, isLoading, error } = useConfigKinds()
   if (isLoading) return <Loading />
   if (error || !data) return <ErrorState title="Could not load kinds">{String(error)}</ErrorState>
   return (
@@ -82,53 +85,6 @@ function KindGlyph({ kind, size = 18 }: { kind: string; size?: number }) {
   )
 }
 
-/**
- * Kind-specific columns. A Pipeline row is not a Channel row, and a generic
- * table of name+age would make every kind equally uninformative.
- */
-function columnsFor(kind: string): string[] {
-  switch (kind) {
-    case 'pipelines':
-      // A Pipeline using capabilityRef carries no profile/toolsets/mcpConfigs
-      // columns — see kindColumns in configapi.go — so those cells render "—"
-      // for it, and `capability` fills in instead.
-      return ['profile', 'capability', 'sources', 'channels', 'toolsets', 'toolsMode', 'mcpConfigs']
-    case 'coordinators':
-      return ['sources', 'escalatesTo', 'capability', 'profile', 'agents']
-    case 'agentcapabilities':
-      return ['profile', 'runtime', 'toolsets', 'mcpConfigs']
-    case 'channels':
-      return ['adapter', 'served']
-    case 'signalsources':
-      return ['adapter', 'served', 'wired']
-    case 'agentprofiles':
-      return ['runtime', 'repository']
-    case 'channeladapters':
-    case 'signaladapters':
-      return ['image', 'servedBy']
-    case 'agentruntimes':
-      return ['image']
-    case 'mcptoolsets':
-      return ['tools']
-    case 'mcpconfigs':
-      return ['servers']
-    case 'conversations':
-      return ['phase', 'profile', 'coordinator', 'causedBy']
-    case 'signals':
-      // console-signals: "source, initiationId, phase and age"
-      // — age is the generic column every kind already gets.
-      return ['source', 'initiationId', 'phase']
-    default:
-      return []
-  }
-}
-
-/** Columns whose values are lists worth rendering as chips rather than prose. */
-const CHIP_COLUMNS = new Set([
-  'sources', 'channels', 'toolsets', 'mcpConfigs', 'tools', 'servers', 'escalatesTo', 'agents',
-])
-const STATUS_COLUMNS = new Set(['served', 'wired'])
-
 function ColumnValue({ name, value }: { name: string; value?: string }) {
   if (!value) return <small>—</small>
   if (name === 'phase' && SIGNAL_PHASES.has(value)) {
@@ -164,7 +120,7 @@ function ColumnValue({ name, value }: { name: string; value?: string }) {
 
 export function ConfigKindPage() {
   const { kind = '' } = useParams()
-  const { data, isLoading, error } = useInventory(kind)
+  const { data, isLoading, error } = useConfigInventory(kind)
   const cols = columnsFor(kind)
   // console-signals: "filterable by source and by phase" — this kind's own
   // addition, kept LOCAL to this page (no global store for a filter nobody
@@ -270,9 +226,9 @@ export function ConfigKindPage() {
 
 export function ConfigDetailPage() {
   const { kind = '', name = '' } = useParams()
-  const { data, isLoading, error } = useDetail(kind, name)
+  const { data, isLoading, error } = useConfigDetail(kind, name)
   const [tab, setTab] = useState<string | number>(0)
-  const iconFor = usePipelineIcon()
+  const iconFor = usePipelineIconOf()
   if (isLoading) return <Loading />
   if (error || !data) return <ErrorState title="Not found">{String(error)}</ErrorState>
   // The object's own declaration, read off its spec: a Pipeline that is not
@@ -447,7 +403,7 @@ export function ConfigDetailPage() {
  * that runs, and the console's whole claim is that it cannot disagree with the
  * system.
  */
-function ResolvedCard({ detail }: { detail: NonNullable<ReturnType<typeof useDetail>['data']> }) {
+function ResolvedCard({ detail }: { detail: NonNullable<ReturnType<typeof useConfigDetail>['data']> }) {
   return (
     <Card>
       <CardTitle>Resolved capabilities</CardTitle>

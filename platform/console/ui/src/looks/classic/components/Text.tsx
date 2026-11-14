@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import { plain } from '../../../model/text'
 
 // PLAIN TEXT, ALWAYS.
 //
@@ -18,24 +19,9 @@ import type { ReactElement } from 'react'
 // object can carry anything, and "no tag reaches the DOM" is a property worth
 // keeping independent of what any upstream promises this week.
 
-const TAG = /<\/?[a-zA-Z][^>]*>/g
-const ENTITIES: Record<string, string> = {
-  '&amp;': '&',
-  '&lt;': '<',
-  '&gt;': '>',
-  '&quot;': '"',
-  '&#39;': "'",
-  '&nbsp;': ' ',
-}
-
-/**
- * plain strips the chat HTML subset and decodes the entities the adapters
- * escape, so text arrives as the person actually typed it.
- */
-export function plain(input: string): string {
-  const withoutTags = input.replace(TAG, '')
-  return withoutTags.replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (m) => ENTITIES[m] ?? m)
-}
+// The stripping rule itself is the model's (model/text.ts), shared by every
+// look; re-exported so this look's callers keep one import.
+export { plain }
 
 export interface PlainTextProps {
   children?: string | null

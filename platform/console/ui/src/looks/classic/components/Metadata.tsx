@@ -4,7 +4,8 @@ import {
 } from '@patternfly/react-core'
 import type { Condition, Health, ObjectMeta } from '../../../api/types'
 import { PlainText } from './Text'
-import { healthVariant } from '../../../api/hooks'
+import { healthTone } from '../../../model/overview'
+import { objectAge } from '../../../model/config'
 
 // Object metadata, shown rather than summarized.
 //
@@ -13,16 +14,8 @@ import { healthVariant } from '../../../api/hooks'
 // this console exists to remove. Everything the watch cache holds is shown; the
 // cache holds no more than the read-only Role can see.
 
-export function age(iso?: string): string {
-  if (!iso) return '—'
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return '—'
-  const s = Math.max(0, (Date.now() - then) / 1000)
-  if (s < 60) return `${Math.round(s)}s`
-  if (s < 3600) return `${Math.round(s / 60)}m`
-  if (s < 86400) return `${Math.round(s / 3600)}h`
-  return `${Math.round(s / 86400)}d`
-}
+/** An object's age — the model's (model/config.ts), named here as this look's callers know it. */
+export const age = objectAge
 
 /** Conditions as chips — the shape an operator scans rather than reads. */
 export function ConditionChips({ conditions }: { conditions?: Condition[] | null }) {
@@ -57,7 +50,7 @@ export function ConditionChips({ conditions }: { conditions?: Condition[] | null
 export function HealthChip({ health }: { health: Health }) {
   if (health === 'none') return <small>reports none</small>
   return (
-    <Label isCompact status={healthVariant(health)}>
+    <Label isCompact status={healthTone(health)}>
       {health}
     </Label>
   )

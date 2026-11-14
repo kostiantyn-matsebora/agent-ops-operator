@@ -1,7 +1,7 @@
-import type { InventoryRow, SignalPhase, SignalStatusWire } from '../../../api/types'
+import type { InventoryRow, SignalPhase, SignalStatusWire } from '../api/types'
 
 // Pure helpers for the Signal kind's extra behaviour on top of the generic
-// Configuration pages (Config.tsx): the source/phase filters the inventory
+// Configuration pages, in every look: the source/phase filters the inventory
 // adds, and reading the per-claimant routing record off the detail object's
 // own `status` — which the BFF passes through verbatim, so there is nothing
 // here to project, only to NAME.
@@ -41,7 +41,7 @@ export function filterSignalRows(rows: InventoryRow[], source: string, phase: st
  * phase vocabulary (Working/Idle/Closed) keeps its plain rendering. */
 export const SIGNAL_PHASES = new Set<string>(['Pending', 'Routed', 'PartiallyRouted', 'Dropped', 'Failed'])
 
-/** PatternFly Label status for a signal's phase — green once routed, red where nothing was, amber in between. */
+/** The status tone for a signal's phase (a PatternFly Label status, which every look maps to its own colours) — green once routed, red where nothing was, amber in between. */
 export function signalPhaseStatus(phase?: string): 'success' | 'danger' | 'warning' | 'info' | undefined {
   switch (phase as SignalPhase | undefined) {
     case 'Routed':
@@ -58,7 +58,7 @@ export function signalPhaseStatus(phase?: string): 'success' | 'danger' | 'warni
   }
 }
 
-/** PatternFly Label status for one claimant's routing state — green once routed, red failed, amber skipped, blue still routing. */
+/** The status tone for one claimant's routing state — green once routed, red failed, amber skipped, blue still routing. */
 export function claimantStateStatus(state?: string): 'success' | 'danger' | 'warning' | 'info' {
   switch (state) {
     case 'Routed':
