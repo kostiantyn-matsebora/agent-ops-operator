@@ -32,7 +32,7 @@
 - [ ] 5.1a Bump the claimed specification version to `2.4.0` in every shipped signal adapter that states one, and in the page's enumeration of them.
 - [ ] 5.2 `docs/concepts.md`: the `Signal` is created by the consumer after acceptance.
 - [ ] 5.3 `docs/CHANGELOG.md`: the `200` to `202` move and the note that no adapter changes.
-- [ ] 5.4 At archive, after `async-command-bus` is archived, fold the `ingest-signal` row and the `in.signal` queue entry into `async-operations` and `command-bus`, and drop the `Wired=False` refusal from the signal accept steps (design D-7).
+- [ ] 5.4 At archive, after `async-command-bus` is archived, fold the `ingest-signal` row and the `in.signal` queue entry into `async-operations` and `command-bus`, and drop the `Wired=False` refusal from the signal accept steps (design D-7). This change's accept step already makes no such refusal, so the drop only removes it from the published specs `async-command-bus` leaves behind.
 
 ### Adopter site
 

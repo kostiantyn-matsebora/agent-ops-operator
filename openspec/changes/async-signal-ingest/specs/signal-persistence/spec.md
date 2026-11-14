@@ -14,7 +14,8 @@ names the consumer's create.
   already exists. The consumer then creates and changes nothing, records a
   duplicate activity event and succeeds.
 
-Publication SHALL look up no existing `Signal` and make NO routing decision:
+Publication SHALL look up no existing `Signal`, except by `signalId` for the
+duplicate rule above, and make NO routing decision:
 
 - no claim lookup, no `Wired` check, no ambiguity check
 - no cooldown consulted or spent
@@ -32,11 +33,11 @@ Every admitted signal that can open or continue a conversation SHALL be
 published this way — machine kinds, an unaddressed chat message, and an
 addressed `/<pipeline> <task>`.
 
-A chat COMMAND that only answers — the listing command, a bare
-`/<pipeline>` asking for its task, `/close` or `/exit` sent on a general
-surface — opens and continues nothing, so it is not a signal: the consumer
-answers it in place and persists no `Signal`. The request no longer answers
-it.
+A chat COMMAND that only answers opens and continues nothing, so it is not a signal:
+
+- The commands are the listing command, a bare `/<pipeline>` asking for its task, and `/close` or `/exit` sent on a general surface.
+- The consumer answers it in place and persists no `Signal`.
+- The request no longer answers it.
 
 The response SHALL be written only after every admitted signal's task is
 durably enqueued. A signal whose task cannot be enqueued SHALL NOT be

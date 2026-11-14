@@ -25,7 +25,7 @@ Before replying, `POST /signal/inbound` SHALL, in this order:
 1. authenticate the caller and check its source scope
 2. validate the body shape and every signal (`initiationId`, `severity`, `signalId`)
 3. refuse an unknown source with `404`
-4. record the "signal received" activity receipt for every signal
+4. record the "signal received" activity receipt for every signal, including one the filters drop next (the receipt is the hop the adapter made, as today)
 5. apply the source's `attributeFilters`
 6. durably enqueue one task per admitted signal
 
