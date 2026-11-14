@@ -42,6 +42,7 @@ export interface LookEntry {
 
 export const LOOKS: readonly LookEntry[] = [
   { id: 'classic', label: 'Classic', load: () => import('./classic') },
+  { id: 'workspace', label: 'Workspace', load: () => import('./workspace') },
 ]
 
 /**

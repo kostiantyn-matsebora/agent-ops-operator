@@ -265,3 +265,24 @@ export function useMemberExchange(name: string, enabled = true) {
     result: lastResult(runs),
   }
 }
+
+/**
+ * Which reply each member belongs under: the reply its invocation is anchored
+ * to (`invokeCardAt`), else the first reply after it, else the last reply.
+ * Keyed by the reply's message id, members in invocation order.
+ */
+export function invokedByReply(
+  messages: Message[],
+  members: { member: ConversationSummary; at: number }[],
+): Map<string, ConversationSummary[]> {
+  const replies = messages
+    .filter((m) => m.kind === 'agent')
+    .map((m) => ({ id: m.id, at: Date.parse(m.at) || 0 }))
+  const out = new Map<string, ConversationSummary[]>()
+  if (replies.length === 0) return out
+  for (const { member, at } of [...members].sort((a, b) => a.at - b.at)) {
+    const reply = replies.find((r) => r.at >= at) ?? replies[replies.length - 1]
+    out.set(reply.id, [...(out.get(reply.id) ?? []), member])
+  }
+  return out
+}

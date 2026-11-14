@@ -1,0 +1,1915 @@
+/*
+ * The workspace look.
+ *
+ * Every rule here is scoped to `.wk`, the look's root, or to the document
+ * while `data-look="workspace"` is on it — the stylesheet loads with the look,
+ * and a viewer switching to another look must not keep any of it.
+ *
+ * COLOURS COME FROM THE SHARED `--ao-*` TOKENS (theme/theme.css). The `--wk-*`
+ * tokens below are what the prototype needed and the shared set lacks — soft
+ * status grounds, the viewer's own bubble, the signal card, geometry. They are
+ * this look's alone and are NOT copied to the docs site (design D6): the
+ * palette rule in palette-and-mark.md governs `--ao-*` only.
+ *
+ * Geometry, spacing and timings are the prototype's
+ * (openspec/changes/console-visual-refresh/mockup/console.html).
+ */
+
+.wk {
+  --wk-font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --wk-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --wk-gutter: 16px;
+  --wk-gap: 12px;
+  --wk-radius: 10px;
+  --wk-radius-sm: 6px;
+  --wk-control-h: 32px;
+  --wk-touch: 44px;
+  --wk-row-h: 84px;
+  --wk-nav-collapsed: 56px;
+  --wk-list-collapsed: 64px;
+  --wk-drawer-w: 260px;
+  /* The two resizable panes' widths, overridden inline from the stored layout. */
+  --wk-navw: 240px;
+  --wk-listw: 340px;
+
+  --wk-warn-soft: #fbefd9;
+  --wk-danger-soft: #f9e1e5;
+  --wk-ok-soft: #dcf1e5;
+  --wk-mine: #d8ece9;
+  --wk-on-mine: #12302d;
+  --wk-sig: #e8edf5;
+  --wk-sig-edge: #8da2c4;
+  --wk-scrim: rgb(10 14 16 / 50%);
+  --wk-shadow: 0 6px 24px rgb(0 0 0 / 18%);
+}
+
+[data-theme='dark'] .wk {
+  --wk-warn-soft: #352a12;
+  --wk-danger-soft: #3d1a22;
+  --wk-ok-soft: #163a28;
+  --wk-mine: #1d3f3d;
+  --wk-on-mine: #e1efed;
+  --wk-sig: #1f2733;
+  --wk-sig-edge: #5c7396;
+  --wk-shadow: 0 6px 24px rgb(0 0 0 / 45%);
+}
+
+/* The page never scrolls: the panes do, each inside itself. */
+html[data-look='workspace'],
+html[data-look='workspace'] body,
+html[data-look='workspace'] #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+.wk {
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 12px max(var(--wk-gutter), env(safe-area-inset-right, 0px)) 12px max(var(--wk-gutter), env(safe-area-inset-left, 0px));
+  background: var(--ao-canvas);
+  color: var(--ao-text);
+  font: 400 14px/1.45 var(--wk-font);
+}
+
+.wk *,
+.wk *::before,
+.wk *::after {
+  box-sizing: border-box;
+}
+
+.wk button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.wk :focus-visible {
+  outline: 2px solid var(--ao-brand);
+  outline-offset: 2px;
+}
+
+.wk-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.wk-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---- controls ---------------------------------------------------------- */
+
+.wk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--ao-border-strong);
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  border-radius: var(--wk-radius-sm);
+  padding: 5px 12px;
+  min-height: var(--wk-control-h);
+  white-space: nowrap;
+}
+
+.wk-btn:hover {
+  background: var(--ao-surface-alt);
+}
+
+.wk-btn.primary {
+  background: var(--ao-brand);
+  border-color: var(--ao-brand);
+  color: var(--ao-on-brand);
+  font-weight: 600;
+}
+
+.wk-btn.primary:hover {
+  background: var(--ao-brand-strong);
+}
+
+.wk-btn.danger {
+  color: var(--ao-danger);
+  border-color: color-mix(in srgb, var(--ao-danger) 50%, var(--ao-border));
+}
+
+.wk-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wk-btn.link {
+  border: 0;
+  background: none;
+  color: var(--ao-brand-strong);
+  padding: 0 4px;
+  min-height: 0;
+  font-weight: 600;
+}
+
+.wk-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--ao-text-subtle);
+  border-radius: var(--wk-radius-sm);
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 6px;
+}
+
+.wk-icon-btn:hover {
+  color: var(--ao-text);
+  background: var(--ao-surface-alt);
+}
+
+.wk svg.wk-i {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wk svg.wk-chev {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--wk-ok-soft);
+  color: var(--ao-success);
+}
+
+.wk-chip i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.wk-chip.live i {
+  animation: wk-pulse 2s infinite;
+}
+
+.wk-chip.off {
+  background: var(--wk-warn-soft);
+  color: var(--ao-warning);
+}
+
+.wk-chip.flight {
+  background: var(--ao-brand-soft);
+  color: var(--ao-brand-strong);
+}
+
+.wk-chip.who {
+  background: var(--ao-brand);
+  color: var(--ao-on-brand);
+}
+
+.wk-chip.quiet {
+  background: var(--ao-surface-alt);
+  color: var(--ao-text-subtle);
+}
+
+.wk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--ao-surface-alt);
+  color: var(--ao-text-subtle);
+}
+
+.wk-pill.working {
+  background: var(--ao-brand-soft);
+  color: var(--ao-brand-strong);
+}
+
+.wk-pill.warn {
+  background: var(--wk-warn-soft);
+  color: var(--ao-warning);
+}
+
+.wk-pill.bad {
+  background: var(--wk-danger-soft);
+  color: var(--ao-danger);
+}
+
+.wk-pill.ok {
+  background: var(--wk-ok-soft);
+  color: var(--ao-success);
+}
+
+.wk-spin {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid currentcolor;
+  border-right-color: transparent;
+  animation: wk-spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+.wk-seg {
+  display: inline-flex;
+  border: 1px solid var(--ao-border-strong);
+  border-radius: var(--wk-radius-sm);
+  overflow: hidden;
+}
+
+.wk-seg button {
+  border: 0;
+  background: var(--ao-surface);
+  padding: 4px 12px;
+  min-height: var(--wk-control-h);
+  min-width: 40px;
+}
+
+.wk-seg button[aria-pressed='true'] {
+  background: var(--ao-brand-soft);
+  color: var(--ao-brand-strong);
+  font-weight: 600;
+}
+
+.wk-look select {
+  font: inherit;
+  color: var(--ao-text);
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border-strong);
+  border-radius: var(--wk-radius-sm);
+  min-height: var(--wk-control-h);
+  padding: 2px 6px;
+}
+
+.wk-look label {
+  color: var(--ao-text-subtle);
+  font-size: 12px;
+}
+
+/* ---- the header -------------------------------------------------------- */
+
+.wk-top {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  flex: none;
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--wk-radius);
+  padding: 8px 12px;
+  margin-bottom: var(--wk-gap);
+}
+
+.wk-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.wk-ham {
+  min-width: 44px;
+  padding: 0 10px;
+}
+
+.wk-sp {
+  flex: 1;
+}
+
+/* ---- the columns ------------------------------------------------------- */
+
+.wk-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--wk-navw) var(--wk-gap) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.wk-cols[data-nav='hidden'] {
+  grid-template-columns: 0 0 minmax(0, 1fr);
+}
+
+.wk-pane {
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--wk-radius);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wk-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A splitter: a 12px gutter that is also a keyboard- and pointer-driven separator. */
+.wk-spl {
+  cursor: col-resize;
+  position: relative;
+  touch-action: none;
+}
+
+.wk-spl::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.wk-spl:hover::after,
+.wk-spl:focus-visible::after,
+.wk-spl.drag::after {
+  background: var(--ao-brand);
+}
+
+.wk-spl.off {
+  pointer-events: none;
+  cursor: default;
+}
+
+/* ---- the navigation panel --------------------------------------------- */
+
+.wk-side {
+  display: flex;
+  flex-direction: column;
+}
+
+.wk-cols[data-nav='hidden'] .wk-side {
+  visibility: hidden;
+  border: 0;
+}
+
+.wk-sidein {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 8px;
+}
+
+.wk-side h3 {
+  margin: 12px 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ao-text-subtle);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wk-side h3:first-child {
+  margin-top: 2px;
+}
+
+.wk-side ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wk-nv {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  border-radius: var(--wk-radius-sm);
+  padding: 7px 10px;
+  color: var(--ao-text);
+  text-decoration: none;
+  position: relative;
+}
+
+.wk-nv:hover {
+  background: var(--ao-surface-alt);
+  color: var(--ao-text);
+  text-decoration: none;
+}
+
+.wk-nv[aria-current='page'],
+.wk-nv[aria-pressed='true'] {
+  background: var(--ao-brand-soft);
+  color: var(--ao-brand-strong);
+  font-weight: 600;
+}
+
+.wk-nv .lb {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.wk-nv .lb span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wk-nv b {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ao-text-subtle);
+}
+
+.wk-nv[aria-current='page'] b,
+.wk-nv[aria-pressed='true'] b {
+  color: inherit;
+}
+
+.wk-sidefoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-top: 1px solid var(--ao-border);
+  color: var(--ao-text-subtle);
+  font-size: 12px;
+}
+
+.wk-side.collapsed .wk-sidein {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.wk-side.collapsed .wk-nv {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+}
+
+.wk-side.collapsed .wk-nv .lb span {
+  display: none;
+}
+
+/* Collapsed, a count stays: a badge on the icon, never dropped. */
+.wk-side.collapsed .wk-nv b {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  background: var(--ao-brand);
+  color: var(--ao-on-brand);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 5px;
+}
+
+.wk-side.collapsed .wk-sidefoot {
+  justify-content: center;
+}
+
+.wk-scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--wk-scrim);
+  z-index: 15;
+  border: 0;
+  padding: 0;
+}
+
+/* ---- pages ------------------------------------------------------------- */
+
+.wk-page {
+  overflow: auto;
+  padding: 16px 22px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+}
+
+.wk-page h1 {
+  font-size: 22px;
+  margin: 0;
+  font-weight: 600;
+}
+
+.wk-card {
+  border: 1px solid var(--ao-border);
+  border-radius: var(--wk-radius);
+  padding: 14px 16px;
+  min-width: 0;
+  background: var(--ao-surface);
+}
+
+.wk-empty {
+  margin: auto;
+  text-align: center;
+  color: var(--ao-text-subtle);
+  padding: 24px;
+}
+
+.wk-empty h2 {
+  color: var(--ao-text);
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.wk-login {
+  margin: auto;
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wk-login input,
+.wk-field {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--ao-border-strong);
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  border-radius: var(--wk-radius-sm);
+  padding: 6px 10px;
+  font: inherit;
+  min-height: var(--wk-control-h);
+}
+
+.wk-note {
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+}
+
+.wk-alert {
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--wk-warn-soft);
+  color: var(--ao-text);
+  border: 1px solid color-mix(in srgb, var(--ao-warning) 35%, var(--ao-border));
+}
+
+.wk-alert.bad {
+  background: var(--wk-danger-soft);
+  border-color: color-mix(in srgb, var(--ao-danger) 35%, var(--ao-border));
+}
+
+/* ---- the conversations workspace -------------------------------------- */
+
+.wk-conv {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--wk-listw) var(--wk-gap) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.wk-ph {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ao-border);
+}
+
+.wk-ph h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.wk-search {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ao-border);
+}
+
+.wk-tools {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ao-border);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.wk-tools label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--ao-text-subtle);
+}
+
+.wk-scopes {
+  display: none;
+  gap: 6px;
+  padding: 8px 14px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--ao-border);
+  flex: none;
+}
+
+.wk-scopes button {
+  flex: none;
+  border: 1px solid var(--ao-border);
+  background: var(--ao-surface);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ao-text-subtle);
+}
+
+.wk-scopes button[aria-pressed='true'] {
+  background: var(--ao-brand-soft);
+  border-color: transparent;
+  color: var(--ao-brand-strong);
+}
+
+.wk-rows {
+  overflow-y: auto;
+  flex: 1;
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A ROW HAS ONE HEIGHT, whatever it shows: a status, a badge, a lifecycle bar
+   or a longer preview never changes it (console-workspace-feedback). */
+.wk-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px 36px minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0 10px;
+  height: var(--wk-row-h);
+  padding: 10px 14px 10px 10px;
+  border-bottom: 1px solid var(--ao-border);
+  transition: background 0.6s;
+}
+
+/* Above its neighbours while its menu is open. */
+.wk-row:focus-within {
+  z-index: 3;
+}
+
+.wk-row:hover {
+  background: var(--ao-surface-alt);
+}
+
+.wk-row[aria-current='true'] {
+  background: var(--ao-brand-soft);
+}
+
+.wk-row.mem {
+  padding-left: 34px;
+}
+
+.wk-row.fail {
+  box-shadow: inset 3px 0 0 var(--ao-danger);
+}
+
+.wk-row.arrived {
+  animation: wk-rowin 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* The whole row opens the conversation; the controls inside sit above it. */
+.wk-row .open {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  z-index: 0;
+}
+
+.wk-row .exp,
+.wk-row .kb {
+  position: relative;
+  z-index: 1;
+}
+
+.wk-row .exp {
+  width: 18px;
+  border: 0;
+  background: none;
+  color: var(--ao-text-subtle);
+  padding: 0;
+  align-self: start;
+  margin-top: 8px;
+  min-height: 0;
+}
+
+.wk-av {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent);
+  position: relative;
+  flex: none;
+}
+
+.wk-av.agent {
+  background: var(--ao-brand-soft);
+  color: var(--ao-brand-strong);
+}
+
+.wk-av .d {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--ao-surface);
+  background: var(--ao-neutral);
+}
+
+.wk-av .d.idle {
+  background: var(--ao-success);
+}
+
+.wk-av .d.working {
+  background: var(--ao-brand);
+}
+
+.wk-av .d.pending {
+  background: var(--ao-warning);
+}
+
+.wk-av .d.failed {
+  background: var(--ao-danger);
+}
+
+.wk-row .txt {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.wk-row .name {
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wk-row.unread .name {
+  font-weight: 600;
+}
+
+.wk-row .l2 {
+  color: var(--ao-text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wk-row .l2.err {
+  color: var(--ao-danger);
+}
+
+.wk-row .l3 {
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: 18px;
+}
+
+/* The lifecycle line is RESERVED: 2px of height on every row, filled only
+   while the conversation is pending or working. */
+.wk-row .lc {
+  height: 2px;
+  margin-top: 6px;
+  display: flex;
+  gap: 3px;
+  flex: none;
+}
+
+.wk-row .lc s {
+  flex: 1;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ao-border);
+  text-decoration: none;
+}
+
+.wk-row .lc s.on {
+  background: var(--ao-brand);
+}
+
+.wk-row .lc s.cur {
+  background: var(--ao-brand);
+  animation: wk-pulse 1.4s infinite;
+}
+
+.wk-row .st {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: 150px;
+  pointer-events: none;
+}
+
+.wk-row .tl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wk-row .tl .wk-pill {
+  padding: 0 7px;
+}
+
+.wk-row .time {
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+  flex: none;
+}
+
+/* Row actions: shown on hover or focus, and always on a touch screen. */
+.wk-row .kb {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.wk-row:hover .kb,
+.wk-row:focus-within .kb,
+.wk-row[aria-current='true'] .kb,
+.wk-row .kb[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.wk-menu {
+  position: absolute;
+  z-index: 8;
+  right: 8px;
+  top: calc(100% - 6px);
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border-strong);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 180px;
+  box-shadow: var(--wk-shadow);
+  margin: 0;
+  list-style: none;
+}
+
+.wk-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 8px 10px;
+  border-radius: var(--wk-radius-sm);
+}
+
+.wk-menu button:hover,
+.wk-menu button:focus-visible {
+  background: var(--ao-surface-alt);
+}
+
+.wk-pane.lp {
+  position: relative;
+}
+
+.wk-pane.lp.collapsed .wk-ph {
+  justify-content: center;
+  padding: 10px 4px;
+}
+
+.wk-pane.lp.collapsed .wk-ph h2,
+.wk-pane.lp.collapsed .wk-search,
+.wk-pane.lp.collapsed .wk-scopes,
+.wk-pane.lp.collapsed .wk-tools {
+  display: none;
+}
+
+/* Collapsed, a row is its avatar — and its unread count, as a badge on it. */
+.wk-pane.lp.collapsed .wk-row {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  padding: 10px 4px;
+  height: 64px;
+}
+
+.wk-pane.lp.collapsed .wk-row > :not(.wk-av, .open) {
+  display: none;
+}
+
+.wk-av .bd {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  background: var(--ao-brand);
+  color: var(--ao-on-brand);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+}
+
+/* ---- the thread -------------------------------------------------------- */
+
+.wk-th {
+  padding: 10px 14px 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wk-th h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  min-width: 0;
+  flex: 1 1 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wk-th .back {
+  display: none;
+}
+
+.wk-th .crumb {
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.wk-th .acts {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.wk-brief {
+  padding: 0 14px 8px;
+  color: var(--ao-text-subtle);
+  margin: 0;
+}
+
+.wk-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 6px 14px 10px;
+  border-bottom: 1px solid var(--ao-border);
+  overflow-x: auto;
+  flex: none;
+}
+
+.wk-tabs button {
+  flex: none;
+  border: 1px solid var(--ao-border);
+  background: var(--ao-surface);
+  border-radius: 999px;
+  padding: 3px 14px;
+  color: var(--ao-text-subtle);
+}
+
+.wk-tabs button[aria-selected='true'] {
+  background: var(--ao-brand-soft);
+  border-color: transparent;
+  color: var(--ao-brand-strong);
+  font-weight: 600;
+}
+
+/* The conversation's start, at the right end of the line under the tabs. */
+.wk-dline {
+  position: relative;
+  height: 0;
+  z-index: 2;
+  flex: none;
+}
+
+.wk-dline time {
+  position: absolute;
+  right: 14px;
+  top: -9px;
+  background: var(--ao-surface);
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+  white-space: nowrap;
+}
+
+.wk-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+}
+
+.wk-dv {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ao-text-subtle);
+  font-size: 12px;
+}
+
+.wk-dv::before,
+.wk-dv::after {
+  content: '';
+  height: 1px;
+  background: var(--ao-border);
+  flex: 1;
+}
+
+/* One message, wrapped so its copy control can sit on it without taking space. */
+.wk-r {
+  position: relative;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--ao-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wk-r.nb {
+  border-bottom: 0;
+}
+
+.wk-ent {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.wk-ent .hd {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.wk-ent .who {
+  font-weight: 600;
+}
+
+.wk-at {
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+  margin-left: auto;
+}
+
+.wk-ttl {
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.35;
+  margin: 2px 0 4px;
+  text-wrap: balance;
+}
+
+.wk-sec {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.wk-sec > b {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+  margin-bottom: 2px;
+}
+
+.wk-md > :first-child {
+  margin-top: 0;
+}
+
+.wk-md > :last-child {
+  margin-bottom: 0;
+}
+
+.wk-md p {
+  margin: 0 0 6px;
+}
+
+.wk-md ul,
+.wk-md ol {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.wk-md ul {
+  list-style: disc outside;
+}
+
+.wk-md ol {
+  list-style: decimal outside;
+}
+
+.wk-md a {
+  color: var(--ao-brand-strong);
+}
+
+.wk-md table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.wk-md th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ao-text-subtle);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ao-border);
+}
+
+.wk-md td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ao-border);
+  vertical-align: top;
+}
+
+.wk-tw {
+  overflow-x: auto;
+  margin: 2px 0;
+}
+
+.wk-md pre {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: var(--wk-radius-sm);
+  background: color-mix(in srgb, var(--ao-text) 6%, transparent);
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 22em;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* QUIET INLINE CODE: monospace and a faint ground, read as part of the line
+   rather than as a row of boxes (console-workspace-look). */
+.wk code {
+  font-family: var(--wk-mono);
+  color: color-mix(in srgb, var(--ao-text) 65%, transparent);
+  background: color-mix(in srgb, var(--ao-text) 2.5%, transparent);
+  font-size: 0.9em;
+  font-weight: inherit;
+  padding: 0.08em 0.3em;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.wk pre code,
+.wk pre code.cmd {
+  display: inline;
+  margin: 0;
+
+  color: inherit;
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* A command long enough to wrap is its own block. */
+.wk code.cmd {
+  display: block;
+  margin: 6px 0;
+  padding: 6px 10px;
+  border-radius: var(--wk-radius-sm);
+  background: color-mix(in srgb, var(--ao-text) 6%, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.wk-mr {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+/* A run-detail row: a short rule, a fact, and its one control. */
+.wk-rm {
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding-left: 14px;
+  position: relative;
+  flex-wrap: wrap;
+}
+
+.wk-rm::before {
+  content: '';
+  width: 10px;
+  height: 1px;
+  background: var(--ao-border-strong);
+  position: absolute;
+  left: 0;
+  top: 50%;
+}
+
+.wk-rm.sub {
+  padding-left: 28px;
+}
+
+.wk-rm.sub::before {
+  left: 14px;
+}
+
+.wk-lnk {
+  border: 0;
+  background: none;
+  color: var(--ao-brand-strong);
+  padding: 0;
+  min-height: 0;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  font-size: 12px;
+}
+
+.wk-tools-list {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: start;
+  gap: 1px 14px;
+  padding: 2px 0 4px 28px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+}
+
+.wk-tools-list dd {
+  margin: 0;
+}
+
+.wk-tools-list dt {
+  font-family: var(--wk-mono);
+}
+
+/* A person's message. The viewer's own sits right in their colour. */
+.wk-msg {
+  max-width: 88%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.wk-msg small {
+  display: block;
+  font-size: 12px;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+.wk-msg .from {
+  font-weight: 600;
+  display: block;
+}
+
+.wk-msg.own {
+  align-self: flex-end;
+  background: var(--wk-mine);
+  color: var(--wk-on-mine);
+  border-bottom-right-radius: 3px;
+  transition: opacity 0.3s;
+}
+
+.wk-msg.own.pending {
+  opacity: 0.6;
+}
+
+.wk-msg.relay {
+  align-self: flex-start;
+  background: var(--ao-surface-alt);
+  border: 1px solid var(--ao-border);
+  border-bottom-left-radius: 3px;
+}
+
+/* A signal: a person's message's shape, its own ground and its own edge. */
+.wk-inc {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+}
+
+.wk-inc .wk-av {
+  background: color-mix(in srgb, var(--ao-text) 8%, transparent);
+  color: var(--ao-text-subtle);
+}
+
+.wk-inc .wk-av.sev-critical,
+.wk-inc .wk-av.sev-error {
+  color: var(--ao-danger);
+}
+
+.wk-inc .wk-av.sev-warning {
+  color: var(--ao-warning);
+}
+
+.wk-inc .wk-av.sev-info {
+  color: var(--ao-text-subtle);
+}
+
+.wk-msg.sig {
+  background: var(--wk-sig);
+  color: var(--ao-text);
+  border-right: 3px solid var(--wk-sig-edge);
+  border-bottom-right-radius: 3px;
+  max-width: min(88%, calc(100% - 46px));
+}
+
+.wk-msg.sig small {
+  color: var(--ao-text-subtle);
+  opacity: 1;
+}
+
+.wk-fold {
+  border: 0;
+  background: none;
+  color: var(--ao-text-subtle);
+  padding: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 0;
+  margin-top: 6px;
+}
+
+.wk-fold .c {
+  transition: transform 0.2s;
+  display: inline-flex;
+}
+
+.wk-fold[aria-expanded='true'] .c {
+  transform: rotate(90deg);
+}
+
+.wk-attrs {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+  margin: 4px 0 0;
+}
+
+.wk-attrs dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.wk-notice {
+  align-self: center;
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+  text-align: center;
+  max-width: 88%;
+}
+
+/* A run in flight: ONE card of a fixed size, whatever arrives. */
+.wk-working {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(88%, 360px);
+  min-height: 78px;
+  padding: 10px 12px;
+  border: 1px dashed var(--ao-border-strong);
+  border-radius: 12px;
+}
+
+.wk-working .l1 {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  color: var(--ao-brand-strong);
+}
+
+.wk-working .l2 {
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wk-shimmer {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--ao-border) 0, var(--ao-brand) 50%, var(--ao-border) 100%) 0 / 200% 100%;
+  animation: wk-shim 1.4s linear infinite;
+}
+
+/* The copy control: no space until shown, shown on hover or focus, always on touch. */
+.wk-cp {
+  z-index: 2;
+  position: absolute;
+  bottom: 12px;
+  right: 2px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--wk-radius-sm);
+  background: transparent;
+  color: var(--ao-text-subtle);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.wk-cp::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+
+.wk-r:hover .wk-cp,
+.wk-r:focus-within .wk-cp,
+.wk-cp:focus-visible {
+  opacity: 1;
+}
+
+.wk-cp:hover {
+  color: var(--ao-text);
+}
+
+.wk-cp[data-state='done'] {
+  opacity: 1;
+  color: var(--ao-brand);
+}
+
+.wk-cp[data-state='manual'] {
+  opacity: 1;
+  color: var(--ao-warning);
+}
+
+.wk-cp .said {
+  position: absolute;
+  right: 32px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wk-closed-note {
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+}
+
+.wk-compose {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--ao-border);
+  flex: none;
+}
+
+.wk-compose textarea {
+  resize: none;
+  grid-column: 1 / 3;
+  min-height: 64px;
+  border: 1px solid var(--ao-border-strong);
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  border-radius: var(--wk-radius-sm);
+  padding: 6px 10px;
+  font: inherit;
+}
+
+.wk-compose .h {
+  grid-column: 1;
+  color: var(--ao-text-subtle);
+  font-size: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.wk kbd {
+  font-family: var(--wk-mono);
+  border: 1px solid var(--ao-border-strong);
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.wk-foot {
+  padding: 10px 14px;
+  border-top: 1px solid var(--ao-border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  color: var(--ao-text-subtle);
+  flex: none;
+}
+
+.wk-kv {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.wk-kv dt {
+  color: var(--ao-text-subtle);
+}
+
+.wk-kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.wk-yaml {
+  margin: 0;
+  white-space: pre;
+  overflow: auto;
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ---- motion ------------------------------------------------------------ */
+
+@keyframes wk-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes wk-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes wk-shim {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes wk-rowin {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wk *,
+  .wk *::before,
+  .wk *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ---- tablet: the navigation is a drawer ------------------------------ */
+
+@media (max-width: 1180px) {
+  .wk-cols,
+  .wk-cols[data-nav='hidden'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wk-cols > .wk-spl,
+  .wk-cols > .wk-side {
+    display: none;
+  }
+
+  .wk-cols[data-drawer='open'] > .wk-side {
+    display: flex;
+    visibility: visible;
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: var(--wk-drawer-w);
+    z-index: 16;
+    border-radius: 0;
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .wk-scopes {
+    display: flex;
+  }
+}
+
+/* ---- phone: one pane at a time --------------------------------------- */
+
+@media (max-width: 900px) {
+  .wk {
+    --wk-gutter: 12px;
+
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .wk-top {
+    padding: 6px 8px;
+  }
+
+  .wk-top .hide-s {
+    display: none;
+  }
+
+  .wk-conv {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wk-conv > .wk-spl {
+    display: none;
+  }
+
+  .wk-conv[data-view='list'] > .tp,
+  .wk-conv[data-view='thread'] > .lp {
+    display: none;
+  }
+
+  .wk-th .back {
+    display: inline-grid;
+  }
+
+  .wk-th .acts {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+
+  .wk-th .acts .wk-btn {
+    flex: 1;
+  }
+
+  .wk-brief {
+    display: none;
+  }
+
+  .wk-msg {
+    max-width: 94%;
+  }
+
+  .wk-msg.sig {
+    max-width: calc(100% - 46px);
+  }
+
+  .wk-ent {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .wk-ent > .wk-av {
+    width: 28px;
+    height: 28px;
+  }
+
+  .wk-ttl {
+    font-size: 16px;
+  }
+
+  .wk-sec {
+    font-size: 14px;
+  }
+
+  .wk-page {
+    padding: 12px 16px 24px;
+  }
+
+  .wk-pane.lp .collapse-list {
+    display: none;
+  }
+}
+
+/* ---- touch: every control at least 44px in its smaller dimension ------ */
+
+@media (pointer: coarse), (hover: none) {
+  .wk-btn,
+  .wk-icon-btn,
+  .wk-seg button,
+  .wk-look select,
+  .wk-field,
+  .wk-login input,
+  .wk-tabs button,
+  .wk-scopes button,
+  .wk-nv,
+  .wk-fold,
+  .wk-lnk,
+  .wk-menu button,
+  .wk-compose textarea,
+  .wk-row .exp,
+  .wk-row .kb,
+  .wk-th .back {
+    min-height: var(--wk-touch);
+  }
+
+  .wk-icon-btn,
+  .wk-row .exp,
+  .wk-row .kb,
+  .wk-seg button,
+  .wk-th .back {
+    min-width: var(--wk-touch);
+  }
+
+  .wk-btn.link {
+    min-height: var(--wk-touch);
+  }
+
+  .wk-tools label {
+    min-height: var(--wk-touch);
+  }
+
+  .wk-tools input[type='checkbox'] {
+    width: 24px;
+    height: 24px;
+  }
+
+  .wk-lnk {
+    display: inline-flex;
+    align-items: center;
+    min-width: var(--wk-touch);
+  }
+
+  .wk-row .exp {
+    margin-top: 0;
+    margin-left: -13px;
+  }
+
+  .wk-row .kb {
+    right: 2px;
+    bottom: 2px;
+    opacity: 1;
+  }
+
+  .wk-row {
+    grid-template-columns: 31px 36px minmax(0, 1fr) auto;
+  }
+
+  /* Always shown on touch, so it is given its own strip under the message
+     rather than covering the message's last line. */
+  .wk-r {
+    padding-bottom: var(--wk-touch);
+  }
+
+  .wk-cp {
+    opacity: 1;
+    width: var(--wk-touch);
+    height: var(--wk-touch);
+    bottom: 0;
+    right: 0;
+  }
+
+  .wk-cp::before {
+    inset: 0;
+  }
+
+  .wk-cp .said {
+    right: 46px;
+  }
+
+  .wk-side.collapsed .wk-nv {
+    width: var(--wk-touch);
+    height: var(--wk-touch);
+  }
+}
+
+/* TODO(4.x): the new-conversation dialog's real contents. */
+.wk-dialog {
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  border: 1px solid var(--ao-border);
+  border-radius: 12px;
+  width: min(460px, calc(100% - 24px));
+  padding: 20px 24px;
+  font: 400 14px/1.45 var(--wk-font);
+}
+
+.wk-dialog::backdrop {
+  background: var(--wk-scrim);
+}
+
+.wk-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}

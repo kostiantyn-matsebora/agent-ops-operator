@@ -24,16 +24,18 @@ Role: `frontend-developer`. Move `classic` onto each model as it lands.
 
 Role: `frontend-developer`. PORT from `mockup/console.html`: composition, spacing, wording and timings come from it. Behaviour comes from the specs.
 
-- [ ] 3.1 Build the workspace shell (header, navigation panel, collapse, drawer) with `--wk-*` tokens, and verify a screenshot at laptop width against the prototype
-- [ ] 3.2 Make the shell fill the viewport with no width cap, and verify a 2560 by 1300 spec asserts the panes reach both edges and the page does not scroll
-- [ ] 3.3 Build the list row with a fixed height, a reserved lifecycle line and the right-hand time, badge and status column, and verify a test that a status change moves no row
-- [ ] 3.4 Build the thread with the date label under the tabs, day dividers only on a day change, and signal cards with severity as an icon, and verify a unit test per contract value
-- [ ] 3.5 Build the folded run detail with the always-visible `Invoked` row, and verify a spec that a finished reply shows only the reply, `Invoked` and the collapsed `Run details`
-- [ ] 3.6 Add the quiet inline code style and the block form for long commands, and verify a screenshot at both colour schemes
-- [ ] 3.7 Add a copy control to every message, copying markdown, with in-place confirmation and a selected-text fallback, and verify a spec reads the clipboard for a reply, a person's message and a signal
-- [ ] 3.8 Persist pane sizes and collapsed states under keys of this look, and verify they survive a reload
-- [ ] 3.9 Keep every `--wk-*` token in `looks/workspace/workspace.css` and out of `theme/theme.css`, and verify by grep that `theme.css` holds none and the site CSS needs none
-- [ ] 3.10 If the work changes any shared `--ao-*` value in `theme/theme.css`, copy it into the token block at the head of `docs/assets/css/agentops.css` as `palette-and-mark.md` requires, and verify the hex grep from that rule finds hits only in the token blocks
+- [x] 3.1 Build the workspace shell (header, navigation panel, collapse, drawer) with `--wk-*` tokens, and verify a screenshot at laptop width against the prototype
+- [x] 3.2 Make the shell fill the viewport with no width cap, and verify a 2560 by 1300 spec asserts the panes reach both edges and the page does not scroll
+- [x] 3.3 Build the list row with a fixed height, a reserved lifecycle line and the right-hand time, badge and status column, and verify a test that a status change moves no row
+- [x] 3.4 Build the thread with the date label under the tabs, day dividers only on a day change, and signal cards with severity as an icon, and verify a unit test per contract value
+- [x] 3.5 Build the folded run detail with the always-visible `Invoked` row, and verify a spec that a finished reply shows only the reply, `Invoked` and the collapsed `Run details`
+- [x] 3.6 Add the quiet inline code style and the block form for long commands, and verify a screenshot at both colour schemes
+- [x] 3.7 Add a copy control to every message, copying markdown, with in-place confirmation and a selected-text fallback, and verify a spec reads the clipboard for a reply, a person's message and a signal
+- [x] 3.8 Persist pane sizes and collapsed states under keys of this look, and verify they survive a reload
+- [x] 3.9 Keep every `--wk-*` token in `looks/workspace/workspace.css` and out of `theme/theme.css`, and verify by grep that `theme.css` holds none and the site CSS needs none
+- [x] 3.10 If the work changes any shared `--ao-*` value in `theme/theme.css`, copy it into the token block at the head of `docs/assets/css/agentops.css` as `palette-and-mark.md` requires, and verify the hex grep from that rule finds hits only in the token blocks
+
+- [ ] 3.11 Give the workspace conversations page the actions `classic` has and the first cut lacks: Graph and Sequence tabs, select and bulk actions, reopen and delete, the escalation bar, the jump-to-new pill, slash typeahead and quick chips, and verify a per-look conformance test that names any action one look exposes and the other omits
 
 ## 4. The workspace look: the other pages
 

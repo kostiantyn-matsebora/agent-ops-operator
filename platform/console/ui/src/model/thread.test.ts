@@ -4,7 +4,7 @@ import { curatedConversations, curatedDetail } from '../test-fixtures/conversati
 import type { ConversationDetail, ConversationSummary, Message } from '../api/types'
 import { resetCommands, runCommand, useCommandStore } from './commands'
 import {
-  chainStepLabel, firstTaskInput, invokeCardAt, lastResult, memberChain, memberTranscript, messageSource,
+  chainStepLabel, firstTaskInput, invokeCardAt, invokedByReply, lastResult, memberChain, memberTranscript, messageSource,
   useMemberChain, useMemberExchange, useThread, useThreadMembers,
 } from './thread'
 
@@ -166,5 +166,33 @@ describe('a message’s source', () => {
     expect(messageSource({ id: 'a', thread: 't', kind: 'agent', text: '**bold**', at: '' })).toBe('**bold**')
     expect(messageSource({ id: 's', thread: 't', kind: 'signal', text: 'disk', at: '', payload: '{"a":1}' }))
       .toBe('disk\n\n```json\n{"a":1}\n```')
+  })
+})
+
+describe('which reply each member belongs under', () => {
+  const reply = (id: string, at: string): Message => ({ id, thread: 't', kind: 'agent', text: id, at })
+  const member = (name: string): ConversationSummary => ({
+    name, runCount: 0, queued: 0, joined: false, errored: false, unread: false, ageSeconds: 0, deleting: false,
+    causedBy: { parent: 'root', entry: name },
+  })
+
+  it('anchors each member to the first reply at or after its invocation, else the last reply', () => {
+    const messages = [
+      reply('r1', '2024-01-01T00:01:00Z'),
+      { id: 'u', thread: 't', kind: 'local', text: 'more?', at: '2024-01-01T00:02:00Z' },
+      reply('r2', '2024-01-01T00:03:00Z'),
+    ]
+    const at = (iso: string) => Date.parse(iso)
+    const out = invokedByReply(messages, [
+      { member: member('late'), at: at('2024-01-01T00:09:00Z') },
+      { member: member('b'), at: at('2024-01-01T00:02:30Z') },
+      { member: member('a'), at: at('2024-01-01T00:01:00Z') },
+    ])
+    expect(out.get('r1')?.map((m) => m.name)).toEqual(['a'])
+    expect(out.get('r2')?.map((m) => m.name)).toEqual(['b', 'late'])
+  })
+
+  it('attaches nothing where the thread holds no reply', () => {
+    expect(invokedByReply([], [{ member: member('a'), at: 1 }]).size).toBe(0)
   })
 })

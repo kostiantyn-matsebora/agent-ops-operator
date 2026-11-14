@@ -180,3 +180,21 @@ export function useWorkingRun(conversation: ConversationSummary | undefined, eve
     [conversation, events, now],
   )
 }
+
+/**
+ * How long a finished run took, in ms: its durable record's start to finish,
+ * else its first lifecycle event to its last. Undefined when nothing says.
+ */
+export function runDuration(details: Pick<RunDetails, 'run' | 'events'>): number | undefined {
+  const start = Date.parse(details.run?.startedAt ?? '')
+  const end = Date.parse(details.run?.finishedAt ?? '')
+  if (start && end && end >= start) return end - start
+  const times = details.events.map((e) => Date.parse(e.ts)).filter((t) => t > 0)
+  if (times.length < 2) return undefined
+  return Math.max(...times) - Math.min(...times)
+}
+
+/** A run's lifecycle events as rows to show: each labelled, in arrival order. */
+export function runEventRows(details: Pick<RunDetails, 'events'>): { kind: string; label: string; at: string }[] {
+  return details.events.map((e) => ({ kind: e.kind, label: runEventLabel(e.kind), at: e.ts }))
+}

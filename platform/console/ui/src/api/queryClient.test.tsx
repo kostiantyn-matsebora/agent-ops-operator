@@ -115,6 +115,11 @@ describe('nothing is persisted', () => {
       // convenience, never conversation state (item 22). Guarded both
       // directions the same way in `closeConfirm.ts`.
       if (path.includes('pages/chat/closeConfirm')) continue
+      // The workspace look's own layout (console-workspace-look: pane sizes
+      // and collapsed states stored per viewer, under keys of this look) is
+      // the same exception as the chat layout above, for the other look.
+      // Guarded both directions in its `safeStorage`, pinned by layout.test.ts.
+      if (path.endsWith('looks/workspace/layout.ts')) continue
       // Comments are stripped first: this file and queryClient.ts both SAY
       // localStorage in prose explaining why they do not use it, and a rule
       // its own reasoning trips is a rule people delete.

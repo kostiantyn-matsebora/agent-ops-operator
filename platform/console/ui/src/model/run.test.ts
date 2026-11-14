@@ -3,7 +3,8 @@ import { act, renderHook } from '@testing-library/react'
 import { curatedDetail, curatedNow } from '../test-fixtures/conversations'
 import type { ActivityEvent, ConversationSummary, Message, Run } from '../api/types'
 import {
-  ELAPSED_TICK_MS, attachRunDetails, groupRunEvents, runEventLabel, runIdOfMessage, useWorkingRun, workingRun,
+  ELAPSED_TICK_MS, attachRunDetails, groupRunEvents, runDuration, runEventLabel, runEventRows, runIdOfMessage,
+  useWorkingRun, workingRun,
 } from './run'
 
 // Design D8: a working run is `{ elapsed, latest, count }`, and when the reply
@@ -159,5 +160,22 @@ describe('useWorkingRun', () => {
     rerender({ c: conv({ phase: 'Idle' }) })
     expect(result.current).toBeUndefined()
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('a finished run, as rows', () => {
+  const ev = (kind: string, ts: string) => ({ cursor: ts, ts, kind, runId: 'r', status: 'ok' }) as ActivityEvent
+
+  it('takes its duration from the run record, else from its events, else says nothing', () => {
+    expect(runDuration({ run: { runId: 'r', status: 'ok', startedAt: '2024-01-01T00:00:00Z', finishedAt: '2024-01-01T00:00:25Z' }, events: [] })).toBe(25_000)
+    expect(runDuration({ events: [ev('run.dispatched', '2024-01-01T00:00:00Z'), ev('run.completed', '2024-01-01T00:00:09Z')] })).toBe(9_000)
+    expect(runDuration({ events: [ev('run.dispatched', '2024-01-01T00:00:00Z')] })).toBeUndefined()
+  })
+
+  it('labels its events in order', () => {
+    expect(runEventRows({ events: [ev('run.dispatched', 'a'), ev('context.checkpoint', 'b')] })).toEqual([
+      { kind: 'run.dispatched', label: 'run dispatched', at: 'a' },
+      { kind: 'context.checkpoint', label: 'context checkpoint', at: 'b' },
+    ])
   })
 })
