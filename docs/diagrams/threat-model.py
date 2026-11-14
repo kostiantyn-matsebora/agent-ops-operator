@@ -169,9 +169,9 @@ def render(p):
     s.append(badge(634, 158, 1, p))
     s.append(arrow(380, 272, 404, 272, p, tone="brand"))     # 2 agent -> MCP
     s.append(badge(392, 250, 2, p, tone="brand"))
-    s.append(arrow(114, 370, 114, 380, p, tone="brand"))     # 3 -> API
+    s.append(arrow(114, 358, 114, 380, p, tone="brand"))     # 3 -> API
     s.append(badge(138, 369, 3, p, tone="brand"))
-    s.append(arrow(292, 370, 292, 380, p, tone="brand", dashed=True))  # 4 -> Secrets
+    s.append(arrow(292, 358, 292, 380, p, tone="brand", dashed=True))  # 4 -> Secrets
     s.append(badge(316, 369, 4, p, tone="brand"))
     s.append(arrow(470, 358, 470, 380, p, tone="brand"))     # 5 -> context
     s.append(badge(494, 369, 5, p, tone="brand"))

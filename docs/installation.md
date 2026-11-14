@@ -178,7 +178,9 @@ for what lives in each.
 
 Pick it before you install. Switching it later is a manual migration, not a
 plain upgrade: close every open conversation, move your Secrets, and rebind
-each claim's PV. The steps are the `conversationNamespace` upgrade path in
+each claim's PV.
+
+The steps are the `conversationNamespace` upgrade path in
 [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
 A namespace the chart created carries `helm.sh/resource-policy: keep`, so an
 uninstall leaves it, its Secrets and its claims standing.

@@ -94,7 +94,7 @@
 - [x] 11.4 `docs/configuration.md`: `conversationNamespace`, `createConversationNamespace`
 - [x] 11.5 `docs/security.md`: the moved trust boundary, the state-read token beside agent code, re-run `threat-model.py`
 - [x] 11.6 `docs/integrations/kubernetes.md` and `docs/console.md`: route accounts and runtime pods in the conversations namespace
-- [x] 11.7 `docs/CHANGELOG.md` `[20.0.0]`, with the Upgrade section as the migration of record: close, Secrets, PV rebind, upgrade, kube cleanup, verify, rollback
+- [x] 11.7 `docs/CHANGELOG.md` `[20.0.0]`, with the Upgrade section as the migration of record: close, Secrets, PV rebind, upgrade, kube cleanup, verify, rollback. The heading names 20.0.0 ahead of `Chart.yaml`, which stays at 19.0.1 until the release-time bump (7.11)
 - [x] 11.8 `.claude/rules/`: `terminology.md` (control and conversations namespace, the namespace pair), `invariants.md` (the placement rule), `structure.md`, `gotchas.md` — three entries added, including the egress-proxy-listener probe the system lane's own no-ingress test surfaced
 - [x] 11.9 Re-run `python3 .github/scripts/docs-generate.py` and pass `--check` (also caught and fixed a stale `--version 19.0.1` in `docs/installation.md`'s install commands)
 
