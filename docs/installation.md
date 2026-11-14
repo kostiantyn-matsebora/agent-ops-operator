@@ -192,6 +192,12 @@ state somewhere of its own:
 
 ## Upgrade and uninstall
 
+**Switching `global.agentops.conversationNamespace` after install is a manual
+migration, not a plain upgrade.** Close every open conversation, move your
+Secrets, and rebind each claim's PV. The steps are the `conversationNamespace`
+upgrade path in [the changelog](https://kostiantyn-matsebora.github.io/agent-ops-operator/changelog/).
+The claims carry `helm.sh/resource-policy: keep` either way.
+
 **Apply the CRDs yourself, before every upgrade.** Helm never upgrades a CRD
 that came from a chart's `crds/` directory. An upgraded install keeps the OLD
 shape until you apply the new one, and a field the new CRD removed keeps

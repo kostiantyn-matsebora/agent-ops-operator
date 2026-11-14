@@ -30,10 +30,8 @@ Setting `conversationNamespace` to the release namespace is the
 single-namespace layout: no namespace is created, and every object renders
 where this chart is installed, exactly as every release before the split.
 
-Switching it after install is a MANUAL MIGRATION, not a plain upgrade. Close
-every open conversation, move your Secrets, and rebind each claim's PV. The steps
-are the `conversationNamespace` upgrade path in [the changelog](https://kostiantyn-matsebora.github.io/agent-ops-operator/changelog/).
-The claims it points at carry `helm.sh/resource-policy: keep` either way.
+Switching it after install is a manual migration. See
+[Upgrade and uninstall](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/#upgrade-and-uninstall).
 
 ## Storage
 
