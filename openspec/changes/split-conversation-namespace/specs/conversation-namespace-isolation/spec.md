@@ -95,8 +95,9 @@ The chart SHALL grant the manager one namespaced Role per namespace, each with
 only what is used there:
 
 - the control-namespace Role SHALL cover every wiring and identity kind,
-  `signals`, adapter Deployments, serviceaccounts, Services, configmaps,
-  leases, events, and
+  `signals`, adapter Deployments, Services, configmaps,
+  leases, events, serviceaccounts with `get`/`list`/`watch`/`create`/`update`/`patch`
+  and no `delete`, and
   a read (`get`/`list`/`watch`) on pods
   - that pod read reaches EVERY pod in the control namespace
   - the manager reads it to resolve the Lease holder to a pod IP for the
@@ -119,6 +120,10 @@ No ClusterRole SHALL be added for the manager. Neither Role SHALL carry a
 #### Scenario: The control-namespace Role reads pods
 - **WHEN** the chart renders split
 - **THEN** the control-namespace Role carries `get`, `list` and `watch` on `pods` and no pod write verb
+
+#### Scenario: The control-namespace Role cannot delete serviceaccounts
+- **WHEN** the chart renders split
+- **THEN** the control-namespace Role carries `get`, `list`, `watch`, `create`, `update` and `patch` on `serviceaccounts` and no `delete`
 
 #### Scenario: The manager cannot reach a third namespace
 - **WHEN** the manager lists pods in an unrelated namespace

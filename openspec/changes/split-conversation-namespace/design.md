@@ -113,7 +113,7 @@ adapter state open in Control.
 
 | Role | Namespace | Rules |
 |---|---|---|
-| manager control Role | control | every wiring kind, `signals`, adapter Deployments, Services, configmaps, leases, events, pods `get/list/watch` (every pod in control, RBAC cannot scope it to its own replicas) |
+| manager control Role | control | every wiring kind, `signals`, adapter Deployments, serviceaccounts `get/list/watch/create/update/patch` (no `delete`), Services, configmaps, leases, events, pods `get/list/watch` (every pod in control, RBAC cannot scope it to its own replicas) |
 | manager conversations Role | conversations | pods, configmaps, `conversations`, `conversationinputs` and status, PVC `get/list/watch/create`, events |
 | console read-only Role | conversations | pods `get/list/watch` |
 

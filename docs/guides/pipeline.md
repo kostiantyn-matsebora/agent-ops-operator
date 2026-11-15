@@ -79,6 +79,9 @@ fields, and omitting both is the ordinary case.
 | `runtimeRef` | the `AgentRuntime` | the one named `default` runs it |
 | `serviceAccountName` | the identity that runtime executes under | it inherits the release's default, which ships as an account bound to NOTHING |
 
+**A service account a Pipeline names renders in the conversations
+namespace**, beside the pods that run as it.
+
 **This is the same decision as `toolsets`.** One says which tools may be called.
 The other says with whose credentials. Both are here so that ONE object states
 what an agent may do.
@@ -184,9 +187,6 @@ too.
 
 In a split layout that is not the release namespace. In a single-namespace
 layout the two are the same.
-
-Runtime service accounts a Pipeline names render in the conversations
-namespace too, beside the pods that run as them.
 
 {: .ao-callout}
 > **The claim outlives the route.** It carries no ownerRef on the Pipeline and
