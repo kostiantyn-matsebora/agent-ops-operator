@@ -289,7 +289,7 @@ An adapter implementing none of these stays fully conformant — see
 | always | `ADAPTER_NAME` | This adapter's own name — the `adapter=` scope on every call. |
 | always | `ADAPTER_TOKEN` | Bearer credential — see `SEC-1`. |
 | always | `POD_NAMESPACE` | This adapter's own namespace, a downward-API field. Feeds `ADP-7`. |
-| always | `CONVERSATION_NAMESPACE` | The release's conversations namespace, a literal value. Equal to `POD_NAMESPACE` outside a split release. Feeds `ADP-10`. |
+| always | `CONVERSATION_NAMESPACE` | The release's conversations namespace, a literal value, always injected. Equal to `POD_NAMESPACE` outside a split release. Feeds `ADP-10`. |
 | conditional | `LISTEN_ADDR` | Set only when `SignalAdapter.spec.port` is set — this adapter is pushed to rather than polling, and the reconciler owns the matching Service. |
 | per-source | `AGENTOPS_CRED_<SOURCE>_<KEY>` | A source's own credentials, keyed by its sanitized name — see `credentialEnvPrefix` on the [source entry](#source-entry). |
 

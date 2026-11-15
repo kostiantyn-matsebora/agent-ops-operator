@@ -116,8 +116,9 @@ adapter state open in Control.
 | manager control Role | control | every wiring kind, `signals`, adapter Deployments, serviceaccounts `get/list/watch/create/update/patch` (no `delete`), Services, configmaps, leases, events, pods `get/list/watch` |
 | manager conversations Role | conversations | pods, configmaps, `conversations`, `conversationinputs` and status, PVC `get/list/watch/create`, events |
 
-The control Role's pod read reaches every pod in control: RBAC cannot scope it to the manager's own replicas.
 | console read-only Role | conversations | pods `get/list/watch` |
+
+The control Role's pod read reaches every pod in control: RBAC cannot scope it to the manager's own replicas.
 
 - In single-namespace mode both rule sets render into one Role, identical to
   today's.

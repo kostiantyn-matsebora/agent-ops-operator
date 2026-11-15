@@ -61,7 +61,7 @@
 - [x] 8.3 Check the `nats`, `commandbus`, `prometheus`, `pulse` and `telegram` policies, and record which need no change
   - `nats`, `commandbus`, `telegram`: no change (control-plane-to-control-plane peers only)
   - `prometheus`, `pulse`: their own MCP-server policies referenced `agentops-runtime`, so each gained the same `namespaceSelector` as `kubernetes` and `home-assistant`
-  - this fix went beyond the task's original premise and is recorded here and in `docs/CHANGELOG.md`
+  - this fix went beyond the task's original premise and is recorded here and in `docs/CHANGELOG.md` (11.7)
 
 ## 9. Unit tests
 
@@ -101,20 +101,20 @@ Left unticked until section 10 has run, so the documentation gate follows the sy
 
 ### Reference docs
 
-- [ ] 11.1 `docs/concepts.md`: the two namespaces, the placement rule and its table
-- [ ] 11.2 `docs/contracts.md`: no manager surface carries a namespace
-- [ ] 11.3 `docs/contracts/signal-adapter.md` to 2.5.0: `POD_NAMESPACE` and `CONVERSATION_NAMESPACE` in `#environment`, `ADP-10`, `ADP-7` reworded, changelog and conformance rows
-- [ ] 11.4 `docs/configuration.md`: `conversationNamespace`, `createConversationNamespace`
-- [ ] 11.5 `docs/security.md`: the moved trust boundary, the state-read token beside agent code, re-run `threat-model.py`
-- [ ] 11.6 `docs/integrations/kubernetes.md` and `docs/console.md`: route accounts and runtime pods in the conversations namespace
-- [ ] 11.7 `docs/CHANGELOG.md` `[20.0.0]`, with the Upgrade section as the migration of record: close, Secrets, PV rebind, upgrade, kube cleanup, verify, rollback. The heading names 20.0.0 ahead of `Chart.yaml`, which stays at 19.0.1 until the release-time bump (7.11)
-- [ ] 11.8 `.claude/rules/`: `terminology.md` (control and conversations namespace, the namespace pair), `invariants.md` (the placement rule), `structure.md`, `gotchas.md` — four files edited, with three new `gotchas.md` entries including the egress-proxy-listener probe, taken from the no-ingress test's doc comment (the lane has not run)
-- [ ] 11.9 Re-run `python3 .github/scripts/docs-generate.py` and pass `--check` (`docs/installation.md`'s install commands pin `--version 19.0.1`, matching `Chart.yaml` until the release-time bump in 7.11)
+- [x] 11.1 `docs/concepts.md`: the two namespaces, the placement rule and its table
+- [x] 11.2 `docs/contracts.md`: no manager surface carries a namespace
+- [x] 11.3 `docs/contracts/signal-adapter.md` to 2.5.0: `POD_NAMESPACE` and `CONVERSATION_NAMESPACE` in `#environment`, `ADP-10`, `ADP-7` reworded, changelog and conformance rows
+- [x] 11.4 `docs/configuration.md`: `conversationNamespace`, `createConversationNamespace`
+- [x] 11.5 `docs/security.md`: the moved trust boundary, the state-read token beside agent code, re-run `threat-model.py`
+- [x] 11.6 `docs/integrations/kubernetes.md` and `docs/console.md`: route accounts and runtime pods in the conversations namespace
+- [x] 11.7 `docs/CHANGELOG.md` `[20.0.0]`, with the Upgrade section as the migration of record: close, Secrets, PV rebind, upgrade, kube cleanup, verify, rollback. The heading names 20.0.0 ahead of `Chart.yaml`, which stays at 19.0.1 until the release-time bump (7.11)
+- [x] 11.8 `.claude/rules/`: `terminology.md` (control and conversations namespace, the namespace pair), `invariants.md` (the placement rule), `structure.md`, `gotchas.md` — four files edited, with three new `gotchas.md` entries including the egress-proxy-listener probe, taken from the no-ingress test's doc comment (the lane has not run)
+- [x] 11.9 Re-run `python3 .github/scripts/docs-generate.py` and pass `--check` (`docs/installation.md`'s install commands pin `--version 19.0.1`, matching `Chart.yaml` until the release-time bump in 7.11)
 
 ### Adopter site
 
-- [ ] 11.10 `docs/installation.md`: both namespaces, Secret placement, the 19 to 20 upgrade mirroring the changelog
-- [ ] 11.11 `docs/getting-started.md`: where the first conversation's pod appears
-- [ ] 11.12 `docs/index.md` and `README.md`: the isolation claim
-- [ ] 11.13 `docs/guides/agent-profile.md`, `agent-runtime.md`, `toolsets.md`: referenced Secrets belong in the conversations namespace
-- [ ] 11.14 `docs/guides/pipeline.md`: claims are created in the conversations namespace
+- [x] 11.10 `docs/installation.md`: both namespaces, Secret placement, the 19 to 20 upgrade mirroring the changelog
+- [x] 11.11 `docs/getting-started.md`: where the first conversation's pod appears
+- [x] 11.12 `docs/index.md` and `README.md`: the isolation claim
+- [x] 11.13 `docs/guides/agent-profile.md`, `agent-runtime.md`, `toolsets.md`: referenced Secrets belong in the conversations namespace
+- [x] 11.14 `docs/guides/pipeline.md`: claims are created in the conversations namespace
