@@ -25,7 +25,8 @@ the house, one that can repair it.
 
 `signals/ha` conforms to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-2.5.0.
+2.5.0. `ADP-10` constrains an adapter observing cluster-shaped state, and
+this one reads Home Assistant logs, so it has no namespace to exclude.
 
 ## What starts work
 
