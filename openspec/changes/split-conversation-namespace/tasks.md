@@ -80,12 +80,20 @@
 
 ## 10. System tests
 
-- [ ] 10.1 A system lane on k3d, built from this working copy: a split release opens a conversation from an ordinary signal, its pod runs in Conversations under a Conversations account, mounts its claim and reaches the manager — `TestSplitConversationPodRunsInConversationsNamespace` (`test/system/namespace_split_test.go`). WRITTEN AND COMPILED (`go vet -tags system`, `go test -tags system -c`) ONLY — this working copy has no docker/k3d, so it has never run on a cluster. Dispatch `system-smoke.yml` to confirm pass/fail
+- [ ] 10.1 A system lane on k3d, built from this working copy: `TestSplitConversationPodRunsInConversationsNamespace` (`test/system/namespace_split_test.go`)
+  - a split release opens a conversation from an ordinary signal
+  - its pod runs in Conversations under a Conversations account, mounts its claim and reaches the manager
+  - WRITTEN AND COMPILED ONLY (`go vet -tags system`, `go test -tags system -c`): no docker/k3d here, so it has never run on a cluster
+  - dispatch `system-smoke.yml` to confirm pass/fail
 - [ ] 10.2 The same lane with NetworkPolicies enforced: every wired flow passes and runtime pods accept no ingress — `TestSplitNetworkPolicyEnforcedRuntimePodAcceptsNoIngress` (same file), FULL TIER ONLY. The no-ingress probe targets the egress-proxy sidecar's own `:15001` listener (the one socket a runtime pod binds wider than loopback) from a control-namespace pod — see the test's own doc comment. WRITTEN AND COMPILED ONLY, not run
 - [ ] 10.3 The authorizer denies the manager pods in a third namespace and PVC `delete` in Conversations — `TestSplitRBACDeniesThirdNamespaceAndPVCDelete` (same file), via `SubjectAccessReview` (`Kube.Can`, pre-existing). WRITTEN AND COMPILED ONLY, not run
 - [ ] 10.4 A missing Secret in Conversations fails the pod and the condition names it — `TestSplitMissingSecretFailsPodAndConditionNamesIt` (same file). WRITTEN AND COMPILED ONLY, not run
 - [ ] 10.5 The migration on a 19.x release: close, place Secrets, PV rebind, upgrade, and a reopened conversation continues its context — ADAPTED: this harness (`install.go`) only ever renders the WORKING TREE's own chart, with no mechanism to pin a published 19.x version, so `TestSplitMigrationFromSingleNamespaceCarriesClaimAndReopens` (`test/system/namespace_migration_test.go`) pins `global.agentops.conversationNamespace` to the release namespace as the pre-split stand-in, then performs the real PV rebind (Retain, delete, clear `claimRef`, pre-create with `volumeName`, `persistence.context.existingClaim`) against a real PV before upgrading onto the split layout. No Secret placement step: this lane's profile resolves none. WRITTEN AND COMPILED ONLY — the PV-rebind mechanics are especially unverified without a real cluster. Dispatch the full tier to confirm
-- [ ] 10.6 Run the system pack — NOT PERFORMED (no docker/k3d on this machine). `go test -tags system -list` ALSO cannot discover tests here: `TestMain` (`harness_test.go`) provisions a k3d cluster unconditionally before `m.Run()`, regardless of `-test.list`, confirmed by running the compiled test binary directly with `-test.list` and getting the same `k3d not found on PATH` panic. Discovery was instead confirmed by `go vet -tags system ./...` (full typecheck, zero findings) and `go test -tags system -c` (the whole suite, including these five new functions, links into one binary with no error). Dispatching `gh workflow run system-smoke.yml --ref change/split-conversation-namespace` (and the full-tier equivalent for 10.2/10.5) is the orchestrating session's job (the `conveyor` session driving this PR dispatches `system-smoke.yml`), not this one's
+- [ ] 10.6 Run the system pack. NOT PERFORMED: no docker/k3d on this machine
+  - `go test -tags system -list` cannot discover tests here: `TestMain` (`harness_test.go`) provisions a k3d cluster before `m.Run()`
+  - discovery was confirmed instead by `go vet -tags system ./...` (zero findings) and `go test -tags system -c` (the suite links, including the five new functions)
+  - the `conveyor` session driving this PR dispatches `gh workflow run system-smoke.yml --ref change/split-conversation-namespace`
+  - the full-tier equivalent for 10.2/10.5 is dispatched the same way
 
 ## 11. Documentation
 
