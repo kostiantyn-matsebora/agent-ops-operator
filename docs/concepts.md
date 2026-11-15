@@ -944,7 +944,7 @@ compiled MCP ConfigMaps.
 
 **In a split release that is the conversations namespace.** The control
 namespace, where the manager and adapters run, is not
-where the agent's RBAC reaches; it holds none of those objects by default. See
+where the agent's RBAC reaches. It holds none of those objects by default. See
 [Where things run](#where-things-run-the-control-and-conversations-namespaces).
 
 {: .ao-callout}
