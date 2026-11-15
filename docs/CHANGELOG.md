@@ -81,7 +81,7 @@ a manual step per claim you want to keep.
 - NetworkPolicy peers (under the existing, default-off
   `global.agentops.networkPolicy.enabled`) gain a `namespaceSelector`
   wherever they cross the split: the manager's own ingress, `mcp-aops`, the
-  `kubernetes` and `home-assistant` MCP servers. The runtime ingress-deny
+  `kubernetes`, `home-assistant`, `prometheus` and `pulse` MCP servers. The runtime ingress-deny
   policy now renders in the conversations namespace.
 
 ### Upgrade

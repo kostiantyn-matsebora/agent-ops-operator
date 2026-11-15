@@ -68,7 +68,7 @@ which indents EVERY line uniformly — the pattern `agentops.runtimeReadRules`
 # pod IP, and the state store's one-time import refuses to run beside an
 # older replica. Read-only, and only here — creating and deleting pods is
 # the conversations Role's, where runtime pods run. Single-namespace merges
-# this with the conversations Role's pods rule, a superset of it.
+# this with the conversations Role's pods rule: two overlapping rule entries.
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get", "list", "watch"]

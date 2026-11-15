@@ -1057,7 +1057,7 @@ is conversation-scoped state. Nothing else moves:**
 | the manager, its Service, Lease, Role | control |
 | the nodes ClusterRole (cluster-scoped, so no namespace) | none |
 | every wiring and identity CR, `Signal` and the rest of the state store | control |
-| NATS, the command bus, adapters, the gateway, the console, every MCP server | control |
+| NATS, adapters, the gateway, the console, every MCP server | control |
 
 No manager HTTP surface carries a namespace — see [contracts](contracts.md).
 
