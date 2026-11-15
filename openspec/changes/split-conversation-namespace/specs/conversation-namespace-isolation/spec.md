@@ -95,7 +95,8 @@ The chart SHALL grant the manager one namespaced Role per namespace, each with
 only what is used there:
 
 - the control-namespace Role SHALL cover every wiring and identity kind,
-  `signals`, adapter Deployments, Services, configmaps, leases, events, and
+  `signals`, adapter Deployments, serviceaccounts, Services, configmaps,
+  leases, events, and
   a read (`get`/`list`/`watch`) on pods
   - that pod read reaches EVERY pod in the control namespace
   - the manager reads it to resolve the Lease holder to a pod IP for the

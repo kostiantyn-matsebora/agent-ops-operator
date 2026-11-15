@@ -35,9 +35,9 @@ metadata:
   labels:
     # No signal loops (invariants.md): a CronJob fails on a SCHEDULE, so
     # without an agentops label here a failing probe would open a
-    # conversation about the storage the agent itself needs. The probe now
-    # runs in the conversations namespace, so it is caught by self-exclusion
-    # mechanism 4 (namespace), not by the name or label families.
+    # conversation about the storage the agent itself needs. This label and
+    # the `agentops-context-probe` name are caught by self-exclusion
+    # mechanisms 1 and 2, whatever namespace the probe runs in.
     app.kubernetes.io/name: agentops-context-probe
 spec:
   schedule: {{ .Values.contextProbe.schedule | quote }}

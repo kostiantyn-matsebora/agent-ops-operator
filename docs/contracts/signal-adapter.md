@@ -224,7 +224,7 @@ it, matching any of:
 | `ADP-5` | Name prefix — the object's name starts with an agent-ops-reserved prefix. |
 | `ADP-6` | Owner or label — the object is owned by, or labeled as, an agent-ops kind. |
 | `ADP-7` | Own namespace — the object lives in the namespace `POD_NAMESPACE` names. An installation that co-locates its own workloads there MAY disable this one alone. |
-| `ADP-10` | Conversations namespace — the object lives in the namespace `CONVERSATION_NAMESPACE` names, whenever that differs from `POD_NAMESPACE`. NOT configurable: that namespace holds only agent-ops machinery by construction. |
+| `ADP-10` | Conversations namespace — the object lives in the namespace `CONVERSATION_NAMESPACE` names, whenever it is set and differs from `POD_NAMESPACE`. NOT configurable: that namespace holds only agent-ops machinery by construction. |
 
 ### Post-emit refractory window
 
