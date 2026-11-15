@@ -169,15 +169,15 @@ def render(p):
     # The crossings. Each number is a row in the page's threat table.
     s.append(arrow(610, 148, 610, 162, p))                 # 1 neighbour -> control ns
     s.append(badge(634, 158, 1, p))
-    s.append(arrow(372, 272, 404, 272, p, tone="brand"))     # 2 agent -> MCP
-    s.append(badge(392, 250, 2, p, tone="brand"))
-    s.append(arrow(114, 374, 114, 380, p, tone="brand"))     # 3 -> API
+    s.append(arrow(372, 280, 404, 280, p, tone="brand"))     # 2 agent -> MCP
+    s.append(badge(392, 258, 2, p, tone="brand"))
+    s.append(arrow(114, 366, 114, 380, p, tone="brand"))     # 3 -> API
     s.append(badge(138, 369, 3, p, tone="brand"))
-    s.append(arrow(292, 374, 292, 380, p, tone="brand", dashed=True))  # 4 -> Secrets
+    s.append(arrow(292, 366, 292, 380, p, tone="brand", dashed=True))  # 4 -> Secrets
     s.append(badge(316, 369, 4, p, tone="brand"))
-    s.append(arrow(470, 374, 470, 380, p, tone="brand"))     # 5 -> context
+    s.append(arrow(470, 366, 470, 380, p, tone="brand"))     # 5 -> context
     s.append(badge(494, 369, 5, p, tone="brand"))
-    s.append(arrow(648, 374, 648, 380, p, tone="danger"))    # 6 -> logs, UNMITIGATED
+    s.append(arrow(648, 366, 648, 380, p, tone="danger"))    # 6 -> logs, UNMITIGATED
     s.append(badge(672, 369, 6, p, tone="danger"))
 
     s.append(arrow(516, 124, 282, 124, p, tone="brand"))     # 7 neighbour -> state servers

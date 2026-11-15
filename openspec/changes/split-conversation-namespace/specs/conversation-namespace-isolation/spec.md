@@ -97,7 +97,7 @@ only what is used there:
 - the control-namespace Role SHALL cover every wiring and identity kind,
   `signals`, adapter Deployments, Services, configmaps,
   leases, events, serviceaccounts with `get`/`list`/`watch`/`create`/`update`/`patch`
-  and no `delete`, and
+  and no `delete` (the ChannelAdapter reconciler creates and updates each adapter's zero-RBAC ServiceAccount), and
   a read (`get`/`list`/`watch`) on pods
   - that pod read reaches EVERY pod in the control namespace
   - the manager reads it to resolve the Lease holder to a pod IP for the
