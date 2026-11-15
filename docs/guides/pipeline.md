@@ -80,7 +80,8 @@ fields, and omitting both is the ordinary case.
 | `serviceAccountName` | the identity that runtime executes under | it inherits the release's default, which ships as an account bound to NOTHING |
 
 **A service account a Pipeline names renders in the conversations
-namespace**, beside the pods that run as it.
+namespace**, beside the pods that run as it. In a single-namespace layout
+that is the same namespace as everything else.
 
 **This is the same decision as `toolsets`.** One says which tools may be called.
 The other says with whose credentials. Both are here so that ONE object states

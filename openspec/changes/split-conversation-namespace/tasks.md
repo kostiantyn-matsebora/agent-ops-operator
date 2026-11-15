@@ -58,7 +58,10 @@
 
 - [x] 8.1 `networkpolicy.yaml`: add a `namespaceSelector` to every peer naming runtime pods or the manager across the split, and render the runtime ingress-deny policy in Conversations
 - [x] 8.2 `coordination.yaml` (`mcp-aops`), `charts/kubernetes` MCP server policy, `charts/home-assistant` MCP admin policy: admit runtime pods from Conversations
-- [x] 8.3 Check the `nats`, `commandbus`, `prometheus`, `pulse` and `telegram` policies, and record which need no change — nats, commandbus and telegram need no change (control-plane-to-control-plane peers only). prometheus and pulse's OWN deployed MCP-server policies DID reference `agentops-runtime`, and needed the same namespaceSelector fix as kubernetes/home-assistant's MCP servers (fixed, beyond this task's original premise — recorded here, no separate report file)
+- [x] 8.3 Check the `nats`, `commandbus`, `prometheus`, `pulse` and `telegram` policies, and record which need no change
+  - `nats`, `commandbus`, `telegram`: no change (control-plane-to-control-plane peers only)
+  - `prometheus`, `pulse`: their own MCP-server policies referenced `agentops-runtime`, so each gained the same `namespaceSelector` as `kubernetes` and `home-assistant`
+  - this fix went beyond the task's original premise and is recorded here and in `docs/CHANGELOG.md`
 
 ## 9. Unit tests
 

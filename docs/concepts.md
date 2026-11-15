@@ -1073,7 +1073,7 @@ RBAC splits the same way, into two manager Roles:
 | Role | Namespace | Covers |
 |---|---|---|
 | control | control | wiring, `signals`, adapter workloads, leases, a read on every pod in the control namespace |
-| conversations | conversations | pods, `conversations`/`conversationinputs`, PVC `get`/`list`/`watch`/`create` — never `delete`, `update` or `patch` |
+| conversations | conversations | pods, configmaps, events, `conversations`/`conversationinputs`, PVC `get`/`list`/`watch`/`create` — never `delete`, `update` or `patch` |
 
 Equal namespaces render as one Role, the exact union a pre-split release had.
 No ClusterRole is added for the manager.
