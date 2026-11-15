@@ -66,7 +66,7 @@ namespace.
 
 #### Scenario: Every kind is cached only where its Role grants it
 - **WHEN** the manager starts split under the chart's own Roles
-- **THEN** every informer syncs: wiring kinds watched in control alone, `conversations` and `conversationinputs` and PVCs in conversations alone, pods and configmaps in both
+- **THEN** every informer syncs: wiring kinds watched in control alone, `conversations` and `conversationinputs` and PVCs in conversations alone, pods and configmaps in both, serviceaccounts in control alone
 
 #### Scenario: The lease stays in control
 - **WHEN** the manager runs split
