@@ -97,7 +97,7 @@ only what is used there:
 - the control-namespace Role SHALL cover every wiring and identity kind,
   `signals`, adapter Deployments, Services, configmaps,
   leases, events, serviceaccounts with `get`/`list`/`watch`/`create`/`update`/`patch`
-  and no `delete` (a grant carried over unchanged from the single-namespace Role). No reconciler creates an adapter's ServiceAccount, and
+  and no `delete` (a grant carried over unchanged from the single-namespace Role), and
   a read (`get`/`list`/`watch`) on pods
   - that pod read reaches EVERY pod in the control namespace
   - the manager reads it to resolve the Lease holder to a pod IP for the
