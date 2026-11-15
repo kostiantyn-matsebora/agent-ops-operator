@@ -1054,7 +1054,7 @@ is conversation-scoped state. Nothing else moves:**
 | every persistence claim, chart-rendered or manager-created | conversations |
 | the housekeeping and context-probe CronJobs | conversations |
 | the floor account `agentops-runtime`, bound to nothing | both |
-| the manager, its Service, Lease, Role | control |
+| the manager, its Service, Lease and control-namespace Role (it holds a second Role in conversations) | control |
 | the nodes ClusterRole (cluster-scoped, so no namespace) | none |
 | every wiring and identity CR, `Signal` and the rest of the state store | control |
 | NATS, adapters, the gateway, the console, every MCP server | control |
