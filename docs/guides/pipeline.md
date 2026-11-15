@@ -79,8 +79,9 @@ fields, and omitting both is the ordinary case.
 | `runtimeRef` | the `AgentRuntime` | the one named `default` runs it |
 | `serviceAccountName` | the identity that runtime executes under | it inherits the release's default, which ships as an account bound to NOTHING |
 
-**A service account a Pipeline names renders in the conversations
-namespace**, beside the pods that run as it. In a single-namespace layout
+**A service account a Pipeline names lives in the conversations
+namespace**, beside the pods that run as it. It exists only once
+`rbac.runtime.serviceAccounts` or a bundle declares it. In a single-namespace layout
 that is the same namespace as everything else.
 
 **This is the same decision as `toolsets`.** One says which tools may be called.

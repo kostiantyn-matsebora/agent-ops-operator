@@ -1043,8 +1043,9 @@ A release resolves two namespaces, not one:
 
 Equal values are the single-namespace layout — the same deployment this chart
 shipped before, with two names resolving to one. **An object moves to
-conversations if a runtime pod runs as it, mounts it, or resolves it, or it
-is conversation-scoped state. Nothing else moves:**
+conversations if a runtime pod runs as it, mounts it, or resolves it.**
+
+**So does conversation-scoped state. Nothing else moves:**
 
 | Object | Namespace |
 |---|---|

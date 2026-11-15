@@ -18,7 +18,7 @@ helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 ## Namespaces
 
 The conversations namespace is set once, before install — see
-[Installation]({{ '/installation/#namespaces' | relative_url }}).
+[Installation](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/#namespaces).
 Switching it later is a migration, not a `helm upgrade`.
 
 ## Storage
