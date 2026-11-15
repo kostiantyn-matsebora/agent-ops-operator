@@ -50,9 +50,9 @@
 - [x] 7.8 `state-read-auth.yaml`: render the generated token into Conversations from the same lookup
 - [x] 7.9 `deployment.yaml`: pass `CONVERSATION_NAMESPACE` to the manager. `console.yaml`: pass it to the console and add its read-only pods Role in Conversations
 - [x] 7.10 `chart/charts/kubernetes`: route accounts and their binding subjects in Conversations, every other object in the release namespace
-- [x] 7.11 `Chart.yaml` stays at 19.0.1 here, the bump to 20.0.0 is deferred to release time with the image pins (7.11a), when `require-release-docs.sh` checks that Chart.yaml, changelog and docs agree
-- [x] 7.11a Image-tag pin deferred to release time, stated reason: this change's own CI has not yet published new manager, console and `signal-k8s-events` tags (still 0.62.0, 0.41.0, 0.6.0). `require-release-docs.sh` refuses the chart tag push unless `Chart.yaml`, changelog and docs agree, so the release re-checks the pin
-- [x] 7.12 `NOTES.txt`: print both namespaces and point at the 20.0.0 Upgrade section
+- [x] 7.11 `Chart.yaml` stays at 19.0.1 here, the bump to 20.0.0 is deferred to release time with the image pins (7.12), when `require-release-docs.sh` checks that Chart.yaml, changelog and docs agree
+- [x] 7.12 Image-tag pin deferred to release time, stated reason: this change's own CI has not yet published new manager, console and `signal-k8s-events` tags (still 0.62.0, 0.41.0, 0.6.0). `require-release-docs.sh` refuses the chart tag push unless `Chart.yaml`, changelog and docs agree, so the release re-checks the pin
+- [x] 7.13 `NOTES.txt`: print both namespaces and point at the 20.0.0 Upgrade section
 
 ## 8. Chart: NetworkPolicy peers — deployment-engineer
 
@@ -98,7 +98,7 @@ Left unticked until section 10 has run, so the documentation gate follows the sy
 - [ ] 11.6 `docs/integrations/kubernetes.md` and `docs/console.md`: route accounts and runtime pods in the conversations namespace
 - [ ] 11.7 `docs/CHANGELOG.md` `[20.0.0]`, with the Upgrade section as the migration of record: close, Secrets, PV rebind, upgrade, kube cleanup, verify, rollback. The heading names 20.0.0 ahead of `Chart.yaml`, which stays at 19.0.1 until the release-time bump (7.11)
 - [ ] 11.8 `.claude/rules/`: `terminology.md` (control and conversations namespace, the namespace pair), `invariants.md` (the placement rule), `structure.md`, `gotchas.md` — four files edited, with three new `gotchas.md` entries including the egress-proxy-listener probe the system lane's own no-ingress test surfaced
-- [ ] 11.9 Re-run `python3 .github/scripts/docs-generate.py` and pass `--check` (also caught and fixed a stale `--version 19.0.1` in `docs/installation.md`'s install commands)
+- [ ] 11.9 Re-run `python3 .github/scripts/docs-generate.py` and pass `--check` (`docs/installation.md`'s install commands pin `--version 19.0.1`, matching `Chart.yaml` until the release-time bump in 7.11)
 
 ### Adopter site
 

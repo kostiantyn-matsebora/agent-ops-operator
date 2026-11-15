@@ -93,7 +93,8 @@ fifteen minutes, most of it the install.
 
 4. **Create the model credential.** It is a Secret a runtime pod resolves,
    so it belongs where the pod runs — `agent-ops-conversations`, not
-   `agent-ops`.
+   `agent-ops`. Alternatively, `--set claude.credentialsSecret.token=<token>`
+   makes the chart create it in `agent-ops-conversations`.
 
    ```sh
    kubectl -n agent-ops-conversations create secret generic agentops-claude \

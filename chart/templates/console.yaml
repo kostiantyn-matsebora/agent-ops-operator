@@ -401,7 +401,9 @@ subjects:
 # in the conversations namespace, where runtime pods now run — the console
 # already reads Conversations and Signals through /state/*, so this is ONLY
 # an additional `pods` watch, beside the Role above rather than a replacement
-# for it. The SAME ServiceAccount, bound from a namespace other than its own.
+# for it. The SAME ServiceAccount, which lives in the release (control)
+# namespace, so the subject below names `.Release.Namespace` while the Role
+# and RoleBinding sit in the conversations namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
