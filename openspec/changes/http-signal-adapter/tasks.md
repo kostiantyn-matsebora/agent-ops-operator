@@ -8,8 +8,9 @@
 
 ## 2. Chart and component inventory
 
-- [ ] 2.1 Add `chart/charts/http/` rendering the `SignalAdapter` with `spec.port`, default off, not enabled by demo mode. Verify the chart render tests for default, enabled and demo.
-- [ ] 2.2 Confirm the image publishes multi-arch and the component appears in the inventory. Verify `.github/components.sh images` and the structure assertions pass.
+- [ ] 2.1 Add `chart/charts/http/` as an embedded subchart: a `Chart.yaml`, templates self-gated on `http.enabled`, and a `values.yaml` reading only `global.`. Render the `SignalAdapter` with `spec.port` and the floor service account. Verify the chart render tests for default, enabled and demo.
+- [ ] 2.2 Register the dependency in the parent `chart/Chart.yaml` with `condition: http.enabled`, add the documented `http:` block (`enabled: false`) to `chart/values.yaml`, and bump the chart version per `chart.md`. Verify `helm dependency` and `helm template` succeed with the bundle off and on.
+- [ ] 2.3 Confirm the image publishes multi-arch and the component appears in the inventory. Verify `.github/components.sh images` and the structure assertions pass.
 
 ## 3. Unit tests
 

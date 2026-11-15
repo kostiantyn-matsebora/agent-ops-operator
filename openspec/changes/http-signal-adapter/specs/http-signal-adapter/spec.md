@@ -127,13 +127,21 @@ The adapter's documentation SHALL state that one request is one message, so `sig
 - **WHEN** `docs/integrations/http.md` is read
 - **THEN** it states the message definition, the `kind` consequences and the loop warning
 
-### Requirement: The adapter ships as a chart bundle that is off by default
-A bundle under `chart/charts/http/` SHALL render the `SignalAdapter` with its port, workload knobs and the adapter's own floor service account, and nothing else by default. It SHALL be off by default and SHALL NOT be enabled by demo mode.
+### Requirement: The adapter ships as an embedded subchart gated by `http.enabled`, off by default
+The adapter SHALL ship as its own subchart at `chart/charts/http/`, like every other bundle. The parent `chart/Chart.yaml` SHALL declare it as a dependency with `condition: http.enabled`, and the subchart's templates SHALL be additionally self-gated on `http.enabled`.
+
+The parent `chart/values.yaml` SHALL document an `http:` block with `enabled: false` and a typical enablement snippet. The subchart SHALL read no parent scope but `global.`.
+
+By default the bundle SHALL render the `SignalAdapter` with its port, workload knobs and the adapter's own floor service account, and nothing else. It SHALL NOT be enabled by demo mode.
 
 #### Scenario: Default install renders nothing
 - **WHEN** the chart is installed with default values
 - **THEN** no object from the bundle renders
 
+#### Scenario: Demo mode does not enable the bundle
+- **WHEN** the chart is installed with `global.demo.enabled=true` and default bundle values
+- **THEN** no object from the bundle renders
+
 #### Scenario: Enabling renders the adapter
-- **WHEN** the bundle is enabled
+- **WHEN** `http.enabled=true`
 - **THEN** a `SignalAdapter` with `spec.port` set renders and the reconciler creates its Service
