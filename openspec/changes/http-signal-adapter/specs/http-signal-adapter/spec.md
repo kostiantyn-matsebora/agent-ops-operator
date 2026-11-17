@@ -7,7 +7,7 @@ The generic HTTP request signal adapter in `signals/http/`. A dependency-free mo
 ### Requirement: The adapter serves HTTP requests as signals through the signal adapter contract
 A signal adapter in `signals/http/` (own dependency-free Go module and image `agentops-signal-http`, listed by `.github/components.sh images` as `signal-http`) SHALL serve `SignalSource`s whose `spec.adapter` names its `SignalAdapter`, through the signal adapter contract. It SHALL accept `POST /request/{source}` on the port declared by `SignalAdapter.spec.port` (`LISTEN_ADDR`).
 
-The `{source}` segment SHALL route to a source learned from `GET /signal/sources?adapter=<key>`. One request SHALL produce exactly one signal, and the response SHALL be `202` once the manager accepts it.
+The `{source}` segment SHALL route to a source learned from `GET /signal/sources?adapter=<key>`, where `<key>` is the adapter's own `SignalAdapter` name, which is its routing key. One request SHALL produce exactly one signal, and the response SHALL be `202` once the manager accepts it.
 
 The adapter SHALL NOT deduplicate, apply cooldown, group or route (`ADP-3`).
 
