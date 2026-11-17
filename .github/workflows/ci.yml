@@ -1077,6 +1077,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: runtimes/pi/package-lock.json
       - run: npm ci
         working-directory: runtimes/pi
       - run: go test -tags conformance -count=1 -timeout 20m -v ./test/conformance/

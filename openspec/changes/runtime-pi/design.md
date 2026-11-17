@@ -340,12 +340,13 @@ resumed session id matches: true   file matches: true
 findById for a missing id -> undefined
 ```
 
-**This contradicts D5's mapping-file fallback.** No id-to-session mapping
-file is needed. The runtime gives each context its own `sessionDir` (for
-example `<state root>/<runtimeContextId>/`) and `findById` plus `open` do
-the rest. `findById` on an id that was never created returns `undefined`
-cleanly, which is what feeds `continuity: unavailable` without a mapping
-file to consult.
+**This confirms D5's corrected mapping.** No id-to-session mapping file is needed.
+
+The runtime gives each context its own `sessionDir` (for example
+`<state root>/<runtimeContextId>/`) and `findById` plus `open` do the rest.
+
+`findById` on an id that was never created returns `undefined` cleanly. That
+feeds `continuity: unavailable` without a mapping file to consult.
 
 The state root relocates independently in two places:
 

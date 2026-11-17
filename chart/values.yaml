@@ -383,7 +383,7 @@ ollama:
 copilot:
   enabled: false
 
-# The FOURTH vendor this chart ships: a model-agnostic coding harness over
+# A further vendor this chart ships: a model-agnostic coding harness over
 # pi's SDK (chart/charts/pi/values.yaml). OFF by default. It needs a
 # credential, a provider and a model — pi talks to many providers through one
 # SDK and has none to fall back on, unlike Copilot's account-level default. A
