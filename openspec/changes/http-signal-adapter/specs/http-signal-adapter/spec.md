@@ -120,7 +120,7 @@ A fault on one source SHALL NOT affect another served source.
 - **WHEN** two sources are served and only one has a bad template
 - **THEN** the other keeps accepting requests
 
-### Requirement: The adapter's page states what a message is and who chooses the lane
+### Requirement: The adapter's page states what a message is and who chooses the agent's prompt
 The adapter's documentation SHALL state that one request is one message, so `signalId` is random unless the source maps a sender-supplied delivery id (`ADP-9`). It SHALL state that a templated `kind` lets a token holder choose the agent's prompt, and that a constant is the safer choice. It SHALL state that an unset `kind` is not sent and the manager then reads it as `alert`. It SHALL warn that a sender pointed at agent-ops' own events can feed a loop.
 
 #### Scenario: The adapter page carries the required statements
