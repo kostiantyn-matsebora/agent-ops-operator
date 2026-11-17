@@ -383,6 +383,21 @@ ollama:
 copilot:
   enabled: false
 
+# The FOURTH vendor this chart ships: a model-agnostic coding harness over
+# pi's SDK (chart/charts/pi/values.yaml). OFF by default. It needs a
+# credential, a provider and a model — pi talks to many providers through one
+# SDK and has none to fall back on, unlike Copilot's account-level default. A
+# route selects it with `pipelines[].runtimeRef: pi`.
+#
+#   pi:
+#     enabled: true
+#     credentialsSecret:
+#       token: sk-placeholder
+#     provider: anthropic
+#     model: claude-sonnet-5
+pi:
+  enabled: false
+
 # THE RUNTIMES THIS INSTALL DECLARES — the second of the two runtime blocks.
 #
 # THE RULE SEPARATING THEM, in one line each:

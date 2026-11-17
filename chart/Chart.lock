@@ -26,11 +26,14 @@ dependencies:
 - name: claude-cli
   repository: ""
   version: 0.1.0
+- name: pi
+  repository: ""
+  version: 0.1.0
 - name: nats
   repository: ""
   version: 0.1.0
 - name: commandbus
   repository: ""
   version: 0.1.0
-digest: sha256:071a098cd0b09dff0c5ec48b2c65cd952195b0eacf4ed54d6da26f9ade27db7d
-generated: "2026-11-14T18:24:22.289886456+02:00"
+digest: sha256:55e99879252f640dd3ade7d5dd326ea35cd8a065e24be0d793c706fd87cf4a72
+generated: "2026-11-17T17:57:49.69056706Z"

@@ -1,0 +1,87 @@
+# The pi agent runtime, as a bundle.
+#
+# OFF BY DEFAULT. The `claude` bundle is what a fresh install executes on; this
+# one is a FOURTH vendor an install turns on beside it and selects per route
+# with `pipelines[].runtimeRef: pi`. Any number run on one install.
+#
+# WHAT IS DIFFERENT ABOUT THIS VENDOR, and why none of it reaches a CRD: pi
+# talks to many model providers through its own SDK rather than one vendor's
+# account, names its built-in tools differently (`read`, `write`, `edit`,
+# `bash`, `grep`, `find`), and lets the caller choose the session id directly —
+# `runtimeContextId` IS pi's own session id, no mapping file needed. The
+# runtime image translates all of this at the boundary — a Pipeline binds the
+# same MCPToolsets it binds for any other runtime, and an empty allowlist
+# stays empty. See docs/runtimes/pi.md.
+#
+# WHAT IT DOES NOT SHIP, because that IS the substrate and stays the parent's:
+# the runtime DEFAULTS every runtime inherits, the FLOOR ServiceAccount, and the
+# context volume. This bundle declares one runtime and inherits the rest.
+enabled: false
+
+# The AgentRuntime CR name, what a Pipeline's `runtimeRef` selects.
+name: pi
+
+# Make THIS the runtime a Pipeline naming no `runtimeRef` runs on. The parent
+# renders the CR named `default` as a copy of the flagged runtime — or of the
+# first configured when none is flagged, so with the `claude` bundle off and
+# this one alone it is the default without the flag. Every runtime is optional.
+default: false
+
+# The runtime image, and the one place its tag is written. NO domain tooling in
+# it: what an agent may reach is wiring — see docs/concepts.md#runtime-images-are-generic.
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-pi:0.1.0
+
+# ONE secret with the credential pi's model provider needs. Projected as env via
+# valueFrom; the manager reads no Secrets.
+#
+# Supply `token` and this bundle CREATES the Secret, release-managed — point it
+# at a secret store from your helmfile and the credential is provisioned with
+# the release. Leave it empty to reference a Secret you manage yourself.
+#
+# Getting it wrong fails at START, not on the first run: the runtime exits
+# naming the variable, and the pod restarts until the Secret exists.
+#
+# THE KEY AND THE ENV VAR NAME THIS VENDOR, which is why they are here and not
+# in the release-wide defaults. Another backend states its own on its own entry.
+credentialsSecret:
+  name: agentops-pi
+  key: apiKey
+  envName: PI_API_KEY
+  token: ""
+
+# WHICH PROVIDER, by pi's own provider id — pi talks to many model providers
+# through one SDK, so unlike Copilot's account-level default there is no
+# provider to fall back on. REQUIRED once the bundle is enabled; the render
+# fails naming this key otherwise, because a runtime with no provider would
+# start fine and fail every run. e.g. anthropic
+provider: ""
+
+# WHICH MODEL, by the chosen provider's own id. REQUIRED once the bundle is
+# enabled, for the same reason. e.g. claude-sonnet-5
+model: ""
+
+# Further knobs the runtime reads, as ordinary env entries — laid OVER the ones
+# the keys above produce.
+#
+#   PI_RUN_TIMEOUT_S   one run's wall-clock ceiling, default 3600
+#   PI_LOG_LEVEL       the SDK's own log level, default warning
+env: []
+
+# WHERE THIS RUNTIME KEEPS ITS CONTEXT, relative to $HOME — pi's own session
+# store, one directory per session id. This is the value that turns context
+# synchronisation ON, and it is here rather than in the release-wide defaults
+# for the same reason the image is: it is this backend's layout and means
+# nothing to another. Clearing it mounts the context volume directly, with no
+# sidecar.
+#
+# ONLY the session subtree, per design runtime-pi's S3/S4 spike finding:
+# `auth.json` and `models-store.json` sit beside it under pi's own state root
+# and stay empty under this design, since the credential is env, never OAuth —
+# syncing them would be harmless but carries nothing, so they are left out.
+contextSync:
+  paths:
+    - ".pi/agent/sessions/**"
+
+# Any key `global.agentops.runtimeDefaults` accepts is accepted here too, and
+# overrides it for THIS runtime only — `idleTtlMinutes`, `nodeSelector`,
+# `resources`, `egressMediation`, `contextStorage`.

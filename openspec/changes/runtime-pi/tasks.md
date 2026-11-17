@@ -123,20 +123,20 @@ sections 2 to 4 depends on an answer until its spike is recorded.
 
 ## 6. Chart: the `pi` bundle — deployment-engineer
 
-- [ ] 6.1 Create `chart/charts/pi/` with `Chart.yaml` 0.1.0, `values.yaml`
+- [x] 6.1 Create `chart/charts/pi/` with `Chart.yaml` 0.1.0, `values.yaml`
   (`enabled: false`, `name: pi`, `default: false`, `image`, the credential
   Secret reference, provider and model env, `contextSync.paths` from S4), and
   `templates/runtime.yaml` calling `agentops.renderRuntime`. Verify:
   `helm template` of the bundle on renders one `AgentRuntime` and nothing
   else.
-- [ ] 6.2 Add `agentops.piRuntimeEntry` to `chart/templates/_helpers.tpl` and
+- [x] 6.2 Add `agentops.piRuntimeEntry` to `chart/templates/_helpers.tpl` and
   `pi` to `agentops.declaredRuntimes`, so the default-runtime guard and the
   bootstrap env see it. Verify: the existing guard test still passes.
-- [ ] 6.3 `chart/Chart.yaml` gains the dependency with `condition:
+- [x] 6.3 `chart/Chart.yaml` gains the dependency with `condition:
   pi.enabled`, and `chart/values.yaml` the documented `pi:` section beside
   `copilot:`. Verify: `helm lint` passes and a default render is
   byte-identical to the render before this change.
-- [ ] 6.4 Bump the chart minor. Verify: `docs-generate.py --check` accepts the
+- [x] 6.4 Bump the chart minor. Verify: `docs-generate.py --check` accepts the
   new version once section 10 is done.
 
 ## 7. The specification — api-architect
