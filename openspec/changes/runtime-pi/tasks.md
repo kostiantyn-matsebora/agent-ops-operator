@@ -264,38 +264,104 @@ archive hook checks it.
 
 ### Reference docs
 
-- [ ] 10.1 `docs/contracts/runtime.md` is done in 7.1. Here, update
+- [x] 10.1 `docs/contracts/runtime.md` is done in 7.1. Here, update
   `docs/contracts.md` and `docs/concepts.md`: the fifth runtime, the
   per-runtime definition path, the tool-enablement posture each runtime
-  takes, and the pinned versions.
-- [ ] 10.2 `docs/configuration.md`: the `pi` bundle's values.
-- [ ] 10.3 `docs/CHANGELOG.md`: an Added entry for the bundle and image,
-  newest first, with the image tag it ships and no upgrade steps.
-- [ ] 10.4 `.claude/rules/runtime-spec.md`, `.claude/rules/structure.md` and
+  takes, and the pinned versions. `docs/concepts.md` edited (agent-definition
+  path, `toolsets.mode` note, context-sync-paths enumeration, all three
+  places now naming pi). `docs/contracts.md` checked and needs NO edit — it
+  is entirely vendor-neutral (grepped `runtime`/`claude`/`ollama`/`version`,
+  no vendor named, no version pinned), recorded here rather than silently
+  skipped.
+- [x] 10.2 `docs/configuration.md`: the `pi` bundle's values. Added the `pi:`
+  link to the bundle list, a `pi:` values block (`enabled`, `provider`,
+  `model`, `credentialsSecret.token`) and a `pipelines[]` example naming
+  `runtimeRef: pi`.
+- [x] 10.3 `docs/CHANGELOG.md`: an Added entry for the bundle and image,
+  newest first, with the image tag it ships and no upgrade steps. Added as a
+  bullet under the existing `## [Unreleased]` / `### Added` — chart 19.1.0 is
+  not yet tagged, and `docs/CLAUDE.md`'s own format is one heading per
+  VERSION, not per change.
+- [x] 10.4 `.claude/rules/runtime-spec.md`, `.claude/rules/structure.md` and
   `.claude/rules/wiring.md`: the shipped-runtime lists and the
   "three shipped runtimes" wording, and the definition path being per-runtime.
   Verify: `python3 .claude/scripts/rules_compliance.py` over the three is
-  silent.
-- [ ] 10.5 Re-run `python3 .github/scripts/docs-generate.py` and commit
+  silent. `runtime-spec.md`'s conformance-carries-every-shipped-runtime list
+  and `structure.md`'s `runtimes/` table/count both now name `runtimes/pi`.
+  `wiring.md` checked (grepped every runtime name and "definition path"/
+  "agents/<") and needs NO edit — it names no specific runtime anywhere.
+  Verified silent: `python3 .claude/scripts/rules_compliance.py
+  .claude/rules/runtime-spec.md .claude/rules/structure.md
+  .claude/rules/wiring.md` — no output.
+- [x] 10.5 Re-run `python3 .github/scripts/docs-generate.py` and commit
   every regenerated block, since a chart value and a runtime page changed.
+  Run for real (not `--check`) after adding the `pi` entry to
+  `docs-generate.py`'s own `BUNDLES` dict (required `provider`/`model`, both
+  added to `DOCUMENTED_PLACEHOLDERS`) — wrote `docs/assets/img/runtimes/
+  pi-{light,dark}.svg` and filled `pi.md`'s `renders bundle=pi` block. Also
+  had to fix a pre-existing, unrelated gap this run surfaced first:
+  `docs/installation.md` still named chart `19.0.1` while `chart/Chart.yaml`
+  is `19.1.0` (the version check runs BEFORE the write step, so it silently
+  blocked every other regeneration) — bumped both install-command lines.
+  `docs-generate.py --check` now exits 0 (73 generated files up to date).
 
 ### Adopter site
 
-- [ ] 10.6 New `docs/runtimes/pi.md` in the copilot page's shape: what it
+- [x] 10.6 New `docs/runtimes/pi.md` in the copilot page's shape: what it
   executes, what it needs, where its context lives, what it costs, the
   tool-enablement posture and the `renders bundle=pi` marker, claiming
   specification 2.0.2. Add its diagram spec to `RUNTIME_DIAGRAMS` in
-  `.github/scripts/docs_diagrams.py`.
-- [ ] 10.7 `docs/_data/nav.yml`: one entry in the Runtimes group. Before the
+  `.github/scripts/docs_diagrams.py`. Written, modeled line-for-line on
+  `copilot.md`'s sections, with pi's own facts (multi-provider,
+  `.claude/agents/<agent>.md`, no scoped-shell narrowing, session resumed by
+  minted id rather than held open). Diagram spec added (`"pi"` key, `dir:
+  "runtimes"`) and rendered.
+- [x] 10.7 `docs/_data/nav.yml`: one entry in the Runtimes group. Before the
   new page links the pi project, add its host to
   `.github/publication-allowlist.json` as a linked upstream project, never by
-  loosening a rule. Verify: `publication-guard.py` passes.
-- [ ] 10.8 The pages that list the shipped runtimes: `docs/introduction.md`,
+  loosening a rule. Verify: `publication-guard.py` passes. Nav entry added
+  (no icon — no pi mark exists under `assets/img/logos/`, and one was not
+  fabricated). The page links the npm package page
+  (`npmjs.com/package/@earendil-works/pi-coding-agent`) — `npmjs.com` is
+  ALREADY in `publication-allowlist.json`'s hostname allowlist (the
+  "TOOLCHAIN, VENDOR AND STANDARDS HOSTS" section), so no entry was added
+  there. `docs-generate.py`'s own SEPARATE, stricter `ALLOWED_HOSTS` set
+  (the published-page audit) did need `www.npmjs.com` added, with a comment
+  citing the same reasoning — found by actually running the generator, not
+  assumed. `publication-guard.py` and `docs-generate.py --check` both exit 0.
+- [x] 10.8 The pages that list the shipped runtimes: `docs/introduction.md`,
   `docs/index.md`, `docs/installation.md` and `docs/guides/agent-runtime.md`.
-- [ ] 10.9 `README.md`: the runtime list only. Verify: `wc -l README.md` is
-  at most 215.
-- [ ] 10.10 Run the prose check from `docs/CLAUDE.md` over the touched pages
+  First three updated (the "Two/Three are already shipped" count, the
+  "Claude Code, Ollama and GitHub Copilot" sentence, the bundle-values
+  table) — also where the chart-version gap from 10.5 was fixed.
+  `agent-runtime.md` checked and left as-is: its two named examples
+  (Ollama/Copilot) illustrate two DISTINCT backend patterns ("its own
+  harness" vs "a vendor SDK translated"), and pi is a second instance of the
+  SAME pattern Copilot already illustrates, so naming a third example there
+  teaches nothing new — a deliberate omission, not an oversight.
+- [x] 10.9 `README.md`: the runtime list only. Verify: `wc -l README.md` is
+  at most 215. Three spots updated (`Works with` logo strip, `Any model you
+  can run` bullet, the runtime link row). Final: 215 lines exactly.
+- [x] 10.10 Run the prose check from `docs/CLAUDE.md` over the touched pages
   and build the site to look at the new page. Verify: the check is silent
-  and the page renders with its diagram in both colour schemes.
-- [ ] 10.11 `docs-generate.py --check`, `retired-vocabulary-guard.py` and
-  `publication-guard.py` pass. Verify: each exits zero.
+  and the page renders with its diagram in both colour schemes. The prose
+  check (`.claude/scripts/rules_compliance.py`, the same check) is silent
+  over every touched file. The site was built with the documented
+  Docker/Jekyll process (network+CA-bundle flags added for this sandbox's
+  egress proxy) — build succeeds, `runtimes/pi/index.html` renders with no
+  unresolved Liquid, the diagram `<img>` resolving to the real
+  `pi-light.svg` asset, 6 tables, and the nav/installation/index pages all
+  link `/runtimes/pi/` correctly. A LIVE BROWSER SCREENSHOT in both colour
+  schemes was not taken — serving the build over HTTP in this sandbox was
+  refused by the environment's own auto-mode classifier (starting a
+  background server), so this is recorded as a workstation-only gap per
+  `remote-session.md` rather than claimed done.
+- [x] 10.11 `docs-generate.py --check`, `retired-vocabulary-guard.py` and
+  `publication-guard.py` pass. Verify: each exits zero. All three
+  independently re-run after every edit above, each exiting 0:
+
+  | Check | Result |
+  |---|---|
+  | `docs-generate.py --check` | "73 generated file(s) up to date" |
+  | `retired-vocabulary-guard.py` | "clean (147 files)" |
+  | `publication-guard.py` | "clean" |

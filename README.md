@@ -48,7 +48,7 @@ cron schedules &nbsp;·&nbsp;
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/logos/ollama-dark.svg"><img src="docs/assets/img/logos/ollama-light.svg" width="18" alt=""></picture> Ollama &nbsp;·&nbsp;
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/logos/github-dark.svg"><img src="docs/assets/img/logos/github-light.svg" width="18" alt=""></picture> GitHub Copilot &nbsp;·&nbsp;
-any MCP server &nbsp;·&nbsp; your own
+pi &nbsp;·&nbsp; any MCP server &nbsp;·&nbsp; your own
 
 ## How it works
 
@@ -103,8 +103,8 @@ identity, mediated egress and at-least-once delivery are already in it.
 - **Compose agents, another seam** — a `Coordinator` analyses what arrived,
   delegates by purpose to the agents it lists, reads what they return, and
   decides what happens next.
-- **Any model you can run** — Claude Code, Ollama and GitHub Copilot ship with
-  it. Point it at your own image and the work contract is unchanged.
+- **Any model you can run** — Claude Code, Ollama, GitHub Copilot and pi ship
+  with it. Point it at your own image and the work contract is unchanged.
 - **A pod per conversation, in its own namespace** — isolated, serial, capped.
 - **Tools that come from the wiring** — not from the prompt. An agent holds the
   cluster identity its route named and nothing else.
@@ -189,7 +189,7 @@ in learning order. The reference pages are read here:
 | [docs/contracts/channel-adapter.md](docs/contracts/channel-adapter.md) | The channel adapter contract: long-poll, push, and the body grammar |
 | [docs/contracts/signal-adapter.md](docs/contracts/signal-adapter.md) | The signal adapter contract: normalize, push, and the lane rules |
 | [docs/console.md](docs/console.md) | Console reference: its endpoints, RBAC grant, values and internals |
-| [kubernetes](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/kubernetes/) · [prometheus](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/prometheus/) · [home-assistant](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/home-assistant/) · [pulse](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/pulse/) · [telegram](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/telegram/) · [claude](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/claude/) · [claude-cli](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/claude-cli/) · [ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/) · [copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/) | Each integration: configure it, tune it, and bind its parts into your own pipelines — and the runtimes |
+| [kubernetes](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/kubernetes/) · [prometheus](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/prometheus/) · [home-assistant](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/home-assistant/) · [pulse](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/pulse/) · [telegram](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/telegram/) · [claude](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/claude/) · [claude-cli](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/claude-cli/) · [ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/) · [copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/) · [pi](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/pi/) | Each integration: configure it, tune it, and bind its parts into your own pipelines — and the runtimes |
 | [Security](https://kostiantyn-matsebora.github.io/agent-ops-operator/security/) | What a default install grants, what each of the three walls bounds, what is not addressed |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) · [docs/adr/](docs/adr/) | Upgrade guides newest first, and decisions with the alternatives that were built |
 

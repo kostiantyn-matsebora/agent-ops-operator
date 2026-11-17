@@ -57,6 +57,15 @@ a manual step per claim you want to keep.
   self-registering sender that read the old name.
 - The `SignalAdapter` reconciler creates no ServiceAccount. It names the
   account in `spec.serviceAccountName` and falls back to the release floor.
+- **A fifth runtime: `agentops-runtime-pi` 0.1.0, shipped as the `pi`
+  bundle.** OFF by default. `pi.enabled: true` with a `pi.provider`,
+  `pi.model` and a credential (`pi.credentialsSecret.token`, or a Secret you
+  manage) renders one `AgentRuntime` named `pi` through the parent's shared
+  renderer. A route selects it with `pipelines[].runtimeRef: pi`. Pi reads
+  `.claude/agents/<agent>.md`, the same path and composition rules as the
+  reference runtime, and reaches bound MCP servers through its own
+  `pi-mcp` client. State lives under `.pi/agent/sessions/**`, declared to
+  `context-sync` by the bundle.
 
 ### Changed
 

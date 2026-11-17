@@ -49,13 +49,13 @@ read-only demo on your cluster in fifteen minutes.
    ```sh
    helm install agent-ops \
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     --version 19.0.1 -n agent-ops
+     --version 19.1.0 -n agent-ops
    ```
 
    ```powershell
    helm install agent-ops `
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     --version 19.0.1 -n agent-ops
+     --version 19.1.0 -n agent-ops
    ```
 
    **No registry credential.** The chart and every image it renders are public
@@ -135,6 +135,7 @@ substrate they run on comes from this chart.
 | Claude CLI runtime | `claude-cli.enabled` | [claude-cli]({{ '/runtimes/claude-cli/' | relative_url }}) |
 | Ollama runtime | `ollama.enabled` | [ollama]({{ '/runtimes/ollama/' | relative_url }}) |
 | GitHub Copilot runtime | `copilot.enabled` | [copilot]({{ '/runtimes/copilot/' | relative_url }}) |
+| pi runtime | `pi.enabled` | [pi]({{ '/runtimes/pi/' | relative_url }}) |
 | Coordination (`agentops-mcp-aops`) | `coordination.enabled` | [coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}) |
 
 All eight are off by default. Each bundle's own page owns its values — this

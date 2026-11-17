@@ -13,7 +13,9 @@ work together.
 MCP servers and channels are the Pipeline's:
 
 - **Git repository** — private OK, SSH key or HTTPS PAT via `secretRef`.
-- **Agent role file** in that repo — `.claude/agents/<name>.md` for the claude and ollama runtimes, `.github/agents/<name>.agent.md` for copilot.
+- **Agent role file** in that repo — `.claude/agents/<name>.md` for the
+  claude, ollama and pi runtimes, `.github/agents/<name>.agent.md` for
+  copilot.
 - **Credentials** as `env[]` with `valueFrom`.
 - **Prompts and limits.**
 
@@ -1154,8 +1156,8 @@ keys are overlaid, with the later ref winning a collision.
 
 The `toolsets` stanza carries a `mode`, and the thing it composes against is the
 **agent's own definition**: the `tools:` frontmatter of the agent's file in the
-profile's repository — `.claude/agents/<agent>.md` on the claude and ollama
-runtimes, `.github/agents/<agent>.agent.md` on copilot.
+profile's repository — `.claude/agents/<agent>.md` on the claude, ollama and
+pi runtimes, `.github/agents/<agent>.agent.md` on copilot.
 
 The path is the runtime's fact. The composition rule is the same on all of them.
 
@@ -2291,10 +2293,11 @@ ships.** The value above is `runtime-claude`'s, and it is the default in
 `chart/charts/claude/values.yaml` — beside that runtime's image and its model
 credential, which live there for the same reason.
 
-`chart/charts/ollama/` ships its own, `.agentops/contexts/**`, and
-`chart/charts/copilot/` ships `.copilot/session-state/**`, for the same
-reason again. So a default install with a context volume runs synchronised
-without anyone setting anything.
+`chart/charts/ollama/` ships its own, `.agentops/contexts/**`,
+`chart/charts/copilot/` ships `.copilot/session-state/**`, and
+`chart/charts/pi/` ships `.pi/agent/sessions/**`, for the same reason again.
+So a default install with a context volume runs synchronised without
+anyone setting anything.
 
 **Not the release-wide runtime defaults.** Those are what every runtime
 inherits, and an include list is one vendor's filesystem layout: it
