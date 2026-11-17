@@ -97,7 +97,7 @@ The adapter SHALL validate each rendered value before pushing, so one stray valu
 | `severity` | `critical`, `error`, `warning` or `info`, after the optional value map. Any other value is sent as none. |
 | `signalId` | 1 to 256 bytes of printable ASCII with no spaces. Otherwise a fresh random id. |
 | `title` | truncated to 500 runes |
-| `labels` | at most 32 keys. A key under the reserved `agentops.dev/` prefix is dropped, so a sender can never set `agentops.dev/channel`, which `LANE-2` and `LANE-3` reserve to the manager's routing. |
+| `labels` | at most 32 keys. A key under the reserved `agentops.dev/` prefix is dropped, because the adapter never sends a `chat` kind and `LANE-3` forbids `agentops.dev/channel` on any other kind, so no sender-chosen label under that prefix is safe to forward. |
 | request body | capped below the manager's 1 MiB limit. A larger request is refused `413`. |
 
 #### Scenario: An unknown severity is sent as unrated
