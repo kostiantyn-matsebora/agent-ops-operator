@@ -1,0 +1,17 @@
+{
+  "name": "agentops-runtime-pi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "agent-ops AgentRuntime image driving the pi coding agent through its SDK, in-process — implements the /work contract, nothing else.",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.2"
+  }
+}

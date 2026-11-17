@@ -30,46 +30,47 @@ sections 2 to 4 depends on an answer until its spike is recorded.
 
 ## 2. The runtime — backend-developer
 
-- [ ] 2.1 Create `runtimes/pi/` with `package.json` (exact pin, `node >=22.12`)
-  and its lockfile, and the entry file that long-polls `GET /work`, runs a
-  unit, posts `/work/done` and exits `0` after `RUNTIME_IDLE_TTL_M`, ported
-  from `runtimes/copilot/runtime.js`. Verify: `node --test` in `runtimes/pi`
-  runs the ported main-loop test.
-- [ ] 2.2 Fail at start on missing `CONTROL_URL`, `CONVO_ID` or credential
+- [x] 2.1 Create `runtimes/pi/` with `package.json` (exact pin, `node
+  >=22.19.0` — the SDK's own declared floor per spike 1.1, above this task's
+  original `>=22.12` guess) and its lockfile, and the entry file that
+  long-polls `GET /work`, runs a unit, posts `/work/done` and exits `0`
+  after `RUNTIME_IDLE_TTL_M`, ported from `runtimes/copilot/runtime.js`.
+  Verify: `node --test` in `runtimes/pi` runs the ported main-loop test.
+- [x] 2.2 Fail at start on missing `CONTROL_URL`, `CONVO_ID` or credential
   with a nonzero exit naming the gap (`LC-4`). Verify: a test per variable
   asserts the exit code and the message.
-- [ ] 2.3 Clone `REPO_URL`/`REPO_REF` with the environment's git credentials
+- [x] 2.3 Clone `REPO_URL`/`REPO_REF` with the environment's git credentials
   and skip cleanly on an empty `REPO_URL` (`RT-1`, `MGR-5`), ported from
   copilot's clone code and its tests. Verify: the ported clone, SSH and HTTPS
   tests pass.
-- [ ] 2.4 `tools.js`: read `.claude/agents/<agent>.md`, return its `tools:` and
+- [x] 2.4 `tools.js`: read `.claude/agents/<agent>.md`, return its `tools:` and
   its body, and compose the allowlist per `toolsMode`. Absent, unreadable or
   unparseable contributes nothing and never blocks (`RT-3.3`). Verify: tests
   for `merge`, `overwrite`, an empty composition, a missing file and bad
   frontmatter.
-- [ ] 2.5 `vocabulary.js`: map the composed allowlist to pi's built-in names
+- [x] 2.5 `vocabulary.js`: map the composed allowlist to pi's built-in names
   per design D2. A scoped shell pattern enables nothing and is logged, an
   unrecognised pattern contributes nothing and is logged, and every mapped
   name is checked against the session's registered inventory at start.
   Verify: table tests for each built-in, a scoped `Bash(...)`, an unknown
   pattern and an inventory gap.
-- [ ] 2.6 Build the system prompt: the definition's body, then the unit's
+- [x] 2.6 Build the system prompt: the definition's body, then the unit's
   `systemPrompt`, on every run including resumes, using the option S2
   found. Verify: a test asserts the composed prompt on a first run and on a
   resume.
-- [ ] 2.7 Answer every permission decision from the composed allowlist, deny
+- [x] 2.7 Answer every permission decision from the composed allowlist, deny
   by default, with no path to an interactive prompt. Verify: a test drives a
   denied call and asserts the run continues and the denial is logged.
-- [ ] 2.8 `continuity.js`: mint `runtimeContextId`, always the runtime's own
+- [x] 2.8 `continuity.js`: mint `runtimeContextId`, always the runtime's own
   id. When S3 found pi cannot take a caller-chosen id, map it to pi's session
   by a file in the state directory. Create or resume the session from it.
   Verify: tests for a first run, a resume and the mapping file.
-- [ ] 2.8a On a failed resume, re-check the state with bounded delays. Treat
+- [x] 2.8a On a failed resume, re-check the state with bounded delays. Treat
   an unreadable path as present and retry once. A confirmed-absent context
   fails with `continuity: unavailable` and a reason naming the context
   volume. Verify: tests for a slow store, an unreadable path and a lost
   context, ported from `runtimes/copilot/continuity.test.js`.
-- [ ] 2.9 Apply the S6 finding: if pi loads workspace context files by
+- [x] 2.9 Apply the S6 finding: if pi loads workspace context files by
   itself, turn that off, or record the behaviour for the runtime's page.
   Verify: a test with an `AGENTS.md` in the checkout asserts the prompt the
   session received.
