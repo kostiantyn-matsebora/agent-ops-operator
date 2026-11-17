@@ -23,7 +23,7 @@ import { Timeline } from './Timeline'
 import type { TimelineExtraItem } from './Timeline'
 import { QuickChips } from './QuickChips'
 import { formatBytes, formatDuration } from './format'
-import { isCloseCommand, skipCloseConfirm, writeSkipCloseConfirm } from './closeConfirm'
+import { isCloseCommand, skipCloseConfirm, writeSkipCloseConfirm } from '../../../../model/closeConfirm'
 import { Blocks } from '../../components/Blocks'
 import { parse } from '../../../../api/blocks'
 import type {
@@ -34,6 +34,8 @@ import {
   type Thread,
 } from '../../../../model/thread'
 import { sendText } from '../../../../model/verbs'
+import { counted } from '../../../../model/coordinator'
+import { sequenceRows } from '../../../../model/sequence'
 import { useCommands } from '../../../../model/commands'
 import { TESTID, testid } from '../../../../model/testids'
 
@@ -355,11 +357,6 @@ function CoordinatorBody({
       <ConversationThread thread={thread} onSentOffline={onSentOffline} extraItems={extraItems} />
     </div>
   )
-}
-
-function counted(used: number | undefined, max: number | undefined): string {
-  const count = used ?? 0
-  return max ? `${count} of ${max}` : String(count)
 }
 
 /**
@@ -816,10 +813,6 @@ function ConversationGraphTab({ name }: Readonly<{ name: string }>) {
   )
 }
 
-function endpoint(ref: { kind: string; name: string } | undefined): string {
-  return ref ? `${ref.kind}/${ref.name}` : '∅'
-}
-
 function Sequence({ events }: Readonly<{ events: ActivityEvent[] }>) {
   if (events.length === 0) {
     return (
@@ -828,8 +821,7 @@ function Sequence({ events }: Readonly<{ events: ActivityEvent[] }>) {
       </Empty>
     )
   }
-  const times = events.map((e) => new Date(e.ts).getTime()).filter((t) => !Number.isNaN(t))
-  const start = times.length ? Math.min(...times) : 0
+  const rows = sequenceRows(events)
   return (
     <div style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
       <Card>
@@ -837,22 +829,19 @@ function Sequence({ events }: Readonly<{ events: ActivityEvent[] }>) {
           <Table variant="compact" aria-label="sequence">
             <Thead><Tr><Th>Hop</Th><Th>From → To</Th><Th>At</Th><Th>Latency</Th></Tr></Thead>
             <Tbody>
-              {events.map((e) => {
-                const at = new Date(e.ts).getTime()
-                return (
-                  <Tr key={e.cursor}>
-                    <Td dataLabel="Hop">
-                      <PlainText>{e.kind}</PlainText>
-                      {e.status === 'error' && <Label status="danger">error</Label>}
-                    </Td>
-                    <Td dataLabel="From → To">
-                      <small><PlainText>{`${endpoint(e.from)} → ${endpoint(e.to)}`}</PlainText></small>
-                    </Td>
-                    <Td dataLabel="At">{`+${((at - start) / 1000).toFixed(1)}s`}</Td>
-                    <Td dataLabel="Latency">{e.latencyMs ? `${(e.latencyMs / 1000).toFixed(2)}s` : '—'}</Td>
-                  </Tr>
-                )
-              })}
+              {rows.map((r) => (
+                <Tr key={r.key}>
+                  <Td dataLabel="Hop">
+                    <PlainText>{r.hop}</PlainText>
+                    {r.errored && <Label status="danger">error</Label>}
+                  </Td>
+                  <Td dataLabel="From → To">
+                    <small><PlainText>{r.route}</PlainText></small>
+                  </Td>
+                  <Td dataLabel="At">{r.at}</Td>
+                  <Td dataLabel="Latency">{r.latency}</Td>
+                </Tr>
+              ))}
             </Tbody>
           </Table>
         </CardBody>

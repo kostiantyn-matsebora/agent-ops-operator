@@ -3,7 +3,8 @@ import {
   DescriptionListTerm, Modal, ModalBody, ModalFooter, ModalHeader,
 } from '@patternfly/react-core'
 import { PlainText } from '../components/Text'
-import type { DeleteResponse, ConversationSummary } from '../../../api/types'
+import { notDeleted } from '../../../model/bulk'
+import type { DeleteResponse } from '../../../api/types'
 
 // Deleting a selected batch.
 //
@@ -21,22 +22,9 @@ import type { DeleteResponse, ConversationSummary } from '../../../api/types'
 // The console still performs no Kubernetes write. Deleting is a manager verb
 // this page CALLS, reached over the same authenticated path as everything else.
 
-/**
- * The rows on the CURRENT PAGE that may be deleted: closed, and not already on
- * their way out.
- *
- * Deliberately narrower than the close page's rule. There, anything not already
- * closing is fair game; here, a conversation that has not been closed first is
- * not a candidate at all — the two-step is the safety property, not a nag.
- */
-export function deletableNames(items: ConversationSummary[]): string[] {
-  return items.filter((c) => !c.deleting && c.phase === 'Closed').map((c) => c.name)
-}
-
-/** The conversations a batch did not delete, with the server's own reason. */
-export function notDeleted(result: DeleteResponse): DeleteResponse['results'] {
-  return result.results.filter((r) => r.outcome !== 'deleted')
-}
+// The selection rules are the model's (model/bulk.ts), shared by every look;
+// re-exported so this look's callers keep one import.
+export { deletableNames, notDeleted } from '../../../model/bulk'
 
 export function DeleteSelectedModal({
   isOpen,

@@ -4,7 +4,8 @@ import {
   DescriptionListTerm, Modal, ModalBody, ModalFooter, ModalHeader, Switch,
 } from '@patternfly/react-core'
 import { PlainText } from '../components/Text'
-import type { CloseResponse, ConversationSummary } from '../../../api/types'
+import { notClosed } from '../../../model/bulk'
+import type { CloseResponse } from '../../../api/types'
 
 // Closing a selected batch.
 //
@@ -24,26 +25,9 @@ import type { CloseResponse, ConversationSummary } from '../../../api/types'
 //     in its own label, because `/close` abandoning an inflight run is right for
 //     a deliberate single close and wrong as the silent default of a batch.
 
-/**
- * The rows on the CURRENT PAGE that may be selected.
- *
- * A conversation already held by its close-topics finalizer is excluded: it is
- * on its way out, and offering it again would only produce a second `/close`
- * with nowhere to land.
- */
-export function selectableNames(items: ConversationSummary[]): string[] {
-  return items.filter((c) => !c.deleting).map((c) => c.name)
-}
-
-/** How many of the selection are working — stated before anything is abandoned. */
-export function workingCount(items: ConversationSummary[], selected: Set<string>): number {
-  return items.filter((c) => selected.has(c.name) && c.phase === 'Working').length
-}
-
-/** The conversations a batch did not close, with the server's own reason. */
-export function notClosed(result: CloseResponse): CloseResponse['results'] {
-  return result.results.filter((r) => r.outcome !== 'closed')
-}
+// The selection rules are the model's (model/bulk.ts), shared by every look;
+// re-exported so this look's callers keep one import.
+export { notClosed, selectableNames, workingCount } from '../../../model/bulk'
 
 export function CloseSelectedModal({
   isOpen,

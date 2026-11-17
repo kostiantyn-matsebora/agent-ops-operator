@@ -114,7 +114,7 @@ describe('nothing is persisted', () => {
       // THIRD exception, on the same footing as layout: a per-browser
       // convenience, never conversation state (item 22). Guarded both
       // directions the same way in `closeConfirm.ts`.
-      if (path.includes('pages/chat/closeConfirm')) continue
+      if (path.includes('model/closeConfirm')) continue
       // The workspace look's own layout (console-workspace-look: pane sizes
       // and collapsed states stored per viewer, under keys of this look) is
       // the same exception as the chat layout above, for the other look.
