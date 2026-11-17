@@ -24,3 +24,14 @@ export function plain(input: string): string {
   const withoutTags = input.replace(TAG, '')
   return withoutTags.replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (m) => ENTITIES[m] ?? m)
 }
+
+/**
+ * preview is a message as ONE line, for a list row: an agent's structured
+ * output reads as its title, and any other text as itself with the tags
+ * dropped. The manager truncates a row's last message, so a title may arrive
+ * without its closing tag — the text so far is the title all the same.
+ */
+export function preview(input: string): string {
+  const title = /<title>([\s\S]*?)(?:<\/title>|$)/i.exec(input)
+  return plain(title ? title[1] : input).replace(/\s+/g, ' ').trim()
+}

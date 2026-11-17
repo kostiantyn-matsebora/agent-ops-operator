@@ -3,6 +3,7 @@ import { useConversations, useInboxCounts, useVocabulary } from '../api/hooks'
 import type { ConversationSummary } from '../api/types'
 import { buildTree, rootNameOf, type TreeRow } from './tree'
 import { stripLeadingIcon, stripNamePrefix } from './titles'
+import { preview } from './text'
 
 // THE CONVERSATION LIST MODEL: which conversations a scope shows, in what
 // order, how many each scope counts, and what each row says about itself.
@@ -174,7 +175,8 @@ export function rowSnippet(row: ConversationSummary): string {
   if (row.phase === 'Pending') return 'pending · waiting for a slot'
   if (row.lastMessage) {
     const who = row.lastMessage.sender ? `${row.lastMessage.sender}: ` : ''
-    return row.presence ? `working · ${who}${row.lastMessage.text}` : `${who}${row.lastMessage.text}`
+    const text = preview(row.lastMessage.text)
+    return row.presence ? `working · ${who}${text}` : `${who}${text}`
   }
   if (row.presence) return `${row.pipeline || 'the agent'} is working…`
   return ''
