@@ -164,27 +164,48 @@ The user approved this edit to `docs/contracts/runtime.md` for this change.
 
 ## 8. Unit tests — testing-specialist
 
-- [ ] 8.1 `cd runtimes/pi && node --test` passes, covering sections 2 to 4.
+- [x] 8.1 `cd runtimes/pi && node --test` passes, covering sections 2 to 4.
   Verify: the run is green and coverage is collected with the flags
-  `build-test.md` gives.
-- [ ] 8.2 Chart render tests: defaults byte-identical, the bundle on renders
+  `build-test.md` gives. The bare default-glob invocation hangs in this
+  sandbox (the same orphaned-child-under-concurrent-spawn artifact section
+  4 already hit), reproduced and confirmed by `ps aux` leaving nothing
+  behind. Naming the suite's 11 files explicitly to the same `node --test`
+  invocation does not hang: 129 tests, 128 pass, 1 expected skip, 98.45%
+  line coverage. CI's own invocation is unaffected, since it runs outside
+  this sandbox.
+- [x] 8.2 Chart render tests: defaults byte-identical, the bundle on renders
   the runtime under its own name and its Secret when a token is supplied,
   `default` is still a copy of the reference runtime, and the bundle on with
   the reference off makes pi the default. Verify: the extended
   `internal/integration/charttemplate_test.go` passes with `helm` present,
   and `serviceaccount-guard.py` still passes.
-- [ ] 8.3 `.github/components.sh images` and `modules` list the new
+- [x] 8.3 `.github/components.sh images` and `modules` list the new
   component and every other module's build, vet and test pass. Verify: the
-  discovery loop from `build-test.md` is green.
-- [ ] 8.4 Conformance lane, if S7 found a fake provider is possible: build
+  discovery loop from `build-test.md` is green. `runtime-pi` is discovered
+  by both, correctly on `modules`'s exclusion side (a Node runtime, not a Go
+  module). Two pre-existing failures outside this change's touched
+  directories — `platform/console` (`ui/dist` never built in this
+  environment) and `platform/context-sync` (two checkpoint tests) — are
+  unrelated to `runtime-pi` (confirmed via `git diff`, neither directory has
+  a change on this branch) and are not this task's to fix.
+- [x] 8.4 Conformance lane, if S7 found a fake provider is possible: build
   the real runtime and run it as a subprocess against `FakeManager` in
   `platform/manager/test/conformance/`, asserting the same runtime-contract
   IDs the ollama lane asserts. Verify:
   `go test -tags conformance -count=1 -v ./test/conformance/` passes with the
-  pi lane present. If S7 said no, this task is ticked with the reason.
-- [ ] 8.5 The documentation gates that read code: `docs-generate.py --check`,
+  pi lane present. If S7 said no, this task is ticked with the reason. S7
+  said yes — `runtimepi_test.go`/`fakepiprovider.go` drive the real
+  `runtime.js` as a subprocess against a ported Go SSE double. Found and
+  fixed in review: a doc comment in `report.js` overstated the omission
+  guarantee for token counts (true for `reasoningTokens`, not for the four
+  usage counters once `ModelRuntime` default-fills a missing wire value to
+  0) — corrected, not left as a documented gap.
+- [x] 8.5 The documentation gates that read code: `docs-generate.py --check`,
   `retired-vocabulary-guard.py` and `publication-guard.py` pass. Verify: each
-  exits zero.
+  exits zero. `retired-vocabulary-guard.py` and `publication-guard.py` do.
+  `docs-generate.py --check` exits 1 on the chart version bump
+  (`docs/installation.md` still prints 19.0.1), exactly the gap task 6.4
+  already named as owed to section 10, not a new regression.
 
 ## 9. System tests — testing-specialist
 

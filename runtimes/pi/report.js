@@ -9,7 +9,15 @@
 // (`RT-3`).
 //
 // A fact pi does not report is OMITTED rather than written as zero, because
-// zero tokens is a real, different value (`API-7`).
+// zero tokens is a real, different value (`API-7`) — true of this function's
+// own logic (`count()` below), but narrower once driven against the real
+// openai-completions provider path: confirmed live (conformance lane,
+// `runtimePiAssertAPI7OmitsWhatPiCannotDetermine`), `ModelRuntime`'s usage
+// accumulator default-fills `input`/`output`/`cacheRead`/`cacheWrite` to 0
+// when the wire sends no `usage` object at all, so this module cannot tell
+// a real zero from a gap pi papered over for those four. `reasoning` is the
+// one sub-fact that stays genuinely absent in that same case, and omission
+// is still exact for it.
 //
 // Shaped like runtimes/copilot/report.js's `newCallRecorder` (task 4.1's own
 // instruction) — same bounds, same drop-undefined-at-the-end structure — over

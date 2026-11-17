@@ -3391,6 +3391,142 @@ func defaultRuntimeDoc(out string) (string, string) {
 	return "", ""
 }
 
+// The pi bundle is the FOURTH vendor runtime (fifth AgentRuntime overall),
+// model-agnostic rather than one vendor's account: `provider`+`model`+the
+// credential become env the shared renderer composes, through
+// `agentops.piRuntimeEntry` (chart/templates/_helpers.tpl), in the ollama/
+// copilot bundles' own exact shape — off by default, one AgentRuntime through
+// the parent's renderer, no substrate.
+func TestPiBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
+	out := helmTemplate(t, "--set", "pi.enabled=true",
+		"--set", "pi.provider=anthropic",
+		"--set", "pi.model=claude-sonnet-5",
+		"--set", "pi.credentialsSecret.token=sk-placeholder")
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 3 {
+		t.Fatalf("want claude, pi and the default copy, got %d", n)
+	}
+	rt := findDocByKindAndMetaName(out, "AgentRuntime", "pi")
+	if rt == "" {
+		t.Fatal("no AgentRuntime named pi rendered")
+	}
+	assertPiRuntimeShape(t, rt)
+	secret := findDocByKindAndMetaName(out, "Secret", "agentops-pi")
+	if secret == "" || !strings.Contains(secret, "apiKey: \"sk-placeholder\"") {
+		t.Errorf("a supplied token must render the credential Secret:\n%s", secret)
+	}
+	// no substrate: the ServiceAccount count is unchanged from the default render
+	if got, want := strings.Count(out, "kind: ServiceAccount\n"), strings.Count(helmTemplate(t), "kind: ServiceAccount\n"); got != want {
+		t.Errorf("the bundle must render no ServiceAccount: %d vs %d", got, want)
+	}
+	// the claude bundle stays on here too (no --set claude.enabled=false), so
+	// claude -- never pi -- is still the one `default` copies: the FIRST
+	// configured runtime wins with neither flagged (wiring.md's precedence,
+	// mirrored here against a second real vendor rather than just ollama).
+	if _, src := defaultRuntimeDoc(out); src != "claude" {
+		t.Errorf("with pi on beside the reference runtime and neither flagged, claude must still be default, got %q", src)
+	}
+}
+
+func assertPiRuntimeShape(t *testing.T, rt string) {
+	t.Helper()
+	for _, want := range []string{
+		`image: "ghcr.io/kostiantyn-matsebora/agentops-runtime-pi:`,
+		"serviceAccountName: agentops-runtime\n", // the floor, inherited
+		"contextStorage: volume\n",
+		"idleTtlMinutes: 1\n", // the release default, not the CRD's 10
+		"- .pi/agent/sessions/**\n",
+		"name: PI_PROVIDER\n      value: anthropic\n",
+		"name: PI_MODEL\n      value: claude-sonnet-5\n",
+		"name: PI_API_KEY\n      valueFrom:\n        secretKeyRef:\n          key: apiKey\n          name: agentops-pi",
+	} {
+		if !strings.Contains(rt, want) {
+			t.Errorf("pi runtime lacks %q:\n%s", want, rt)
+		}
+	}
+	if strings.Contains(rt, ".claude/projects") {
+		t.Error("the pi runtime must not inherit claude-code's sync paths")
+	}
+}
+
+// Enabled with neither required key set, the render FAILS naming the first
+// one it reaches (provider) -- pi talks to many model providers through one
+// SDK and has none to fall back on, unlike copilot's account-level default.
+// Enabled with a provider but no model, it fails naming the second.
+func TestPiBundleRequiresProviderAndModel(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--set", "pi.enabled=true"}, "pi.provider is required"},
+		{[]string{"--set", "pi.enabled=true", "--set", "pi.provider=anthropic"}, "pi.model is required"},
+	} {
+		if out := helmTemplateErr(t, tc.args...); !strings.Contains(out, tc.want) {
+			t.Errorf("%v: want %q, got %s", tc.args, tc.want, out)
+		}
+	}
+}
+
+// Without a token the runtime still references the Secret by name (the
+// shared renderer's `credentialsSecret.name` default) and creates nothing;
+// the reference bundle off and this one on makes it the default with no
+// rename, same as every other vendor runtime.
+func TestPiBundleDefaultsAndBecomesDefault(t *testing.T) {
+	out := helmTemplate(t, "--set", "pi.enabled=true",
+		"--set", "pi.provider=anthropic", "--set", "pi.model=claude-sonnet-5")
+	if strings.Contains(out, "kind: Secret\nmetadata:\n  name: agentops-pi\n") {
+		t.Error("no token supplied, so no Secret may render")
+	}
+	rt := findDocByKindAndMetaName(out, "AgentRuntime", "pi")
+	if rt == "" || !strings.Contains(rt, "name: agentops-pi") {
+		t.Errorf("the runtime must still reference the credential Secret by name:\n%s", rt)
+	}
+	alone := helmTemplate(t, "--set", "pi.enabled=true",
+		"--set", "pi.provider=anthropic", "--set", "pi.model=claude-sonnet-5",
+		"--set", "claude.enabled=false")
+	if doc, src := defaultRuntimeDoc(alone); src != "pi" || !strings.Contains(doc, "PI_PROVIDER") {
+		t.Errorf("pi alone must be copied as default with its env, got source %q", src)
+	}
+	if strings.Count(alone, "\nkind: AgentRuntime\n") != 2 {
+		t.Error("pi alone renders exactly pi and default")
+	}
+}
+
+// The pi bundle is a FIFTH chart dependency and OFF BY DEFAULT: adding it
+// must not move a release that never asked for it. Isolated to the pi
+// bundle's own possible artifacts (an AgentRuntime named pi, its default
+// copy, its credential Secret) rather than the whole rendered output, which
+// carries unrelated per-run randomness (generated tokens/salts on other
+// bundles) that would make a byte-for-byte comparison of everything noise.
+func TestPiBundleOffRendersNoArtifactsAndIsByteIdenticalEitherWayOfSayingOff(t *testing.T) {
+	implicit := piBundleDocs(helmTemplate(t))
+	explicit := piBundleDocs(helmTemplate(t, "--set", "pi.enabled=false"))
+	if implicit != explicit {
+		t.Fatalf("leaving pi.enabled unset must render byte-identically to stating it false:\nunset:\n%s\nexplicit false:\n%s", implicit, explicit)
+	}
+	if implicit != "" {
+		t.Fatalf("the pi bundle must render no artifact while off:\n%s", implicit)
+	}
+	base := helmTemplate(t)
+	if n := strings.Count(base, "\nkind: AgentRuntime\n"); n != 2 {
+		t.Fatalf("want exactly the claude runtime and its default copy while pi is off, got %d", n)
+	}
+}
+
+// piBundleDocs isolates every rendered doc the pi bundle itself could have
+// produced -- an AgentRuntime/Secret named for it, or a `default` copy
+// sourced from it -- the same isolation telegramBundleDocs uses, for the same
+// reason: the rest of a render carries randomness this bundle never touches.
+func piBundleDocs(rendered string) string {
+	var b strings.Builder
+	for _, doc := range splitDocs(rendered) {
+		if strings.Contains(doc, "\n  name: pi\n") || strings.Contains(doc, "agentops-pi") || strings.Contains(doc, `agentops.dev/default-of: "pi"`) {
+			b.WriteString(doc)
+			b.WriteString("\n---\n")
+		}
+	}
+	return b.String()
+}
+
 // call-auth.yaml's gatewayToken is generated the same way adapterAuth.token
 // and console.auth.uiToken are, so it owes the SAME property
 // TestUpgradeRendersNoGeneratedCredential pins for those two: a cluster-less
