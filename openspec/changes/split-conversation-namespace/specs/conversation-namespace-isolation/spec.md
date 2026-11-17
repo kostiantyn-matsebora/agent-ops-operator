@@ -95,10 +95,10 @@ The chart SHALL grant the manager one namespaced Role per namespace, each with
 only what is used there:
 
 - the control-namespace Role SHALL cover every wiring and identity kind,
-  `signals`, adapter Deployments, Services, configmaps,
-  leases, events, serviceaccounts with `get`/`list`/`watch`/`create`/`update`/`patch`
-  and no `delete` (a grant carried over unchanged from the single-namespace Role), and
-  a read (`get`/`list`/`watch`) on pods
+  `signals`, adapter Deployments, Services, configmaps, leases and events
+- that Role SHALL grant `serviceaccounts` `get`/`list`/`watch`/`create`/`update`/`patch`
+  and no `delete` (a grant carried over unchanged from the single-namespace Role)
+- that Role SHALL grant a read (`get`/`list`/`watch`) on pods
   - that pod read reaches EVERY pod in the control namespace
   - the manager reads it to resolve the Lease holder to a pod IP for the
     leader proxy, and to refuse the state store's one-time import beside an
