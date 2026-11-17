@@ -111,14 +111,16 @@ adapter state open in Control.
 
 ### 4. RBAC: two manager Roles and a console Role, no new ClusterRole
 
-- **manager control Role**, in control:
-  - every wiring kind, `signals`, adapter Deployments, Services, configmaps, leases and events
-  - serviceaccounts `get/list/watch/create/update/patch`, no `delete`
-  - pods `get/list/watch`
-- **manager conversations Role**, in conversations:
-  - pods, configmaps, `conversations`, `conversationinputs` and their status, events
-  - PVC `get/list/watch/create`
-- **console read-only Role**, in conversations: pods `get/list/watch`
+| Role | Namespace | Grant |
+|---|---|---|
+| manager control | control | every wiring kind, `signals` |
+| manager control | control | adapter Deployments, Services, configmaps, leases, events |
+| manager control | control | serviceaccounts `get/list/watch/create/update/patch`, no `delete` |
+| manager control | control | pods `get/list/watch` |
+| manager conversations | conversations | pods, configmaps, events |
+| manager conversations | conversations | `conversations`, `conversationinputs` and their status |
+| manager conversations | conversations | PVC `get/list/watch/create` |
+| console read-only | conversations | pods `get/list/watch` |
 
 The control Role's pod read reaches every pod in control: RBAC cannot scope it to the manager's own replicas.
 
