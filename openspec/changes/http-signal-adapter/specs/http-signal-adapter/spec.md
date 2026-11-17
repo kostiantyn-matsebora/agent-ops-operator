@@ -5,7 +5,7 @@ The generic HTTP request signal adapter in `signals/http/`. A dependency-free mo
 ## ADDED Requirements
 
 ### Requirement: The adapter serves HTTP requests as signals through the signal adapter contract
-A signal adapter in `signals/http/` (own dependency-free Go module and image `agentops-signal-http`) SHALL serve `SignalSource`s whose `spec.adapter` names its `SignalAdapter`, through the signal adapter contract. It SHALL accept `POST /request/{source}` on the port declared by `SignalAdapter.spec.port` (`LISTEN_ADDR`).
+A signal adapter in `signals/http/` (own dependency-free Go module and image `agentops-signal-http`, listed by `.github/components.sh images` as `signal-http`) SHALL serve `SignalSource`s whose `spec.adapter` names its `SignalAdapter`, through the signal adapter contract. It SHALL accept `POST /request/{source}` on the port declared by `SignalAdapter.spec.port` (`LISTEN_ADDR`).
 
 The `{source}` segment SHALL route to a source learned from `GET /signal/sources?adapter=<key>`. One request SHALL produce exactly one signal, and the response SHALL be `202` once the manager accepts it.
 
@@ -43,7 +43,20 @@ A source with no `credentialsSecretRef` or no `TOKEN` key SHALL report `Ready=Fa
 - **THEN** the adapter returns `401`
 
 ### Requirement: Each signal field is a per-source template or constant
-A source's `config` SHALL map the normalized fields below to a Go `text/template` string. A string with no actions is a constant. Templates SHALL read the request through exactly two functions, `header "<name>"` and `body "<dotted.path>"`, over a JSON body. A non-JSON body SHALL leave `body` unresolved while headers stay available.
+A source's `config` SHALL map the normalized fields below to a Go `text/template` string. A string with no actions is a constant. Templates SHALL read the request through exactly two functions, `header "<name>"` and `body "<dotted.path>"`, over a JSON body. `header` SHALL match the name case-insensitively, as HTTP header names are. `body` paths SHALL be case-sensitive. A non-JSON body, an empty body and a path the JSON does not contain SHALL each leave `body` unresolved, while headers stay available.
+
+For example, a source mapping a sender's delivery id and severity:
+
+```yaml
+config:
+  initiationId: '{{ body "alert.group" }}'
+  signalId: '{{ header "X-Delivery-Id" }}'
+  kind: task
+  title: '{{ body "alert.name" }}'
+  severity: '{{ body "alert.level" }}'
+  labels:
+    env: '{{ header "X-Env" }}'
+```
 
 | Field | Default | When unresolved or invalid |
 |---|---|---|
