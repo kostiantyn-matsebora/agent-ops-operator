@@ -22,9 +22,8 @@
 - [ ] 3.6 The chart's render tests pass for default, enabled and demo, and `helm dependency` and `helm template` succeed with the bundle off and on.
 - [ ] 3.7 The structure assertions pass with the new component in the inventory.
 - [ ] 3.8 `go test -count=1 -coverpkg=./... ./...` in `signals/http` is green with every spec scenario covered.
-- [ ] 3.9 The chart's render tests for the new bundle pass.
-- [ ] 3.10 Run the contract conformance suite against the adapter if one exists for signal adapters, and verify it passes.
-- [ ] 3.11 `python3 .github/scripts/publication-guard.py` and `python3 .github/scripts/retired-vocabulary-guard.py` report a passing verdict.
+- [ ] 3.9 Run the contract conformance suite against the adapter if one exists for signal adapters, and verify it passes.
+- [ ] 3.10 `python3 .github/scripts/publication-guard.py` and `python3 .github/scripts/retired-vocabulary-guard.py` report a passing verdict.
 
 ## 4. System tests
 
