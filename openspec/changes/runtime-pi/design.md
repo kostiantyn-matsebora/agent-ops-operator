@@ -390,9 +390,9 @@ Mapped onto `runtimes/copilot/report.js`'s `turns[]` shape:
 | `tokensIn` | `usage.input` | |
 | `tokensOut` | `usage.output` | |
 | `cacheReadTokens` | `usage.cacheRead` | |
+| `cacheCreationTokens` | `usage.cacheWrite` (+ `cacheWrite1h` split) | NOT a new field — `workreport.go`'s `Turn.CacheCreationTokens` already carries this exact fact for `runtimes/claude`/`runtimes/claude-cli`. Corrected from an earlier draft of this finding, which proposed minting `cacheWriteTokens` before checking the existing contract field |
 | `stopReason` | `message.stopReason` | `"pending"\|"stop"\|"length"\|"toolUse"\|"error"\|"aborted"\|"deferred"` |
-| not in copilot's shape | `usage.cacheWrite` (+ `cacheWrite1h` split) | pi reports a figure copilot never had — ADD a `cacheWriteTokens` field rather than drop it |
-| not in copilot's shape | `usage.reasoning` | present only when the provider reports a thinking-token breakdown — omit when `undefined`, per the existing "omitted, not zero" rule |
+| not in copilot's shape, no existing contract field | `usage.reasoning` | present only when the provider reports a thinking-token breakdown — omit when `undefined`, per the existing "omitted, not zero" rule. `reasoningTokens` is a NEW wire field with no contract entry yet — section 7 decides whether to adopt it |
 
 Nothing D6 expected is UNREPORTED. The only gap is the reverse: pi reports
 more than copilot's shape carries a field for.

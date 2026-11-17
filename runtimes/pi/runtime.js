@@ -26,11 +26,10 @@
 //     array carries mcp.js's registerMcpTools beside the tool_call-permission
 //     factory this file already registers — grant.mcpPatterns (from
 //     vocabulary.translate) is what it resolves against.
-//   - section 4 (report.js): onEvent's `state` already separates turns from
-//     tool calls; a recorder shaped like runtimes/copilot/report.js's
-//     `newCallRecorder` plugs into the same event stream attempt() already
-//     subscribes to, and attempt()'s return value is where `turns`/
-//     `toolCalls` would be spread in alongside `result`/`brief`.
+//   - section 4 (report.js): wired. `attempt()`'s `state.calls` is a
+//     `newCallRecorder()`, fed by `onEvent` beside the transcript
+//     bookkeeping it already does, and its `report()` is spread into
+//     `attempt()`'s return value alongside `result`/`brief`.
 
 'use strict';
 
@@ -42,6 +41,7 @@ const { readAgentDefinition, composeAllowedTools, safeJoin, sanitizeLog } = requ
 const { translate, decide, checkInventory } = require('./vocabulary');
 const { confirmContextMissing } = require('./continuity');
 const { registerMcpTools } = require('./mcp');
+const { newCallRecorder } = require('./report');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
@@ -257,6 +257,12 @@ function extractBrief(text) {
 // instead of corrupting the transcript.
 function onEvent(ev, state) {
   try {
+    // section 4 (report.js): a recorder shaped like runtimes/copilot's own
+    // `newCallRecorder` plugs into this same event stream, beside (never
+    // instead of) the transcript bookkeeping below — guarded on `state.calls`
+    // so the existing onEvent unit tests, which construct a bare transcript
+    // state with no recorder, are untouched.
+    if (state.calls) state.calls.note(ev);
     switch (ev.type) {
       case 'turn_end': {
         state.turns++;
@@ -424,7 +430,7 @@ async function closeMcpClients(handle) {
 }
 
 async function attempt(sdk, modelCtx, unit, grant, definitionBody, prompt, denials = []) {
-  const state = { lastText: '', toolCalls: 0, turns: 0, errors: [] };
+  const state = { lastText: '', toolCalls: 0, turns: 0, errors: [], calls: newCallRecorder() };
   let opened;
   const mcpHandle = { toolNames: [], clients: [] };
   try {
@@ -484,7 +490,10 @@ async function attempt(sdk, modelCtx, unit, grant, definitionBody, prompt, denia
     await closeMcpClients(mcpHandle);
   }
   process.stdout.write(`\n=== RESULT (${status}, ${state.turns} turns, ${state.toolCalls} tool calls, ${Math.round((Date.now() - started) / 1000)}s) ===\n${result}\n`);
-  return { status, exitCode: status === 'succeeded' ? 0 : 1, sessionId: id, result: result.slice(0, 2000), ...(brief ? { brief } : {}) };
+  return {
+    status, exitCode: status === 'succeeded' ? 0 : 1, sessionId: id, result: result.slice(0, 2000),
+    ...(brief ? { brief } : {}), ...state.calls.report(),
+  };
 }
 
 async function runPi(unit) {

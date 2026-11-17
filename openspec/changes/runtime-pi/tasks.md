@@ -96,13 +96,13 @@ sections 2 to 4 depends on an answer until its spike is recorded.
 
 ## 4. Telemetry — backend-developer
 
-- [ ] 4.1 `report.js`: build `turns[]` and `toolCalls[]` from the SDK's
+- [x] 4.1 `report.js`: build `turns[]` and `toolCalls[]` from the SDK's
   events, trimmed to the published bounds, with tool names in the agent-ops
   vocabulary, no tool input or output, an omitted figure where pi reports
   none, and neither array when no call was made (`API-4` to `API-9`).
   Verify: ported bounds and omission tests from
   `runtimes/copilot/report.test.js`, plus an event fixture from S5.
-- [ ] 4.2 Deliver the report with bounded retry on transient failure, no
+- [x] 4.2 Deliver the report with bounded retry on transient failure, no
   retry on a definitive `4xx`, and a log line carrying status and body for
   every undelivered report (`API-10` to `API-12`). Verify: the ported
   delivery tests pass.

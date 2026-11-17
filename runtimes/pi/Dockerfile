@@ -86,7 +86,7 @@ RUN npm install -g --ignore-scripts npm@12.0.2 && \
       rm -f "$tgz"; \
     done && \
     npm cache clean --force
-COPY runtime.js tools.js vocabulary.js mcp.js continuity.js /srv/
+COPY runtime.js tools.js vocabulary.js mcp.js continuity.js report.js /srv/
 
 ENV HOME=/data/context
 USER node

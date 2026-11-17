@@ -1,0 +1,6 @@
+{"type":"tool_execution_start","toolCallId":"call_fixture_1","toolName":"mcp__kubernetes__pods_list","args":{"namespace":"agent-ops"}}
+{"type":"tool_execution_end","toolCallId":"call_fixture_1","toolName":"mcp__kubernetes__pods_list","result":"NAME READY STATUS\nagentops-manager-0 1/1 Running\n","isError":false,"durationMs":350}
+{"type":"turn_end","message":{"role":"assistant","model":"fake-model","stopReason":"toolUse","content":[{"type":"text","text":"Checking pods."}],"usage":{"input":2400,"output":42,"cacheRead":1800,"cacheWrite":300,"reasoning":0,"totalTokens":2742,"cost":{"input":0.01,"output":0.002,"cacheRead":0.001,"cacheWrite":0.002,"total":0.015}}},"toolResults":[]}
+{"type":"tool_execution_start","toolCallId":"call_fixture_2","toolName":"bash","args":{"command":"kubectl get events -n agent-ops"}}
+{"type":"tool_execution_end","toolCallId":"call_fixture_2","toolName":"bash","result":"No resources found in agent-ops namespace.\n","isError":false,"durationMs":20}
+{"type":"turn_end","message":{"role":"assistant","model":"fake-model","stopReason":"stop","content":[{"type":"text","text":"Every pod is running and no events are recorded."}],"usage":{"input":2600,"output":18,"totalTokens":2618,"cost":{"input":0.01,"output":0.001,"total":0.011}}},"toolResults":[]}
