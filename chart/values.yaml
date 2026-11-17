@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
-  tag: 0.62.0
+  tag: 0.63.0
 
 # How many manager pods run at once. Safe above 1 now (durable-chat-ops-broker):
 # the Conversation reconciler claims an ensure-topic op on the Conversation CR
@@ -1096,7 +1096,7 @@ console:
     # surface (spec.stateAccess) instead of a Kubernetes watch, takes channel
     # ops over GET /channel/ops/stream, adds the read-only signals view, and
     # waits out a refused manager connection instead of losing the send.
-    tag: 0.41.0
+    tag: 0.42.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:

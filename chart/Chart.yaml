@@ -12,8 +12,8 @@ type: application
 sources:
   - https://github.com/kostiantyn-matsebora/agent-ops-operator
 home: https://kostiantyn-matsebora.github.io/agent-ops-operator/
-version: 19.1.0
-appVersion: "0.62.0"
+version: 20.0.0
+appVersion: "0.63.0"
 dependencies:
   # embedded subchart (chart/charts/prometheus); templates are
   # additionally self-gated on prometheus.enabled
@@ -26,7 +26,7 @@ dependencies:
   # only the first existing path — it could never express the OR. Every template
   # self-gates instead.
   - name: kubernetes
-    version: 0.4.2
+    version: 0.4.3
     repository: ""
   # embedded subchart (chart/charts/telegram); templates are
   # additionally self-gated on telegram.enabled
@@ -76,13 +76,6 @@ dependencies:
     version: 0.1.0
     repository: ""
     condition: claude-cli.enabled
-  # embedded subchart (chart/charts/pi) — a FOURTH vendor runtime, a
-  # model-agnostic coding harness over pi's SDK. OFF by default; a route
-  # selects it with `runtimeRef: pi`.
-  - name: pi
-    version: 0.1.0
-    repository: ""
-    condition: pi.enabled
   # embedded subchart (chart/charts/nats) — the `nats` state-store backend's
   # server (design nats-state-store-default D-8). NO condition: whether it
   # renders follows `stateStore.backend` (D-9), a value this subchart cannot
