@@ -4,7 +4,7 @@ dependencies:
   version: 0.2.3
 - name: kubernetes
   repository: ""
-  version: 0.4.2
+  version: 0.4.3
 - name: telegram
   repository: ""
   version: 0.6.1
@@ -32,5 +32,5 @@ dependencies:
 - name: commandbus
   repository: ""
   version: 0.1.0
-digest: sha256:071a098cd0b09dff0c5ec48b2c65cd952195b0eacf4ed54d6da26f9ade27db7d
-generated: "2026-11-14T18:24:22.289886456+02:00"
+digest: sha256:a47be76d51f1eaa9b2c2f6015b716a09dd34770aaa9b70393935d5269ef8d24a
+generated: "2026-11-17T19:37:55.246725761+02:00"
