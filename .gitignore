@@ -27,6 +27,13 @@ runtimes/*/[!.]*[!.]
 !*/*/LICENSE
 !*/*/[a-z]*/
 
+# npm installs its own tree beside a Node runtime's source; the repo commits
+# the lockfile, never the resolved packages — same convention as
+# platform/console/ui/.gitignore's own node_modules rule. Listed AFTER the
+# `[a-z]*/` re-include above, which would otherwise un-ignore it too, since
+# the last matching line wins.
+runtimes/*/node_modules/
+
 # Publication-scrub working file. The substitution map is used ONCE and deleted;
 # committing it would republish exactly what the scrub removes.
 .scrub-map.local
