@@ -358,3 +358,35 @@ test('task 3.3: an MCP tool the composed allowlist permits is reachable on the l
     }
   });
 });
+
+// Regression: task 3.3's test above proves the tool is ACTIVATED on the
+// session, but never fires a real `tool_call` event — so it alone would
+// still pass even if the permission hook denied every MCP call outright.
+// This test drives attempt() end to end, the real production path, so the
+// hook actually decides a call for `mcp__fixture__echo` — catching the gap
+// where `decide()` only ever knew the built-in grant and denied a correctly
+// registered MCP tool unconditionally.
+test('a correctly registered MCP tool call is GRANTED by the permission hook, not just activated', async () => {
+  await withProvider({
+    reply: 'the fixture answered',
+    toolCall: { name: 'mcp__fixture__echo', args: { message: 'hi' } },
+    toolCallOnce: true,
+  }, async ({ port }) => {
+    const home = tmp('agentops-pi-live-home-');
+    const ws = tmp('agentops-pi-live-ws-');
+    fs.mkdirSync(ws, { recursive: true });
+    const mcpConfig = path.join(home, 'mcp.json');
+    fs.writeFileSync(mcpConfig, JSON.stringify({
+      mcpServers: { fixture: { command: process.execPath, args: [path.join(__dirname, 'test', 'fake-mcp-server.js')] } },
+    }));
+    const rt = freshRuntime({ HOME: home, WORKSPACE: ws, PI_MODEL: 'fake-model', PI_BASE_URL: `http://127.0.0.1:${port}/v1`, MCP_CONFIG: mcpConfig });
+    const s = await rt.getSdk();
+    const ctx = await rt.getModelContext();
+    const grant = { builtinNames: [], mcpPatterns: ['mcp__fixture__echo'] };
+    const denials = [];
+    const out = await rt.attempt(s, ctx, { promptText: 'use the fixture tool' }, grant, '', 'use the fixture tool', denials);
+    assert.deepStrictEqual(denials, [], 'a registered MCP tool must never be denied by the hook that only ever checked built-ins');
+    assert.strictEqual(out.status, 'succeeded', `the run must succeed, not fail with a denied-tool-call message: ${out.result}`);
+    assert.match(out.result, /the fixture answered/, 'the run reaches the reply that follows the tool call');
+  });
+});

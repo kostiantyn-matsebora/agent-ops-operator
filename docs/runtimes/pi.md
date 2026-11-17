@@ -109,7 +109,15 @@ this is the only runtime — so it is the default without the flag.
 | `pi.provider` | the model provider, by pi's own provider id (e.g. `anthropic`). REQUIRED once enabled — the render fails naming this key otherwise |
 | `pi.model` | the model, by the chosen provider's own id (e.g. `claude-sonnet-5`). REQUIRED once enabled, for the same reason |
 | `pi.credentialsSecret.token` | the provider's credential. Set, the Secret is created. Empty, the named Secret is yours to create |
-| `pi.env` | further knobs, as env entries — `PI_RUN_TIMEOUT_S` (default 3600) and `PI_LOG_LEVEL` (default warning) |
+| `pi.env` | further knobs, as env entries — `PI_RUN_TIMEOUT_S` (default 3600), and `PI_PROVIDER_API` / `PI_BASE_URL` for a self-hosted or BYOK endpoint |
+
+**`PI_BASE_URL` points at a self-hosted or BYOK endpoint for the chosen
+provider.** `PI_PROVIDER_API` names the API shape it speaks, when that
+differs from `pi.provider`'s own default — an endpoint speaking
+`openai-completions`, say.
+
+This is the mechanism behind "whichever model provider you configure." The
+provider id picks the SDK's defaults, and these two knobs override them.
 
 **`maxTurns` is not a pi control.** A Pipeline's profile bounds a claude run
 and an ollama loop by turns.

@@ -349,7 +349,13 @@ async function buildResourceLoader(sdk, unit, grant, definitionBody, denials, mc
   const extra = [definitionBody, unit.systemPrompt].filter(Boolean).join('\n\n');
   const extensionFactory = (pi) => {
     pi.on('tool_call', (ev) => {
-      const d = decide(grant.builtinNames, ev.toolName);
+      // `mcpHandle.toolNames` is read fresh on every call, by reference —
+      // `registerMcpTools` (mcp.js) fills it during `loader.reload()`
+      // below, before this hook can ever fire, so a correctly-registered
+      // `mcp__<server>__<tool>` name is granted exactly like a built-in,
+      // never falling through to "not in the composed allowlist" just
+      // because `decide()` only ever knew pi's six built-in names.
+      const d = decide([...grant.builtinNames, ...mcpHandle.toolNames], ev.toolName);
       if (d.allow) return undefined;
       denials.push(d.why);
       console.log(`[runtime] denied tool_call ${sanitizeLog(ev.toolName)}: ${sanitizeLog(d.why)}`);

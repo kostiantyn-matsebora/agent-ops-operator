@@ -158,6 +158,14 @@ The user approved this edit to `docs/contracts/runtime.md` for this change.
 - [x] 7.2 Walk the 35-item conformance checklist for `runtimes/pi`, one
   verdict per item with the test or finding that backs it, kept in this
   change's `design.md`. Verify: all 35 have a verdict and none is "assumed".
+  Found and fixed in cross-role review: item 7 (`API-7`) claimed an
+  unqualified "Pass, tested", but task 8.4's own live conformance finding
+  (`report.js`'s zero-vs-omitted guarantee holds for `reasoningTokens`, not
+  for the four usage counters once `ModelRuntime` default-fills a missing
+  wire value to 0) was never carried into this table's verdict. Reworded to
+  "Pass for `reasoningTokens`, vendor-forced partial for the other four",
+  with the live finding as evidence — the checklist now states the same
+  narrower claim the test and the code comment already do.
 - [x] 7.3 Move the claimed version on the four existing runtime pages to
   2.0.2. Verify: a grep for the old version in `docs/runtimes/` returns
   nothing.
@@ -365,3 +373,34 @@ archive hook checks it.
   | `docs-generate.py --check` | "73 generated file(s) up to date" |
   | `retired-vocabulary-guard.py` | "clean (147 files)" |
   | `publication-guard.py` | "clean" |
+
+## Cross-role review (`/opsx:apply` step 6.6)
+
+One round, three dispatches, each a role reviewing sections it did not
+write. Every finding was independently re-verified against source before
+acting, and every real finding was fixed on the branch, none dropped.
+
+- **testing-specialist, sections 1-6**: found a genuine production bug —
+  `runtimes/pi`'s `tool_call` permission hook (`runtime.js`'s
+  `buildResourceLoader`) checked only `grant.builtinNames`, never the MCP
+  tool names `mcp.js` actually registers, so every MCP tool call pi
+  attempted was denied regardless of what a Pipeline's `MCPToolset`/
+  `MCPConfig` granted. Fixed (`decide([...grant.builtinNames,
+  ...mcpHandle.toolNames], ev.toolName)`), with a new regression test
+  (`runtime.live.test.js`) verified to fail without the fix and pass with
+  it.
+- **api-architect, section 10**: found `chart/charts/pi/values.yaml`
+  documented a dead env var (`PI_LOG_LEVEL`, nothing in `runtimes/pi/*.js`
+  reads it) and omitted two real, functional ones (`PI_PROVIDER_API`,
+  `PI_BASE_URL`). Fixed in `values.yaml`'s comment and in
+  `docs/runtimes/pi.md`'s `pi.env` row and a new explanatory note. A third,
+  explicitly non-blocking note (imprecise shared reasoning for why
+  `auth.json`/`models-store.json` both stay empty) stands as written —
+  the reviewer flagged it as not a defect.
+- **backend-developer, sections 7-9**: re-ran every gate itself rather than
+  trusting the stated verdicts (all green). Found one real finding — this
+  change's own `design.md` conformance table overclaimed item 7 (`API-7`)
+  as an unqualified "Pass, tested," when task 8.4's own live finding (the
+  usage-counter zero-fill is vendor-forced, true only for
+  `reasoningTokens`) was never carried into the table's verdict. Fixed in
+  7.2 above and in `design.md`'s own row.

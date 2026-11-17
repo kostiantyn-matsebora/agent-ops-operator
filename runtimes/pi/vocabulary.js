@@ -98,13 +98,15 @@ function checkInventory(builtinNames, registeredNames) {
   return gaps;
 }
 
-// decide answers one `tool_call` event (task 2.7) from a translated grant.
-// Exact match only — pi's built-ins carry no scoping of their own (no
-// per-command prefix, no per-path narrowing), so "granted" and "not granted"
-// are the only two outcomes. An `mcp__<server>__<tool>`-wired custom tool
-// (section 3) is granted the same way, by its own registered name, once that
-// module exists; until then nothing registers one, so this never sees it.
-// Deny by default — an unrecognised toolName is refused, never offered an
+// decide answers one `tool_call` event (task 2.7) from a flat list of
+// granted names. Exact match only — pi's built-ins carry no scoping of
+// their own (no per-command prefix, no per-path narrowing), so "granted"
+// and "not granted" are the only two outcomes. An `mcp__<server>__<tool>`
+// custom tool (section 3) is granted the same way, by its own registered
+// name — the caller (runtime.js's `buildResourceLoader`) is the one that
+// folds `mcpHandle.toolNames` in alongside the built-ins before calling
+// this, since this function itself knows nothing about MCP. Deny by
+// default — an unrecognised toolName is refused, never offered an
 // interactive prompt.
 function decide(builtinNames, toolName) {
   const granted = new Set(builtinNames || []);

@@ -63,8 +63,12 @@ model: ""
 # Further knobs the runtime reads, as ordinary env entries — laid OVER the ones
 # the keys above produce.
 #
-#   PI_RUN_TIMEOUT_S   one run's wall-clock ceiling, default 3600
-#   PI_LOG_LEVEL       the SDK's own log level, default warning
+#   PI_RUN_TIMEOUT_S    one run's wall-clock ceiling, default 3600
+#   PI_PROVIDER_API     the provider's own API shape, when it differs from
+#                        `provider`'s default (e.g. a BYOK endpoint speaking
+#                        `openai-completions`)
+#   PI_BASE_URL          a self-hosted/BYOK endpoint for the chosen provider,
+#                        in place of its default
 env: []
 
 # WHERE THIS RUNTIME KEEPS ITS CONTEXT, relative to $HOME — pi's own session
