@@ -25,8 +25,7 @@ the house, one that can repair it.
 
 `signals/ha` conforms to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-2.5.0. `ADP-10` excludes objects in the conversations namespace.
-This one reads Home Assistant, not Kubernetes objects, so it has no namespace to exclude.
+2.5.0.
 
 ## What starts work
 

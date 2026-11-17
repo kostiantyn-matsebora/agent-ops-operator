@@ -158,7 +158,7 @@ credential, one flag, no clone:
 helm install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
   -n agent-ops --create-namespace --set global.demo.enabled=true
 
-# the chart created agent-ops-conversations, where runtime pods resolve it
+# the chart created agent-ops-conversations, where runtime pods resolve the Secret
 kubectl -n agent-ops-conversations create secret generic agentops-claude \
   --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key, see Getting started
 ```
