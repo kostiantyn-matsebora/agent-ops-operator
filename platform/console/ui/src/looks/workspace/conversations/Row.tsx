@@ -35,6 +35,8 @@ export interface RowProps {
   iconOnly?: boolean
   /** Set while the viewer is selecting: the row carries a box and opening it toggles the box instead. */
   selection?: { selected: boolean; onToggle: () => void }
+  /** A modifier-click on the row: starts a selection with this row in it, instead of opening it. */
+  onMultiSelect?: () => void
   now?: number
 }
 
@@ -130,7 +132,7 @@ function RowMenu({ title, actions }: Readonly<{ title: string; actions: RowActio
 }
 
 export function Row({
-  tree, current, arrived, folded, onToggleFold, actions = [], iconOnly, selection, now,
+  tree, current, arrived, folded, onToggleFold, actions = [], iconOnly, selection, onMultiSelect, now,
 }: Readonly<RowProps>): ReactElement {
   const row = tree.row
   const title = rowTitle(row)
@@ -168,9 +170,13 @@ export function Row({
         aria-label={`Open ${title}${unread ? `, ${row.unreadCount} unread` : ''}`}
         title={iconOnly ? title : undefined}
         onClick={(e) => {
-          if (!selection) return
-          e.preventDefault()
-          selection.onToggle()
+          if (selection) {
+            e.preventDefault()
+            selection.onToggle()
+          } else if ((e.ctrlKey || e.metaKey) && onMultiSelect) {
+            e.preventDefault()
+            onMultiSelect()
+          }
         }}
       />
       {selection && !iconOnly && (

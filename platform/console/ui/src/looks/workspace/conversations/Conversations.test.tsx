@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import type { ConversationSummary } from '../../../api/types'
@@ -168,6 +168,13 @@ describe('the conversations page', () => {
     expect(calls).toEqual([['close', { names: ['c1', 'c2'], includeWorking: true }]])
     // The batch ends the mode.
     expect(screen.queryByTestId(TESTID.selectionBar)).toBeNull()
+  })
+
+  it('starts a selection from a modifier-click, without opening the row', async () => {
+    mount('/conversations')
+    fireEvent.click(screen.getByTestId(testid.open('c1')), { ctrlKey: true })
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/conversations$/)
+    expect(screen.getByTestId(TESTID.selectionBar)).toHaveTextContent('1 selected')
   })
 
   it('marks a selection read, and offers delete only when every selected row is closed', async () => {

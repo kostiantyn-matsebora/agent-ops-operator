@@ -1953,7 +1953,7 @@ html[data-look='workspace'] #root {
   margin-left: -4px;
 }
 
-.wk-dialog-scrim {
+.wk-modal-scrim {
   position: fixed;
   inset: 0;
   z-index: 60;
@@ -1963,7 +1963,7 @@ html[data-look='workspace'] #root {
   padding: 16px;
 }
 
-.wk-dialog {
+.wk-modal {
   background: var(--ao-surface);
   color: var(--ao-text);
   border: 1px solid var(--ao-border-strong);
@@ -1975,13 +1975,13 @@ html[data-look='workspace'] #root {
   flex-direction: column;
 }
 
-.wk-dialog h2 {
+.wk-modal h2 {
   margin: 0;
   padding: 16px 18px 8px;
   font-size: 16px;
 }
 
-.wk-dialog-body {
+.wk-modal-body {
   padding: 0 18px;
   overflow-y: auto;
   display: flex;
@@ -1989,11 +1989,11 @@ html[data-look='workspace'] #root {
   gap: 10px;
 }
 
-.wk-dialog-body p {
+.wk-modal-body p {
   margin: 0;
 }
 
-.wk-dialog-foot {
+.wk-modal-foot {
   display: flex;
   gap: 8px;
   justify-content: flex-end;

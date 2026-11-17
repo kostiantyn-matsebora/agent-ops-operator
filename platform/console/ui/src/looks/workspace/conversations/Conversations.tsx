@@ -259,6 +259,7 @@ function ListPane({ current, collapsed }: Readonly<{ current?: string; collapsed
             onToggleFold={() => toggle(t.row.name)}
             actions={rowActions(t.row, deps)}
             iconOnly={collapsed}
+            onMultiSelect={collapsed ? undefined : () => deps.select(t.row.name)}
             selection={selecting && !collapsed ? { selected: selected.has(t.row.name), onToggle: () => toggleSelected(t.row.name) } : undefined}
           />
         ))}

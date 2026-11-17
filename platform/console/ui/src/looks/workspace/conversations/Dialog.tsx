@@ -22,14 +22,14 @@ export function Dialog({
   }, [])
   return (
     <div
-      className="wk-dialog-scrim"
+      className="wk-modal-scrim"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
       <div
         ref={panel}
-        className="wk-dialog"
+        className="wk-modal"
         role="dialog"
         aria-modal="true"
         aria-label={label ?? title}
@@ -39,8 +39,8 @@ export function Dialog({
         }}
       >
         <h2>{title}</h2>
-        <div className="wk-dialog-body">{children}</div>
-        <div className="wk-dialog-foot">{footer}</div>
+        <div className="wk-modal-body">{children}</div>
+        <div className="wk-modal-foot">{footer}</div>
       </div>
     </div>
   )

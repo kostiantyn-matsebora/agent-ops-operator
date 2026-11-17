@@ -35,7 +35,7 @@ Role: `frontend-developer`. PORT from `mockup/console.html`: composition, spacin
 - [x] 3.9 Keep every `--wk-*` token in `looks/workspace/workspace.css` and out of `theme/theme.css`, and verify by grep that `theme.css` holds none and the site CSS needs none
 - [x] 3.10 If the work changes any shared `--ao-*` value in `theme/theme.css`, copy it into the token block at the head of `docs/assets/css/agentops.css` as `palette-and-mark.md` requires, and verify the hex grep from that rule finds hits only in the token blocks
 
-- [ ] 3.11 Give the workspace conversations page the actions `classic` has and the first cut lacks: Graph and Sequence tabs, select and bulk actions, reopen and delete, the escalation bar, the jump-to-new pill, slash typeahead and quick chips, and verify a per-look conformance test that names any action one look exposes and the other omits
+- [x] 3.11 Give the workspace conversations page the actions `classic` has and the first cut lacks: Graph and Sequence tabs, select and bulk actions, reopen and delete, the escalation bar, the jump-to-new pill, slash typeahead and quick chips, and verify a per-look conformance test that names any action one look exposes and the other omits
 
 ## 4. The workspace look: the other pages
 
