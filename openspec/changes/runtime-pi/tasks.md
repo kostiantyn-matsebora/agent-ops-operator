@@ -209,23 +209,53 @@ The user approved this edit to `docs/contracts/runtime.md` for this change.
 
 ## 9. System tests — testing-specialist
 
-- [ ] 9.1 Add a pi lane to `platform/manager/test/system/`: a route with
+- [x] 9.1 Add a pi lane to `platform/manager/test/system/`: a route with
   `runtimeRef: pi` answers a signal and every bound thread receives it.
   Verify: the lane passes against the cluster, run from this working copy's
-  tree and not the default branch's.
-- [ ] 9.2 In that lane, assert the pod's shape: the `context-sync` sidecar
+  tree and not the default branch's. WRITTEN
+  (`TestPiRuntimeRouteAnswersAndDeliversToEveryBoundThread`), on the stub
+  image per `TestImagePullThroughAuthenticatedRegistry`'s own precedent, not
+  run — no cluster in this remote session (`remote-session.md`). Compiles
+  (`go test -tags system -c ./test/system/`, exit 0) and `go vet -tags
+  system ./...` is clean, independently re-verified.
+- [x] 9.2 In that lane, assert the pod's shape: the `context-sync` sidecar
   and the egress init container are present, and the session state is under
   the declared path. Verify: the lane reads the pod spec and the volume.
-- [ ] 9.3 Context continuity: a second run resumes the same context, and
+  WRITTEN (`TestPiRuntimePodShapeHasContextSyncAndEgress`), not run, same
+  gap as 9.1. Reads `pod.Spec.InitContainers` and `kubectl exec ... test -e`
+  against the live state file.
+- [x] 9.3 Context continuity: a second run resumes the same context, and
   deleting the session state fails the next run with the cannot-be-continued
   message rather than answering fresh. Verify: both outcomes asserted.
-- [ ] 9.4 Tools: with observation-only toolsets the shell is absent on one
+  WRITTEN (`TestPiRuntimeContextContinuityAndLoss`), not run, same gap.
+  Widens this lane's own `IdleTTLMinutes` to 5 so all three runs land on one
+  pod, with the reasoning recorded in the test's own comment.
+- [x] 9.4 Tools: with observation-only toolsets the shell is absent on one
   route while the same profile keeps it on another, and a bound
   `Bash(kubectl:*)` grants no shell and is logged. Verify: both asserted.
-- [ ] 9.5 MCP: a bound `MCPConfig` makes its tools reachable and an unbound
+  WRITTEN (`TestPiRuntimeToolsetsNarrowAndScopeTheShell`), not run, same
+  gap. No `runtimes/pi` vocabulary mapping exists at this tier (stub image),
+  so `test/stubruntime`'s own `wiring` directive was extended, test-only, to
+  echo the manager's composed `allowedTools`/`MCP_CONFIG` back and log a
+  scoped-pattern narrowing as a stand-in — the real per-tool mapping stays
+  pinned at the unit tier (`runtimes/pi/vocabulary.test.js`). Re-verified:
+  `cd test/stubruntime && go build ./... && go vet ./... && go test ./...`
+  all pass, including the two new stub tests.
+- [x] 9.5 MCP: a bound `MCPConfig` makes its tools reachable and an unbound
   server's are not. Verify: both asserted through the lane's stub server.
+  WRITTEN (`TestPiRuntimeMCPBindingReachesTheMountedConfigAndExcludesTheUnbound`),
+  not run, same gap. Proves the manager's `internal/mcpcompile` delivers a
+  bound server's key into the exact `MCP_CONFIG` file a real pod mounts,
+  and withholds an unbound one, while real MCP tool-call reachability stays
+  pinned at the unit and conformance tiers (`runtimes/pi/mcp.test.js`,
+  `test/conformance/runtimepi_test.go`'s section-8.4 lane) — no new MCP
+  server double built here, since that would duplicate rather than add
+  coverage.
 - [ ] 9.6 Run the pack. A remote session records this as dispatched, not
   done, per `remote-session.md`. Verify: the pack's result for the pi lane.
+  Left unticked until dispatched — the integrating session dispatches the
+  cluster smoke-test tier once every section is complete (step 6 of
+  `implement-issue.md`), named in the pull request rather than run here.
 
 ## 10. Documentation
 
