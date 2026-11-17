@@ -150,15 +150,15 @@ sections 2 to 4 depends on an answer until its spike is recorded.
 
 The user approved this edit to `docs/contracts/runtime.md` for this change.
 
-- [ ] 7.1 `RT-3.4`: name `runtimes/pi` among the runtimes reading
+- [x] 7.1 `RT-3.4`: name `runtimes/pi` among the runtimes reading
   `.claude/agents/<agent>.md`. Move the version to 2.0.2 and add the
   changelog row, stating it clarifies and changes no obligation. Verify: the
   page's version, its changelog and every shipped runtime page's claimed
   version agree.
-- [ ] 7.2 Walk the 35-item conformance checklist for `runtimes/pi`, one
+- [x] 7.2 Walk the 35-item conformance checklist for `runtimes/pi`, one
   verdict per item with the test or finding that backs it, kept in this
   change's `design.md`. Verify: all 35 have a verdict and none is "assumed".
-- [ ] 7.3 Move the claimed version on the four existing runtime pages to
+- [x] 7.3 Move the claimed version on the four existing runtime pages to
   2.0.2. Verify: a grep for the old version in `docs/runtimes/` returns
   nothing.
 

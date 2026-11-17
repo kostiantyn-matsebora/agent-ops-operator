@@ -81,3 +81,32 @@ test('with RUNTIME_IDLE_TTL_M=0 the process eventually reports the idle TTL and 
   assert.strictEqual(code, 0);
   assert.match(stdout, /idle TTL reached/);
 });
+
+test('SIGTERM exits 0 promptly through its own handler, not the idle-TTL path (LC-5)', async () => {
+  // A long idle TTL rules out LC-2's exit racing this one — the only way the
+  // process can exit 0 here is the signal handler itself.
+  const child = spawn(process.execPath, [RUNTIME], {
+    env: {
+      ...process.env,
+      CONTROL_URL: 'http://127.0.0.1:1',
+      CONVO_ID: 'conv-sigterm',
+      PI_API_KEY: 'test-key',
+      PI_MODEL: 'fake-model',
+      REPO_URL: '',
+      HOME: tmp('agentops-pi-sigterm-home-'),
+      WORKSPACE: tmp('agentops-pi-sigterm-ws-'),
+      RUNTIME_IDLE_TTL_M: '60',
+    },
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  let stdout = '';
+  child.stdout.on('data', (c) => { stdout += c; });
+  // Give the loop one tick so the signal lands mid-poll, not before the
+  // handler is installed.
+  await new Promise((r) => setTimeout(r, 200));
+  child.kill('SIGTERM');
+  const code = await new Promise((resolve) => child.once('exit', resolve));
+  assert.strictEqual(code, 0);
+  assert.match(stdout, /SIGTERM — exiting/);
+  assert.doesNotMatch(stdout, /idle TTL reached/);
+});

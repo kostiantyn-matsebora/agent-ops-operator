@@ -19,7 +19,7 @@ surface. It is what EXECUTES an agent — the reference runtime, and the one a
 fresh install runs on.
 
 It conforms to the [runtime specification]({{ '/contracts/runtime/' | relative_url }}), version
-2.0.1.
+2.0.2.
 
 **With this bundle, agent-ops runs a route on claude-code.** Each conversation
 gets a `runtime-claude` pod, and the manager hands it work. The pod drives

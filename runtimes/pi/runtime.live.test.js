@@ -75,6 +75,21 @@ test('a first run creates a session, answers, and mints a runtimeContextId', asy
     assert.strictEqual(out.continuity, 'new');
     assert.ok(out.sessionId, 'a fresh run mints its own runtimeContextId');
     assert.match(out.result, /hello from the fake/);
+    assert.ok(!('brief' in out), 'an answer with no <brief> block omits the field, LATEST-WINS (API-5)');
+  });
+});
+
+test('a <brief> block in the answer is reported, and removed from result (API-5)', async () => {
+  await withProvider({ reply: 'All done.\n\n<brief>\nFixed the restart loop\n</brief>' }, async ({ port }) => {
+    const home = tmp('agentops-pi-live-home-');
+    const ws = tmp('agentops-pi-live-ws-');
+    fs.mkdirSync(ws, { recursive: true });
+    const rt = freshRuntime({ HOME: home, WORKSPACE: ws, PI_MODEL: 'fake-model', PI_BASE_URL: `http://127.0.0.1:${port}/v1` });
+
+    const out = await rt.runPi({ runId: 'r1', promptText: 'say hi', allowedTools: 'Read', toolsMode: 'merge' });
+    assert.strictEqual(out.status, 'succeeded');
+    assert.strictEqual(out.brief, 'Fixed the restart loop');
+    assert.doesNotMatch(out.result, /<brief>/);
   });
 });
 

@@ -461,6 +461,59 @@ the OpenAI `chat.completion.chunk` streaming shape.
 **Conformance lane (task 8.4): YES, build it.** The same fake-provider
 approach the spikes used works as the conformance lane's provider stand-in.
 
+## Conformance checklist — runtimes/pi
+
+Task 7.2's walk of `docs/contracts/runtime.md`'s 35-item checklist
+(version 2.0.2), one verdict per item, against `runtimes/pi`'s own
+source and test suite.
+
+"N/A — shared" marks an item the manager or the chart renders the
+same way for every runtime. Nothing pi-specific needs verifying there,
+beyond what the other three runtimes already prove.
+
+| # | Obligation | Verdict | Evidence |
+|---|---|---|---|
+| 1 | `API-1` long-polls, `204` not an error | Pass, tested | `runLoop` polls continuously (`runtime.js:674-696`). `pollNextUnit` (`runtime.js:601-609`) returns `undefined` on `204` with no error path. `runtime.test.js:262` ("pollNextUnit returns undefined on a 204"), `runtime.mainentry.test.js:56` exercises the loop end to end |
+| 2 | `API-2` exactly one of `promptFile`/`promptText` | Pass, consumption-side | `resolvePrompt` (`runtime.js:306-322`) prefers `promptText`, falls back to `promptFile`. `runtime.test.js:139,143,155`. The exactly-one guarantee itself is the manager's own obligation, not re-verified here |
+| 3 | `API-3` continuity restored before `GET /work` answers | N/A — shared | A `contextSync` sidecar's job, not runtime code. The pi runtime only resumes a session already on disk via `SessionManager.findById`/`.open` (`runtime.js:413-417`), same posture as every other runtime |
+| 4 | `API-4` `turns`/`toolCalls` trimmed to bounds | Pass, tested | `report.js:37-40,130-135` caps at 200 entries / 200 bytes. `report.test.js:58` ("the report is trimmed to the manager bounds") |
+| 5 | `API-5` `runtimeContextId`/`brief` LATEST-WINS | Pass, tested | `reportDone` omits `runtimeContextId` when absent (`runtime.js:622-629`), confirmed by `runtime.test.js:306`. `attempt()`'s `...(brief ? {brief} : {})` (`runtime.js:495`) is confirmed both ways live — an answer with no `<brief>` block omits the field, one with a block reports it and strips it from `result` (`runtime.live.test.js`, "an answer with no `<brief>` block omits the field" and "a `<brief>` block in the answer is reported, and removed from result") |
+| 6 | `API-6` `turns`/`toolCalls` become activity hops, never written to the Conversation | N/A — shared | Manager-side (`internal/httpapi`) handling of the posted fields, outside what the runtime controls |
+| 7 | `API-7` an unknown fact is omitted, never zero | Pass, tested | `report.js`'s `count()` (line 42-44) returns `undefined` for anything not finite/non-negative, dropped by `drop()`. `report.test.js:24` shows turn two's usage carrying no cache/reasoning keys, omitted rather than zeroed |
+| 8 | `API-8` a tool's input/output never reported | Pass, tested | `report.js` only ever stores `{tool, server, durationMs}` (line 113). `report.test.js:42` ("no tool input or output reaches the report") |
+| 9 | `API-9` neither array reported when the run made no call | Pass, tested | `report()` (`report.js:130-134`) sets each key only when non-empty. `report.test.js:48` ("reports nothing (API-9)") |
+| 10 | `API-10` a definitive 4xx is never retried | Pass, tested | `reportDone`'s definitive branch (`runtime.js:642-648`). `runtime.test.js:338` |
+| 11 | `API-11` transport error/timeout/408/429/5xx gets a bounded retry | Pass, tested | Same function, retry loop up to 60×10s. `runtime.test.js:313,325,356,366` |
+| 12 | `API-12` every undelivered report is logged, never dropped silently | Pass, tested | `runtime.js:646,652` both `console.error` the status/body. `runtime.test.js:338` asserts the logged text directly ("the status and body are logged (API-12)") |
+| 13 | `LC-1` one inflight unit per conversation | Pass, structural | `runLoop` (`runtime.js:674-696`) awaits `runUnit`+`reportDone` fully before the next `pollNextUnit` — no concurrent second poll is ever issued. No dedicated test isolates this, same posture as the other three runtimes' identical serial loop |
+| 14 | `LC-2` exits on exactly one condition: idle TTL | Pass, tested | `runtime.js:680-685,695`. `runtime.mainentry.test.js:56` |
+| 15 | `LC-3` `/exit` deletes the pod, refused mid-run | N/A — shared | A manager-side (Conversation controller) verb. The runtime implements no corresponding endpoint and needs none |
+| 16 | `LC-4` bad config before the first poll crashes, naming the gap | Pass, tested | `runtime.js:90-103`, three `process.exit(1)` branches. `runtime.mainentry.test.js:38,44,50` |
+| 17 | `LC-5` honouring the pod's termination signal is not a lifecycle exit | Pass, tested | `SIGTERM`/`SIGINT` handlers (`runtime.js:706-711`) call `process.exit(0)` directly. `runtime.mainentry.test.js`'s "SIGTERM exits 0 promptly through its own handler, not the idle-TTL path (LC-5)" spawns the real process with a long idle TTL and asserts the exit comes from the signal handler, not the idle check |
+| 18 | `RT-1` clones `REPO_URL`/`REPO_REF` with env credentials | Pass, tested | `syncRepo`/`gitEnv`/`repoURL` (`runtime.js:129-176`). `runtime.gitclone.test.js:45,51`, `runtime.sshenv.test.js:20,26`, `runtime.httpsenv.test.js:21` |
+| 19 | `RT-2` executes the unit, streaming to stdout, no transport of its own | Pass, tested | `onEvent` (`runtime.js:258-302`) writes every line via `process.stdout.write`, nothing else opens a progress channel. `runtime.test.js:102,109,117` |
+| 20 | `RT-3` composes the allowlist as `toolsMode` directs | Pass, tested | `composeAllowedTools` (`tools.js:163-168`) plus the per-invocation `tool_call` hook (`runtime.js:350-358`). `tools.test.js:71,76,81,85`, live enforcement at `runtime.live.test.js:178` |
+| 21 | `RT-3.1` no repository visibility uses `allowedTools` as-is | Pass, tested | `readAgentDefinition` degrades to `{tools: [], body: ''}`. `tools.test.js:38,66` |
+| 22 | `RT-3.2` an empty allowlist stays empty | Pass, tested | `tools.test.js:81` ("produces an empty, explicit composition"). Confirmed live by S1's finding that `tools: []` declares nothing to the model |
+| 23 | `RT-3.3` an absent/unreadable definition contributes nothing | Pass, tested | `tools.test.js:38,45,66` cover a missing file, an unclosed frontmatter block, and an absent workspace |
+| 24 | `RT-3.4` the definition path is runtime-specific | Pass, verified against source | `tools.js:126-128`'s `definitionPath` reads `.claude/agents/<agent>.md`, the same path `runtimes/claude`/`runtimes/ollama` use — confirmed by reading this file for this task, not assumed. `docs/contracts/runtime.md`'s `RT-3.4` row now names `runtimes/pi` |
+| 25 | `SEC-1` the manager never reads a secret | N/A — shared | Manager's own obligation. The pi bundle's credential rides as `valueFrom.secretKeyRef` (`chart/charts/pi/templates/runtime.yaml:26-36`), resolved by the kubelet |
+| 26 | `SEC-2` `AOPS_MCP_TOKEN` is derived, never stored | Pass (runtime's half), tested | The "derived" half is the manager's. The runtime's own half — never logging the expanded value — is in `mcp.js:50-58` ("expanded in-process and never logged") and `mcp.test.js:256` |
+| 27 | `SEC-3` the operator grants the runtime no Kubernetes permissions | N/A — shared | `chart/charts/pi/templates/runtime.yaml` renders no ServiceAccount and no RBAC, only the AgentRuntime CR and an optional credential Secret |
+| 28 | `MGR-1` one pod per conversation | N/A — shared | Manager's own `internal/runtimepod`, independent of which runtime image the pod runs |
+| 29 | `MGR-2` context checkpointed before `POST /work/done` | N/A — shared | `contextSync` sidecar's job. The pi bundle enables it via `contextSync.paths: ['.pi/agent/sessions/**']` (`chart/charts/pi/values.yaml:81-83`), matching design's S3/S4 finding of what continuity actually needs |
+| 30 | `MGR-3` a pod that never reaches `Running` is reaped | N/A — shared | Manager's own `internal/controller`, independent of the runtime image |
+| 31 | `MGR-4` the manager supplies every Environment variable | N/A — shared | The runtime only reads them (`runtime.js:46-83`). The shared `agentops.piRuntimeEntry` helper (`chart/templates/_helpers.tpl:253-266`) projects `PI_PROVIDER`/`PI_MODEL`/credential alongside every runtime's common env |
+| 32 | `MGR-5` an empty `REPO_URL` is never an error or "clone the default" | Pass, tested | `runtime.js:164`. `runtime.test.js:60` ("syncRepo is a no-op when no REPO_URL is configured (MGR-5)") |
+| 33 | `COMPAT-1` a runtime ignores unknown work-unit fields | Pass, structural | Every consumer (`resolvePrompt`, `runPi`, ...) reads only named properties off the unit object. An unread key has no effect by construction. No dedicated test sends an unknown field, same posture as the other runtimes |
+| 34 | `COMPAT-2` the manager ignores unknown report fields | N/A — shared, and actively relied on | Manager's own decode obligation. The pi runtime's `reasoningTokens` (`report.js:105`) is a field with no contract entry yet, sent in reliance on this guarantee (design's S5 finding) |
+| 35 | `COMPAT-3` a published section anchor is a stable name | N/A | A documentation-versioning rule about this spec page, not something runtime code conforms to or violates |
+
+Items 5 and 17 were initially flagged as code-confirmed but
+untested. Both now carry a dedicated test (`test-coverage.md` leaves
+no gap as a documented limit), closed in this same change rather than
+deferred.
+
 ## Risks / Trade-offs
 
 - **Pi's SDK moves under a pinned version** → exact pin and lockfile, and the
