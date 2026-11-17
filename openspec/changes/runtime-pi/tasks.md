@@ -3,28 +3,28 @@
 Each ends in a written finding under `design.md`'s Spikes section. No code in
 sections 2 to 4 depends on an answer until its spike is recorded.
 
-- [ ] 1.1 Pick the SDK version and package scope, install it in a scratch
+- [x] 1.1 Pick the SDK version and package scope, install it in a scratch
   directory, and record the exact version, the scope and the SDK entry points
   the runtime will use. Verify: the finding names the pinned version and the
   runtime's `npm ci` resolves it from a lockfile.
-- [ ] 1.2 S1: enable a chosen set of built-in tools for a session, and find
+- [x] 1.2 S1: enable a chosen set of built-in tools for a session, and find
   out whether a per-call hook exists. Verify: a script starts two sessions,
   one with `read` only and one with none, and the finding records the
   registered built-in names against design D2's table.
-- [ ] 1.3 S2: find the system-prompt option, whether it appends or replaces,
+- [x] 1.3 S2: find the system-prompt option, whether it appends or replaces,
   and whether it applies on a resumed session. Verify: the finding quotes the
   resulting prompt from a scripted session, before and after a resume.
-- [ ] 1.4 S3 and S4: create and resume a session by a caller-chosen id, and
+- [x] 1.4 S3 and S4: create and resume a session by a caller-chosen id, and
   place the state root under a given `$HOME`. Verify: the finding lists the
   paths a session writes, which become `contextSync.paths`, and says whether
   the runtime needs its own id-to-session mapping file (design D5).
-- [ ] 1.5 S5: read per-turn usage, cache counts and stop reason from the
+- [x] 1.5 S5: read per-turn usage, cache counts and stop reason from the
   events. Verify: the finding maps each to a `turns[]` field and names the
   ones pi does not report.
-- [ ] 1.6 S6: determine whether pi loads `AGENTS.md` or `CLAUDE.md` from the
+- [x] 1.6 S6: determine whether pi loads `AGENTS.md` or `CLAUDE.md` from the
   working directory by itself, and whether that can be turned off. Verify:
   a scratch checkout with such a file, and a transcript showing the outcome.
-- [ ] 1.7 S7: point pi's provider base URL at a fake endpoint. Verify: a
+- [x] 1.7 S7: point pi's provider base URL at a fake endpoint. Verify: a
   scripted run completes against a local fake, or the finding states it
   cannot and 8.4 is struck with that reason.
 
