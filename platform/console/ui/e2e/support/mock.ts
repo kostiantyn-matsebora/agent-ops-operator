@@ -65,6 +65,20 @@ export const DETAIL = {
   ],
 }
 
+export const TOPOLOGY = {
+  windowSeconds: 300,
+  eventNodeKinds: { pipeline: 'pipelines', channel: 'channels', runtime: 'agentruntimes' },
+  nodes: [
+    { id: 'pipelines/ops', kind: 'pipelines', name: 'ops', health: 'ok', active: 1, recent: 4 },
+    { id: 'agentruntimes/default', kind: 'agentruntimes', name: 'default', health: 'none', active: 0, recent: 0 },
+    { id: 'channels/console', kind: 'channels', name: 'console', health: 'ok', active: 0, recent: 0 },
+  ],
+  edges: [
+    { from: 'pipelines/ops', to: 'agentruntimes/default', kind: 'uses' },
+    { from: 'pipelines/ops', to: 'channels/console', kind: 'posts' },
+  ],
+}
+
 export const MIME: Record<string, string> = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.json': 'application/json',
@@ -75,6 +89,8 @@ type Extra = { rows?: object[]; vocabulary?: object[] }
 export function answer(path: string, query: URLSearchParams, extra: Extra = {}): unknown {
   const rows = [...ROWS, ...(extra.rows ?? [])]
   if (path === '/api/session') return SESSION
+  if (path === '/api/topology') return { topology: TOPOLOGY, oldestEvent: at(-120), unjoinedPipelines: [], synced: {}, metricsAvailable: false }
+  if (path === `/api/conversations/${ROOT.name}/graph`) return { ...TOPOLOGY, events: DETAIL.events, diverged: false, pipeline: 'incident' }
   if (path === '/api/vocabulary') return { entries: [{ kind: 'coordinator', name: 'incident' }, { kind: 'pipeline', name: 'k8s-observe' }, ...(extra.vocabulary ?? [])] }
   if (path === '/api/conversations') {
     const page = { total: rows.length, unreadTotal: 1, rootTotal: 5, offset: 0, limit: 100, scopes: { working: 1, mine: 0, errored: 1, closed: 0, incident: 1 } }
