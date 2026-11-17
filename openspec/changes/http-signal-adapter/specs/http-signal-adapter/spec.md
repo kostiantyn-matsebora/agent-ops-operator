@@ -49,7 +49,7 @@ A source's `config` SHALL map the normalized fields below to a Go `text/template
 |---|---|---|
 | `initiationId` | fresh random id per request | fresh random id |
 | `signalId` | fresh random id per request | fresh random id |
-| `kind` | none, not sent | none |
+| `kind` | none, not sent (the manager then reads `alert`) | none, not sent |
 | `title` | none | none |
 | `labels` | none | the key is dropped |
 | `payload` | the raw request body | the raw request body |
@@ -121,7 +121,7 @@ A fault on one source SHALL NOT affect another served source.
 - **THEN** the other keeps accepting requests
 
 ### Requirement: The adapter's page states what a message is and who chooses the lane
-The adapter's documentation SHALL state that one request is one message, so `signalId` is random unless the source maps a sender-supplied delivery id (`ADP-9`). It SHALL state that a templated `kind` lets a token holder choose the agent's prompt, and that a constant is the safer choice. It SHALL state that an unset `kind` reads as `alert`. It SHALL warn that a sender pointed at agent-ops' own events can feed a loop.
+The adapter's documentation SHALL state that one request is one message, so `signalId` is random unless the source maps a sender-supplied delivery id (`ADP-9`). It SHALL state that a templated `kind` lets a token holder choose the agent's prompt, and that a constant is the safer choice. It SHALL state that an unset `kind` is not sent and the manager then reads it as `alert`. It SHALL warn that a sender pointed at agent-ops' own events can feed a loop.
 
 #### Scenario: The adapter page carries the required statements
 - **WHEN** `docs/integrations/http.md` is read

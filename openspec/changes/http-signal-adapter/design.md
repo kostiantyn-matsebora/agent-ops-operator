@@ -30,11 +30,11 @@ See proposal.md for motivation. `signals/alertmanager` and `signals/pulse` are t
 
 **D-6. `kind` has no default and may be templated.** The adapter cannot infer the subject from the transport. Unset sends nothing and the manager reads `alert`. A templated `kind` lets a token holder pick the prompt, so the mandatory per-source token bounds it and the docs recommend a constant. Alternative: `kind` required (rejected, forces a choice the owner may not need) or defaulted from the id (rejected, a guess).
 
-**D-9. Validate before push.** `API-6` and `API-7` refuse the whole batch for a bad `severity` or `signalId`. The adapter validates both itself and degrades the field, so one bad value never drops a signal.
-
 **D-7. `signalId` is random unless mapped.** `ADP-9` wants it stable across a re-send, and the adapter cannot recognise a retry. A body hash would swallow legitimately repeated payloads. The page states "one request is one message" and recommends mapping the sender's delivery id.
 
 **D-8. Mandatory per-source bearer, header only.** Reuses the `credentialsSecretRef` projection, so the manager still reads no Secret. No URL token (it lands in access logs). No HMAC in v1.
+
+**D-9. Validate before push.** `API-6` and `API-7` refuse the whole batch for a bad `severity` or `signalId`. The adapter validates both itself and degrades the field, so one bad value never drops a signal.
 
 ## Risks / Trade-offs
 
