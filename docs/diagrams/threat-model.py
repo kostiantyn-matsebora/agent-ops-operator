@@ -139,7 +139,7 @@ def render(p):
     # The conversations namespace, beside the control namespace, because
     # crossing 2 goes between them: a runtime pod, what it runs as and what
     # it mounts live here, so a NetworkPolicy, quota or Role scoped to it is
-    # a boundary Kubernetes enforces. Equal namespaces are one box.
+    # a boundary Kubernetes enforces.
     s.append(boundary(18, 160, 358, 210, "conversations namespace", p))
     # The runtime pod — where model output actually executes. Its label sits
     # 30px below the namespace's, so the two label plates never overlap.
