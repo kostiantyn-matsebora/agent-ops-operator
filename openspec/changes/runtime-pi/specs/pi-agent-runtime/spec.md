@@ -174,7 +174,12 @@ An unreadable path SHALL be treated as present, and the run retried once. A cont
 ### Requirement: Telemetry reports what pi observed, bounded and never invented
 The runtime SHALL report one `turns[]` entry per model call and one `toolCalls[]` entry per tool call. They come from the events pi emits and are trimmed to the published bounds before posting.
 
-A fact pi does not report SHALL be omitted, never reported as zero. A tool's input or output SHALL NOT be reported. Neither array SHALL be reported when the run made neither kind of call.
+A fact pi's events do not carry SHALL be omitted, never reported as zero.
+
+- One vendor limit is a known gap. Pi's own usage accumulator default-fills `tokensIn`, `tokensOut`, `cacheReadTokens` and `cacheCreationTokens` with zero when a provider sends no `usage` object.
+- Those four cannot then be told apart from a real zero. Only `reasoningTokens` stays absent.
+
+A tool's input or output SHALL NOT be reported. Neither array SHALL be reported when the run made neither kind of call.
 
 Tool names in `toolCalls[]` SHALL be in the agent-ops vocabulary: `Read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob`, or `mcp__<server>__<tool>`.
 

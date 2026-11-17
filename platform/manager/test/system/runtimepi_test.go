@@ -300,8 +300,16 @@ func TestPiRuntimeContextContinuityAndLoss(t *testing.T) {
 	if code, out := e.ConsoleSend(t, conv.Name, "echo three"); code/100 != 2 {
 		t.Fatalf("console send: %d %s", code, out)
 	}
-	conv = e.WaitRun(t, conv.Name, 3, 4*time.Minute)
-	run = conv.Status.Runs[len(conv.Status.Runs)-1]
+	assertPiContinuityLost(t, e, conv.Name, handle)
+}
+
+// assertPiContinuityLost waits for the third run and asserts it FAILED with
+// the cannot-be-continued message and a ContextUnavailable condition naming
+// the lost handle.
+func assertPiContinuityLost(t *testing.T, e *Env, convName, handle string) {
+	t.Helper()
+	conv := e.WaitRun(t, convName, 3, 4*time.Minute)
+	run := conv.Status.Runs[len(conv.Status.Runs)-1]
 	if run.Status != "failed" {
 		t.Fatalf("a deleted session state must FAIL the next run, not answer fresh: %+v", run)
 	}
