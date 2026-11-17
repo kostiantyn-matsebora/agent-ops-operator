@@ -59,6 +59,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
@@ -187,32 +188,17 @@ func TestPiRuntimePodShapeHasContextSyncAndEgress(t *testing.T) {
 	}
 	pod := pods[0]
 
-	hasInit := func(name string) bool {
-		for _, c := range pod.Spec.InitContainers {
-			if c.Name == name {
-				return true
-			}
+	for _, c := range []struct{ name, why string }{
+		{piContextSyncContainer, "the context-sync sidecar must be present on a runtime declaring contextSync"},
+		{piEgressInitContainer, "the egress-init container must be present on a runtime declaring egressMediation"},
+		{piEgressProxyContainer, "the egress-proxy sidecar must be present on a runtime declaring egressMediation"},
+	} {
+		if !hasInitContainer(pod, c.name) {
+			t.Fatalf("%s: %+v", c.why, pod.Spec.InitContainers)
 		}
-		return false
-	}
-	if !hasInit(piContextSyncContainer) {
-		t.Fatalf("the context-sync sidecar must be present on a runtime declaring contextSync: %+v", pod.Spec.InitContainers)
-	}
-	if !hasInit(piEgressInitContainer) {
-		t.Fatalf("the egress-init container must be present on a runtime declaring egressMediation: %+v", pod.Spec.InitContainers)
-	}
-	if !hasInit(piEgressProxyContainer) {
-		t.Fatalf("the egress-proxy sidecar must be present on a runtime declaring egressMediation: %+v", pod.Spec.InitContainers)
 	}
 
-	var syncEnv []string
-	for i := range pod.Spec.InitContainers {
-		if pod.Spec.InitContainers[i].Name == piContextSyncContainer {
-			for _, ev := range pod.Spec.InitContainers[i].Env {
-				syncEnv = append(syncEnv, ev.Name+"="+ev.Value)
-			}
-		}
-	}
+	syncEnv := initContainerEnv(pod, piContextSyncContainer)
 	if !slices.ContainsFunc(syncEnv, func(kv string) bool {
 		return strings.HasPrefix(kv, "CONTEXT_SYNC_PATHS=") && strings.Contains(kv, piStubContextSyncPath)
 	}) {
@@ -298,10 +284,8 @@ func TestPiRuntimeContextContinuityAndLoss(t *testing.T) {
 	if conv.Status.RuntimeContextID != handle {
 		t.Fatalf("the handle must survive a resume: %q -> %q", handle, conv.Status.RuntimeContextID)
 	}
-	for _, c := range conv.Status.Conditions {
-		if c.Type == "ContextContinuity" && c.Status == metav1.ConditionFalse {
-			t.Fatalf("a resume must not report continuity lost: %s %s", c.Reason, c.Message)
-		}
+	if c := continuityCondition(conv.Status.Conditions); c != nil && c.Status == metav1.ConditionFalse {
+		t.Fatalf("a resume must not report continuity lost: %s %s", c.Reason, c.Message)
 	}
 
 	// Delete the session state FILE directly in the running pod — the SAME
@@ -324,12 +308,7 @@ func TestPiRuntimeContextContinuityAndLoss(t *testing.T) {
 	if !strings.Contains(run.Result, "refusing to continue without it") {
 		t.Fatalf("the failure must carry the cannot-be-continued message: %+v", run)
 	}
-	var cond *metav1.Condition
-	for i := range conv.Status.Conditions {
-		if conv.Status.Conditions[i].Type == "ContextContinuity" {
-			cond = &conv.Status.Conditions[i]
-		}
-	}
+	cond := continuityCondition(conv.Status.Conditions)
 	if cond == nil || cond.Status != metav1.ConditionFalse {
 		t.Fatalf("the loss must be visible as a ContextContinuity condition: %+v", conv.Status.Conditions)
 	}
@@ -361,37 +340,7 @@ func TestPiRuntimeToolsetsNarrowAndScopeTheShell(t *testing.T) {
 
 	wiringResultOn := func(routeSuffix string, toolsets *agentopsv1alpha1.ToolsetBinding) string {
 		t.Helper()
-		srcName := "e2e-pi-tools-" + routeSuffix + "-" + stamp
-		mustCreate(t, e.K, source(srcName, "e2e", nil))
-		p := pipeline("e2e-pi-tools-"+routeSuffix+"-"+stamp, ProfileStub, []string{srcName}, []string{ChannelConsole})
-		p.Spec.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: rtName}
-		p.Spec.Toolsets = toolsets
-		mustCreate(t, e.K, p)
-		if err := waitPipelineReady(ctx, e.K, p.Name, 2*time.Minute); err != nil {
-			t.Fatal(err)
-		}
-		fp := "e2e-pi-tools-" + routeSuffix + "-run-" + stamp
-		e.PostTask(t, srcName, fp, "wiring")
-		conv := e.ConversationFor(t, fp, time.Minute)
-		conv = e.WaitRun(t, conv.Name, 1, 4*time.Minute)
-		run := conv.Status.Runs[0]
-		if run.Status != "succeeded" {
-			t.Fatalf("route %s: %+v", routeSuffix, run)
-		}
-		if routeSuffix == "kubectl-scoped" {
-			podName := conv.Status.RuntimePod
-			if podName == "" {
-				t.Fatalf("no runtime pod recorded on %s", conv.Name)
-			}
-			logs, err := e.Cluster.Kubectl(ctx, "-n", ConversationsNamespace, "logs", podName, "-c", piWorkerContainer)
-			if err != nil {
-				t.Fatalf("reading the runtime pod's own logs: %v", err)
-			}
-			if !strings.Contains(logs, "narrowed") {
-				t.Fatalf("a scoped shell pattern must be LOGGED as a narrowing: %s", logs)
-			}
-		}
-		return run.Result
+		return piWiringResult(t, ctx, e, stamp, rtName, routeSuffix, toolsets)
 	}
 
 	observeOnly := wiringResultOn("observe-only",
@@ -414,6 +363,72 @@ func TestPiRuntimeToolsetsNarrowAndScopeTheShell(t *testing.T) {
 	if !slices.Contains(tools, "Bash(kubectl:*)") {
 		t.Fatalf("the scoped pattern itself must still reach the runtime: %q", kubectlScoped)
 	}
+}
+
+func hasInitContainer(pod corev1.Pod, name string) bool {
+	return slices.ContainsFunc(pod.Spec.InitContainers, func(c corev1.Container) bool { return c.Name == name })
+}
+
+// initContainerEnv returns the named init container's env as NAME=value pairs.
+func initContainerEnv(pod corev1.Pod, name string) []string {
+	var out []string
+	for _, c := range pod.Spec.InitContainers {
+		if c.Name != name {
+			continue
+		}
+		for _, ev := range c.Env {
+			out = append(out, ev.Name+"="+ev.Value)
+		}
+	}
+	return out
+}
+
+// continuityCondition returns the ContextContinuity condition, or nil.
+func continuityCondition(conds []metav1.Condition) *metav1.Condition {
+	for i := range conds {
+		if conds[i].Type == "ContextContinuity" {
+			return &conds[i]
+		}
+	}
+	return nil
+}
+
+// piWiringResult wires one route onto the shared runtime, runs the stub's
+// `wiring` directive and returns its result. The kubectl-scoped route also
+// asserts the narrowing is logged on the runtime pod.
+func piWiringResult(t *testing.T, ctx context.Context, e *Env, stamp, rtName, routeSuffix string, toolsets *agentopsv1alpha1.ToolsetBinding) string {
+	t.Helper()
+	srcName := "e2e-pi-tools-" + routeSuffix + "-" + stamp
+	mustCreate(t, e.K, source(srcName, "e2e", nil))
+	p := pipeline("e2e-pi-tools-"+routeSuffix+"-"+stamp, ProfileStub, []string{srcName}, []string{ChannelConsole})
+	p.Spec.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: rtName}
+	p.Spec.Toolsets = toolsets
+	mustCreate(t, e.K, p)
+	if err := waitPipelineReady(ctx, e.K, p.Name, 2*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	fp := "e2e-pi-tools-" + routeSuffix + "-run-" + stamp
+	e.PostTask(t, srcName, fp, "wiring")
+	conv := e.ConversationFor(t, fp, time.Minute)
+	conv = e.WaitRun(t, conv.Name, 1, 4*time.Minute)
+	run := conv.Status.Runs[0]
+	if run.Status != "succeeded" {
+		t.Fatalf("route %s: %+v", routeSuffix, run)
+	}
+	if routeSuffix != "kubectl-scoped" {
+		return run.Result
+	}
+	if conv.Status.RuntimePod == "" {
+		t.Fatalf("no runtime pod recorded on %s", conv.Name)
+	}
+	logs, err := e.Cluster.Kubectl(ctx, "-n", ConversationsNamespace, "logs", conv.Status.RuntimePod, "-c", piWorkerContainer)
+	if err != nil {
+		t.Fatalf("reading the runtime pod's own logs: %v", err)
+	}
+	if !strings.Contains(logs, "narrowed") {
+		t.Fatalf("a scoped shell pattern must be LOGGED as a narrowing: %s", logs)
+	}
+	return run.Result
 }
 
 // allowedToolsFrom reads the comma-separated allowlist out of the stub's own

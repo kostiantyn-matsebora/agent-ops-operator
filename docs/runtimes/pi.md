@@ -157,7 +157,7 @@ composition rules the reference runtime reads.
 **`agentops-shell` means the pod's shell.** With whatever the route's
 `serviceAccountName` can reach. That is the same posture as the other
 runtimes, and it is why the toolsets ship risk-split — see
-[the agent's power]({{ '/installation/#the-agents-power' | relative_url }}).
+[the agent's power]({{ '/configuration/#the-agents-power' | relative_url }}).
 
 ## Where its context lives
 
