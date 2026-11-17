@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -42,9 +43,9 @@ func coordServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	bus := memory.Open()
 	// async-command-bus task 6: shares the SAME Bus as the Server below.
 	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: bus}
-	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
+	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Ops: q}
 	return &Server{
-		Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops",
+		Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"},
 		AdapterToken: coordTestMasterKey, Router: router, Bus: bus,
 	}, c
 }

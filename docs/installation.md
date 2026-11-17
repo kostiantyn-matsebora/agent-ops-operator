@@ -160,10 +160,30 @@ component. See
 
 ## Configure
 
-**Storage is the only setting that must be right before you install.**
-Everything else is a `helm upgrade` away and safe at its default, and every
-value the chart takes is in the
+**Storage and the conversations namespace are the only settings that must be
+right before you install.** Everything else is a `helm upgrade` away and safe
+at its default, and every value the chart takes is in the
 [configuration reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md).
+
+### Namespaces
+
+A release resolves two namespaces — see
+[Concepts]({{ '/concepts/#where-things-run-the-control-and-conversations-namespaces' | relative_url }})
+for what lives in each.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `global.agentops.conversationNamespace` | `agent-ops-conversations` | where runtime pods, their claims and their accounts run. The release namespace is the single-namespace layout |
+| `global.agentops.createConversationNamespace` | `true` | `false` means you create it, labeled however you need |
+
+Pick it before you install. Switching it later is a manual migration, not a
+plain upgrade: close every open conversation, move your Secrets, and rebind
+each claim's PV.
+
+The steps are the `conversationNamespace` upgrade path in
+[the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
+A namespace the chart created carries `helm.sh/resource-policy: keep`, so an
+uninstall leaves it, its Secrets and its claims standing.
 
 ### Storage
 
@@ -234,6 +254,20 @@ helm upgrade agent-ops `
 Read [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
 first, since it is the only place migration steps live, keyed by chart version
 and newest first.
+
+**The next release is BREAKING**: a release now resolves a second namespace, for
+runtime pods and everything they run as, mount or resolve. Split by
+default — the chart creates `agent-ops-conversations` for you.
+
+This needs a manual step per claim and per Secret you want to keep.
+The full procedure, in order, with commands, is the `[Unreleased]` entry's
+Upgrade section in [the
+changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
+Read it before you upgrade a production install.
+
+Pin today's single-namespace layout instead with
+`global.agentops.conversationNamespace` set to your release namespace — no
+object splits, and no manual step is owed.
 
 **19.0.0 is BREAKING**:
 

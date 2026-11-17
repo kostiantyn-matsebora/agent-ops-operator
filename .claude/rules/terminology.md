@@ -68,6 +68,21 @@ The sidecar keeping a runtime's live context on pod-local storage and a
 snapshot on the durable volume. No durable-volume mount in the agent
 container. Checkpoints are conditional AND incremental.
 
+### The namespace pair: control and conversations
+
+| Word | Names |
+|---|---|
+| control namespace | `.Release.Namespace` — the manager, every wiring/identity CR, the state store (except below), adapters, the gateway, the console, every MCP server |
+| conversations namespace | `global.agentops.conversationNamespace` — runtime pods and everything they run as, mount or resolve, every persistence claim, the housekeeping and context-probe CronJobs, and `Conversation`/`ConversationInput` CRs under the `kube` backend. The full rule is `invariants.md`'s placement row |
+
+`Namespaces{Control, Conversations}` is the Go pair threaded wherever
+`Namespace string` was one value. Equal strings are the single-namespace
+layout, never a branch on whether they differ. See `invariants.md`'s
+placement rule for what lives where.
+
+"The operator's own namespace" said alone now means CONTROL — see
+`invariants.md`.
+
 ### API group
 
 `agentops.dev/v1alpha1`. Provisional — a rename is possible pre-1.0.

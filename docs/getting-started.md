@@ -38,30 +38,22 @@ fifteen minutes, most of it the install.
 
 ## Install
 
-1. **Create the namespace and the model credential.**
+1. **Create the release namespace.**
 
    ```sh
    kubectl create namespace agent-ops
-
-   kubectl -n agent-ops create secret generic agentops-claude \
-     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
-
-   # ...or let the chart create it: --set claude.credentialsSecret.token=<token>
    ```
 
    ```powershell
    kubectl create namespace agent-ops
-
-   kubectl -n agent-ops create secret generic agentops-claude `
-     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
-
-   # ...or let the chart create it: --set claude.credentialsSecret.token=<token>
    ```
 
 2. **Install the chart.** The flag brings up
    [the Kubernetes integration]({{ '/integrations/kubernetes/' | relative_url }}),
    wired to the console. The token is just to sign in — pick a real one outside
-   a laptop.
+   a laptop. To have the chart create the model credential for you, add
+   `--set claude.credentialsSecret.token=<token>` here: it creates the Secret
+   in `agent-ops-conversations`, and step 4 is then already done.
 
    ```sh
    helm install agent-ops \
@@ -89,7 +81,9 @@ fifteen minutes, most of it the install.
    > [Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }})
    > for what the `Coordinator` adds beyond this.
 
-3. **Wait for the manager.**
+3. **Wait for the manager.** The chart has already created the conversations
+   namespace, `agent-ops-conversations`, where the model credential below
+   belongs.
 
    ```sh
    kubectl -n agent-ops rollout status deploy/agentops-manager
@@ -97,6 +91,20 @@ fifteen minutes, most of it the install.
 
    ```powershell
    kubectl -n agent-ops rollout status deploy/agentops-manager
+   ```
+
+4. **Create the model credential.** It is a Secret a runtime pod resolves,
+   so it belongs where the pod runs — `agent-ops-conversations`, not
+   `agent-ops`.
+
+   ```sh
+   kubectl -n agent-ops-conversations create secret generic agentops-claude \
+     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+   ```
+
+   ```powershell
+   kubectl -n agent-ops-conversations create secret generic agentops-claude `
+     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
    ```
 
 ## Ask it something
@@ -161,31 +169,33 @@ The answer lands in the thread. Follow-ups in the same thread keep their context
 detail behind a control you can expand.
 
 From the outside, the pod is always a real Kubernetes object, whichever
-state backend the install uses:
+state backend the install uses. **It runs in `agent-ops-conversations`**,
+not `agent-ops` — this install split by default:
 
 ```sh
-kubectl -n agent-ops get pods -l app.kubernetes.io/name=agentops-runtime -w
-kubectl -n agent-ops logs -f agentops-conv-<name>      # live transcript
+kubectl -n agent-ops-conversations get pods -l app.kubernetes.io/name=agentops-runtime -w
+kubectl -n agent-ops-conversations logs -f agentops-conv-<name>      # live transcript
 ```
 
 ```powershell
-kubectl -n agent-ops get pods -l app.kubernetes.io/name=agentops-runtime -w
-kubectl -n agent-ops logs -f agentops-conv-<name>      # live transcript
+kubectl -n agent-ops-conversations get pods -l app.kubernetes.io/name=agentops-runtime -w
+kubectl -n agent-ops-conversations logs -f agentops-conv-<name>      # live transcript
 ```
 
 {: .ao-callout}
 > **Reading the answer back through `kubectl` needs the `kube` backend.**
 > On the default, `nats`, the Conversation record lives in the state store,
 > not as an object `kubectl` lists. Read the answer in the console instead, or install with
-> `--set stateStore.backend=kube` and:
+> `--set stateStore.backend=kube` and (the `Conversation` CR is in
+> `agent-ops-conversations` too, beside the pod):
 >
 > ```sh
-> kubectl -n agent-ops get conversation <name> \
+> kubectl -n agent-ops-conversations get conversation <name> \
 >   -o jsonpath='{.status.runs[0].result}'
 > ```
 >
 > ```powershell
-> kubectl -n agent-ops get conversation <name> `
+> kubectl -n agent-ops-conversations get conversation <name> `
 >   -o jsonpath='{.status.runs[0].result}'
 > ```
 
@@ -207,7 +217,7 @@ exits on the idle TTL.
 | Cause | Where it shows |
 |---|---|
 | Bad or missing credential | the run fails — `status.runs[].status: failed`, non-zero exit code, reason in `kubectl logs` |
-| No storage provisioner | the `agentops-context` PVC sits `Pending` and no pod is created. Reinstall with `--set persistence.context.enabled=false` |
+| No storage provisioner | the `agentops-context` PVC, in `agent-ops-conversations`, sits `Pending` and no pod is created. Reinstall with `--set persistence.context.enabled=false` |
 | Nothing claims the source | the source's `Wired` condition is `False` with a reason. The console reports its composer unavailable, and signals are dropped |
 | At capacity | phase `Pending`, no pod, no thread. Five run at once by default |
 

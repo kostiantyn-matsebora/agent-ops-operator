@@ -10,6 +10,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -38,7 +39,7 @@ func reconcileConversation(t *testing.T, srv *httpapi.Server, name string) {
 	t.Helper()
 	rc := &controller.ConversationReconciler{
 		Client:        k8sClient,
-		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns}, Scheme: scheme, MaxActiveConversations: 100,
 		Ops: srv.Ops, Router: srv.Router, Runtime: srv.Runtime,
 	}
 	if _, err := rc.Reconcile(context.Background(),
@@ -359,7 +360,7 @@ func TestCoordinateFutureDeadlineCapsTheReconcileRequeue(t *testing.T) {
 	srv := apiServer()
 	rc := &controller.ConversationReconciler{
 		Client:        k8sClient,
-		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns}, Scheme: scheme, MaxActiveConversations: 100,
 		Ops: srv.Ops, Router: srv.Router, Runtime: srv.Runtime,
 	}
 	res, err := rc.Reconcile(context.Background(),

@@ -259,7 +259,7 @@ func assertKubeRecordsUntouched(t *testing.T, ctx context.Context, e *Env, befor
 	convName, convBefore, sigBefore := before.convName, before.conv, before.sig
 	sourceName, cooldownBefore := before.sourceName, before.cooldown
 	var convAfter agentopsv1alpha1.Conversation
-	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: convName}, &convAfter); err != nil {
+	if err := e.K.Get(ctx, types.NamespacedName{Namespace: ConversationsNamespace, Name: convName}, &convAfter); err != nil {
 		t.Fatalf("the kube Conversation must still exist, untouched, after the upgrade: %v", err)
 	}
 	if !reflect.DeepEqual(convBefore.Spec, convAfter.Spec) || !reflect.DeepEqual(convBefore.Status, convAfter.Status) {

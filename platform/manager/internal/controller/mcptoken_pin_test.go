@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"testing"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
@@ -44,7 +45,7 @@ func TestResolveActingCoordinatorMatchesChatPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := &chat.Router{Client: c, Reader: c, Conversations: store, Namespace: "agent-ops"}
+	router := &chat.Router{Client: c, Reader: c, Conversations: store, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 
 	for _, fixture := range []*agentopsv1alpha1.Conversation{root, member, plain} {
 		rec, _, err := store.Get(context.Background(), state.Key(fixture.Name))

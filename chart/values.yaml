@@ -478,6 +478,33 @@ global:
   # from the networkPolicy key — which is why none of these is an ordinary
   # top-level value.
   agentops:
+    # THE CONVERSATIONS NAMESPACE (split-conversation-namespace): where a
+    # runtime pod, every ServiceAccount/claim/Secret/ConfigMap it runs as,
+    # mounts or resolves, and the housekeeping + context-probe CronJobs that
+    # mount those same claims all live. Everything else — the manager, every
+    # wiring and identity CR, adapters, the console, the MCP servers, NATS —
+    # stays in the RELEASE namespace (`.Release.Namespace`), which this chart
+    # never gives a second name: there is no "control namespace" value,
+    # because that namespace already has one.
+    #
+    # LIVES UNDER `global.agentops` rather than top-level for the same forcing
+    # as `runtimeDefaults` below: `chart/charts/kubernetes` (and
+    # `chart/charts/home-assistant`) render their own routes' ServiceAccounts
+    # here too, and a subchart reads no parent scope but `global.`.
+    #
+    # `agentops.conversationNamespace` in `_helpers.tpl` is the ONE place this
+    # resolves — every template calls it rather than inlining the comparison.
+    # SET IT TO THE RELEASE NAMESPACE to reproduce today's single-namespace
+    # layout exactly, with no object split in two.
+    conversationNamespace: agent-ops-conversations
+    # Whether the chart creates that namespace. True renders it with
+    # `helm.sh/resource-policy: keep`, so `helm uninstall` leaves it, its
+    # Secrets and its claims standing — a conversation's accumulated context
+    # must outlive the release that pointed a volume at it. Never renders
+    # when `conversationNamespace` equals the release namespace: that
+    # namespace is not this chart's to create, it is where the release itself
+    # is installed.
+    createConversationNamespace: true
     # WHO MAY REACH THE COMPONENTS THIS RELEASE DEPLOYS.
     #
     # Every component here assumes its callers are wired. Nothing enforces that

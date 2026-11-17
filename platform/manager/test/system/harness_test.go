@@ -37,6 +37,15 @@ import (
 // Namespace is the release namespace.
 const Namespace = "agent-ops"
 
+// ConversationsNamespace is the chart's own default
+// (global.agentops.conversationNamespace, chart/values.yaml) that
+// install.go's valuesYAML never overrides, so it is also what this pack's
+// shared install actually renders: every runtime pod, its MCP ConfigMap,
+// every persistence claim and every `rbac.runtime.serviceAccounts` entry
+// land here now, never in Namespace (the release/control namespace every
+// pre-existing lane in this package was written against).
+const ConversationsNamespace = "agent-ops-conversations"
+
 // Release is the helm release name.
 const Release = "agentops"
 
@@ -198,7 +207,7 @@ func resetReusedInstall(ctx context.Context, cluster *Cluster, k *Kube) error {
 	// Deleted conversations linger under their close-topics finalizer for up
 	// to two minutes, and a signal with a lingering one's signature folds
 	// into it. Wait until they are really gone.
-	_, _ = cluster.Kubectl(ctx, "-n", Namespace, "delete", "conversations", "--all", "--wait=false")
+	_, _ = cluster.Kubectl(ctx, "-n", ConversationsNamespace, "delete", "conversations", "--all", "--wait=false")
 	deadline := time.Now().Add(4 * time.Minute)
 	for time.Now().Before(deadline) {
 		items, err := k.Conversations(ctx)

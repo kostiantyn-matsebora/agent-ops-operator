@@ -121,13 +121,13 @@ func brokenConfigManager(t *testing.T) ctrl.Manager {
 }
 
 func TestTheBackendsRefuseToWireWithoutAUsableKubernetesClient(t *testing.T) {
-	if _, err := newKubeStores(brokenConfigManager(t), "agent-ops"); err == nil {
+	if _, err := newKubeStores(brokenConfigManager(t), testNamespaces); err == nil {
 		t.Error("newKubeStores built a store on an unusable config")
 	}
 	srv := startTestNats(t)
 	t.Setenv("NATS_URL", srv.ClientURL())
 	t.Setenv("NATS_REPLICAS", "1")
-	_, err := newNatsStores(brokenConfigManager(t), "agent-ops")
+	_, err := newNatsStores(brokenConfigManager(t), testNamespaces)
 	if err == nil || !strings.Contains(err.Error(), "import") {
 		t.Errorf("newNatsStores = %v, want the import's kube client failure", err)
 	}
@@ -136,7 +136,7 @@ func TestTheBackendsRefuseToWireWithoutAUsableKubernetesClient(t *testing.T) {
 func TestTheNatsStoreRefusesABadReplicaCount(t *testing.T) {
 	t.Setenv("NATS_URL", "nats://127.0.0.1:1")
 	t.Setenv("NATS_REPLICAS", "many")
-	if _, err := newNatsStores(testManager(t), "agent-ops"); err == nil || !strings.Contains(err.Error(), "NATS_REPLICAS") {
+	if _, err := newNatsStores(testManager(t), testNamespaces); err == nil || !strings.Contains(err.Error(), "NATS_REPLICAS") {
 		t.Fatalf("newNatsStores = %v, want the replica count refused by name", err)
 	}
 }
@@ -150,7 +150,7 @@ func TestTheNatsStoreFailsWhenTheBucketsCannotBeCreated(t *testing.T) {
 	t.Cleanup(func() { natsOpenTimeout = old })
 	done := make(chan error, 1)
 	go func() {
-		_, err := newNatsStores(testManager(t), "agent-ops")
+		_, err := newNatsStores(testManager(t), testNamespaces)
 		done <- err
 	}()
 	select {

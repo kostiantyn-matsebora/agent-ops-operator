@@ -265,6 +265,11 @@ spec:
 ```
 <!-- /generated -->
 
+**The Secret this header names is the runtime pod's to resolve, not the
+manager's.** It belongs in the conversations namespace, beside the pod —
+as with the `valueFrom` above. The `MCPConfig`
+itself stays wiring, in the control namespace, unchanged.
+
 Then two routes at two privilege levels. The one anyone may reach:
 
 <!-- generated: example preset=tier2 kind=Pipeline name=ha-control -->

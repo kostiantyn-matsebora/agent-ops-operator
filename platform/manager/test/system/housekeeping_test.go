@@ -50,7 +50,7 @@ func TestHousekeepingDryRunRetainsEveryConversation(t *testing.T) {
 		t.Fatalf("a dry run must succeed: %+v", job.Status)
 	}
 
-	pods, err := e.K.Pods(ctx, "job-name="+job.Name)
+	pods, err := e.K.RuntimePods(ctx, "job-name="+job.Name)
 	if err != nil || len(pods) == 0 {
 		t.Fatalf("the job's own pod: %v %d", err, len(pods))
 	}
@@ -80,7 +80,7 @@ func TestHousekeepingDryRunRetainsEveryConversation(t *testing.T) {
 		t.Fatalf("the pod must read STATE_READ_TOKEN from a Secret (never a literal, never a Kubernetes read): %+v", pod.Spec.Containers)
 	}
 
-	logs, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "logs", pod.Name)
+	logs, err := e.Cluster.Kubectl(ctx, "-n", ConversationsNamespace, "logs", pod.Name)
 	if err != nil {
 		t.Fatalf("reading the job's log: %v", err)
 	}

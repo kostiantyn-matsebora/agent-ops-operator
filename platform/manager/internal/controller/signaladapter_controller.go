@@ -51,6 +51,11 @@ type SignalAdapterReconciler struct {
 	// configuration. An adapter naming none runs as it — bound to nothing, and
 	// refused as a binding target by the chart that renders it.
 	FloorServiceAccount string
+	// ConversationNamespace is injected as CONVERSATION_NAMESPACE, a literal
+	// value beside POD_NAMESPACE (signal-adapter-lifecycle ADP-10) — equal to
+	// it in a single-namespace release. Channel adapters carry no such field:
+	// they have no runtime-pod concern to name.
+	ConversationNamespace string
 }
 
 // Reconcile renders the adapter workload for one SignalAdapter.
@@ -92,6 +97,9 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	env := []corev1.EnvVar{
 		{Name: "MANAGER_URL", Value: r.ManagerURL},
 		{Name: "ADAPTER_NAME", Value: adapter.Name},
+		// A literal value, never a downward-API field like POD_NAMESPACE
+		// beside it: it names a DIFFERENT namespace than the pod runs in.
+		{Name: "CONVERSATION_NAMESPACE", Value: r.ConversationNamespace},
 	}
 	if r.MasterToken != "" {
 		env = append(env, corev1.EnvVar{Name: "ADAPTER_TOKEN", Value: chat.DeriveSignalAdapterToken(r.MasterToken, adapter.Name)})

@@ -54,6 +54,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # split-conversation-namespace: the second half of the namespace
+            # pair. Defaults to NAMESPACE above (single-namespace layout) when
+            # the two are equal — resolved here, ONCE, through the same helper
+            # every other template calls.
+            - name: CONVERSATION_NAMESPACE
+              value: {{ include "agentops.conversationNamespace" . | quote }}
             # Reported by GET /status and shown on the console's Overview. Taken
             # from appVersion rather than the image tag: the tag can be pinned or
             # overridden per environment, and "which version am I running" should

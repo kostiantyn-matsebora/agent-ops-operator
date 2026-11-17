@@ -395,6 +395,43 @@ subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
     namespace: {{ .Release.Namespace }}
+{{- if include "agentops.namespacesSplit" . }}
+---
+# split-conversation-namespace (console-deployment): a SECOND, narrower Role
+# in the conversations namespace, where runtime pods now run — the console
+# already reads Conversations and Signals through /state/*, so this is ONLY
+# an additional `pods` watch, beside the Role above rather than a replacement
+# for it. The SAME ServiceAccount, which lives in the release (control)
+# namespace, so the subject below names `.Release.Namespace` while the Role
+# and RoleBinding sit in the conversations namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa }}
+  namespace: {{ include "agentops.conversationNamespace" . }}
+  labels:
+    app.kubernetes.io/name: agentops-console
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa }}
+  namespace: {{ include "agentops.conversationNamespace" . }}
+  labels:
+    app.kubernetes.io/name: agentops-console
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $sa }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- /* THE CONSOLE'S IDENTITY, BESIDE THE ROLE IT CARRIES. The reconciler creates
 no ServiceAccount — it names this one on the pod and mounts its token. The grant
 above and the account are read together, in one file. */}}

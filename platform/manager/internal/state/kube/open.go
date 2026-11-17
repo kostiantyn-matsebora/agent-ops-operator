@@ -6,6 +6,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
@@ -19,30 +20,38 @@ type Backend struct {
 	sweeps []interface{ Run(context.Context) }
 }
 
-// OpenStores opens every field of state.Stores, scoped to namespace. The sweeps
-// are not started: Run does that, once the caller has somewhere to run them.
-func OpenStores(c client.WithWatch, namespace string, opts ...Option) (*Backend, error) {
-	conversations, err := Open(c, namespace, ConversationLayout(), opts...)
+// OpenStores opens every field of state.Stores, scoped to the namespace pair
+// (split-conversation-namespace): Conversations, Runs and Blobs open in
+// ns.Conversations — conversation-scoped state, under the placement rule.
+// Signals, Cooldowns, Receipts and AdapterState open in ns.Control, beside
+// every other control-plane kind. The sweeps are not started: Run does that,
+// once the caller has somewhere to run them.
+//
+// A single-namespace caller passes a pair of two equal strings, which is
+// exactly today's behaviour: every field opens in the one namespace it
+// always did.
+func OpenStores(c client.WithWatch, ns namespace.Namespaces, opts ...Option) (*Backend, error) {
+	conversations, err := Open(c, ns.Conversations, ConversationLayout(), opts...)
 	if err != nil {
 		return nil, err
 	}
-	runs, err := OpenAppended(c, namespace, RunsLayout(), opts...)
+	runs, err := OpenAppended(c, ns.Conversations, RunsLayout(), opts...)
 	if err != nil {
 		return nil, err
 	}
-	signals, err := OpenExpiring(c, namespace, SignalLayout(), opts...)
+	signals, err := OpenExpiring(c, ns.Control, SignalLayout(), opts...)
 	if err != nil {
 		return nil, err
 	}
-	cooldowns, err := Open(c, namespace, CooldownLayout(), opts...)
+	cooldowns, err := Open(c, ns.Control, CooldownLayout(), opts...)
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := Open(c, namespace, ReceiptLayout(), opts...)
+	receipts, err := Open(c, ns.Control, ReceiptLayout(), opts...)
 	if err != nil {
 		return nil, err
 	}
-	adapterState, err := OpenAdapterState(c, namespace, opts...)
+	adapterState, err := OpenAdapterState(c, ns.Control, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +63,7 @@ func OpenStores(c client.WithWatch, namespace string, opts ...Option) (*Backend,
 			Cooldowns:     cooldowns,
 			Receipts:      receipts,
 			AdapterState:  adapterState,
-			Blobs:         OpenBlobs(c, namespace, opts...),
+			Blobs:         OpenBlobs(c, ns.Conversations, opts...),
 		},
 		sweeps: []interface{ Run(context.Context) }{signals},
 	}, nil

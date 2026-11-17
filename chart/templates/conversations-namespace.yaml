@@ -1,0 +1,27 @@
+{{- /*
+THE CHART OWNS THE CONVERSATIONS NAMESPACE AND KEEPS IT
+(split-conversation-namespace, decision 9).
+
+Guarded on `agentops.namespacesSplit` — it never renders when
+`global.agentops.conversationNamespace` equals `.Release.Namespace`: that
+namespace is the release's own, created by whoever ran `helm install`
+(or `--create-namespace`), and this chart has no business owning it.
+
+`helm.sh/resource-policy: keep` is why `helm uninstall` leaves this
+namespace, its Secrets and its claims standing — a conversation's
+accumulated context, and the Secrets a runtime pod resolves, must outlive
+the release that pointed a volume at them.
+*/ -}}
+{{- if and (include "agentops.namespacesSplit" .) (include "agentops.createConversationNamespaceEnabled" .) }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "agentops.conversationNamespace" . }}
+  labels:
+    app.kubernetes.io/name: agentops-conversations
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: agent-ops-operator
+  annotations:
+    helm.sh/resource-policy: keep
+{{- end }}

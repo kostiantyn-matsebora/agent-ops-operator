@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ func TestOwnIsSkippedWhenNoKubernetesObjectStandsBehindTheRecord(t *testing.T) {
 		{"kube backend keeps the reference", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &ConversationReconciler{Scheme: scheme, Namespace: "ns-a", NoOwnerReference: tc.skip}
+			r := &ConversationReconciler{Scheme: scheme, Namespaces: namespace.Namespaces{Control: "ns-a", Conversations: "ns-a"}, NoOwnerReference: tc.skip}
 			for _, obj := range []client.Object{
 				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "ns-a"}},
 				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "ns-a"}},

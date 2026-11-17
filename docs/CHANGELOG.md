@@ -8,6 +8,134 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [Unreleased]
+
+**BREAKING. A release now resolves two namespaces, split by default.** The
+control namespace (the manager, wiring, adapters, state store) is unchanged.
+
+A new conversations namespace holds runtime pods and everything they run
+as, mount or resolve. Read [Upgrade](#upgrade) before upgrading. It needs
+a manual step per claim you want to keep.
+
+### Added
+
+- `global.agentops.conversationNamespace` (default `agent-ops-conversations`)
+  and `global.agentops.createConversationNamespace` (default `true`). Setting
+  the former to the release namespace reproduces the single-namespace layout
+  exactly, with no object split in two.
+- `CONVERSATION_NAMESPACE`, read by the manager at startup, defaulting to
+  `NAMESPACE`. Injected as a literal value on every channel and signal
+  adapter, beside `POD_NAMESPACE`.
+- A second manager Role, in the conversations namespace: pods, configmaps, `conversations`
+  and `conversationinputs` and their status, events, PVC
+  `get`/`list`/`watch`/`create` — never `delete`, `update` or `patch`. No ClusterRole is added.
+  Single-namespace installs still render one merged Role, identical in
+  substance to today's. The control Role keeps a read on pods, for the
+  manager's own replicas.
+- A second console Role, in the conversations namespace: `pods`
+  `get`/`list`/`watch` alone, so the Infrastructure view keeps every runtime
+  pod. The console reads `CONVERSATION_NAMESPACE`, defaulting to
+  `POD_NAMESPACE`.
+- An expected-references condition on the `Conversation`, naming every
+  Secret and ConfigMap its pod will resolve — profile repository auth,
+  profile and runtime `env[].valueFrom`, MCP config `valueFrom` and raw
+  references. Derived from the referencing CRs alone. The manager still
+  reads no Secret.
+- `signals/k8s-events` gains a fourth, unconfigurable self-exclusion
+  mechanism: every event in the conversations namespace is dropped whenever
+  it differs from `POD_NAMESPACE`, with no object read. The signal adapter
+  specification moves to **2.5.0** — `POD_NAMESPACE` and
+  `CONVERSATION_NAMESPACE` join [Environment](contracts/signal-adapter.md#environment),
+  and `ADP-10` names the new mechanism. Every shipped adapter's claimed
+  version moves to 2.5.0. Only `signals/k8s-events` implements `ADP-10` —
+  the others carry no namespace-scoped exclusion to extend.
+- The chart creates the conversations namespace by default, with the
+  release's labels and `helm.sh/resource-policy: keep` — `helm uninstall`
+  leaves it, its Secrets and its claims standing.
+- A `SignalAdapter` pod receives `ADAPTER_NAME` (the CR's name), the same env
+  name channel adapters get, replacing `SOURCE_TYPE`. Rename it in any
+  self-registering sender that read the old name.
+- The `SignalAdapter` reconciler creates no ServiceAccount. It names the
+  account in `spec.serviceAccountName` and falls back to the release floor.
+
+### Changed
+
+- **BREAKING: runtime pods, their MCP ConfigMaps, every chart-rendered and
+  manager-created persistence claim, every `rbac.runtime.serviceAccounts`
+  entry and bundle route account, and the housekeeping and context-probe
+  CronJobs all move to the conversations namespace.** The floor account
+  `agentops-runtime` now renders in both namespaces, bound to nothing in
+  either.
+- **BREAKING: every Secret and ConfigMap a runtime pod resolves — profile
+  repository auth, profile env, the runtime's model credential, MCP config
+  references, image pull secrets — must exist in the conversations
+  namespace.** The manager does not copy them there. See
+  [Upgrade](#upgrade).
+- The chart renders every Secret it creates that a runtime pod resolves into
+  the conversations namespace, so a token-supplied credential needs no copy.
+  `agentops-ha-operator` renders in both namespaces, since the admin MCP server
+  and the log source read it from the release namespace too.
+- Under the `kube` state backend, `Conversation` and `ConversationInput` move
+  to the conversations namespace. `Signal`s and the rest of the state store
+  stay in control. Under `nats` (the default) nothing here is a CR, so
+  nothing moves.
+- The chart's generated `stateReadAuth` token now renders into both
+  namespaces from the same value, since housekeeping moved with its claims.
+  `allowPodExecution` guards this copy exactly as it already guards every
+  adopter Secret a runtime pod resolves.
+- NetworkPolicy peers (under the existing, default-off
+  `global.agentops.networkPolicy.enabled`) gain a `namespaceSelector`
+  wherever they cross the split: the manager's own ingress, `mcp-aops`, the
+  `kubernetes`, `home-assistant`, `prometheus` and `pulse` MCP servers. The runtime ingress-deny
+  policy now renders in the conversations namespace.
+
+### Upgrade
+
+This release moves objects between namespaces. There is no code path that
+moves state for you — follow these steps in order, on the release you are
+upgrading:
+
+1. **Close every open conversation**, so no pod or claim is in use.
+2. **Create the conversations namespace**, or let the chart create it
+   (`createConversationNamespace: true`, the default).
+3. **Create every Secret a runtime pod resolves in the new namespace** —
+   profile repository auth, profile env, the runtime's model credential, MCP
+   config references, image pull secrets.
+   The Secrets the chart creates itself from a token (the `claude` and
+   `copilot` runtime credential, the home-assistant control and operator
+   tokens, the pulse observer and operator tokens) are rendered there for you.
+   Only a Secret you reference by name, or create out of band, needs this step.
+4. **Carry each persistence claim across:**
+   1. Set the bound PV's reclaim policy to `Retain`.
+   2. Delete the old claim, then clear the PV's `claimRef`.
+   3. Pre-create the claim in the new namespace, `volumeName` set to that PV.
+   4. Point the chart at it with `persistence.<volume>.existingClaim`. A
+      manager-created claim needs no setting — the manager is idempotent by
+      existence.
+5. **Apply the CRDs, then `helm upgrade`:**
+
+   ```sh
+   kubectl apply -f chart/crds/
+   helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator -n agent-ops
+   ```
+
+   ```powershell
+   kubectl apply -f chart/crds/
+   helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator -n agent-ops
+   ```
+6. **Under the `kube` state backend, delete the `Conversation` CRs left in
+   the release namespace** — they receive no reconciliation there.
+7. **Verify** with an ordinary signal, and confirm the pod appears in the
+   conversations namespace.
+
+**Rollback** is `conversationNamespace` set back to the release namespace.
+Objects in the new namespace go inert rather than disappearing — every claim
+still carries `resource-policy: keep`.
+
+**Context survives only where the claim was carried.** A conversation
+promised context it no longer has fails its run rather than answering
+fresh, same as any other `promised-and-lost` case.
+
 ## [19.0.1] — 2026-11-14
 
 A security patch. Six images are rebuilt on current base images, with no
@@ -42,7 +170,7 @@ No values or CRDs change. Upgrade with `helm upgrade` as usual.
 
 **BREAKING.** The default state backend is now `nats`, the manager accepts
 work through a durable command bus, and channel adapters read, acknowledge,
-then report each op. Read [Upgrade](#upgrade) before upgrading.
+then report each op. Read [Upgrade](#upgrade-1) before upgrading.
 
 - `manager` 0.62.0, `console` 0.41.0, `channel-telegram` 0.27.0,
   `housekeeping` 0.3.0, `mcp-aops` 0.2.0, `runtime-claude` 0.13.0,

@@ -105,7 +105,7 @@ func (r *Router) InvokeMember(ctx context.Context, caller *state.ConversationRec
 		return nil, ErrNotCoordinatorRoot
 	}
 	var co agentopsv1alpha1.Coordinator
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: scope.Name}, &co); err != nil {
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: scope.Name}, &co); err != nil {
 		return nil, err
 	}
 	entry := findAgentEntry(&co, agentName)
@@ -220,7 +220,7 @@ func (r *Router) CoordinatorAgents(ctx context.Context, caller *state.Conversati
 		return nil, ErrNotCoordinatorRoot
 	}
 	var co agentopsv1alpha1.Coordinator
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: caller.CoordinatorRef}, &co); err != nil {
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: caller.CoordinatorRef}, &co); err != nil {
 		return nil, err
 	}
 	return co.Spec.Agents, nil
@@ -536,13 +536,13 @@ func (r *Router) createMember(ctx context.Context, caller *state.ConversationRec
 	switch {
 	case entry.CapabilityRef != nil:
 		var ac agentopsv1alpha1.AgentCapability
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: entry.CapabilityRef.Name}, &ac); err != nil {
+		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: entry.CapabilityRef.Name}, &ac); err != nil {
 			return nil, fmt.Errorf("agentcapability/%s: %w", entry.CapabilityRef.Name, err)
 		}
 		capability, persistenceName = ac.Spec, entry.CapabilityRef.Name
 	case entry.CoordinatorRef != nil:
 		var n agentopsv1alpha1.Coordinator
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: entry.CoordinatorRef.Name}, &n); err != nil {
+		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: entry.CoordinatorRef.Name}, &n); err != nil {
 			return nil, fmt.Errorf("coordinator/%s: %w", entry.CoordinatorRef.Name, err)
 		}
 		nested = &n
@@ -555,7 +555,7 @@ func (r *Router) createMember(ctx context.Context, caller *state.ConversationRec
 		return nil, fmt.Errorf("agents[%s] names neither capabilityRef nor coordinatorRef", entry.Name)
 	}
 
-	snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, persistenceName, capability, r.Runtime)
+	snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespaces.Control, persistenceName, capability, r.Runtime)
 	// The word-chain and the actual Create are AllocateName's below —
 	// readable-conversation-names: an object name is a deterministic
 	// word-chain, never metadata.generateName's random suffix. The word

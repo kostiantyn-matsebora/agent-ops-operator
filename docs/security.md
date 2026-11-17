@@ -34,6 +34,15 @@ you gave it. **Treat the agent container as untrusted code with a shell.**
 | **6** agent → pod logs | conversation content readable with `pods/log` | **none** — [residual risk](#residual-risk) |
 | **7** any pod → state or bus server | reads or writes conversation state, or a task, directly, bypassing the manager's own authorization | [state store isolation](#state-store-isolation) / [command bus isolation](#command-bus-isolation) — **on** (credential), **off** (network policy) |
 
+**"Operator ns" above is the control namespace.**
+
+A release may resolve a second one, conversations, where the runtime pod
+itself runs. See
+[Concepts]({{ '/concepts/#where-things-run-the-control-and-conversations-namespaces' | relative_url }}).
+
+Every crossing above is the same either way. Namespace is deployment
+topology, not a trust boundary of its own.
+
 **Nothing in the cluster is granted by default.** A route naming no identity runs
 as an account bound to nothing. Acting power is something a route opts into, by
 name.
@@ -117,6 +126,10 @@ The kubelet resolves a Secret when it builds a pod. The verb is never evaluated.
 **So pod execution is the Secrets boundary, and it is disabled by default.** It
 gates every write that produces or enters a pod, not one verb: a Job, a
 Deployment and a patch to a pod template are the same path.
+
+**It now also gates `stateReadAuth`'s copy in the conversations namespace** —
+the one credential there that is not the adopter's own, and the same control
+that already covered every adopter Secret a runtime pod resolves.
 
 Keys and worked examples in
 [The agent's power]({{ '/installation/' | relative_url }}#the-agents-power).
@@ -239,6 +252,7 @@ Properties of the product you cannot read off the values.
 | **Housekeeping holds no Kubernetes grant** | it lists conversations through the manager's `/state/*` surface, authenticated by its own `stateReadAuth` credential. No Role, no RoleBinding, and its ServiceAccount's token is not even mounted (`automountServiceAccountToken: false`) |
 | **The state server's credential is chart-managed, not the manager's to mint** | resolved explicit value, then an existing Secret, then generation on install only — the same order as `adapterAuth`/`controlPlaneAuth`. The manager receives it by `valueFrom` and reads no Secret of its own, under this backend either |
 | **The state read surface is a grant, off by default** | `spec.stateAccess: true` on a `ChannelAdapter` or `SignalAdapter` opens `/state/*` to that adapter's derived token. Silence grants nothing. The console reads through its own adapter's grant. Housekeeping is not an adapter and reads through `stateReadAuth` instead |
+| **`stateReadAuth` now renders beside agent code too** | housekeeping moved to the conversations namespace with the claims it mounts, so its copy of the token renders there — the same value, a second Secret object. It grants read on `/state/*` alone, and reading it at all still needs pod execution, [off by default](#secret-exposure) |
 | **Runtime pods are non-root** | at a fixed uid, and each conversation's workspace is its own subpath of the claim, so concurrent pods cannot see each other's tree |
 | **Under egress control the container is hardened further** | all capabilities dropped, privilege escalation refused |
 

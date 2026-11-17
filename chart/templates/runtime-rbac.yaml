@@ -66,7 +66,14 @@ this chart does not, so `kubernetes` renders an account per route and
 `home-assistant` renders accounts with no Kubernetes RBAC at all. What stays
 exclusively the parent's is the runtime DEFAULTS and this FLOOR.
 */ -}}
-{{- $ns := .Release.Namespace }}
+{{- /*
+split-conversation-namespace: every declared runtime account now lives in the
+CONVERSATIONS namespace (it is what a runtime pod runs as, and a runtime pod
+runs there now). These are ClusterRoleBindings — cluster-wide already — so
+only the subject's `namespace:` field moves; the ClusterRole/ClusterRoleBinding
+objects themselves, and their naming, are unchanged.
+*/ -}}
+{{- $ns := include "agentops.conversationNamespace" . }}
 {{- $floor := include "agentops.floorServiceAccount" . }}
 {{- $rt := .Values.rbac.runtime }}
 {{- $accounts := list }}

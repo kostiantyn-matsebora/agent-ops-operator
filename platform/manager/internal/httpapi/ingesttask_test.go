@@ -10,6 +10,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +60,7 @@ func TestHandleIngestSignalTaskSourceReadFailureIsRetryable(t *testing.T) {
 		WithInterceptorFuncs(interceptor.Funcs{Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
 			return apierrors.NewInternalError(errors.New("apiserver down"))
 		}}).Build()
-	s := &Server{Reader: c, Client: c, Namespace: sigTestNamespace, Signals: testSignals(t, c, sigTestNamespace),
+	s := &Server{Reader: c, Client: c, Namespaces: namespace.Namespaces{Control: sigTestNamespace, Conversations: sigTestNamespace}, Signals: testSignals(t, c, sigTestNamespace),
 		Activity: activity.New(16), Bus: memory.Open()}
 	p := ingestSignalPayload{Source: source.Name, Signal: NormalizedSignal{InitiationID: "i-1", Payload: "x"}}
 	err := s.HandleIngestSignalTask(context.Background(), commandbus.Task{UID: "t-3", Payload: p.encode()})
@@ -146,7 +147,7 @@ func TestHandleIngestSignalTaskFailedStoreFailsTheTaskAndARetrySucceeds(t *testi
 	}}
 	c := base.WithInterceptorFuncs(failFirst).Build()
 	s := &Server{
-		Reader: c, Client: c, Namespace: sigTestNamespace, AdapterToken: "sig-test-master",
+		Reader: c, Client: c, Namespaces: namespace.Namespaces{Control: sigTestNamespace, Conversations: sigTestNamespace}, AdapterToken: "sig-test-master",
 		Conversations: testConversations(t, c, sigTestNamespace), Signals: testSignals(t, c, sigTestNamespace),
 		Activity: activity.New(16), Bus: memory.Open(),
 	}

@@ -45,6 +45,23 @@ const defaultBoundClaimSize = "5Gi"
 // in the chat lane, by refusing rather than guessing.
 type PipelineReconciler struct {
 	client.Client
+	// ConversationsNamespace is where a bound claim renders (split-
+	// conversation-namespace, placement rule): a claim is a workload sharing
+	// a runtime pod's claims, even though the Pipeline naming it is
+	// control-plane wiring read from its own namespace. Empty falls back to
+	// the Pipeline's own namespace, which is what every pre-split caller
+	// (and every test building this reconciler directly) still gets.
+	ConversationsNamespace string
+}
+
+// conversationsNamespace is where ensureClaim renders: the configured value,
+// or the Pipeline's own namespace when none was set — the single-namespace
+// behaviour every pre-split caller already had.
+func (r *PipelineReconciler) conversationsNamespace(p *agentopsv1alpha1.Pipeline) string {
+	if r.ConversationsNamespace != "" {
+		return r.ConversationsNamespace
+	}
+	return p.Namespace
 }
 
 // Reconcile validates one Pipeline.
@@ -160,8 +177,9 @@ func (r *PipelineReconciler) ensureClaim(ctx context.Context, p *agentopsv1alpha
 	vol runtimepod.Volume, b *agentopsv1alpha1.PersistenceBinding) error {
 
 	name := runtimepod.PipelineClaimName(p.Name, vol)
+	ns := r.conversationsNamespace(p)
 	var existing corev1.PersistentVolumeClaim
-	err := r.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: name}, &existing)
+	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &existing)
 	if err == nil {
 		return nil
 	}
@@ -192,7 +210,7 @@ func (r *PipelineReconciler) ensureClaim(ctx context.Context, p *agentopsv1alpha
 	claim := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: p.Namespace,
+			Namespace: ns,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":        "agentops",
 				"agentops.dev/pipeline":         p.Name,

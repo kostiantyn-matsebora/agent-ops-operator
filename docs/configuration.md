@@ -15,6 +15,17 @@ helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 ```
 
+## Namespaces
+
+The conversations namespace is set once, before install — see
+[Installation](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/#namespaces).
+Switching it later is a migration, not a `helm upgrade`.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `global.agentops.conversationNamespace` | `agent-ops-conversations` | where runtime pods, their claims and the runtime accounts live; the release namespace gives the single-namespace layout |
+| `global.agentops.createConversationNamespace` | `true` | the chart creates the namespace and keeps it on uninstall; `false` when you made it yourself |
+
 ## Storage
 
 The access mode and storage class are set once, before install — see

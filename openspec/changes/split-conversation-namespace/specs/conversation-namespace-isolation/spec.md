@@ -52,8 +52,9 @@ a single namespace:
 - equal values SHALL reproduce the single-namespace deployment with no branch
   on layout
 
-The cache SHALL cover exactly the two namespaces, and leader election SHALL
-stay in the control namespace.
+The cache SHALL cover exactly the two namespaces, each kind only in the
+namespace whose Role grants it, and leader election SHALL stay in the control
+namespace.
 
 #### Scenario: Equal namespaces reproduce today's layout
 - **WHEN** `CONVERSATION_NAMESPACE` equals `NAMESPACE`
@@ -62,6 +63,10 @@ stay in the control namespace.
 #### Scenario: The cache is two namespaces, never the cluster
 - **WHEN** the manager starts with two distinct namespaces
 - **THEN** it watches those two namespaces and no other
+
+#### Scenario: Every kind is cached only where its Role grants it
+- **WHEN** the manager starts split under the chart's own Roles
+- **THEN** every informer syncs: wiring kinds watched in control alone, `conversations` and `conversationinputs` and PVCs in conversations alone, pods and configmaps in both, serviceaccounts in control alone
 
 #### Scenario: The lease stays in control
 - **WHEN** the manager runs split
@@ -91,6 +96,16 @@ only what is used there:
 
 - the control-namespace Role SHALL cover every wiring and identity kind,
   `signals`, adapter Deployments, Services, configmaps, leases and events
+- that Role SHALL grant `serviceaccounts` `get`/`list`/`watch`/`create`/`update`/`patch`
+  and no `delete` (a grant carried over unchanged from the single-namespace Role)
+  - it covers the zero-RBAC accounts the manager creates for adapter workloads, which stay in the control namespace
+  - the runtime and route accounts in the conversations namespace are chart-rendered and only referenced by a pod, so the manager needs no verb on them there
+- that Role SHALL grant a read (`get`/`list`/`watch`) on pods
+  - that pod read reaches EVERY pod in the control namespace
+  - the manager reads it to resolve the Lease holder to a pod IP for the
+    leader proxy, and to refuse the state store's one-time import beside an
+    older replica
+  - RBAC cannot scope a verb to the manager's own replicas
 - the conversations-namespace Role SHALL cover pods, configmaps,
   `conversations`, `conversationinputs` and their status, events, and PVC
   `get`/`list`/`watch`/`create`
@@ -103,6 +118,14 @@ No ClusterRole SHALL be added for the manager. Neither Role SHALL carry a
 #### Scenario: Two Roles render, no new ClusterRole
 - **WHEN** the chart renders split
 - **THEN** a manager Role and RoleBinding exist in each namespace, and the only manager ClusterRole is the existing nodes grant
+
+#### Scenario: The control-namespace Role reads pods
+- **WHEN** the chart renders split
+- **THEN** the control-namespace Role carries `get`, `list` and `watch` on `pods` and no pod write verb
+
+#### Scenario: The control-namespace Role cannot delete serviceaccounts
+- **WHEN** the chart renders split
+- **THEN** the control-namespace Role carries `get`, `list`, `watch`, `create`, `update` and `patch` on `serviceaccounts` and no `delete`
 
 #### Scenario: The manager cannot reach a third namespace
 - **WHEN** the manager lists pods in an unrelated namespace
@@ -135,10 +158,10 @@ referencing CRs alone.
 - **THEN** nothing creates a copy in the conversations namespace
 
 ### Requirement: The chart splits by default and keeps the namespace it creates
-The chart SHALL expose `conversationNamespace`, defaulting to
-`agent-ops-conversations`, and `createConversationNamespace`, defaulting to
-true. Setting `conversationNamespace` to the release namespace SHALL render the
-single-namespace layout.
+The chart SHALL expose `global.agentops.conversationNamespace`, defaulting
+to `agent-ops-conversations`, and `global.agentops.createConversationNamespace`,
+defaulting to true. Setting `global.agentops.conversationNamespace` to the
+release namespace SHALL render the single-namespace layout.
 
 A namespace the chart creates SHALL carry the release labels and
 `helm.sh/resource-policy: keep`. The chart SHALL render its generated
@@ -150,7 +173,7 @@ for the manager, the conversations namespace for housekeeping.
 - **THEN** conversation-scoped objects target `agent-ops-conversations`, which the chart creates and labels
 
 #### Scenario: Single namespace is one value away
-- **WHEN** `conversationNamespace` equals the release namespace
+- **WHEN** `global.agentops.conversationNamespace` equals the release namespace
 - **THEN** no namespace is created and every object renders in the release namespace
 
 #### Scenario: Uninstall leaves the conversations namespace standing

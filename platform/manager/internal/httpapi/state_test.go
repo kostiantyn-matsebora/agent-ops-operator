@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -77,7 +78,7 @@ func TestStateHandlersRefuseAMalformedBodyOnceTheChannelResolves(t *testing.T) {
 	ch := &agentopsv1alpha1.Channel{}
 	ch.Name, ch.Namespace, ch.Spec.Adapter = "c1", "agent-ops", "slack"
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(ch).Build()
-	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops"}
+	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 
 	t.Run("handleStatePut", func(t *testing.T) {
 		req := httptest.NewRequest("PUT", "/channel/c1/state/key", strings.NewReader("{not json"))

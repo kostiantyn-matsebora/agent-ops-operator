@@ -32,11 +32,16 @@ suppresses the one rendered here.
 {{- if include "home-assistant.routeAccountRendered" (dict "ctx" $ "cfg" $cfg "p" $p) }}
 {{- $sa := include "home-assistant.routeServiceAccount" (dict "ctx" $ "route" $cfg.name) }}
 ---
+# split-conversation-namespace: route ServiceAccounts follow the runtime
+# pods they identify — rendered in the CONVERSATIONS namespace, never the
+# release namespace this bundle's other objects use. The parent's
+# `agentops.conversationNamespace` helper is callable here because it reads
+# `global.` only, which this subchart sees.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ $sa }}
-  namespace: {{ $.Release.Namespace }}
+  namespace: {{ include "agentops.conversationNamespace" $ }}
   labels:
     app.kubernetes.io/name: agentops-home-assistant
 {{- $rbac := $cfg.rbac | default dict }}
@@ -60,7 +65,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
-    namespace: {{ $.Release.Namespace }}
+    namespace: {{ include "agentops.conversationNamespace" $ }}
 {{- end }}
 {{- range $rbac.bindClusterRoles | default list }}
 ---
@@ -75,7 +80,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
-    namespace: {{ $.Release.Namespace }}
+    namespace: {{ include "agentops.conversationNamespace" $ }}
 {{- end }}
 {{- end }}
 {{- end }}

@@ -239,8 +239,11 @@ func TestKubernetesMutationsAreStatedNotDerived(t *testing.T) {
 	}
 }
 
-// No bundle renders the substrate: with every bundle on there is still exactly
-// one floor account and one runtime, both from the parent's own model.
+// No bundle renders the substrate: with every bundle on there is still
+// exactly one floor account PER NAMESPACE (split-conversation-namespace: the
+// floor renders on both sides, bound to nothing — the chart splits by
+// default, so this is 2, not 1) and one runtime, both from the parent's own
+// model.
 func TestNoBundleRendersTheFloorOrTheDefaults(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "claude.credentialsSecret.token=x",
@@ -252,8 +255,8 @@ func TestNoBundleRendersTheFloorOrTheDefaults(t *testing.T) {
 		"--set", "home-assistant.homeAssistant.endpoint=http://ha.example.com:8123",
 		"--set", "home-assistant.homeAssistant.credentials.controlToken=c",
 		"--set", "home-assistant.homeAssistant.credentials.operatorToken=o")
-	if got := strings.Count(out, "name: agentops-runtime\n  namespace:"); got != 1 {
-		t.Fatalf("exactly one floor ServiceAccount must render, got %d:\n%s", got, out)
+	if got := strings.Count(out, "name: agentops-runtime\n  namespace:"); got != 2 {
+		t.Fatalf("the floor ServiceAccount must render in both namespaces (2), got %d:\n%s", got, out)
 	}
 	// the claude runtime plus its `default` copy; the ollama bundle is off
 	if got := strings.Count(out, "kind: AgentRuntime\n"); got != 2 {

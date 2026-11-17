@@ -122,16 +122,18 @@ func (k *Kube) Can(ctx context.Context, sa, verb, group, resource, namespace str
 // RunCronJobOnce creates a one-off Job from a CronJob's own JobTemplate — the
 // standard `kubectl create job --from=cronjob/NAME` behavior — and waits for
 // it to reach a terminal state. Needed because 11.2's lane cannot wait for
-// the real schedule: it proves the job's OWN run, not that cron ticks.
+// the real schedule: it proves the job's OWN run, not that cron ticks. Both
+// shipped CronJobs (housekeeping, the context probe) run in the
+// conversations namespace, beside the claims they mount.
 func (k *Kube) RunCronJobOnce(ctx context.Context, cronJobName string, timeout time.Duration) (*batchv1.Job, error) {
 	var cj batchv1.CronJob
-	if err := k.Get(ctx, types.NamespacedName{Namespace: k.Namespace, Name: cronJobName}, &cj); err != nil {
+	if err := k.Get(ctx, types.NamespacedName{Namespace: ConversationsNamespace, Name: cronJobName}, &cj); err != nil {
 		return nil, fmt.Errorf("getting cronjob %s: %w", cronJobName, err)
 	}
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: cronJobName + "-manual-",
-			Namespace:    k.Namespace,
+			Namespace:    ConversationsNamespace,
 			Labels:       cj.Spec.JobTemplate.Labels,
 			Annotations:  cj.Spec.JobTemplate.Annotations,
 		},
@@ -143,7 +145,7 @@ func (k *Kube) RunCronJobOnce(ctx context.Context, cronJobName string, timeout t
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		var cur batchv1.Job
-		if err := k.Get(ctx, types.NamespacedName{Namespace: k.Namespace, Name: job.Name}, &cur); err != nil {
+		if err := k.Get(ctx, types.NamespacedName{Namespace: ConversationsNamespace, Name: job.Name}, &cur); err != nil {
 			return job, fmt.Errorf("getting job %s: %w", job.Name, err)
 		}
 		if cur.Status.Succeeded >= 1 {
@@ -157,9 +159,20 @@ func (k *Kube) RunCronJobOnce(ctx context.Context, cronJobName string, timeout t
 	return job, fmt.Errorf("job %s did not complete within %s", job.Name, timeout)
 }
 
-// Pods lists pods by label selector.
+// Pods lists pods by label selector in the release (control) namespace: the
+// manager, adapters, NATS.
 func (k *Kube) Pods(ctx context.Context, selector string) ([]corev1.Pod, error) {
-	list, err := k.Clientset.CoreV1().Pods(k.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	return k.podsIn(ctx, k.Namespace, selector)
+}
+
+// RuntimePods lists pods by label selector in the conversations namespace,
+// where runtime pods and the housekeeping CronJob's pods run.
+func (k *Kube) RuntimePods(ctx context.Context, selector string) ([]corev1.Pod, error) {
+	return k.podsIn(ctx, ConversationsNamespace, selector)
+}
+
+func (k *Kube) podsIn(ctx context.Context, namespace, selector string) ([]corev1.Pod, error) {
+	list, err := k.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
 		return nil, err
 	}
@@ -173,10 +186,10 @@ func (k *Kube) Conversation(ctx context.Context, name string) (*agentopsv1alpha1
 		if err := k.stateGet(ctx, "/state/conversations/"+name, &w); err != nil {
 			return nil, err
 		}
-		return w.object(k.Namespace), nil
+		return w.object(ConversationsNamespace), nil
 	}
 	var c agentopsv1alpha1.Conversation
-	if err := k.Get(ctx, types.NamespacedName{Namespace: k.Namespace, Name: name}, &c); err != nil {
+	if err := k.Get(ctx, types.NamespacedName{Namespace: ConversationsNamespace, Name: name}, &c); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -193,12 +206,12 @@ func (k *Kube) Conversations(ctx context.Context) ([]agentopsv1alpha1.Conversati
 		}
 		items := make([]agentopsv1alpha1.Conversation, 0, len(out.Items))
 		for i := range out.Items {
-			items = append(items, *out.Items[i].object(k.Namespace))
+			items = append(items, *out.Items[i].object(ConversationsNamespace))
 		}
 		return items, nil
 	}
 	var list agentopsv1alpha1.ConversationList
-	if err := k.List(ctx, &list, client.InNamespace(k.Namespace)); err != nil {
+	if err := k.List(ctx, &list, client.InNamespace(ConversationsNamespace)); err != nil {
 		return nil, err
 	}
 	return list.Items, nil
@@ -211,10 +224,17 @@ func (k *Kube) Conversations(ctx context.Context) ([]agentopsv1alpha1.Conversati
 // embedded client's.
 func (k *Kube) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
 	conv, ok := obj.(*agentopsv1alpha1.Conversation)
-	if !ok || k.StateURL == "" {
+	if !ok {
 		return k.Client.Delete(ctx, obj, opts...)
 	}
-	err := k.Client.Delete(ctx, obj, opts...)
+	// A Conversation object, where one exists, lives in the conversations
+	// namespace, whatever namespace the caller wrote.
+	conv = conv.DeepCopy()
+	conv.Namespace = ConversationsNamespace
+	if k.StateURL == "" {
+		return k.Client.Delete(ctx, conv, opts...)
+	}
+	err := k.Client.Delete(ctx, conv, opts...)
 	if err == nil || !apierrors.IsNotFound(err) {
 		return err
 	}
@@ -239,7 +259,7 @@ func (k *Kube) DeleteAllConversations(ctx context.Context) error {
 		}
 	}
 	var list agentopsv1alpha1.ConversationList
-	if err := k.List(ctx, &list, client.InNamespace(k.Namespace)); err != nil {
+	if err := k.List(ctx, &list, client.InNamespace(ConversationsNamespace)); err != nil {
 		return err
 	}
 	for i := range list.Items {
@@ -317,7 +337,7 @@ func (k *Kube) deleteStored(ctx context.Context, names []string) error {
 
 // deleteConversationPods removes the runtime pods of one conversation.
 func (k *Kube) deleteConversationPods(ctx context.Context, name string) error {
-	pods, err := k.Pods(ctx, "agentops.dev/conversation="+name)
+	pods, err := k.RuntimePods(ctx, "agentops.dev/conversation="+name)
 	if err != nil {
 		return err
 	}
@@ -465,10 +485,18 @@ func waitFor(t *testing.T, what string, timeout time.Duration, cond func() (bool
 	t.Fatalf("timed out after %s waiting for %s (last error: %v)", timeout, what, lastErr)
 }
 
-// mustCreate creates an object and deletes it when the test ends.
+// mustCreate creates an object in the release namespace and deletes it when
+// the test ends.
 func mustCreate(t *testing.T, k *Kube, obj client.Object) {
 	t.Helper()
-	obj.SetNamespace(k.Namespace)
+	mustCreateIn(t, k, k.Namespace, obj)
+}
+
+// mustCreateIn is mustCreate in a named namespace — ConversationsNamespace
+// for anything a runtime pod resolves (a Secret, a pull Secret).
+func mustCreateIn(t *testing.T, k *Kube, namespace string, obj client.Object) {
+	t.Helper()
+	obj.SetNamespace(namespace)
 	err := k.Create(context.Background(), obj)
 	if apierrors.IsAlreadyExists(err) {
 		// Left behind by a run interrupted before its cleanup. Test-owned
@@ -494,7 +522,12 @@ func mustCreate(t *testing.T, k *Kube, obj client.Object) {
 // ensure creates an object if it is absent and leaves it in place for the
 // whole run — the pack's shared wiring.
 func ensure(ctx context.Context, k *Kube, obj client.Object) error {
-	obj.SetNamespace(k.Namespace)
+	return ensureIn(ctx, k, k.Namespace, obj)
+}
+
+// ensureIn is ensure in a named namespace.
+func ensureIn(ctx context.Context, k *Kube, namespace string, obj client.Object) error {
+	obj.SetNamespace(namespace)
 	err := k.Create(ctx, obj)
 	if apierrors.IsAlreadyExists(err) {
 		return nil

@@ -79,7 +79,7 @@ def boundary(x, y, w, h, label, p, tone="borderStrong"):
         f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="10" '
         f'fill="none" stroke="{p[tone]}" stroke-width="1.5" '
         f'stroke-dasharray="7 5"/>'
-        f'<rect x="{x + 14}" y="{y - 10}" width="{len(label) * 7 + 18}" '
+        f'<rect x="{x + 14}" y="{y - 10}" width="{len(label) * 7 + 26}" '
         f'height="20" rx="5" fill="{p["band"]}"/>'
         + text(x + 22, y + 5, label, p[tone], size=13, weight=600)
     )
@@ -136,17 +136,23 @@ def render(p):
     # neighbour reaching either one.
     s.append(node(28, 100, 250, "state & bus servers", "credential required", p))
 
-    # The runtime pod — where model output actually executes — beside the
-    # operator's own namespace, because crossing 2 goes between them.
-    s.append(boundary(28, 172, 340, 182, "runtime pod", p, tone="danger"))
-    s.append(node(42, 190, 312, "the agent container", "runs the model's output", p,
+    # The conversations namespace, beside the control namespace, because
+    # crossing 2 goes between them: a runtime pod, what it runs as and what
+    # it mounts live here, so a NetworkPolicy, quota or Role scoped to it is
+    # a boundary Kubernetes enforces.
+    s.append(boundary(18, 160, 358, 210, "conversations namespace", p))
+    # The runtime pod — where model output actually executes. Its label sits
+    # 30px below the namespace's, so the two label plates never overlap.
+    s.append(boundary(28, 190, 340, 172, "runtime pod", p, tone="danger"))
+    s.append(node(42, 204, 312, "the agent container", "runs the model's output", p,
                   kind="untrusted"))
-    s.append(node(42, 248, 150, "egress proxy", "on by default", p, kind="control"))
-    s.append(node(204, 248, 150, "context-sync", "on by default", p, kind="control"))
-    s.append(node(42, 302, 312, "its ServiceAccount", "bound to nothing", p,
+    s.append(node(42, 256, 150, "egress proxy", "on by default", p, kind="control"))
+    s.append(node(204, 256, 150, "context-sync", "on by default", p, kind="control"))
+    s.append(node(42, 310, 312, "its ServiceAccount", "bound to nothing", p,
                   kind="control"))
 
-    s.append(boundary(408, 172, 332, 182, "operator namespace", p))
+    # Same top and bottom edge as the conversations namespace beside it.
+    s.append(boundary(408, 160, 332, 210, "control namespace", p))
     s.append(node(422, 190, 304, "the manager", "unauthenticated", p))
     s.append(node(422, 248, 304, "MCP servers", "accept any caller", p))
     s.append(node(422, 302, 304, "adapters, console", "credentials as env", p))
@@ -161,17 +167,17 @@ def render(p):
         s.append(node(x, 384, 172, t, sub, p))
 
     # The crossings. Each number is a row in the page's threat table.
-    s.append(arrow(610, 148, 610, 168, p))                   # 1 neighbour -> operator ns
+    s.append(arrow(610, 148, 610, 156, p))                 # 1 neighbour -> control ns
     s.append(badge(634, 158, 1, p))
-    s.append(arrow(372, 272, 402, 272, p, tone="brand"))     # 2 agent -> MCP
-    s.append(badge(387, 250, 2, p, tone="brand"))
-    s.append(arrow(114, 358, 114, 380, p, tone="brand"))     # 3 -> API
+    s.append(arrow(372, 280, 404, 280, p, tone="brand"))     # 2 agent -> MCP
+    s.append(badge(392, 258, 2, p, tone="brand"))
+    s.append(arrow(114, 366, 114, 380, p, tone="brand"))     # 3 -> API
     s.append(badge(138, 369, 3, p, tone="brand"))
-    s.append(arrow(292, 358, 292, 380, p, tone="brand", dashed=True))  # 4 -> Secrets
+    s.append(arrow(292, 366, 292, 380, p, tone="brand", dashed=True))  # 4 -> Secrets
     s.append(badge(316, 369, 4, p, tone="brand"))
-    s.append(arrow(470, 358, 470, 380, p, tone="brand"))     # 5 -> context
+    s.append(arrow(470, 366, 470, 380, p, tone="brand"))     # 5 -> context
     s.append(badge(494, 369, 5, p, tone="brand"))
-    s.append(arrow(648, 358, 648, 380, p, tone="danger"))    # 6 -> logs, UNMITIGATED
+    s.append(arrow(648, 366, 648, 380, p, tone="danger"))    # 6 -> logs, UNMITIGATED
     s.append(badge(672, 369, 6, p, tone="danger"))
 
     s.append(arrow(516, 124, 282, 124, p, tone="brand"))     # 7 neighbour -> state servers

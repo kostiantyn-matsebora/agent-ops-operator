@@ -938,9 +938,14 @@ the moment it exists.
 - **No component logs message content**, so the pod logs an agent can read carry
   no conversation text.
 
-What an agent gains in the operator's namespace is pod names and specs
+What an agent gains in the namespace its pod runs in is pod names and specs
 (credentials are `valueFrom` references, not values), Services, events and the
 compiled MCP ConfigMaps.
+
+**In a split release that is the conversations namespace.** The control
+namespace, where the manager and adapters run, is not
+where the agent's RBAC reaches. It holds none of those objects by default. See
+[Where things run](#where-things-run-the-control-and-conversations-namespaces).
 
 {: .ao-callout}
 > **On a route naming a `full` account it can also restart or delete those
@@ -1026,6 +1031,57 @@ read-only server under a `readonly` one.
 Widening the agent therefore widens the MCP path unless you say otherwise — see
 [kubernetes](integrations/kubernetes.md#may-it-act) for the
 override that recovers the separation.
+
+## Where things run: the control and conversations namespaces
+
+A release resolves two namespaces, not one:
+
+| Namespace | Holds | Set by |
+|---|---|---|
+| control | the manager, every wiring/identity CR, the state store, adapters, the console, every MCP server | `.Release.Namespace` |
+| conversations | runtime pods and what they run as, mount or resolve | `global.agentops.conversationNamespace` |
+
+Equal values are the single-namespace layout — the same deployment this chart
+shipped before, with two names resolving to one. **An object moves to
+conversations if a runtime pod runs as it, mounts it, or resolves it.**
+
+**So does conversation-scoped state. Nothing else moves:**
+
+| Object | Namespace |
+|---|---|
+| runtime pod `agentops-conv-<name>`, its MCP ConfigMap `agentops-mcp-conv-<name>` | conversations |
+| `Conversation`, `ConversationInput` (`kube` state backend only) | conversations |
+| every `rbac.runtime.serviceAccounts` entry and bundle route account | conversations |
+| every persistence claim, chart-rendered or manager-created | conversations |
+| the housekeeping and context-probe CronJobs | conversations |
+| the floor account `agentops-runtime`, bound to nothing | both |
+| the manager, its Service, Lease and control-namespace Role (it holds a second Role in conversations) | control |
+| the nodes ClusterRole (cluster-scoped, so no namespace) | none |
+| every wiring and identity CR, `Signal` and the rest of the state store | control |
+| NATS, adapters, the gateway, the console, every MCP server | control |
+
+No manager HTTP surface carries a namespace — see [contracts](contracts.md).
+
+{: .ao-callout}
+> **A Secret or ConfigMap a runtime pod resolves must
+> exist in the conversations namespace, placed by you.** The manager never
+> reads a Secret through the API, so it cannot copy one there. It names what
+> a conversation's pod will need on the conversation's own conditions
+> instead, derived from the referencing CRs alone.
+
+RBAC splits the same way, into two manager Roles:
+
+| Role | Namespace | Covers |
+|---|---|---|
+| control | control | wiring, `signals`, adapter workloads, leases, a read on every pod in the control namespace |
+| conversations | conversations | pods, configmaps, events, `conversations`/`conversationinputs`, PVC `get`/`list`/`watch`/`create` — never `delete`, `update` or `patch` |
+
+Equal namespaces render as one Role, the exact union a pre-split release had.
+No ClusterRole is added for the manager.
+
+See [installation](installation.md) for `conversationNamespace` /
+`createConversationNamespace` and the upgrade from a single-namespace
+release, which the release that ships the split documents.
 
 ## Capabilities are wiring
 

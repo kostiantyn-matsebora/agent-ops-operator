@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"sync"
 	"testing"
 	"time"
@@ -59,7 +60,7 @@ func feedReconciler(t *testing.T) (*ConversationReconciler, state.Collection[sta
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &ConversationReconciler{Client: c, Conversations: store, Namespace: "ns-a"}, store
+	return &ConversationReconciler{Client: c, Conversations: store, Namespaces: namespace.Namespaces{Control: "ns-a", Conversations: "ns-a"}}, store
 }
 
 func waitForNames(t *testing.T, q *recordingQueue, want ...string) {
@@ -146,7 +147,7 @@ func TestFeedStopsWithItsContext(t *testing.T) {
 }
 
 func TestMapPodToOwnerReadsTheControllerReference(t *testing.T) {
-	r := &ConversationReconciler{Namespace: "ns-a"}
+	r := &ConversationReconciler{Namespaces: namespace.Namespaces{Control: "ns-a", Conversations: "ns-a"}}
 	owned := r.ownerOf(&state.ConversationRecord{Name: "conv-1", ID: "uid-1"})
 	pod := ownedPod(t, r, owned)
 	got := r.mapPodToOwner(context.Background(), pod)
@@ -240,7 +241,7 @@ func TestPumpFeedClearsAResumePointTheStoreRejects(t *testing.T) {
 		},
 		eventsThenClose(),
 	}}
-	r := &ConversationReconciler{Conversations: stub, Namespace: "ns-a"}
+	r := &ConversationReconciler{Conversations: stub, Namespaces: namespace.Namespaces{Control: "ns-a", Conversations: "ns-a"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go r.pumpFeed(ctx, &recordingQueue{})
@@ -257,7 +258,7 @@ func TestPumpFeedFollowsABookmarkWithoutEnqueuing(t *testing.T) {
 		eventsThenClose(state.Event[state.ConversationRecord]{Type: state.EventBookmark, Resume: "9"}),
 		eventsThenClose(),
 	}}
-	r := &ConversationReconciler{Conversations: stub, Namespace: "ns-a"}
+	r := &ConversationReconciler{Conversations: stub, Namespaces: namespace.Namespaces{Control: "ns-a", Conversations: "ns-a"}}
 	q := &recordingQueue{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
