@@ -49,7 +49,7 @@ The chart SHALL grant SA `agentops-adapter-console` a namespaced read-only Role 
 No write verb SHALL be granted on any resource, and no reconciler SHALL create or bind RBAC.
 
 In a split release the chart SHALL also grant the console a read-only Role on
-`pods` in the conversations namespace, so runtime pods stay visible. The
+`pods` in the conversations namespace, bound by a RoleBinding, so runtime pods stay visible. The
 console SHALL read `CONVERSATION_NAMESPACE`, defaulting to `POD_NAMESPACE`.
 
 The trust boundary SHALL be documented. Whoever holds the UI token:

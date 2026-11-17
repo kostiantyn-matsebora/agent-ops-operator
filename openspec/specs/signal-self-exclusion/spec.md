@@ -32,7 +32,7 @@ agent-ops' own health SHALL be reported as status — conditions on the owning C
 The adapter SHALL detect its own machinery by all four of the following, independently, so that no single cold cache, configuration edit or namespace layout re-opens the cycle:
 
 1. **Owner/label rule** — the involved object carries `app.kubernetes.io/name` in the agentops family (`agentops-runtime`, `agentops-manager`, and adapter workload names), OR its owner reference chain reaches a `Conversation`.
-2. **Name-prefix rule** — the involved object's name begins with `agentops-conv-`, `agentops-mcp-conv-`, `agentops-adapter-`, `agentops-signal-`, or `agentops-housekeeping-`. This mechanism SHALL require no read of the involved object, so that it holds before any object cache is warm.
+2. **Name-prefix rule** — the involved object's name begins with `agentops-conv-`, `agentops-mcp-conv-`, `agentops-adapter-`, `agentops-signal-`, `agentops-housekeeping-`, or `agentops-context-probe-`. This mechanism SHALL require no read of the involved object, so that it holds before any object cache is warm.
 3. **Release-namespace exclusion** — events in the operator's own namespace, read from `POD_NAMESPACE`, are dropped by default.
 4. **Conversations-namespace exclusion** — events in the namespace `CONVERSATION_NAMESPACE` names are dropped whenever it is set and differs from `POD_NAMESPACE`. Like mechanism 2 it SHALL require no read of the involved object. Where the two are equal or it is unset, mechanisms 1 to 3 govern alone.
 
