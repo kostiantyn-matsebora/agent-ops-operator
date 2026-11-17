@@ -77,20 +77,20 @@ sections 2 to 4 depends on an answer until its spike is recorded.
 
 ## 3. The MCP extension — backend-developer
 
-- [ ] 3.1 `mcp.js`: read `MCP_CONFIG`, treating an absent file as no servers
+- [x] 3.1 `mcp.js`: read `MCP_CONFIG`, treating an absent file as no servers
   and an unreadable or unparseable one as one logged failure, and translate
   each entry, stdio and HTTP, as `runtimes/copilot/mcp.js` does. Verify: the
   ported translation tests pass.
-- [ ] 3.2 Expand `${ENV}` placeholders in-process. A missing one fails that
+- [x] 3.2 Expand `${ENV}` placeholders in-process. A missing one fails that
   server alone with a logged reason, and no value reaches a log line, the
   transcript or the result. Verify: tests for a resolved value, a missing
   one, and a log capture asserting the secret never appears.
-- [ ] 3.3 Connect to the listed servers only, list their tools, and register
+- [x] 3.3 Connect to the listed servers only, list their tools, and register
   each as `mcp__<server>__<tool>` as a pi custom tool, only when the composed
   allowlist permits it. A `mcp__<server>__*` pattern permits that server's
   tools and no other's. Verify: tests for a named tool, a server wildcard, a
   server nobody bound, and no configuration at all.
-- [ ] 3.4 Ship the extension inside the image and load only it. Verify: a
+- [x] 3.4 Ship the extension inside the image and load only it. Verify: a
   test asserts the session loads no other extension, and the image's file
   list in 5.1 names it.
 
@@ -109,15 +109,21 @@ sections 2 to 4 depends on an answer until its spike is recorded.
 
 ## 5. The image and its release — deployment-engineer
 
-- [ ] 5.1 `runtimes/pi/Dockerfile` from copilot's: the same base, the
+- [x] 5.1 `runtimes/pi/Dockerfile` from copilot's: the same base, the
   `APT_REFRESH` layer, `npm ci` from the lockfile, the npm CVE-pin block, no
   domain tooling, and `HOME=/data/context`. Verify:
   `.github/components.sh images` lists `agentops-runtime-pi`, and a local
   `docker buildx build --platform linux/amd64,linux/arm64` of the directory
-  succeeds.
-- [ ] 5.2 Run the image scan locally the way CI does and clear fixable
+  succeeds. Component discovery and a `linux/amd64` build were verified from
+  this remote session. The sandbox has no privileged mode/binfmt_misc, so the
+  `linux/arm64` leg of the local build was not performed here. The
+  Dockerfile is architecture-neutral (no native binaries, confirmed), and
+  CI's own multi-arch build is the gate that actually proves it, per
+  `remote-session.md`.
+- [x] 5.2 Run the image scan locally the way CI does and clear fixable
   CRITICAL and HIGH findings, pinning as copilot does. Verify: the scan
-  reports none.
+  reports none. Run against the `linux/amd64` build above, via the same
+  Trivy invocation `.github/actions/trivy-scan` uses — zero CRITICAL/HIGH.
 - [ ] 5.3 Publish by tag from the merged tree,
   `runtime-pi-v0.1.0`. Verify: check the registry for both architectures,
   not the tag, and flip the package's Actions access and visibility once.

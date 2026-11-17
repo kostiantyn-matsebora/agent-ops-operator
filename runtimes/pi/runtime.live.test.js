@@ -288,3 +288,58 @@ test('logInventoryGaps logs a gap when a granted name was never registered by th
     opened.session.dispose();
   });
 });
+
+// ---- section 3: the MCP extension, wired through buildResourceLoader -----
+// ---- (mcp.test.js drives mcp.js's own connect/register logic directly; ---
+// ---- these two prove runtime.js actually wires it onto a live session) ---
+
+test('task 3.4: the session loads exactly the two factories this runtime ships, no other extension', async () => {
+  await withProvider({ reply: 'ok' }, async ({ port }) => {
+    const home = tmp('agentops-pi-live-home-');
+    const ws = tmp('agentops-pi-live-ws-');
+    fs.mkdirSync(ws, { recursive: true });
+    const rt = freshRuntime({
+      HOME: home, WORKSPACE: ws, PI_MODEL: 'fake-model', PI_BASE_URL: `http://127.0.0.1:${port}/v1`,
+      MCP_CONFIG: path.join(home, 'nonexistent-mcp.json'),
+    });
+    const s = await rt.getSdk();
+    const grant = { builtinNames: [], mcpPatterns: [] };
+    const loader = await rt.buildResourceLoader(s, { promptText: 'go' }, grant, '', []);
+    const result = loader.getExtensions();
+    assert.deepStrictEqual(result.errors, []);
+    assert.strictEqual(
+      result.extensions.length, 2,
+      'only the tool_call-permission factory and the MCP extension — nothing pi loads on its own'
+    );
+  });
+});
+
+test('task 3.3: an MCP tool the composed allowlist permits is reachable on the live session, named mcp__<server>__<tool>', async () => {
+  await withProvider({ reply: 'ok' }, async ({ port }) => {
+    const home = tmp('agentops-pi-live-home-');
+    const ws = tmp('agentops-pi-live-ws-');
+    fs.mkdirSync(ws, { recursive: true });
+    const mcpConfig = path.join(home, 'mcp.json');
+    fs.writeFileSync(mcpConfig, JSON.stringify({
+      mcpServers: { fixture: { command: process.execPath, args: [path.join(__dirname, 'test', 'fake-mcp-server.js')] } },
+    }));
+    const rt = freshRuntime({ HOME: home, WORKSPACE: ws, PI_MODEL: 'fake-model', PI_BASE_URL: `http://127.0.0.1:${port}/v1`, MCP_CONFIG: mcpConfig });
+    const s = await rt.getSdk();
+    const ctx = await rt.getModelContext();
+    const grant = { builtinNames: [], mcpPatterns: ['mcp__fixture__echo'] };
+    const mcpHandle = { toolNames: [], clients: [] };
+    const loader = await rt.buildResourceLoader(s, { promptText: 'go' }, grant, '', [], mcpHandle);
+    assert.deepStrictEqual(mcpHandle.toolNames, ['mcp__fixture__echo'], 'buildResourceLoader must hand back every tool name the MCP extension registered, before openSession builds its own activation list');
+    assert.strictEqual(mcpHandle.clients.length, 1, 'and the connected McpClient, so the caller can close it once this run ends');
+    const opened = await rt.openSession(s, ctx, { promptText: 'go' }, grant, loader, mcpHandle.toolNames);
+    try {
+      assert.ok(
+        opened.session.getActiveToolNames().includes('mcp__fixture__echo'),
+        'the MCP extension factory must register and activate the permitted tool on this very session'
+      );
+    } finally {
+      opened.session.dispose();
+      await rt.closeMcpClients(mcpHandle);
+    }
+  });
+});

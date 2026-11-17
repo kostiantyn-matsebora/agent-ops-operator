@@ -22,11 +22,10 @@
 //
 // INTEGRATION POINTS FOR LATER SECTIONS OF THIS CHANGE, left deliberately
 // visible rather than stubbed out:
-//   - section 3 (mcp.js): grant.mcpPatterns (from vocabulary.translate) names
-//     every `mcp__<server>__<tool>` pattern this conversation's wiring
-//     granted. Nothing resolves them into registered custom tools yet —
-//     buildResourceLoader's extensionFactories array is where an MCP
-//     extension factory joins the one this file already registers.
+//   - section 3 (mcp.js): wired. buildResourceLoader's extensionFactories
+//     array carries mcp.js's registerMcpTools beside the tool_call-permission
+//     factory this file already registers — grant.mcpPatterns (from
+//     vocabulary.translate) is what it resolves against.
 //   - section 4 (report.js): onEvent's `state` already separates turns from
 //     tool calls; a recorder shaped like runtimes/copilot/report.js's
 //     `newCallRecorder` plugs into the same event stream attempt() already
@@ -42,6 +41,7 @@ const path = require('path');
 const { readAgentDefinition, composeAllowedTools, safeJoin, sanitizeLog } = require('./tools');
 const { translate, decide, checkInventory } = require('./vocabulary');
 const { confirmContextMissing } = require('./continuity');
+const { registerMcpTools } = require('./mcp');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
@@ -53,9 +53,9 @@ const GIT_SSH_KEY = process.env.GIT_SSH_KEY || '';
 const GIT_TOKEN = process.env.GIT_TOKEN || '';
 const TTL_MS = (Number.parseInt(process.env.RUNTIME_IDLE_TTL_M || '10', 10)) * 60 * 1000;
 const WORKSPACE = process.env.WORKSPACE || '/data/workspace';
-// MCP_CONFIG is read by section 3's not-yet-built mcp.js, not by this file —
-// declared here only so its absence is never silently misread as "no MCP
-// configured" by a reader of this module's env surface.
+// MCP_CONFIG is read by mcp.js's loadMcpServers, through buildResourceLoader's
+// registerMcpTools call below — declared here, beside every other env fact
+// this runtime reads, rather than left for mcp.js alone to default silently.
 const MCP_CONFIG = process.env.MCP_CONFIG || '/etc/agentops/mcp.json';
 const HOME = process.env.HOME || '/data/context';
 // PI_AGENT_DIR is the SDK's own `agentDir`: auth.json, models.json and the
@@ -328,7 +328,18 @@ function contextIdOf(unit) {
 // OFF (task 2.9, S6), and the permission decision for every `tool_call`
 // (task 2.7) answered from the composed allowlist, deny by default, with no
 // path to an interactive prompt.
-async function buildResourceLoader(sdk, unit, grant, definitionBody, denials) {
+// `mcpHandle`, when the caller passes its own `{ toolNames, clients }`
+// (mcp.js's own shape), is filled with every `mcp__<server>__<tool>` name
+// the MCP extension actually registered and every `McpClient` it
+// connected — `await loader.reload()` below runs that extension factory to
+// completion first, so by the time this function returns, both lists are
+// the caller's own: `toolNames` is what `openSession` must fold into its
+// `tools:` option (`pi.registerTool()` alone never activates a tool on the
+// session; see mcp.js's registerMcpTools), and `clients` is what the
+// caller must close once this attempt's session ends (`attempt()` below —
+// never left open past one run; see mcp.js's own note on why
+// `session_shutdown` alone is not enough here).
+async function buildResourceLoader(sdk, unit, grant, definitionBody, denials, mcpHandle = { toolNames: [], clients: [] }) {
   const extra = [definitionBody, unit.systemPrompt].filter(Boolean).join('\n\n');
   const extensionFactory = (pi) => {
     pi.on('tool_call', (ev) => {
@@ -339,6 +350,10 @@ async function buildResourceLoader(sdk, unit, grant, definitionBody, denials) {
       return { block: true, reason: `not permitted by this conversation's tool allowlist: ${d.why}` };
     });
   };
+  // section 3: the one extension this image ships beyond the permission
+  // hook above — connects only the servers MCP_CONFIG lists and registers
+  // each tool grant.mcpPatterns permits, named mcp__<server>__<tool>.
+  const mcpExtensionFactory = (pi) => registerMcpTools(pi, MCP_CONFIG, grant.mcpPatterns, undefined, undefined, mcpHandle);
   const loader = new sdk.DefaultResourceLoader({
     cwd: WORKSPACE,
     agentDir: PI_AGENT_DIR,
@@ -346,7 +361,11 @@ async function buildResourceLoader(sdk, unit, grant, definitionBody, denials) {
     // uncomposed prompt the manager never agreed to — turned off entirely.
     agentsFilesOverride: () => ({ agentsFiles: [] }),
     ...(extra ? { appendSystemPromptOverride: (base) => [...base, extra] } : {}),
-    extensionFactories: [extensionFactory],
+    extensionFactories: [extensionFactory, mcpExtensionFactory],
+    // task 3.4: load ONLY the two factories above — pi's own built-in mcp
+    // extension would otherwise double-register these same mcp__ tool
+    // names from its own (unused by this runtime) connection logic.
+    disabledBuiltinExtensions: ['mcp'],
   });
   await loader.reload(); // a caller-supplied loader is never auto-reloaded
   return loader;
@@ -362,13 +381,20 @@ async function buildResourceLoader(sdk, unit, grant, definitionBody, denials) {
 // takes the SDK client as a parameter: a function depending on its caller's
 // explicit input, not on hidden module state, is what makes it exercisable
 // directly in a test.
-async function openSession(sdk, modelCtx, unit, grant, loader) {
+//
+// `extraToolNames` folds into the explicit `tools:` activation list beside
+// `grant.builtinNames` — `createAgentSession`'s own `tools` option, when
+// given at all, becomes the session's `initialActiveToolNames` OUTRIGHT
+// (confirmed live against the SDK's `sdk.js`), so an MCP tool registered on
+// the resource loader's own extension but left out of this list would be
+// known to pi's tool registry yet never offered to the model.
+async function openSession(sdk, modelCtx, unit, grant, loader, extraToolNames = []) {
   const base = {
     cwd: WORKSPACE,
     agentDir: PI_AGENT_DIR,
     modelRuntime: modelCtx.modelRuntime,
     model: modelCtx.model,
-    tools: grant.builtinNames,
+    tools: [...grant.builtinNames, ...extraToolNames],
     resourceLoader: loader,
   };
   const existingId = contextIdOf(unit);
@@ -386,12 +412,24 @@ async function openSession(sdk, modelCtx, unit, grant, loader) {
   return { session, id: existingId, resumed: true };
 }
 
+// closeMcpClients ends every MCP connection this one attempt opened.
+// Required rather than left to mcp.js's own `session_shutdown` listener:
+// this runtime calls the bare `AgentSession.dispose()` between units
+// (never the SDK's own session-replacement path), which never fires that
+// event — a stdio server's child process, or an open HTTP MCP connection,
+// would otherwise outlive every single run.
+async function closeMcpClients(handle) {
+  if (!handle || !handle.clients || !handle.clients.length) return;
+  await Promise.all(handle.clients.map((c) => c.close().catch(() => {})));
+}
+
 async function attempt(sdk, modelCtx, unit, grant, definitionBody, prompt, denials = []) {
   const state = { lastText: '', toolCalls: 0, turns: 0, errors: [] };
   let opened;
+  const mcpHandle = { toolNames: [], clients: [] };
   try {
-    const loader = await buildResourceLoader(sdk, unit, grant, definitionBody, denials);
-    opened = await openSession(sdk, modelCtx, unit, grant, loader);
+    const loader = await buildResourceLoader(sdk, unit, grant, definitionBody, denials, mcpHandle);
+    opened = await openSession(sdk, modelCtx, unit, grant, loader, mcpHandle.toolNames);
   } catch (e) {
     // The open itself failed — auth, a resume of a handle that is gone.
     // Logged AND carried as the result, so a fresh session that cannot open
@@ -399,6 +437,10 @@ async function attempt(sdk, modelCtx, unit, grant, definitionBody, prompt, denia
     // `openError` to tell "not found" from everything else.
     const msg = String(e.message || e);
     console.log(`[runtime] could not open the pi session: ${msg}`);
+    // buildResourceLoader may have connected MCP servers even though the
+    // SESSION never opened — close them here too, or a failed open leaks
+    // every one of them.
+    await closeMcpClients(mcpHandle);
     // No `exitCode`: the session never opened, so no run ever executed —
     // there is no process outcome to report.
     return { status: 'failed', sessionId: contextIdOf(unit) || null, result: `could not open the pi session: ${msg}`, openError: msg };
@@ -432,6 +474,14 @@ async function attempt(sdk, modelCtx, unit, grant, definitionBody, prompt, denia
   } finally {
     off();
     try { session.dispose(); } catch {}
+    // dispose() invalidates the extension context but — confirmed live —
+    // never emits 'session_shutdown'; only a session-REPLACEMENT flow does
+    // that, and this runtime never takes it. So mcp.js's own fallback
+    // listener never fires here, and this is the one place that actually
+    // closes a connection this attempt opened — every path above returns
+    // before reaching it, so each is responsible for its own call (see the
+    // catch above).
+    await closeMcpClients(mcpHandle);
   }
   process.stdout.write(`\n=== RESULT (${status}, ${state.turns} turns, ${state.toolCalls} tool calls, ${Math.round((Date.now() - started) / 1000)}s) ===\n${result}\n`);
   return { status, exitCode: status === 'succeeded' ? 0 : 1, sessionId: id, result: result.slice(0, 2000), ...(brief ? { brief } : {}) };
@@ -452,7 +502,7 @@ async function runPi(unit) {
   console.log(`[runtime] pi built-ins=${sanitizeLog(grant.builtinNames.length ? grant.builtinNames.join(',') : '(none)')}`);
   for (const s of grant.scoped) console.log(`[runtime] scoped pattern withheld: ${sanitizeLog(s)} — pi has no per-command shell narrowing, granting nothing`);
   for (const u of grant.unmapped) console.log(`[runtime] UNMAPPED pattern withheld: ${sanitizeLog(u)} — no pi equivalent, granting nothing`);
-  if (grant.mcpPatterns.length) console.log(`[runtime] ${grant.mcpPatterns.length} mcp__ pattern(s) granted, pending the MCP extension: ${sanitizeLog(grant.mcpPatterns.join(','))}`);
+  if (grant.mcpPatterns.length) console.log(`[runtime] ${grant.mcpPatterns.length} mcp__ pattern(s) granted to the MCP extension: ${sanitizeLog(grant.mcpPatterns.join(','))}`);
   console.log(`[init] model=${PI_MODEL} provider=${PI_PROVIDER} tools=${grant.builtinNames.length}`);
   if (unit.systemPrompt) console.log(`[runtime] appending unit systemPrompt (${unit.systemPrompt.length} chars)`);
   if (unit.maxTurns) console.log(`[runtime] maxTurns=${sanitizeLog(unit.maxTurns)} requested (not enforced by this runtime; run timeout ${RUN_TIMEOUT_MS / 1000}s)`);
@@ -526,7 +576,7 @@ function finish(out, continuity) {
 module.exports = {
   gitEnv, repoURL, run, clearDir, syncRepo, onEvent, resolvePrompt, contextIdOf,
   buildResourceLoader, openSession, attempt, runPi, finish, resolveContinuity,
-  extractBrief, logInventoryGaps, getSdk, getModelContext,
+  extractBrief, logInventoryGaps, getSdk, getModelContext, closeMcpClients,
   SESSIONS_ROOT, WORKSPACE, PI_AGENT_DIR,
 };
 
