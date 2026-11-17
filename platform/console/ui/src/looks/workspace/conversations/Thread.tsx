@@ -6,6 +6,7 @@ import { skipCloseConfirm, writeSkipCloseConfirm } from '../../../model/closeCon
 import { useCommands } from '../../../model/commands'
 import { budgetLines, escalation } from '../../../model/coordinator'
 import { speakerOf } from '../../../model/message'
+import { runTokens, toolRows, turnRows } from '../../../model/runStats'
 import type { RunDetails as RunDetailsFact, WorkingRun } from '../../../model/run'
 import { GENERAL_FEED_NAME, useGeneralFeed } from '../../../model/session'
 import { TESTID, testid } from '../../../model/testids'
@@ -15,7 +16,7 @@ import {
 import { rowTitle } from '../../../model/conversationList'
 import { sendText } from '../../../model/verbs'
 import { Chevron, Icon } from '../icons'
-import { dayKey, day, duration, started, toolDuration } from '../format'
+import { dayKey, day, duration, started } from '../format'
 import { CloseConfirm } from './CloseConfirm'
 import { Composer } from './Composer'
 import { Notice, PersonMessage, Reply, SignalCard, WorkingCard } from './Entries'
@@ -122,44 +123,107 @@ function statusPill(c: ConversationSummary): ReactElement | null {
   return null
 }
 
-function RunsTab({ runs }: Readonly<{ runs: Run[] }>) {
-  if (runs.length === 0) return <div className="wk-card wk-note">No runs yet.</div>
+function RunCard({ run }: Readonly<{ run: Run }>) {
+  const turns = turnRows(run)
+  const tools = toolRows(run)
+  const tokens = runTokens(run)
+  return (
+    <div className="wk-card" data-testid={TESTID.runsView}>
+      <h4>Run</h4>
+      <dl className="wk-kv">
+        <dt>Run</dt>
+        <dd>{run.runId}</dd>
+        <dt>Status</dt>
+        <dd>
+          <span className={`wk-pill ${run.status === 'succeeded' ? 'ok' : 'bad'}`}>{run.status}</span>
+        </dd>
+        <dt>Exit</dt>
+        <dd>{run.exitCode ?? '—'}</dd>
+        {run.startedAt && run.finishedAt && (
+          <>
+            <dt>Took</dt>
+            <dd className="wk-num">{duration(Date.parse(run.finishedAt) - Date.parse(run.startedAt))}</dd>
+          </>
+        )}
+        <dt>Finished</dt>
+        <dd>{run.finishedAt ? new Date(run.finishedAt).toLocaleString() : '—'}</dd>
+        {tokens && (
+          <>
+            <dt>Tokens</dt>
+            <dd className="wk-num" data-testid="run-tokens">{`${tokens.in} in · ${tokens.out} out`}</dd>
+          </>
+        )}
+      </dl>
+      {run.result && (
+        <div className="wk-sec">
+          <b>Result</b>
+          <pre className="wk-result">{run.result}</pre>
+        </div>
+      )}
+      {turns.length > 0 && (
+        <div className="wk-sec">
+          <b>{`Turns – ${turns.length} model call${turns.length === 1 ? '' : 's'}`}</b>
+          <div className="wk-tw">
+            <table className="wk-tbl" aria-label="Turns">
+              <thead>
+                <tr><th>Model</th><th>In</th><th>Cached</th><th>Written</th><th>Fresh</th><th>Out</th><th>Stop reason</th></tr>
+              </thead>
+              <tbody>
+                {turns.map((t) => (
+                  <tr key={t.key}>
+                    <td>{t.model}</td>
+                    <td className="wk-num">{t.in}</td>
+                    <td className="wk-num">{t.cached}</td>
+                    <td className="wk-num">{t.written}</td>
+                    <td className="wk-num">{t.fresh}</td>
+                    <td className="wk-num">{t.out}</td>
+                    <td>{t.stopReason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {tools.length > 0 && (
+        <div className="wk-sec">
+          <b>{`Tool calls – ${tools.length}`}</b>
+          <div className="wk-tw">
+            <table className="wk-tbl" aria-label="Tool calls">
+              <thead>
+                <tr><th>Tool</th><th>Server</th><th>Duration</th><th>Result size</th></tr>
+              </thead>
+              <tbody>
+                {tools.map((t) => (
+                  <tr key={t.key}>
+                    <td>{t.tool}</td>
+                    <td>{t.server}</td>
+                    <td className="wk-num">{t.duration}</td>
+                    <td className="wk-num">{t.size}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RunsTab({ runs, conversation }: Readonly<{ runs: Run[]; conversation: ConversationSummary }>) {
   return (
     <>
-      {runs.map((r) => (
-        <div key={r.runId} className="wk-card" data-testid={TESTID.runsView}>
-          <dl className="wk-kv">
-            <dt>Run</dt>
-            <dd>{r.runId}</dd>
-            <dt>Status</dt>
-            <dd>{r.status}</dd>
-            {r.startedAt && r.finishedAt && (
-              <>
-                <dt>Took</dt>
-                <dd className="wk-num">{duration(Date.parse(r.finishedAt) - Date.parse(r.startedAt))}</dd>
-              </>
-            )}
-            {r.finishedAt && (
-              <>
-                <dt>Finished</dt>
-                <dd>{new Date(r.finishedAt).toLocaleString()}</dd>
-              </>
-            )}
-            {(r.toolCalls?.length ?? 0) > 0 && (
-              <>
-                <dt>Tool calls</dt>
-                <dd>
-                  {r.toolCalls!.map((t, i) => (
-                    <div key={i}>
-                      <code>{t.tool}</code> <span className="wk-num wk-note">{toolDuration(t.durationMs)}</span>
-                    </div>
-                  ))}
-                </dd>
-              </>
-            )}
-          </dl>
-        </div>
-      ))}
+      {runs.length === 0 ? <div className="wk-card wk-note">No completed runs.</div> : runs.map((r) => <RunCard key={r.runId} run={r} />)}
+      <div className="wk-card">
+        <h4>Bindings and runtime</h4>
+        <dl className="wk-kv">
+          <dt>Inputs queued</dt>
+          <dd>{conversation.queued}</dd>
+          <dt>Runtime pod</dt>
+          <dd>{conversation.runtimePod || '—'}</dd>
+        </dl>
+      </div>
     </>
   )
 }
@@ -310,7 +374,7 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
             )}
           </>
         )}
-        {tab === 'runs' && <RunsTab runs={p.runs} />}
+        {tab === 'runs' && <RunsTab runs={p.runs} conversation={c} />}
         {tab === 'graph' && <GraphTab name={c.name} />}
         {tab === 'sequence' && <SequenceTab events={p.events ?? []} />}
         {tab === 'yaml' && (

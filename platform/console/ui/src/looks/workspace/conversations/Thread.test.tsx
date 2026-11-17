@@ -276,3 +276,32 @@ describe('arrivals while reading higher up', () => {
     expect(screen.queryByTestId(TESTID.jumpPill)).toBeNull()
   })
 })
+
+describe('the runs tab', () => {
+  it('shows a run\u2019s token statistics, its result and its tool calls', async () => {
+    mount({
+      runs: [{
+        runId: 'run-1', status: 'succeeded', exitCode: 0, result: 'the raw result',
+        turns: [{ model: 'sonnet', tokensIn: 1000, tokensOut: 50, cacheReadTokens: 600, cacheCreationTokens: 100, stopReason: 'end_turn' }],
+        toolCalls: [{ tool: 'mcp__aops__invoke', durationMs: 154, resultBytes: 300 }],
+      }],
+    })
+    await userEvent.click(screen.getByRole('tab', { name: 'Runs · 1' }))
+    expect(screen.getByTestId('run-tokens')).toHaveTextContent('1000 in · 50 out')
+    const turns = screen.getByRole('table', { name: 'Turns' })
+    expect(within(turns).getByText('300')).toBeInTheDocument() // fresh
+    expect(within(turns).getByText('end_turn')).toBeInTheDocument()
+    const tools = screen.getByRole('table', { name: 'Tool calls' })
+    expect(within(tools).getByText('invoke')).toBeInTheDocument()
+    expect(within(tools).getByText('aops')).toBeInTheDocument()
+    expect(screen.getByText('the raw result')).toBeInTheDocument()
+    expect(screen.getByText('Bindings and runtime')).toBeInTheDocument()
+  })
+
+  it('draws no turns or tools table for a run that reported none', async () => {
+    mount({ runs: [{ runId: 'run-1', status: 'succeeded' }] })
+    await userEvent.click(screen.getByRole('tab', { name: 'Runs · 1' }))
+    expect(screen.queryByRole('table', { name: 'Turns' })).toBeNull()
+    expect(screen.queryByTestId('run-tokens')).toBeNull()
+  })
+})
