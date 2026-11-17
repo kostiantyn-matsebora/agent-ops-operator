@@ -33,6 +33,8 @@ export interface RowProps {
   actions?: RowAction[]
   /** The list is folded to icons: the row is its avatar and badge. */
   iconOnly?: boolean
+  /** Set while the viewer is selecting: the row carries a box and opening it toggles the box instead. */
+  selection?: { selected: boolean; onToggle: () => void }
   now?: number
 }
 
@@ -128,7 +130,7 @@ function RowMenu({ title, actions }: Readonly<{ title: string; actions: RowActio
 }
 
 export function Row({
-  tree, current, arrived, folded, onToggleFold, actions = [], iconOnly, now,
+  tree, current, arrived, folded, onToggleFold, actions = [], iconOnly, selection, now,
 }: Readonly<RowProps>): ReactElement {
   const row = tree.row
   const title = rowTitle(row)
@@ -141,7 +143,7 @@ export function Row({
     .filter(Boolean)
     .join(' · ')
   const segments = lifecycle(status)
-  const cls = ['wk-row', unread && 'unread', tree.depth > 0 && 'mem', status === 'failed' && 'fail', arrived && 'arrived']
+  const cls = ['wk-row', unread && 'unread', tree.depth > 0 && 'mem', status === 'failed' && 'fail', arrived && 'arrived', selection && 'sel']
     .filter(Boolean)
     .join(' ')
 
@@ -165,7 +167,22 @@ export function Row({
         data-testid={testid.open(row.name)}
         aria-label={`Open ${title}${unread ? `, ${row.unreadCount} unread` : ''}`}
         title={iconOnly ? title : undefined}
+        onClick={(e) => {
+          if (!selection) return
+          e.preventDefault()
+          selection.onToggle()
+        }}
       />
+      {selection && !iconOnly && (
+        <input
+          type="checkbox"
+          className="pick"
+          data-testid={testid.select(row.name)}
+          aria-label={`Select ${title}`}
+          checked={selection.selected}
+          onChange={selection.onToggle}
+        />
+      )}
       {onToggleFold && folded !== undefined && !iconOnly ? (
         <button
           type="button"

@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import type { ConversationSummary, Message } from '../../../api/types'
+import type { ConversationSummary, Message, VocabularyEntry } from '../../../api/types'
 import { TESTID } from '../../../model/testids'
 import { ThreadView, type ThreadViewProps } from './Thread'
 
@@ -20,6 +20,8 @@ function mount(over: Partial<ThreadViewProps> = {}) {
   }
   return render(<MemoryRouter><ThreadView {...props} /></MemoryRouter>)
 }
+
+afterEach(() => localStorage.clear())
 
 describe('the thread', () => {
   it('states when the conversation started on the line under its tabs', () => {
@@ -59,15 +61,37 @@ describe('the thread', () => {
     expect(screen.getByText('No messages yet')).toBeInTheDocument()
   })
 
-  it('confirms a close before sending it', async () => {
+  it('confirms a close in a dialog before sending it, and never confirms an exit', async () => {
     const verbs: string[] = []
     mount({ onVerb: (v) => verbs.push(v) })
     await userEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(verbs).toEqual([])
-    await userEvent.click(screen.getByRole('button', { name: 'Confirm close' }))
+    expect(screen.getByTestId(TESTID.closeConfirmModal)).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId(TESTID.closeConfirmOk))
     expect(verbs).toEqual(['/close'])
     await userEvent.click(screen.getByRole('button', { name: 'Exit runtime' }))
     expect(verbs).toEqual(['/close', '/exit'])
+  })
+
+  it('cancels a close without sending it', async () => {
+    const verbs: string[] = []
+    mount({ onVerb: (v) => verbs.push(v) })
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(verbs).toEqual([])
+    expect(screen.queryByTestId(TESTID.closeConfirmModal)).toBeNull()
+  })
+
+  it('stops asking once the viewer opts out, and asks again when the dialog reopens unchecked', async () => {
+    const verbs: string[] = []
+    mount({ onVerb: (v) => verbs.push(v) })
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.getByTestId(TESTID.closeConfirmSkip)).not.toBeChecked()
+    await userEvent.click(screen.getByTestId(TESTID.closeConfirmSkip))
+    await userEvent.click(screen.getByTestId(TESTID.closeConfirmOk))
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByTestId(TESTID.closeConfirmModal)).toBeNull()
+    expect(verbs).toEqual(['/close', '/close'])
   })
 
   it('sends a reply with Shift+Enter and clears the box', async () => {
@@ -107,5 +131,148 @@ describe('the thread', () => {
     mount({ onBack: () => { back = true } })
     await userEvent.click(screen.getByRole('button', { name: 'Back to the list' }))
     expect(back).toBe(true)
+  })
+})
+
+const VOCAB: VocabularyEntry[] = [
+  { kind: 'builtin', name: 'exit', position: 'thread', description: 'release the runtime' },
+  { kind: 'builtin', name: 'close', position: 'thread' },
+  { kind: 'pipeline', name: 'ops', position: 'general' },
+]
+
+describe('the composer', () => {
+  it('lists the thread\u2019s commands as the viewer types a slash, and chooses one with the keyboard', async () => {
+    mount({ vocabulary: VOCAB })
+    const box = screen.getByRole('textbox', { name: 'message' })
+    await userEvent.type(box, '/')
+    const list = screen.getByTestId(TESTID.commandTypeahead)
+    // Position is the filter: a pipeline starts a conversation, it does not act on one.
+    expect(within(list).getAllByRole('option').map((o) => o.textContent)).toEqual(['/exitrelease the runtime', '/close'])
+    await userEvent.keyboard('{ArrowDown}{Enter}')
+    expect(box).toHaveValue('/close')
+    expect(screen.queryByTestId(TESTID.commandTypeahead)).toBeNull()
+  })
+
+  it('narrows by prefix, steps out of the way on Escape, and stays quiet mid-sentence', async () => {
+    mount({ vocabulary: VOCAB })
+    const box = screen.getByRole('textbox', { name: 'message' })
+    await userEvent.type(box, '/ex')
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByTestId(TESTID.commandTypeahead)).toBeNull()
+    await userEvent.clear(box)
+    await userEvent.type(box, 'check /var/log')
+    expect(screen.queryByTestId(TESTID.commandTypeahead)).toBeNull()
+  })
+
+  it('runs a thread command from its chip at once, leaving a draft alone', async () => {
+    const verbs: string[] = []
+    mount({ vocabulary: VOCAB, onVerb: (v) => verbs.push(v) })
+    await userEvent.type(screen.getByRole('textbox', { name: 'message' }), 'a draft')
+    const chips = screen.getByTestId(TESTID.quickChips)
+    await userEvent.click(within(chips).getByRole('button', { name: '/exit' }))
+    expect(verbs).toEqual(['/exit'])
+    expect(screen.getByRole('textbox', { name: 'message' })).toHaveValue('a draft')
+    // /close goes through the same confirmation as the header's.
+    await userEvent.click(within(chips).getByRole('button', { name: '/close' }))
+    expect(verbs).toEqual(['/exit'])
+    await userEvent.click(screen.getByTestId(TESTID.closeConfirmOk))
+    expect(verbs).toEqual(['/exit', '/close'])
+  })
+
+  it('shows no chips to a viewer who cannot write', () => {
+    mount({ vocabulary: VOCAB, canWrite: false })
+    expect(screen.queryByTestId(TESTID.quickChips)).toBeNull()
+  })
+})
+
+describe('the graph and sequence views', () => {
+  it('belong to a root, and a member offers neither', () => {
+    const { unmount } = mount()
+    expect(screen.getByRole('tab', { name: 'Graph' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Sequence' })).toBeInTheDocument()
+    unmount()
+    mount({ conversation: conv({ causedBy: { parent: 'root', entry: 'triage' } }), root: { name: 'root', title: 'Incident' } })
+    expect(screen.queryByRole('tab', { name: 'Graph' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Sequence' })).toBeNull()
+  })
+
+  it('lists the recorded hops with their route, offset and latency', async () => {
+    mount({
+      events: [
+        { cursor: '1', ts: '2025-06-10T22:00:00Z', kind: 'signal', status: 'ok', from: { kind: 'SignalSource', name: 'cron' }, to: { kind: 'Pipeline', name: 'ops' } },
+        { cursor: '2', ts: '2025-06-10T22:00:02Z', kind: 'run.completed', status: 'error', latencyMs: 1500 },
+      ],
+    })
+    await userEvent.click(screen.getByRole('tab', { name: 'Sequence' }))
+    const table = screen.getByRole('table', { name: 'Sequence' })
+    expect(within(table).getByText('SignalSource/cron → Pipeline/ops')).toBeInTheDocument()
+    expect(within(table).getByText('+2.0s')).toBeInTheDocument()
+    expect(within(table).getByText('1.50s')).toBeInTheDocument()
+    expect(within(table).getByText('error')).toBeInTheDocument()
+  })
+
+  it('says so when the buffer holds no hop for the conversation', async () => {
+    mount({ events: [] })
+    await userEvent.click(screen.getByRole('tab', { name: 'Sequence' }))
+    expect(screen.getByText('No recorded hops for this conversation')).toBeInTheDocument()
+  })
+})
+
+describe('a coordinator root', () => {
+  it('states its budget per level, and the moment it escalated among the messages', () => {
+    mount({
+      conversation: conv({
+        coordinator: 'incident',
+        budget: { agentsInvoked: 2, maxAgents: 4, turns: 3 },
+        escalatedAt: '2025-06-10T22:10:00Z',
+      }),
+      messages: [msg('a', 'agent', '2025-06-10T22:05:00Z'), msg('b', 'agent', '2025-06-10T22:20:00Z')],
+    })
+    const budget = screen.getByTestId('budget')
+    expect(budget).toHaveTextContent('Agents invoked 2 of 4')
+    expect(budget).toHaveTextContent('Turns 3')
+    const order = [...document.querySelectorAll(`[data-testid="${TESTID.message}"], [data-testid="escalated"]`)].map((n) => n.getAttribute('data-id') ?? 'escalated')
+    expect(order).toEqual(['a', 'escalated', 'b'])
+  })
+
+  it('draws neither where nothing was budgeted or escalated', () => {
+    mount({ messages: [msg('a', 'agent', '2025-06-10T22:05:00Z')] })
+    expect(screen.queryByTestId('budget')).toBeNull()
+    expect(screen.queryByTestId('escalated')).toBeNull()
+  })
+})
+
+describe('arrivals while reading higher up', () => {
+  function scrolledUp() {
+    const body = document.getElementById('wk-thread-body') as HTMLElement
+    Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 1000 })
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 100 })
+    fireEvent.scroll(body, { target: { scrollTop: 0 } })
+    return body
+  }
+  const props = (n: number) => ({
+    conversation: conv(), title: 'disk pressure', messages: Array.from({ length: n }, (_, i) => msg(`m${i}`, 'agent', '2025-06-10T22:05:00Z')),
+    runs: [], runDetails: new Map(), invoked: new Map(), canWrite: true,
+  }) as ThreadViewProps
+
+  it('counts them on a pill instead of moving the viewer, and jumps on request', async () => {
+    const { rerender } = render(<MemoryRouter><ThreadView {...props(2)} /></MemoryRouter>)
+    expect(screen.queryByTestId(TESTID.jumpPill)).toBeNull()
+    const body = scrolledUp()
+    rerender(<MemoryRouter><ThreadView {...props(3)} /></MemoryRouter>)
+    expect(screen.getByTestId(TESTID.jumpPill)).toHaveTextContent('↓ 1 new message')
+    expect(body.scrollTop).toBe(0)
+    rerender(<MemoryRouter><ThreadView {...props(5)} /></MemoryRouter>)
+    expect(screen.getByTestId(TESTID.jumpPill)).toHaveTextContent('↓ 3 new messages')
+    await userEvent.click(screen.getByTestId(TESTID.jumpPill))
+    expect(screen.queryByTestId(TESTID.jumpPill)).toBeNull()
+    expect(body.scrollTop).toBe(1000)
+  })
+
+  it('shows no pill to a viewer who is at the bottom', () => {
+    const { rerender } = render(<MemoryRouter><ThreadView {...props(2)} /></MemoryRouter>)
+    rerender(<MemoryRouter><ThreadView {...props(3)} /></MemoryRouter>)
+    expect(screen.queryByTestId(TESTID.jumpPill)).toBeNull()
   })
 })

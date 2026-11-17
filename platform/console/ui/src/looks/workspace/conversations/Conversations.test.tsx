@@ -17,6 +17,8 @@ const conv = (name: string, over: Partial<ConversationSummary> = {}): Conversati
 })
 const ITEMS = [conv('c1'), conv('c2', { presence: true, phase: 'Working' })]
 const sent: [string, string][] = []
+const calls: [string, unknown][] = []
+const mutation = (kind: string) => ({ mutate: (arg: unknown, opts?: { onSuccess?: () => void }) => { calls.push([kind, arg]); opts?.onSuccess?.() }, isPending: false, reset: () => undefined, data: undefined, error: null })
 
 vi.mock('../../../model/conversationList', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../model/conversationList')>()),
@@ -32,7 +34,19 @@ vi.mock('../../../model/session', () => ({
   useConsoleSession: () => ({ data: { canWrite: true } }),
   useGeneralFeed: () => ({ data: { channel: 'console', messages: [] }, isLoading: false }),
 }))
-vi.mock('../../../model/commands', () => ({ useCommands: () => ({ sending: () => false }) }))
+vi.mock('../../../model/actions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../model/actions')>()),
+  useReopen: () => mutation('reopen'),
+  useMarkRead: () => mutation('markRead'),
+  useMarkUnread: () => mutation('markUnread'),
+  useCloseBatch: () => mutation('close'),
+  useDeleteBatch: () => mutation('delete'),
+  useVocabulary: () => ({ data: { entries: [] } }),
+}))
+vi.mock('../../../model/commands', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../model/commands')>()),
+  useCommands: () => ({ sending: () => false }),
+}))
 vi.mock('../../../model/verbs', () => ({
   sendText: (name: string, text: string) => sent.push([name, text]),
   exitRuntime: (name: string) => sent.push([name, '/exit']),
@@ -67,6 +81,7 @@ const mount = (path: string) =>
 
 beforeEach(() => {
   sent.length = 0
+  calls.length = 0
   localStorage.clear()
   useWorkspaceLayout.setState(DEFAULT_WORKSPACE_LAYOUT)
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1400 })
@@ -108,11 +123,63 @@ describe('the conversations page', () => {
     expect(useWorkspaceLayout.getState().listWidth).toBe(DEFAULT_WORKSPACE_LAYOUT.listWidth)
   })
 
-  it('offers a row\u2019s actions, and runs them through the model', async () => {
+  it('offers a row\u2019s actions, and Close hands the row to the confirmed batch flow', async () => {
     mount('/conversations')
     await userEvent.click(within(screen.getByTestId(testid.row('c1'))).getByRole('button', { name: /Actions for/ }))
     await userEvent.click(screen.getByRole('menuitem', { name: 'Close' }))
-    expect(sent).toEqual([['c1', '/close']])
+    // Nothing is sent: the row is selected and the bar's own dialog confirms.
+    expect(sent).toEqual([])
+    expect(screen.getByTestId(TESTID.selectionBar)).toHaveTextContent('1 selected')
+    expect(screen.getByTestId(testid.select('c1'))).toBeChecked()
+    await userEvent.click(screen.getByTestId(TESTID.closeSelected))
+    await userEvent.click(screen.getByTestId('close-confirm'))
+    expect(calls).toEqual([['close', { names: ['c1'], includeWorking: false }]])
+  })
+
+  it('offers Reopen and Delete on a closed conversation, and neither on an open one', async () => {
+    ITEMS.push(conv('c3', { phase: 'Closed' }))
+    try {
+      mount('/conversations')
+      const menu = async (name: string) => {
+        await userEvent.click(within(screen.getByTestId(testid.row(name))).getByRole('button', { name: /Actions for/ }))
+        return screen.getAllByRole('menuitem').map((m) => m.textContent)
+      }
+      expect(await menu('c3')).toEqual(expect.arrayContaining(['Reopen', 'Delete']))
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Reopen' }))
+      expect(calls).toEqual([['reopen', 'c3']])
+      expect(await menu('c1')).not.toEqual(expect.arrayContaining(['Reopen']))
+    } finally {
+      ITEMS.pop()
+    }
+  })
+
+  it('selects rows without opening them, and offers the bulk actions on the selection', async () => {
+    mount('/conversations')
+    await userEvent.click(screen.getByRole('button', { name: 'Select' }))
+    await userEvent.click(screen.getByTestId(testid.open('c1')))
+    await userEvent.click(screen.getByTestId(testid.open('c2')))
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/conversations$/)
+    expect(screen.getByTestId(TESTID.selectionBar)).toHaveTextContent('2 selected')
+    // A working conversation is only closed once the viewer says so.
+    await userEvent.click(screen.getByTestId(TESTID.closeSelected))
+    expect(screen.getByTestId('close-working')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('checkbox', { name: /Also close 1 working/ }))
+    await userEvent.click(screen.getByTestId('close-confirm'))
+    expect(calls).toEqual([['close', { names: ['c1', 'c2'], includeWorking: true }]])
+    // The batch ends the mode.
+    expect(screen.queryByTestId(TESTID.selectionBar)).toBeNull()
+  })
+
+  it('marks a selection read, and offers delete only when every selected row is closed', async () => {
+    mount('/conversations')
+    await userEvent.click(screen.getByRole('button', { name: 'Select' }))
+    await userEvent.click(screen.getByTestId(testid.open('c1')))
+    await userEvent.click(screen.getByTestId(TESTID.markRead))
+    expect(calls).toEqual([['markRead', { names: ['c1'] }]])
+    expect(screen.queryByTestId(TESTID.selectionBar)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Select' }))
+    await userEvent.click(screen.getByTestId(testid.open('c1')))
+    expect(screen.getByTestId(TESTID.deleteSelected)).toBeDisabled()
   })
 
   it('remembers the show-closed choice', async () => {

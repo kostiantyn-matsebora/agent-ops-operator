@@ -75,6 +75,8 @@ export const TESTID = {
 export const testid = {
   /** An inbox scope, by its visible label ("All", "Mine", "Archive", a Pipeline's name). */
   scope: (label: string) => `scope-${label}`,
+  /** A conversation's secondary view control: `runs`, `graph`, `sequence` or `yaml`. */
+  view: (id: string) => `view-${id}`,
   /** A conversation's list row. */
   row: (name: string) => `row-${name}`,
   /** The control that opens a conversation from its row. */

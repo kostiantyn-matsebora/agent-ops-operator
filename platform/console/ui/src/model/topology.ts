@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useActivityBuffer, useChart, useTopology } from '../api/hooks'
+import { useActivityBuffer, useChart, useConversationGraph, useTopology } from '../api/hooks'
 import { useStream } from '../api/stream'
 import { useDisplay } from '../graph/display'
 import { mergeEvents } from '../graph/hops'
@@ -39,6 +39,27 @@ export function useTopologyPage() {
     bufferCovers,
     historyOpen,
     toggleHistory: () => useDisplay.getState().setHistoryOpen(!historyOpen),
+  }
+}
+
+/**
+ * One conversation's graph: the topology for the Display panel's window, this
+ * conversation's recorded hops with the live stream on top, and whether the
+ * pipeline was re-wired since it ran.
+ */
+export function useConversationGraphPage(name: string) {
+  const windowSeconds = useDisplay((s) => s.windowSeconds)
+  const graph = useConversationGraph(name)
+  const topology = useTopology(windowSeconds)
+  const live = useStream((s) => s.events)
+  const events = useMemo(() => mergeEvents(graph.data?.events ?? [], live), [graph.data?.events, live])
+  const oldest = topology.data?.oldestEvent
+  return {
+    graph,
+    topology,
+    events,
+    bufferStart: oldest ? Date.parse(oldest) : undefined,
+    loading: (graph.isLoading && !graph.data) || (topology.isLoading && !topology.data),
   }
 }
 

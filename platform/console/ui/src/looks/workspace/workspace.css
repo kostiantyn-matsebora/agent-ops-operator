@@ -1913,3 +1913,238 @@ html[data-look='workspace'] #root {
   margin: 0 0 8px;
   font-size: 16px;
 }
+
+/* ---- selecting, and the batch dialogs --------------------------------- */
+
+.wk-selbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--ao-brand-soft);
+  border-bottom: 1px solid var(--ao-border);
+  flex: none;
+}
+
+.wk-selbar .end {
+  margin-left: auto;
+}
+
+/* The box sits in the row's left padding, so no row changes height. */
+.wk-row.sel {
+  padding-left: 30px;
+}
+
+.wk-row.sel.mem {
+  padding-left: 52px;
+}
+
+.wk-row .pick {
+  position: absolute;
+  left: 8px;
+  top: 12px;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+}
+
+.wk-row.sel .exp {
+  margin-left: -4px;
+}
+
+.wk-dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--wk-scrim);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.wk-dialog {
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  border: 1px solid var(--ao-border-strong);
+  border-radius: 12px;
+  box-shadow: var(--wk-shadow);
+  width: min(520px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.wk-dialog h2 {
+  margin: 0;
+  padding: 16px 18px 8px;
+  font-size: 16px;
+}
+
+.wk-dialog-body {
+  padding: 0 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wk-dialog-body p {
+  margin: 0;
+}
+
+.wk-dialog-foot {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 14px 18px 16px;
+}
+
+.wk-check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.wk-reasons .wk-reason {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 4px 12px;
+}
+
+/* ---- the thread's secondary views, bar and composer aids --------------- */
+
+.wk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--ao-border);
+  color: var(--ao-text-subtle);
+  font-size: 12px;
+  flex: none;
+}
+
+.wk-bar b {
+  color: var(--ao-text);
+  font-weight: 600;
+}
+
+.wk-dv.esc {
+  color: var(--ao-accent);
+  font-weight: 700;
+}
+
+.wk-dv.esc::before,
+.wk-dv.esc::after {
+  background: var(--ao-accent);
+}
+
+.wk-dv.new {
+  color: var(--ao-brand-strong);
+  font-weight: 700;
+}
+
+.wk-dv.new::before,
+.wk-dv.new::after {
+  background: var(--ao-brand);
+}
+
+.wk-jump {
+  position: sticky;
+  bottom: 4px;
+  align-self: flex-end;
+  border-radius: 999px;
+  box-shadow: var(--wk-shadow);
+  margin-top: -36px;
+  flex: none;
+}
+
+.wk-body.graph {
+  padding: 8px;
+  overflow: hidden;
+}
+
+.wk-body.graph > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.wk-seq {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.wk-seq th,
+.wk-seq td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ao-border);
+  overflow-wrap: anywhere;
+}
+
+.wk-seq th {
+  color: var(--ao-text-subtle);
+  font-weight: 600;
+}
+
+.wk-compose-wrap {
+  position: relative;
+  grid-column: 1 / 3;
+}
+
+.wk-compose-wrap textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.wk-typeahead {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin: 0 0 4px;
+  padding: 4px;
+  list-style: none;
+  max-height: 40vh;
+  overflow-y: auto;
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border-strong);
+  border-radius: 8px;
+  box-shadow: var(--wk-shadow);
+  z-index: 10;
+}
+
+.wk-typeahead button {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 6px 10px;
+  border-radius: var(--wk-radius-sm);
+}
+
+.wk-typeahead button[aria-selected='true'] {
+  background: var(--ao-brand-soft);
+}
+
+.wk-typeahead .d {
+  color: var(--ao-text-subtle);
+  font-size: 12px;
+}
+
+.wk-chips {
+  grid-column: 1 / 3;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.wk-chips .wk-btn {
+  padding: 2px 10px;
+  font-size: 12px;
+}

@@ -25,7 +25,16 @@ vi.mock('../../model/session', () => ({
   useLiveStream: () => connection === 'connected',
   signIn: vi.fn(async () => true),
 }))
-vi.mock('../../model/commands', () => ({
+vi.mock('../../model/actions', async (importOriginal) => {
+  const idle = { mutate: () => undefined, isPending: false, reset: () => undefined, data: undefined, error: null }
+  return {
+    ...(await importOriginal<typeof import('../../model/actions')>()),
+    useReopen: () => idle, useMarkRead: () => idle, useMarkUnread: () => idle,
+    useCloseBatch: () => idle, useDeleteBatch: () => idle, useVocabulary: () => ({ data: { entries: [] } }),
+  }
+})
+vi.mock('../../model/commands', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../model/commands')>()),
   useCommands: () => ({ inFlight, connection, sending: () => false }),
 }))
 vi.mock('../../model/conversationList', async (importOriginal) => ({

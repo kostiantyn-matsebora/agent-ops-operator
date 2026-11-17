@@ -1,11 +1,14 @@
-import { Fragment, type FormEvent, type KeyboardEvent, type ReactElement, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, type ReactElement, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { ConversationSummary, Message, Run } from '../../../api/types'
+import type { ActivityEvent, ConversationSummary, Message, Run, VocabularyEntry } from '../../../api/types'
+import { useVocabulary } from '../../../model/actions'
+import { skipCloseConfirm, writeSkipCloseConfirm } from '../../../model/closeConfirm'
 import { useCommands } from '../../../model/commands'
+import { budgetLines, escalation } from '../../../model/coordinator'
 import { speakerOf } from '../../../model/message'
 import type { RunDetails as RunDetailsFact, WorkingRun } from '../../../model/run'
 import { GENERAL_FEED_NAME, useGeneralFeed } from '../../../model/session'
-import { TESTID } from '../../../model/testids'
+import { TESTID, testid } from '../../../model/testids'
 import {
   invokedByReply, memberTranscript, useMemberChain, useThread, useThreadMembers,
 } from '../../../model/thread'
@@ -13,12 +16,15 @@ import { rowTitle } from '../../../model/conversationList'
 import { sendText } from '../../../model/verbs'
 import { Chevron, Icon } from '../icons'
 import { dayKey, day, duration, started, toolDuration } from '../format'
+import { CloseConfirm } from './CloseConfirm'
+import { Composer } from './Composer'
 import { Notice, PersonMessage, Reply, SignalCard, WorkingCard } from './Entries'
+import { GraphTab, SequenceTab } from './Secondary'
 
 // THE THREAD: one conversation, opened beside the list. The container reads
 // the thread model; the view draws what it is given and nothing else.
 
-export type ThreadTab = 'conversation' | 'runs' | 'yaml'
+export type ThreadTab = 'conversation' | 'runs' | 'graph' | 'sequence' | 'yaml'
 
 export interface ThreadViewProps {
   conversation: ConversationSummary
@@ -29,6 +35,10 @@ export interface ThreadViewProps {
   working?: WorkingRun
   startedAt?: string
   yaml?: string
+  /** The conversation's recorded hops, for the Sequence tab. */
+  events?: ActivityEvent[]
+  /** The channel's vocabulary, for the command listing and the thread's own commands. */
+  vocabulary?: VocabularyEntry[]
   canWrite: boolean
   /** Which members each reply opened, by reply id. */
   invoked: Map<string, ConversationSummary[]>
@@ -50,11 +60,18 @@ type Item = { key: string; node: ReactNode; divider?: boolean }
  * on the line under the tabs, so the first day needs no divider of its own.
  */
 export function threadItems(p: Pick<ThreadViewProps, 'messages' | 'startedAt' | 'conversation' | 'runDetails' | 'invoked'>): Item[] {
-  const rows: ({ divider: string; at: string } | { message: Message; speaker: ReturnType<typeof speakerOf> })[] = []
+  const rows: ({ divider: string; at: string } | { escalated: string } | { message: Message; speaker: ReturnType<typeof speakerOf> })[] = []
   let lastDay = dayKey(p.startedAt) || dayKey(p.messages[0]?.at)
+  // The moment a Coordinator root reached a person sits in the stream by time.
+  const esc = escalation(p.conversation)
+  let escPlaced = !esc
   for (const m of p.messages) {
     const speaker = speakerOf(m)
     if (speaker === 'hidden') continue
+    if (esc && !escPlaced && (Date.parse(m.at) || 0) > esc.at) {
+      rows.push({ escalated: esc.label })
+      escPlaced = true
+    }
     const k = dayKey(m.at)
     if (k && k !== lastDay) {
       rows.push({ divider: k, at: m.at })
@@ -62,13 +79,17 @@ export function threadItems(p: Pick<ThreadViewProps, 'messages' | 'startedAt' | 
     }
     rows.push({ message: m, speaker })
   }
+  if (esc && !escPlaced) rows.push({ escalated: esc.label })
   return rows.map((r, i) => {
     if ('divider' in r) {
       return { key: `day-${r.divider}`, divider: true, node: <div className="wk-dv" role="separator">{day(r.at)}</div> }
     }
+    if ('escalated' in r) {
+      return { key: 'escalated', divider: true, node: <div className="wk-dv esc" role="separator" data-testid="escalated">{r.escalated}</div> }
+    }
     // The entry before a divider, and the last one, close without their own rule.
     const next = rows[i + 1]
-    const last = !next || 'divider' in next
+    const last = !next || 'divider' in next || 'escalated' in next
     return { key: r.message.id, node: entryFor(r.message, r.speaker, p, last) }
   })
 }
@@ -99,38 +120,6 @@ function statusPill(c: ConversationSummary): ReactElement | null {
   if (c.phase === 'Closed') return <span className="wk-pill">Closed</span>
   if (c.phase === 'Pending' || c.phase === 'Queued') return <span className="wk-pill warn">{c.phase}</span>
   return null
-}
-
-function Composer({ onSend, disabled }: Readonly<{ onSend: (text: string) => void; disabled?: boolean }>) {
-  const [text, setText] = useState('')
-  function submit(e?: FormEvent) {
-    e?.preventDefault()
-    const t = text.trim()
-    if (!t || disabled) return
-    onSend(t)
-    setText('')
-  }
-  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && e.shiftKey) submit(e as unknown as FormEvent)
-  }
-  return (
-    <form className="wk-compose" onSubmit={submit}>
-      <textarea
-        aria-label="message"
-        placeholder="Reply to the agent…"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-      />
-      <span className="h">
-        <span><kbd>/</kbd> commands</span>
-        <span><kbd>Shift</kbd> + <kbd>Enter</kbd> send</span>
-      </span>
-      <button className="wk-btn primary" type="submit" disabled={disabled || !text.trim()}>
-        Send
-      </button>
-    </form>
-  )
 }
 
 function RunsTab({ runs }: Readonly<{ runs: Run[] }>) {
@@ -177,8 +166,10 @@ function RunsTab({ runs }: Readonly<{ runs: Run[] }>) {
 
 export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
   const [tab, setTab] = useState<ThreadTab>('conversation')
-  const [confirmClose, setConfirmClose] = useState(false)
+  const [closing, setClosing] = useState(false)
+  const [away, setAway] = useState(0)
   const body = useRef<HTMLDivElement>(null)
+  const seen = useRef(0)
   const c = p.conversation
   const closed = c.phase === 'Closed'
   const isMember = Boolean(c.causedBy)
@@ -194,15 +185,32 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
     const el = body.current
     if (el && stick.current && tab === 'conversation') el.scrollTop = el.scrollHeight
   }, [c.name, items.length, Boolean(p.working), tab])
+  // Arrivals while the viewer is reading higher up are counted, never forced
+  // into view: the pill says how many, and jumps on request.
   useEffect(() => {
-    if (!confirmClose) return
-    const t = setTimeout(() => setConfirmClose(false), 4000)
-    return () => clearTimeout(t)
-  }, [confirmClose])
+    const grew = items.length - seen.current
+    seen.current = items.length
+    if (grew > 0 && !stick.current && tab === 'conversation') setAway((n) => n + grew)
+  }, [items.length, tab])
+  const jumpToEnd = () => {
+    const el = body.current
+    if (el) el.scrollTop = el.scrollHeight
+    stick.current = true
+    setAway(0)
+  }
+  // `/close` ends the conversation, so it asks first unless the viewer opted out. `/exit` never asks.
+  const closeOrAsk = () => {
+    if (!skipCloseConfirm()) setClosing(true)
+    else p.onVerb?.('/close')
+  }
+  const runCommand = (command: '/exit' | '/close') => (command === '/close' ? closeOrAsk() : p.onVerb?.(command))
+  const budget = budgetLines(c.budget)
 
   const tabs: { id: ThreadTab; label: string }[] = [
     { id: 'conversation', label: 'Conversation' },
     { id: 'runs', label: `Runs${p.runs.length ? ` · ${p.runs.length}` : ''}` },
+    // Graph and Sequence read the conversation's own topology and hops: a root's. A member's single node is one click into its parent's view.
+    ...(isMember ? [] : [{ id: 'graph' as const, label: 'Graph' }, { id: 'sequence' as const, label: 'Sequence' }]),
     { id: 'yaml', label: 'YAML' },
   ]
 
@@ -230,20 +238,8 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
             <button type="button" className="wk-btn" disabled={p.busy} onClick={() => p.onVerb?.('/exit')}>
               Exit runtime
             </button>
-            <button
-              type="button"
-              className={`wk-btn${confirmClose ? ' danger' : ''}`}
-              disabled={p.busy}
-              onClick={() => {
-                if (!confirmClose) {
-                  setConfirmClose(true)
-                  return
-                }
-                setConfirmClose(false)
-                p.onVerb?.('/close')
-              }}
-            >
-              {confirmClose ? 'Confirm close' : 'Close'}
+            <button type="button" className="wk-btn" disabled={p.busy} onClick={closeOrAsk}>
+              Close
             </button>
           </div>
         )}
@@ -256,6 +252,7 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
             type="button"
             role="tab"
             id={`wk-tab-${t.id}`}
+            data-testid={testid.view(t.id)}
             aria-selected={tab === t.id}
             aria-controls="wk-thread-body"
             onClick={() => setTab(t.id)}
@@ -271,8 +268,17 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
           </time>
         )}
       </div>
+      {tab === 'conversation' && budget.length > 0 && (
+        <div className="wk-bar" data-testid="budget">
+          {budget.map((l) => (
+            <span key={l.label}>
+              {l.label} <b>{l.value}</b>
+            </span>
+          ))}
+        </div>
+      )}
       <div
-        className="wk-body"
+        className={`wk-body${tab === 'graph' ? ' graph' : ''}`}
         id="wk-thread-body"
         role="tabpanel"
         aria-labelledby={`wk-tab-${tab}`}
@@ -281,6 +287,7 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
         onScroll={(e) => {
           const el = e.currentTarget
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 90
+          if (stick.current) setAway(0)
         }}
       >
         {tab === 'conversation' && (
@@ -296,9 +303,16 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
             )}
             {p.working && <WorkingCard working={p.working} />}
             {closed && <div className="wk-closed-note">This conversation is closed. Its history is kept.</div>}
+            {away > 0 && (
+              <button type="button" className="wk-btn primary wk-jump" data-testid={TESTID.jumpPill} onClick={jumpToEnd}>
+                {`↓ ${away} new message${away === 1 ? '' : 's'}`}
+              </button>
+            )}
           </>
         )}
         {tab === 'runs' && <RunsTab runs={p.runs} />}
+        {tab === 'graph' && <GraphTab name={c.name} />}
+        {tab === 'sequence' && <SequenceTab events={p.events ?? []} />}
         {tab === 'yaml' && (
           <div className="wk-card">
             <pre className="wk-yaml">{p.yaml || 'No YAML for this conversation.'}</pre>
@@ -313,7 +327,17 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
         </div>
       )}
       {tab === 'conversation' && !isMember && !closed && p.canWrite && p.onSend && (
-        <Composer onSend={p.onSend} disabled={p.busy} />
+        <Composer onSend={p.onSend} onCommand={p.onVerb ? runCommand : undefined} vocabulary={p.vocabulary} disabled={p.busy} />
+      )}
+      {closing && (
+        <CloseConfirm
+          onCancel={() => setClosing(false)}
+          onConfirm={(dontAskAgain) => {
+            writeSkipCloseConfirm(dontAskAgain)
+            setClosing(false)
+            p.onVerb?.('/close')
+          }}
+        />
       )}
     </>
   )
@@ -331,6 +355,7 @@ function LoadedThread({ thread, onBack }: Readonly<{ thread: ReturnType<typeof u
   const c = thread.conversation
   const commands = useCommands()
   const { members } = useThreadMembers(c, thread.detail?.transcript)
+  const vocabulary = useVocabulary()
   // A member binds no channel of its own: its runs' records are its transcript.
   const messages = thread.isMember && thread.messages.length === 0 ? memberTranscript(c, thread.runs) : thread.messages
   const invoked = invokedByReply(messages, members)
@@ -343,6 +368,8 @@ function LoadedThread({ thread, onBack }: Readonly<{ thread: ReturnType<typeof u
     working: thread.working,
     startedAt: thread.startedAt,
     yaml: thread.detail?.yaml,
+    events: thread.detail?.events ?? [],
+    vocabulary: vocabulary.data?.entries,
     canWrite: thread.canWrite,
     invoked,
     memberEntry: c.causedBy?.entry,

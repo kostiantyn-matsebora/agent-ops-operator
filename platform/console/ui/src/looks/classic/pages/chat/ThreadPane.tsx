@@ -110,14 +110,14 @@ export function ThreadPane({ name, onBack }: Readonly<{ name: string; onBack?: (
               Sequence stay root-only: both read the CONVERSATION's own
               topology/activity, which for a member is a single node a click
               into its parent's view already reaches with more context. */}
-          <ViewButton active={view === 'runs'} onClick={() => setView('runs')}>Runs</ViewButton>
+          <ViewButton id="runs" active={view === 'runs'} onClick={() => setView('runs')}>Runs</ViewButton>
           {!isMember && (
             <>
-              <ViewButton active={view === 'graph'} onClick={() => setView('graph')}>Graph</ViewButton>
-              <ViewButton active={view === 'sequence'} onClick={() => setView('sequence')}>Sequence</ViewButton>
+              <ViewButton id="graph" active={view === 'graph'} onClick={() => setView('graph')}>Graph</ViewButton>
+              <ViewButton id="sequence" active={view === 'sequence'} onClick={() => setView('sequence')}>Sequence</ViewButton>
             </>
           )}
-          <ViewButton active={view === 'yaml'} onClick={() => setView('yaml')}>YAML</ViewButton>
+          <ViewButton id="yaml" active={view === 'yaml'} onClick={() => setView('yaml')}>YAML</ViewButton>
           {view !== 'transcript' && <ViewButton active onClick={() => setView('transcript')}>Back to transcript</ViewButton>}
         </div>
         {c.brief && (
@@ -160,9 +160,9 @@ function TranscriptBody({
   return <ConversationThread thread={thread} onSentOffline={onSentOffline} />
 }
 
-function ViewButton({ active, onClick, children }: Readonly<{ active: boolean; onClick: () => void; children: React.ReactNode }>) {
+function ViewButton({ id, active, onClick, children }: Readonly<{ id?: string; active: boolean; onClick: () => void; children: React.ReactNode }>) {
   return (
-    <Button variant={active ? 'primary' : 'secondary'} size="sm" onClick={onClick}>
+    <Button variant={active ? 'primary' : 'secondary'} size="sm" onClick={onClick} data-testid={id ? testid.view(id) : undefined}>
       {children}
     </Button>
   )
