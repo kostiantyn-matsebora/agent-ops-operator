@@ -52,6 +52,11 @@ a manual step per claim you want to keep.
 - The chart creates the conversations namespace by default, with the
   release's labels and `helm.sh/resource-policy: keep` — `helm uninstall`
   leaves it, its Secrets and its claims standing.
+- A `SignalAdapter` pod receives `ADAPTER_NAME` (the CR's name), the same env
+  name channel adapters get, replacing `SOURCE_TYPE`. Rename it in any
+  self-registering sender that read the old name.
+- The `SignalAdapter` reconciler creates no ServiceAccount. It names the
+  account in `spec.serviceAccountName` and falls back to the release floor.
 
 ### Changed
 

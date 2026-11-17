@@ -97,7 +97,7 @@
 
 ## 11. Documentation
 
-Left unticked until section 10 has run, so the documentation gate follows the system tests.
+Written after section 10's lanes were authored. Those lanes are dispatched rather than run here (10.6), so these pages describe the layout as designed and tested at the unit and render tiers, not as confirmed on a cluster.
 
 ### Reference docs
 

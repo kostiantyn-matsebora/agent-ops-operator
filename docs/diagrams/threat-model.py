@@ -79,7 +79,7 @@ def boundary(x, y, w, h, label, p, tone="borderStrong"):
         f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="10" '
         f'fill="none" stroke="{p[tone]}" stroke-width="1.5" '
         f'stroke-dasharray="7 5"/>'
-        f'<rect x="{x + 14}" y="{y - 10}" width="{len(label) * 7 + 18}" '
+        f'<rect x="{x + 14}" y="{y - 10}" width="{len(label) * 7 + 26}" '
         f'height="20" rx="5" fill="{p["band"]}"/>'
         + text(x + 22, y + 5, label, p[tone], size=13, weight=600)
     )
@@ -167,7 +167,7 @@ def render(p):
         s.append(node(x, 384, 172, t, sub, p))
 
     # The crossings. Each number is a row in the page's threat table.
-    s.append(arrow(610, 148, 610, 162, p))                 # 1 neighbour -> control ns
+    s.append(arrow(610, 148, 610, 156, p))                 # 1 neighbour -> control ns
     s.append(badge(634, 158, 1, p))
     s.append(arrow(372, 280, 404, 280, p, tone="brand"))     # 2 agent -> MCP
     s.append(badge(392, 258, 2, p, tone="brand"))

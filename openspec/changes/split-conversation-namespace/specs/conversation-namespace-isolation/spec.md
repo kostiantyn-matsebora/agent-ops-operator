@@ -98,6 +98,8 @@ only what is used there:
   `signals`, adapter Deployments, Services, configmaps, leases and events
 - that Role SHALL grant `serviceaccounts` `get`/`list`/`watch`/`create`/`update`/`patch`
   and no `delete` (a grant carried over unchanged from the single-namespace Role)
+  - it covers the zero-RBAC accounts the manager creates for adapter workloads, which stay in the control namespace
+  - the runtime and route accounts in the conversations namespace are chart-rendered and only referenced by a pod, so the manager needs no verb on them there
 - that Role SHALL grant a read (`get`/`list`/`watch`) on pods
   - that pod read reaches EVERY pod in the control namespace
   - the manager reads it to resolve the Lease holder to a pod IP for the
