@@ -202,6 +202,17 @@ The runtime SHALL take its model provider, model and credential from environment
 - **WHEN** the bundle is enabled with a credential Secret
 - **THEN** the runtime's pod receives the credential through `valueFrom` or `envFrom`, and the manager reads no secret
 
+### Requirement: Reading the checkout's `.claude/` like Claude Code is optional, on by default, and adds no tool
+The image SHALL carry the `pi-code` package at an exact version from the lockfile, and the runtime SHALL load it only when `PI_CODE_ENABLED` is not `false`, `0`, `no` or `off`. The bundle SHALL expose one boolean, `pi.piCode`, default true, that becomes that env. The package SHALL add no tool to a session, and the `tool_call` permission decision SHALL still answer every call from the composed allowlist. The runtime SHALL record its own workspace as approved so the package loads the checkout's configuration on a headless run. With it off, the session SHALL load exactly the runtime's own two extensions.
+
+#### Scenario: The flag is off
+- **WHEN** `pi.piCode` is `false`
+- **THEN** the runtime pod carries `PI_CODE_ENABLED=false`, the session loads only the permission and MCP extensions, and no approval is recorded
+
+#### Scenario: The flag is unset
+- **WHEN** the bundle is enabled and `pi.piCode` is not set
+- **THEN** the pod carries `PI_CODE_ENABLED=true` and the package's extensions load beside the runtime's own, with no load error
+
 ### Requirement: The runtime ships as a bundle that declares only its vendor
 The chart SHALL ship the runtime as `chart/charts/pi/`, OFF by default, in the same shape as the other runtime bundles. It is one `AgentRuntime` rendered through the parent's shared runtime renderer.
 

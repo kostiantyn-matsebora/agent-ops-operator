@@ -60,6 +60,15 @@ provider: ""
 # enabled, for the same reason. e.g. claude-sonnet-5
 model: ""
 
+# READ A CHECKOUT'S `.claude/` THE WAY CLAUDE CODE DOES. ON by default. The
+# image carries the `pi-code` package, which loads CLAUDE.md and its @imports,
+# path-scoped rules, commands, skills, output styles and hooks from the
+# repository the profile names. It adds no tool to a session and the tool
+# allowlist still gates every call, but a hook it runs is a shell command from
+# that repository, and the runtime approves the workspace itself because a
+# headless run cannot ask. Set false to leave pi reading none of it.
+piCode: true
+
 # Further knobs the runtime reads, as ordinary env entries — laid OVER the ones
 # the keys above produce.
 #

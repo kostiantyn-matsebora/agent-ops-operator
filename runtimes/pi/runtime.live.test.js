@@ -35,6 +35,7 @@ function freshRuntime(env) {
   process.env.PI_BASE_URL = '';
   process.env.REPO_URL = '';
   process.env.RUNTIME_IDLE_TTL_M = '10';
+  delete process.env.PI_CODE_ENABLED; // on by default; a test that wants it off says so
   for (const [k, v] of Object.entries(env)) process.env[k] = v;
   return require('./runtime');
 }
@@ -308,14 +309,14 @@ test('logInventoryGaps logs a gap when a granted name was never registered by th
 // ---- (mcp.test.js drives mcp.js's own connect/register logic directly; ---
 // ---- these two prove runtime.js actually wires it onto a live session) ---
 
-test('task 3.4: the session loads exactly the two factories this runtime ships, no other extension', async () => {
+test('task 3.4: with pi-code off, the session loads exactly the two factories this runtime ships, no other extension', async () => {
   await withProvider({ reply: 'ok' }, async ({ port }) => {
     const home = tmp('agentops-pi-live-home-');
     const ws = tmp('agentops-pi-live-ws-');
     fs.mkdirSync(ws, { recursive: true });
     const rt = freshRuntime({
       HOME: home, WORKSPACE: ws, PI_MODEL: 'fake-model', PI_BASE_URL: `http://127.0.0.1:${port}/v1`,
-      MCP_CONFIG: path.join(home, 'nonexistent-mcp.json'),
+      MCP_CONFIG: path.join(home, 'nonexistent-mcp.json'), PI_CODE_ENABLED: 'false',
     });
     const s = await rt.getSdk();
     const grant = { builtinNames: [], mcpPatterns: [] };
@@ -326,6 +327,27 @@ test('task 3.4: the session loads exactly the two factories this runtime ships, 
       result.extensions.length, 2,
       'only the tool_call-permission factory and the MCP extension — nothing pi loads on its own'
     );
+  });
+});
+
+test('pi-code on (the default): its extensions load beside the two factories, the workspace is approved, nothing is a load error', async () => {
+  await withProvider({ reply: 'ok' }, async ({ port }) => {
+    const home = tmp('agentops-pi-live-home-');
+    const ws = tmp('agentops-pi-live-ws-');
+    fs.mkdirSync(ws, { recursive: true });
+    const rt = freshRuntime({
+      HOME: home, WORKSPACE: ws, PI_MODEL: 'fake-model', PI_BASE_URL: `http://127.0.0.1:${port}/v1`,
+      MCP_CONFIG: path.join(home, 'nonexistent-mcp.json'),
+    });
+    const s = await rt.getSdk();
+    const loader = await rt.buildResourceLoader(s, { promptText: 'go' }, { builtinNames: [], mcpPatterns: [] }, '', []);
+    const result = loader.getExtensions();
+    assert.deepStrictEqual(result.errors, []);
+    assert.ok(result.extensions.length > 2, 'pi-code adds its extensions to the two this runtime ships');
+    const commands = new Set(result.extensions.flatMap((e) => [...e.commands.keys()]));
+    assert.ok(commands.has('hooks'), 'the Claude hooks surface is registered');
+    assert.strictEqual(new s.ProjectTrustStore(rt.PI_AGENT_DIR).get(ws), true, 'the runtime approves its own workspace, since a headless run cannot ask');
+    assert.strictEqual(process.env.PI_CODING_AGENT_DIR, rt.PI_AGENT_DIR);
   });
 });
 

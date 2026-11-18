@@ -256,11 +256,12 @@ own CR and for the parent's `default` copy, so both carry identical env. */ -}}
 {{- $model := $v.model | required "pi.model is required when the bundle is enabled — the chosen provider's own model id" -}}
 {{- $env := list
   (dict "name" "PI_PROVIDER" "value" ($provider | toString))
-  (dict "name" "PI_MODEL" "value" ($model | toString)) -}}
+  (dict "name" "PI_MODEL" "value" ($model | toString))
+  (dict "name" "PI_CODE_ENABLED" "value" ((ternary $v.piCode true (hasKey $v "piCode")) | toString)) -}}
 {{- range ($v.env | default list) }}{{ $env = append $env . }}{{ end -}}
 {{- $cred := $v.credentialsSecret | default dict -}}
 {{- if $cred.name }}{{ $env = append $env (dict "name" ($cred.envName | default "PI_API_KEY") "valueFrom" (dict "secretKeyRef" (dict "name" $cred.name "key" ($cred.key | default "apiKey")))) }}{{ end -}}
-{{- $entry := omit $v "enabled" "global" "provider" "model" "env" "credentialsSecret" -}}
+{{- $entry := omit $v "enabled" "global" "provider" "model" "env" "credentialsSecret" "piCode" -}}
 {{- $_ := set $entry "env" $env -}}
 {{- toYaml $entry -}}
 {{- end -}}

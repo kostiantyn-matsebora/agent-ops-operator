@@ -42,6 +42,7 @@ const { translate, decide, checkInventory } = require('./vocabulary');
 const { confirmContextMissing } = require('./continuity');
 const { registerMcpTools } = require('./mcp');
 const { newCallRecorder } = require('./report');
+const { loaderOptions: piCodeLoaderOptions, piCodeEnabled } = require('./picode');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
@@ -374,6 +375,9 @@ async function buildResourceLoader(sdk, unit, grant, definitionBody, denials, mc
     agentsFilesOverride: () => ({ agentsFiles: [] }),
     ...(extra ? { appendSystemPromptOverride: (base) => [...base, extra] } : {}),
     extensionFactories: [extensionFactory, mcpExtensionFactory],
+    // The OPTIONAL pi-code package (picode.js): reads the checkout's .claude/ as
+    // Claude Code does. Empty when the chart's `pi.piCode` is off.
+    ...piCodeLoaderOptions(sdk, { agentDir: PI_AGENT_DIR, workspace: WORKSPACE }),
     // task 3.4: load ONLY the two factories above — pi's own built-in mcp
     // extension would otherwise double-register these same mcp__ tool
     // names from its own (unused by this runtime) connection logic.
@@ -515,6 +519,7 @@ async function runPi(unit) {
   console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${id ? ' continue=' + sanitizeLog(id) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
   console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${definition.tools.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
   console.log(`[runtime] pi built-ins=${sanitizeLog(grant.builtinNames.length ? grant.builtinNames.join(',') : '(none)')}`);
+  console.log(`[runtime] pi-code ${piCodeEnabled() ? "on: the checkout's .claude/ is read as Claude Code reads it" : "off"}`);
   for (const s of grant.scoped) console.log(`[runtime] scoped pattern withheld: ${sanitizeLog(s)} — pi has no per-command shell narrowing, granting nothing`);
   for (const u of grant.unmapped) console.log(`[runtime] UNMAPPED pattern withheld: ${sanitizeLog(u)} — no pi equivalent, granting nothing`);
   if (grant.mcpPatterns.length) console.log(`[runtime] ${grant.mcpPatterns.length} mcp__ pattern(s) granted to the MCP extension: ${sanitizeLog(grant.mcpPatterns.join(','))}`);

@@ -109,6 +109,7 @@ this is the only runtime — so it is the default without the flag.
 | `pi.provider` | the model provider, by pi's own provider id (e.g. `anthropic`). REQUIRED once enabled — the render fails naming this key otherwise |
 | `pi.model` | the model, by the chosen provider's own id (e.g. `claude-sonnet-5`). REQUIRED once enabled, for the same reason |
 | `pi.credentialsSecret.token` | the provider's credential. Set, the Secret is created. Empty, the named Secret is yours to create |
+| `pi.piCode` | `true` by default. Lets pi read a checkout's `.claude/` the way Claude Code does, through the `pi-code` package. `false` turns it off |
 | `pi.env` | further knobs, as env entries — `PI_RUN_TIMEOUT_S` (default 3600), and `PI_PROVIDER_API` / `PI_BASE_URL` for a self-hosted or BYOK endpoint |
 
 **`PI_BASE_URL` points at a self-hosted or BYOK endpoint for the chosen
@@ -125,6 +126,23 @@ and an ollama loop by turns.
 The runtime logs the turns a route asked for, but enforces none of them. A
 run is bounded by `PI_RUN_TIMEOUT_S` (default an hour) and the pod's idle TTL
 instead.
+
+## Reading the checkout's `.claude/`
+
+With `pi.piCode` on, pi loads a repository's CLAUDE.md and its imports,
+path-scoped rules, commands, skills, output styles and hooks, as Claude Code
+does. The image carries the `pi-code` package for this, pinned to one version.
+
+**It adds no tool.** A session is opened with the tools the composed allowlist
+names, so the todo, web and subagent tools the package registers are never
+offered to the model, and the permission decision still answers every call.
+
+**It runs what the repository ships.** The package loads nothing from a project
+until the project is approved, and a run with no one to ask cannot approve. The
+runtime therefore approves its own workspace, the repository the profile names.
+A hook in that repository's `.claude/settings.json` is a shell command, and it
+runs outside the tool allowlist. Set `pi.piCode: false` when you do not trust
+what the repositories your profiles name ship.
 
 ## The tools it gives
 

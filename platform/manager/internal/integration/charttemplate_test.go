@@ -3427,6 +3427,23 @@ func TestPiBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
 	}
 }
 
+// `pi.piCode` is the one boolean that turns the pi-code package off. It reaches
+// the runtime as PI_CODE_ENABLED, and is not a field the AgentRuntime carries.
+func TestPiBundlePiCodeFlagReachesTheRuntimeAsEnv(t *testing.T) {
+	base := []string{"--set", "pi.enabled=true", "--set", "pi.provider=anthropic", "--set", "pi.model=claude-sonnet-5"}
+	off := findDocByKindAndMetaName(helmTemplate(t, append(base, "--set", "pi.piCode=false")...), "AgentRuntime", "pi")
+	if !strings.Contains(off, "name: PI_CODE_ENABLED\n      value: \"false\"\n") {
+		t.Errorf("pi.piCode=false must render PI_CODE_ENABLED=false:\n%s", off)
+	}
+	on := findDocByKindAndMetaName(helmTemplate(t, base...), "AgentRuntime", "pi")
+	if !strings.Contains(on, "name: PI_CODE_ENABLED\n      value: \"true\"\n") {
+		t.Errorf("pi-code must be on when the key is not set:\n%s", on)
+	}
+	if strings.Contains(on, "piCode") {
+		t.Errorf("piCode is a chart value, never an AgentRuntime field:\n%s", on)
+	}
+}
+
 func assertPiRuntimeShape(t *testing.T, rt string) {
 	t.Helper()
 	for _, want := range []string{
@@ -3438,6 +3455,7 @@ func assertPiRuntimeShape(t *testing.T, rt string) {
 		"name: PI_PROVIDER\n      value: anthropic\n",
 		"name: PI_MODEL\n      value: claude-sonnet-5\n",
 		"name: PI_API_KEY\n      valueFrom:\n        secretKeyRef:\n          key: apiKey\n          name: agentops-pi",
+		"name: PI_CODE_ENABLED\n      value: \"true\"\n", // on by default
 	} {
 		if !strings.Contains(rt, want) {
 			t.Errorf("pi runtime lacks %q:\n%s", want, rt)

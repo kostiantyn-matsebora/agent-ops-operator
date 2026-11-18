@@ -171,6 +171,33 @@ field map.
 branch in the declared-runtime list. Provider, model and credential are env.
 The bundle adds no value that is not env, an image or a context path.
 
+### D9. `pi-code` reads the checkout's `.claude/`, optional, on by default
+
+The image carries the `pi-code` package (exact pin, lockfile) so pi reads a
+checkout's `.claude/` the way Claude Code does: CLAUDE.md and its @imports,
+path-scoped rules, commands, skills, output styles and hooks. The bundle's
+`pi.piCode` boolean (default true) becomes `PI_CODE_ENABLED`; the runtime adds
+the package through `additionalExtensionPaths` only when it is on. Four facts
+bound it, each tested:
+
+- It adds no tool to a session. `openSession` passes an explicit `tools:` list,
+  which becomes the active set outright, so what the package registers is known
+  to pi and never offered to the model.
+- The `tool_call` permission hook (D2) still answers every call, deny by default.
+- It loads nothing from a project until the project is approved, and a headless
+  run cannot ask. The runtime records the workspace as approved in pi's own
+  trust store, because the workspace is the repository the AgentProfile names,
+  chosen by whoever wired the route. A hook the package then runs is a shell
+  command from that repository, outside the allowlist.
+- pi's own `AGENTS.md`/`CLAUDE.md` auto-load (S6) stays off either way. With the
+  package on, CLAUDE.md arrives through the package's approval-gated import, not
+  through pi's native loader.
+
+Alternative: leave it out, since the runtime already reads the agent definition
+itself (D4). Rejected: a team's rules, commands and skills in `.claude/` then
+do nothing under pi. The cost is a larger lockfile (88 more packages) and a
+repository-defined hook surface, which is why it is a flag.
+
 ### D8. Pin exactly, from a lockfile
 
 `package.json` pins one version of the SDK package and `npm ci` installs from
@@ -435,7 +462,7 @@ systemPrompt includes "haiku" (AGENTS.md): false
 
 So pi DOES load both names on its own, and it CAN be turned off.
 
-Task 2.9 turns it off. A checkout's own `AGENTS.md`/`CLAUDE.md` would
+Task 2.9 turns it off (D9 adds the one gated way back in). A checkout's own `AGENTS.md`/`CLAUDE.md` would
 otherwise be a second, uncomposed prompt the manager never agreed to. It
 sits outside the one place agent-ops already puts repository instructions:
 `.claude/agents/<agent>.md` (D4). The runtime's page states this

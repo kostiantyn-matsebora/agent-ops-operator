@@ -74,6 +74,7 @@ sections 2 to 4 depends on an answer until its spike is recorded.
   itself, turn that off, or record the behaviour for the runtime's page.
   Verify: a test with an `AGENTS.md` in the checkout asserts the prompt the
   session received.
+- [x] 2.10 `picode.js` and its wiring (D9): `PI_CODE_ENABLED` read at load time, the package added through `additionalExtensionPaths`, `PI_CODING_AGENT_DIR` pointed at the agent dir, the workspace approved in pi's trust store, one startup log line. `package.json` pins `pi-code` 1.10.1 exactly and the Dockerfile copies the file.
 
 ## 3. The MCP extension — backend-developer
 
@@ -145,6 +146,7 @@ sections 2 to 4 depends on an answer until its spike is recorded.
   byte-identical to the render before this change.
 - [x] 6.4 Bump the chart minor. Verify: `docs-generate.py --check` accepts the
   new version once section 10 is done.
+- [x] 6.5 `pi.piCode` (default true) in `chart/charts/pi/values.yaml`; `agentops.piRuntimeEntry` renders it as `PI_CODE_ENABLED` and omits it from the entry, so it is never an AgentRuntime field.
 
 ## 7. The specification — api-architect
 
@@ -245,6 +247,7 @@ acting, and every real finding was fixed on the branch, none dropped.
   `docs-generate.py --check` exits 1 on the chart version bump
   (`docs/installation.md` still prints 19.0.1), exactly the gap task 6.4
   already named as owed to section 10, not a new regression.
+- [x] 8.6 pi-code tests: `picode.test.js` (the env parse, off contributing nothing, on approving the workspace, the real package loading without a load error), the live suite's two-extension assertion run with it off and a new one with it on, and `TestPiBundlePiCodeFlagReachesTheRuntimeAsEnv` with the default-on assertion in `assertPiRuntimeShape`.
 
 ## 9. System tests — testing-specialist
 
@@ -395,6 +398,7 @@ archive hook checks it.
   refused by the environment's own auto-mode classifier (starting a
   background server), so this is recorded as a workstation-only gap per
   `remote-session.md` rather than claimed done.
+- [x] 10.12 `docs/runtimes/pi.md` states `pi.piCode`, what it loads, that it adds no tool, and the hook and approval consequence; `docs/CHANGELOG.md` names it under the pi bundle entry.
 - [x] 10.11 `docs-generate.py --check`, `retired-vocabulary-guard.py` and
   `publication-guard.py` pass. Verify: each exits zero. All three
   independently re-run after every edit above, each exiting 0:
