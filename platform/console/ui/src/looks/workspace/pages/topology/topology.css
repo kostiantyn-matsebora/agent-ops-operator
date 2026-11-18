@@ -477,3 +477,8 @@
   margin-right: 4px;
   vertical-align: middle;
 }
+
+.wk-tp-hop b {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}

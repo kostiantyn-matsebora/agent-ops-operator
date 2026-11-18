@@ -140,3 +140,7 @@
     min-height: 44px;
   }
 }
+
+.wk-ov-card .wk-tbl th {
+  white-space: nowrap;
+}

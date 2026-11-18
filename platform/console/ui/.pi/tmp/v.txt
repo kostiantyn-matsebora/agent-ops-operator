@@ -1,13 +1,13 @@
 
  RUN  v2.1.9 /home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui
 
- ✓ src/api/apply.test.ts (13 tests) 17ms
- ✓ src/api/stream.test.ts (15 tests) 22ms
+ ✓ src/api/apply.test.ts (13 tests) 14ms
  ✓ src/model/commands.test.ts (23 tests) 32ms
- ✓ src/model/run.test.ts (15 tests) 27ms
- ✓ src/model/thread.test.ts (15 tests) 49ms
- ✓ src/model/conversationList.test.ts (21 tests) 60ms
- ✓ src/graph/model.test.ts (15 tests) 51ms
+ ✓ src/api/stream.test.ts (15 tests) 18ms
+ ✓ src/model/run.test.ts (15 tests) 24ms
+ ✓ src/model/thread.test.ts (15 tests) 45ms
+ ✓ src/model/conversationList.test.ts (21 tests) 80ms
+ ✓ src/graph/model.test.ts (15 tests) 31ms
 stderr | src/looks/classic/pages/live.test.tsx > Overview > updates from a delta without ever showing a spinner
 Warning: An update to ThBase inside a test was not wrapped in act(...).
 
@@ -685,6 +685,8 @@ This ensures that you're testing the behavior the user would see in the browser.
     at MemoryRouter (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
 
+ ✓ src/looks/classic/components/Blocks.test.tsx (21 tests) 431ms
+ ✓ src/graph/filter.test.ts (12 tests) 46ms
 stderr | src/looks/classic/pages/live.test.tsx > Queues > applies pushed queue state, with no request and no spinner
 Warning: An update to QueuesPage inside a test was not wrapped in act(...).
 
@@ -701,20 +703,20 @@ This ensures that you're testing the behavior the user would see in the browser.
     at MemoryRouter (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
 
- ✓ src/looks/classic/components/Blocks.test.tsx (21 tests) 347ms
- ✓ src/graph/filter.test.ts (12 tests) 33ms
- ✓ src/looks/classic/pages/NewConversation.test.tsx (21 tests) 629ms
- ✓ src/looks/workspace/conversations/Entries.test.tsx (15 tests) 542ms
- ✓ src/looks/workspace/pages/config/Config.test.tsx (12 tests) 573ms
- ✓ src/looks/classic/pages/chat/Timeline.test.tsx (24 tests) 416ms
- ✓ src/looks/classic/pages/chat/SelectionBar.test.tsx (13 tests) 689ms
- ✓ src/looks/workspace/pages/NewConversation.test.tsx (16 tests) 344ms
- ✓ src/looks/workspace/conversations/Row.test.tsx (7 tests) 333ms
- ✓ src/graph/shapes.test.ts (50 tests) 24ms
- ✓ src/looks/classic/pages/chat/ConversationRow.test.tsx (42 tests) 866ms
- ✓ src/theme/theme.test.tsx (11 tests) 336ms
- ✓ src/graph/replay.test.ts (10 tests) 21ms
- ✓ src/looks/workspace/conversations/Conversations.test.tsx (18 tests) 1457ms
+ ✓ src/looks/workspace/conversations/Entries.test.tsx (15 tests) 543ms
+ ✓ src/looks/workspace/pages/config/Config.test.tsx (12 tests) 591ms
+ ✓ src/looks/classic/pages/NewConversation.test.tsx (21 tests) 702ms
+ ✓ src/looks/classic/pages/chat/SelectionBar.test.tsx (13 tests) 718ms
+ ✓ src/looks/classic/pages/chat/Timeline.test.tsx (24 tests) 462ms
+ ✓ src/graph/shapes.test.ts (50 tests) 19ms
+ ✓ src/looks/workspace/pages/NewConversation.test.tsx (16 tests) 448ms
+ ✓ src/looks/workspace/conversations/Row.test.tsx (7 tests) 439ms
+ ✓ src/theme/theme.test.tsx (11 tests) 217ms
+ ✓ src/looks/classic/pages/chat/ConversationRow.test.tsx (42 tests) 1016ms
+ ✓ src/graph/replay.test.ts (10 tests) 23ms
+ ✓ src/looks/workspace/conversations/Conversations.test.tsx (18 tests) 1294ms
+ ✓ src/looks/workspace/pages/Overview.test.tsx (5 tests) 374ms
+ ✓ src/graph/Viewport.test.tsx (9 tests) 242ms
 stderr | src/looks/classic/pages/live.test.tsx > Topology > updates from a delta without a spinner, and keeps its timer for rates only
 Warning: An update to TopologyPage inside a test was not wrapped in act(...).
 
@@ -745,7 +747,7 @@ This ensures that you're testing the behavior the user would see in the browser.
     at MemoryRouter (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
 
- ✓ src/looks/workspace/conversations/Thread.test.tsx (32 tests) 1778ms
+ ✓ src/looks/workspace/conversations/Thread.test.tsx (32 tests) 1683ms
 stderr | src/looks/classic/pages/live.test.tsx > Topology > updates from a delta without a spinner, and keeps its timer for rates only
 Warning: An update to Popper inside a test was not wrapped in act(...).
 
@@ -1623,10 +1625,6 @@ This ensures that you're testing the behavior the user would see in the browser.
     at MemoryRouter (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
 
- ✓ src/looks/workspace/pages/Overview.test.tsx (5 tests) 442ms
-   ✓ workspace OverviewPage > draws every card, field and link 309ms
- ✓ src/model/tree.test.ts (12 tests) 11ms
- ✓ src/graph/Viewport.test.tsx (9 tests) 327ms
 stderr | src/looks/workspace/Shell.test.tsx > the workspace header > carries the look switcher, the colour scheme, the connection and who the viewer is
 Error: Uncaught [Error: No QueryClient set, use QueryClientProvider to set one]
     at reportException (/home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/jsdom/lib/jsdom/living/helpers/runtime-script-errors.js:66:24)
@@ -2036,11 +2034,9 @@ The above error occurred in the <OverviewPage> component:
 
 React will try to recreate this component tree from scratch using the error boundary you provided, Boundary.
 
- ✓ src/model/signals.test.ts (12 tests) 17ms
- ✓ src/graph/layout.test.ts (25 tests) 2221ms
-   ✓ compaction > leaves no two boxes and no two marks intersecting: model by bundle, cola 382ms
- ✓ src/Root.test.tsx (9 tests) 272ms
- ✓ src/looks/classic/pages/CloseConversations.test.tsx (6 tests) 324ms
+ ✓ src/model/tree.test.ts (12 tests) 13ms
+ ✓ src/model/signals.test.ts (12 tests) 21ms
+ ✓ src/Root.test.tsx (9 tests) 250ms
 stderr | src/looks/workspace/Shell.test.tsx > the workspace header > offers New conversation only where this console may start one
 Error: Uncaught [Error: No QueryClient set, use QueryClientProvider to set one]
     at reportException (/home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/jsdom/lib/jsdom/living/helpers/runtime-script-errors.js:66:24)
@@ -2275,6 +2271,8 @@ The above error occurred in the <OverviewPage> component:
 
 React will try to recreate this component tree from scratch using the error boundary you provided, Boundary.
 
+ ✓ src/graph/layout.test.ts (25 tests) 2206ms
+   ✓ compaction > leaves no two boxes and no two marks intersecting: model by bundle, cola 338ms
 stderr | src/looks/workspace/Shell.test.tsx > the navigation panel > picks a scope and opens the conversations page
 Error: Uncaught [Error: No QueryClient set, use QueryClientProvider to set one]
     at reportException (/home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/jsdom/lib/jsdom/living/helpers/runtime-script-errors.js:66:24)
@@ -2334,6 +2332,10 @@ The above error occurred in the <OverviewPage> component:
 
 React will try to recreate this component tree from scratch using the error boundary you provided, Boundary.
 
+ ✓ src/looks/classic/pages/Config.test.tsx (4 tests) 657ms
+   ✓ ConfigKindPage — the Signal kind > shows source, initiationId, phase, and filters by source and phase 474ms
+ ✓ src/looks/classic/pages/SignalRouting.test.tsx (9 tests) 400ms
+ ✓ src/looks/classic/pages/CloseConversations.test.tsx (6 tests) 325ms
 stderr | src/looks/workspace/Shell.test.tsx > the navigation panel > is put away from the header and announced as such
 Error: Uncaught [Error: No QueryClient set, use QueryClientProvider to set one]
     at reportException (/home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/jsdom/lib/jsdom/living/helpers/runtime-script-errors.js:66:24)
@@ -2393,12 +2395,9 @@ The above error occurred in the <OverviewPage> component:
 
 React will try to recreate this component tree from scratch using the error boundary you provided, Boundary.
 
- ✓ src/looks/classic/pages/Config.test.tsx (4 tests) 601ms
-   ✓ ConfigKindPage — the Signal kind > shows source, initiationId, phase, and filters by source and phase 409ms
- ✓ src/looks/classic/pages/SignalRouting.test.tsx (9 tests) 374ms
- ✓ src/looks/workspace/pages/Queues.test.tsx (3 tests) 230ms
- ✓ src/theme/useLook.test.ts (13 tests) 12ms
- ✓ src/api/blocks.test.ts (18 tests) 14ms
+ ✓ src/theme/useLook.test.ts (13 tests) 23ms
+ ✓ src/looks/workspace/pages/Queues.test.tsx (3 tests) 238ms
+ ✓ src/api/blocks.test.ts (18 tests) 11ms
 stderr | src/looks/classic/pages/live.test.tsx > the composer > sends and asks for nothing — the echo arrives on the stream
 Warning: An update to ConversationThread inside a test was not wrapped in act(...).
 
@@ -2424,12 +2423,14 @@ This ensures that you're testing the behavior the user would see in the browser.
     at MemoryRouter (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
 
- ✓ src/model/verbs.test.ts (9 tests) 16ms
- ✓ src/looks/classic/App.test.tsx (5 tests) 675ms
- ✓ src/looks/workspace/Shell.test.tsx (13 tests) 2457ms
-   ✓ the workspace header > carries the look switcher, the colour scheme, the connection and who the viewer is 452ms
-   ✓ the workspace header > offers sign-out where the console holds the session, and not behind an external authenticator 557ms
-   ✓ at tablet width > makes the navigation a drawer that opens from the header and closes on Escape 458ms
+ ✓ src/looks/classic/App.test.tsx (5 tests) 720ms
+ ✓ src/looks/workspace/Shell.test.tsx (13 tests) 2296ms
+   ✓ the workspace header > carries the look switcher, the colour scheme, the connection and who the viewer is 331ms
+   ✓ the workspace header > offers sign-out where the console holds the session, and not behind an external authenticator 464ms
+   ✓ at tablet width > makes the navigation a drawer that opens from the header and closes on Escape 416ms
+ ✓ src/looks/classic/pages/DeleteConversations.test.tsx (8 tests) 282ms
+ ✓ src/model/verbs.test.ts (9 tests) 11ms
+ ✓ src/graph/content.test.ts (6 tests) 10ms
 stderr | src/looks/classic/pages/live.test.tsx > the composer > sends and asks for nothing — the echo arrives on the stream
 Warning: An update to ConversationThread inside a test was not wrapped in act(...).
 
@@ -2455,12 +2456,12 @@ This ensures that you're testing the behavior the user would see in the browser.
     at MemoryRouter (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
 
- ✓ src/looks/classic/pages/chat/Inbox.test.tsx (5 tests) 322ms
- ✓ src/graph/content.test.ts (6 tests) 8ms
- ✓ src/looks/classic/pages/chat/ChatView.test.tsx (35 tests) 2990ms
- ✓ src/looks/classic/pages/chat/Splitter.test.tsx (5 tests) 89ms
- ✓ src/looks/classic/pages/DeleteConversations.test.tsx (8 tests) 238ms
- ✓ src/model/message.test.ts (7 tests) 12ms
+ ✓ src/looks/classic/pages/chat/Inbox.test.tsx (5 tests) 332ms
+ ✓ src/model/message.test.ts (7 tests) 8ms
+ ✓ src/looks/classic/pages/chat/Splitter.test.tsx (5 tests) 95ms
+ ✓ src/looks/classic/pages/chat/ChatView.test.tsx (35 tests) 3154ms
+ ✓ src/looks/workspace/layout.test.ts (5 tests) 24ms
+ ✓ src/graph/traffic.test.ts (6 tests) 13ms
 stderr | src/looks/classic/pages/live.test.tsx > a resync still replaces applied state wholesale > treats a reported history gap the same way, and keeps the gap visible
 Warning: An update to TopologyPage inside a test was not wrapped in act(...).
 
@@ -2477,7 +2478,7 @@ This ensures that you're testing the behavior the user would see in the browser.
     at MemoryRouter (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
 
- ✓ src/looks/workspace/layout.test.ts (5 tests) 13ms
+ ✓ src/looks/parity.config.test.tsx (3 tests) 483ms
 stderr | src/looks/classic/pages/live.test.tsx > after first paint, no event puts a page back into loading > holds its content on Queues
 Warning: An update to QueuesPage inside a test was not wrapped in act(...).
 
@@ -2494,8 +2495,6 @@ This ensures that you're testing the behavior the user would see in the browser.
     at MemoryRouter (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
 
- ✓ src/graph/traffic.test.ts (6 tests) 18ms
- ✓ src/looks/parity.config.test.tsx (3 tests) 386ms
 stderr | src/looks/classic/pages/live.test.tsx > after first paint, no event puts a page back into loading > holds its content on Topology
 Warning: An update to TopologyPage inside a test was not wrapped in act(...).
 
@@ -2966,9 +2965,6 @@ This ensures that you're testing the behavior the user would see in the browser.
     at MemoryRouter (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
 
- ✓ src/looks/classic/pages/chat/ThreadPane.test.tsx (52 tests) 3647ms
-   ✓ secondary views replace the transcript in place > switches to Runs and back — a plain pipeline conversation is unchanged 402ms
-   ✓ closing from the composer asks first (item 22) > "don't ask again" is remembered — a later /close sends straight away 318ms
 stderr | src/looks/classic/pages/live.test.tsx > after first paint, no event puts a page back into loading > holds its content on Conversations
 Warning: An update to ChatView inside a test was not wrapped in act(...).
 
@@ -2987,7 +2983,8 @@ This ensures that you're testing the behavior the user would see in the browser.
     at MemoryRouter (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
 
- ✓ src/boundary.test.ts (8 tests) 24ms
+ ✓ src/looks/workspace/conversations/CopyButton.test.tsx (3 tests) 196ms
+ ✓ src/looks/classic/components/Yaml.test.tsx (7 tests) 189ms
 stderr | src/looks/classic/pages/live.test.tsx > after first paint, no event puts a page back into loading > holds its content on Conversation
 Warning: An update to ThreadPane inside a test was not wrapped in act(...).
 
@@ -3128,15 +3125,21 @@ This ensures that you're testing the behavior the user would see in the browser.
     at MemoryRouter (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
 
- ✓ src/looks/classic/pages/live.test.tsx (17 tests) 5273ms
-   ✓ Overview > updates from a delta without ever showing a spinner 714ms
-   ✓ Topology > updates from a delta without a spinner, and keeps its timer for rates only 1688ms
-   ✓ the Conversations list > shows a conversation appearing, changing phase and being deleted, in place 867ms
-   ✓ the composer > sends and asks for nothing — the echo arrives on the stream 340ms
- ✓ src/looks/workspace/conversations/CopyButton.test.tsx (3 tests) 200ms
- ✓ src/looks/classic/components/Yaml.test.tsx (7 tests) 288ms
- ✓ src/looks/classic/components/Text.test.tsx (10 tests) 164ms
- ✓ src/model/runStats.test.ts (6 tests) 10ms
+ ✓ src/looks/classic/pages/live.test.tsx (17 tests) 4969ms
+   ✓ Overview > updates from a delta without ever showing a spinner 770ms
+   ✓ Topology > updates from a delta without a spinner, and keeps its timer for rates only 1544ms
+   ✓ the Conversations list > shows a conversation appearing, changing phase and being deleted, in place 739ms
+   ✓ the composer > sends and asks for nothing — the echo arrives on the stream 426ms
+ ✓ src/looks/classic/pages/chat/ThreadPane.test.tsx (52 tests) 3527ms
+   ✓ secondary views replace the transcript in place > switches to Runs and back — a plain pipeline conversation is unchanged 365ms
+   ✓ closing from the composer asks first (item 22) > "don't ask again" is remembered — a later /close sends straight away 319ms
+ ✓ src/boundary.test.ts (8 tests) 20ms
+ ✓ src/model/testids.test.ts (5 tests) 10ms
+ ✓ src/model/runStats.test.ts (6 tests) 7ms
+ ✓ src/looks/classic/components/Text.test.tsx (10 tests) 104ms
+ ✓ src/looks/classic/pages/chat/layout.test.ts (5 tests) 8ms
+ ✓ src/looks/shared/LookSwitcher.test.tsx (4 tests) 200ms
+ ✓ src/model/closeConfirm.test.ts (6 tests) 8ms
 stderr | src/api/queryClient.test.tsx > the cache is bounded > never re-reads a view that is held on screen
 Warning: An update to TestComponent inside a test was not wrapped in act(...).
 
@@ -3152,60 +3155,54 @@ This ensures that you're testing the behavior the user would see in the browser.
     at QueryClientProvider (file:///home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
     at /home/kostya/Projects/agent-ops-worktrees/console-visual-refresh/platform/console/ui/src/api/queryClient.test.tsx:250:13
 
- ✓ src/api/queryClient.test.tsx (5 tests) 187ms
- ✓ src/looks/classic/pages/chat/layout.test.ts (5 tests) 12ms
- ✓ src/model/closeConfirm.test.ts (6 tests) 15ms
- ✓ src/model/testids.test.ts (5 tests) 14ms
- ✓ src/graph/layout/curve.test.ts (4 tests) 7ms
- ✓ src/looks/classic/pages/chat/RowMenu.test.tsx (6 tests) 672ms
- ✓ src/looks/shared/LookSwitcher.test.tsx (4 tests) 363ms
- ✓ src/model/coordinator.test.ts (5 tests) 58ms
- ✓ src/api/hooks.test.ts (2 tests) 21ms
- ✓ src/looks/workspace/tokens.test.ts (3 tests) 25ms
- ✓ src/model/sequence.test.ts (3 tests) 8ms
- ✓ src/looks/parity.overview-queues.test.tsx (2 tests) 151ms
- ✓ src/looks/classic/pages/chat/QuickChips.test.tsx (4 tests) 249ms
- ✓ src/looks/classic/pages/chat/format.test.ts (13 tests) 9ms
- ✓ src/looks/classic/components/PipelineName.test.tsx (2 tests) 66ms
+ ✓ src/looks/classic/pages/chat/RowMenu.test.tsx (6 tests) 507ms
+ ✓ src/api/queryClient.test.tsx (5 tests) 186ms
+ ✓ src/model/coordinator.test.ts (5 tests) 31ms
+ ✓ src/graph/layout/curve.test.ts (4 tests) 6ms
+ ✓ src/api/hooks.test.ts (2 tests) 13ms
+ ✓ src/looks/parity.overview-queues.test.tsx (2 tests) 138ms
+ ✓ src/model/sequence.test.ts (3 tests) 6ms
+ ✓ src/looks/workspace/tokens.test.ts (3 tests) 6ms
+ ✓ src/looks/classic/pages/chat/QuickChips.test.tsx (4 tests) 120ms
+ ✓ src/looks/classic/pages/chat/format.test.ts (13 tests) 5ms
+ ✓ src/looks/classic/components/PipelineName.test.tsx (2 tests) 51ms
+ ✓ src/looks/classic/pages/chat/GeneralFeedPane.test.tsx (4 tests) 127ms
  ✓ src/model/text.test.ts (4 tests) 7ms
- ✓ src/looks/classic/pages/chat/motion.test.ts (3 tests) 5ms
- ✓ src/looks/classic/pages/Overview.test.tsx (2 tests) 209ms
- ✓ src/looks/classic/pages/chat/composerIntent.test.ts (2 tests) 5ms
- ✓ src/looks/classic/pages/chat/GeneralFeedPane.test.tsx (4 tests) 112ms
- ✓ src/looks/classic/pages/History.test.tsx (1 test) 116ms
- ✓ src/looks/classic/pages/chat/listKeyAction.test.ts (5 tests) 2ms
- ✓ src/looks/registry.test.ts (4 tests) 1674ms
-   ✓ the look registry > loads each look as a shell and every page of the contract 1667ms
- ✓ src/looks/workspace/pages/topology/Topology.test.tsx (21 tests) 7791ms
-   ✓ the page > draws the crumb, the graph and the History card, in that order 793ms
-   ✓ the page > stays quiet about the buffer while it covers the window 525ms
-   ✓ the page > tells a missing metrics backend from one that cannot extend edge rates 679ms
-   ✓ the page > warns that a disconnected stream animates nothing, and names a gap in the record 350ms
-   ✓ the page > names the pipelines the console is not joined to 324ms
-   ✓ the History card > folds to its title from the same chevron 303ms
-   ✓ the History card > says no metrics backend is configured, and draws no chart 351ms
-   ✓ the History card > loads, fails and runs dry per chart, each saying so 1001ms
-   ✓ the History card > draws an aggregate line per series, labelled 453ms
-   ✓ the toolbar > lists the pipelines and narrows the picture to the ones ticked 1031ms
-   ✓ the toolbar > changes the window and the layout through the display store 317ms
- ✓ src/looks/workspace/pages/topology/Graph.test.tsx (23 tests) 5025ms
-   ✓ the three views > draws the Model, and switches to Components and Infrastructure 631ms
-   ✓ the display control > keeps each view's own classes 414ms
-   ✓ an Infrastructure pod > opens into its containers and collapses again 361ms
- ✓ src/graph/Graph.test.tsx (23 tests) 6218ms
-   ✓ the three views > draws the Model, and switches to Components and Infrastructure 724ms
-   ✓ the display control > keeps each view's own classes 562ms
-   ✓ the display control > still reports a failure it hides 320ms
-   ✓ the display control > removes idle elements and counts them 307ms
-   ✓ scope > scopes to an element's route, names it, and returns without a reload 327ms
-   ✓ an Infrastructure pod > opens into its containers and collapses again 415ms
-   ✓ replay > replays a window and admits what the buffer does not hold 326ms
-   ✓ replay > replays one conversation, dimming what its run did not touch 368ms
-   ✓ replay > advances a frame a second at the fastest speed, and pausing keeps the frame 314ms
-   ✓ the side panels > folds the column to a strip and brings it back from the same place, and a selection still shows 312ms
+ ✓ src/looks/classic/pages/chat/composerIntent.test.ts (2 tests) 3ms
+ ✓ src/looks/classic/pages/Overview.test.tsx (2 tests) 145ms
+ ✓ src/looks/classic/pages/chat/motion.test.ts (3 tests) 2ms
+ ✓ src/looks/classic/pages/History.test.tsx (1 test) 84ms
+ ✓ src/looks/classic/pages/chat/listKeyAction.test.ts (5 tests) 3ms
+ ✓ src/looks/registry.test.ts (4 tests) 1318ms
+   ✓ the look registry > loads each look as a shell and every page of the contract 1313ms
+ ✓ src/looks/workspace/pages/topology/Topology.test.tsx (21 tests) 6839ms
+   ✓ the page > draws the crumb, the graph and the History card, in that order 727ms
+   ✓ the page > stays quiet about the buffer while it covers the window 464ms
+   ✓ the page > tells a missing metrics backend from one that cannot extend edge rates 670ms
+   ✓ the page > names the pipelines the console is not joined to 327ms
+   ✓ the History card > folds to its title from the same chevron 385ms
+   ✓ the History card > says no metrics backend is configured, and draws no chart 317ms
+   ✓ the History card > loads, fails and runs dry per chart, each saying so 793ms
+   ✓ the toolbar > lists the pipelines and narrows the picture to the ones ticked 797ms
+   ✓ the toolbar > changes the window and the layout through the display store 320ms
+ ✓ src/looks/workspace/pages/topology/Graph.test.tsx (23 tests) 4814ms
+   ✓ the three views > draws the Model, and switches to Components and Infrastructure 632ms
+   ✓ the display control > keeps each view's own classes 440ms
+   ✓ an Infrastructure pod > opens into its containers and collapses again 330ms
+ ✓ src/graph/Graph.test.tsx (23 tests) 6426ms
+   ✓ the three views > draws the Model, and switches to Components and Infrastructure 600ms
+   ✓ the display control > keeps each view's own classes 596ms
+   ✓ the display control > still reports a failure it hides 353ms
+   ✓ the display control > removes idle elements and counts them 326ms
+   ✓ scope > scopes to an element's route, names it, and returns without a reload 374ms
+   ✓ an Infrastructure pod > opens into its containers and collapses again 461ms
+   ✓ replay > replays a window and admits what the buffer does not hold 349ms
+   ✓ replay > replays one conversation, dimming what its run did not touch 375ms
+   ✓ replay > advances a frame a second at the fastest speed, and pausing keeps the frame 326ms
+   ✓ the side panels > folds the column to a strip and brings it back from the same place, and a selection still shows 305ms
 
  Test Files  79 passed (79)
       Tests  917 passed (917)
-   Start at  00:27:46
-   Duration  16.01s (transform 10.24s, setup 6.19s, collect 53.37s, tests 53.34s, environment 42.33s, prepare 8.33s)
+   Start at  00:36:25
+   Duration  14.79s (transform 9.19s, setup 5.84s, collect 48.29s, tests 51.14s, environment 38.46s, prepare 6.73s)
 

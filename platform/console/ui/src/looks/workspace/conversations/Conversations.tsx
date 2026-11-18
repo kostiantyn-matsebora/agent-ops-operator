@@ -265,7 +265,11 @@ function ListPane({ current, collapsed }: Readonly<{ current?: string; collapsed
         {list.data && list.rows.length === 0 && (
           <li className="wk-empty">
             <h2>No conversations match</h2>
-            {list.data.total > 0 ? 'Every conversation was filtered out.' : 'Nothing has started a conversation yet.'}
+            {list.data.total === 0
+              ? 'Nothing has started a conversation yet.'
+              : showClosed
+                ? 'Every conversation was filtered out.'
+                : 'Every conversation here is closed, and closed ones are hidden: turn on Show closed.'}
           </li>
         )}
         {list.rows.map((t) => (
