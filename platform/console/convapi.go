@@ -100,7 +100,9 @@ func parseFilter(r *http.Request) ConversationFilter {
 	return f
 }
 
-// conversationPageSize bounds one page.
+// conversationPageSize bounds one page — counted in TREES (a root with every
+// conversation under it), never in rows: a page cut at N rows separated a
+// coordinator from the members the list draws beneath it.
 const conversationPageSize = 50
 
 // parsePaging reads the page window: limit (1..500, default one page) and a
@@ -145,6 +147,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	// answer — which is the behaviour before per-identity marks existed.
 	reader := a.adapter.ReaderKey(Identity(r))
 	var all []ConversationSummary
+	parents := map[string]string{}
 	unreadTotal := 0
 	rootTotal := 0
 	scopes := map[string]int{}
@@ -175,6 +178,9 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		if s.Unread && !isMember(s) && closedVisible {
 			unreadTotal++
 		}
+		if s.CausedBy != nil {
+			parents[s.Name] = s.CausedBy.Parent
+		}
 		if filter.matches(s, 0) {
 			all = append(all, s)
 		}
@@ -196,17 +202,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if offset > total {
-		offset = total
-	}
-	end := offset + limit
-	if end > total {
-		end = total
-	}
-	page := all[offset:end]
-	if page == nil {
-		page = []ConversationSummary{}
-	}
+	page := pageByTree(all, parents, offset, limit)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": page, "total": total, "rootTotal": rootTotal, "offset": offset, "limit": limit,
 		"unreadTotal": unreadTotal,
@@ -1264,4 +1260,43 @@ func (a *API) handleReopen(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("console write: action=reopen identity=%s conversation=%s", Identity(r), name)
 	writeJSON(w, http.StatusOK, map[string]string{"outcome": "reopened", "name": name})
+}
+
+// pageByTree returns the limit trees starting at offset, every row of each.
+// A tree is a root and everything its members descend from it; trees are
+// ordered by their most recently active row (rows arrive newest first), and a
+// row whose parent is not known stands as its own tree. offset and limit count
+// trees — the rows of one are never split across two pages.
+func pageByTree(rows []ConversationSummary, parents map[string]string, offset, limit int) []ConversationSummary {
+	rootOf := func(name string) string {
+		for hop := 0; hop < 64; hop++ {
+			p, ok := parents[name]
+			if !ok {
+				break
+			}
+			name = p
+		}
+		return name
+	}
+	var order []string
+	trees := map[string][]ConversationSummary{}
+	for _, r := range rows {
+		root := rootOf(r.Name)
+		if _, seen := trees[root]; !seen {
+			order = append(order, root)
+		}
+		trees[root] = append(trees[root], r)
+	}
+	if offset > len(order) {
+		offset = len(order)
+	}
+	end := offset + limit
+	if end > len(order) {
+		end = len(order)
+	}
+	page := []ConversationSummary{}
+	for _, root := range order[offset:end] {
+		page = append(page, trees[root]...)
+	}
+	return page
 }
