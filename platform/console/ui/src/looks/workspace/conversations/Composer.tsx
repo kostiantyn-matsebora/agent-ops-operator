@@ -1,4 +1,4 @@
-import { type FormEvent, type KeyboardEvent, type ReactElement, useRef, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, type ReactElement, useEffect, useRef, useState } from 'react'
 import type { VocabularyEntry } from '../../../api/types'
 import { matchEntries } from '../../../model/slash'
 import { TESTID } from '../../../model/testids'
@@ -13,18 +13,26 @@ const CHIP_HINT: Record<string, string> = {
 }
 
 export function Composer({
-  onSend, onCommand, vocabulary = [], disabled,
+  onSend, onCommand, vocabulary = [], disabled, insert,
 }: Readonly<{
   onSend: (text: string) => void
   /** Runs a thread command at once, never by writing it into the box. */
   onCommand?: (command: '/exit' | '/close') => void
   vocabulary?: VocabularyEntry[]
   disabled?: boolean
+  /** Text an offered choice puts in the box; a new `n` replaces the draft and focuses it. */
+  insert?: { text: string; n: number }
 }>): ReactElement {
   const [text, setText] = useState('')
   const [dismissed, setDismissed] = useState(false)
   const [cursor, setCursor] = useState(0)
   const box = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!insert) return
+    setText(insert.text)
+    setDismissed(true)
+    requestAnimationFrame(() => box.current?.focus())
+  }, [insert])
   const options = dismissed ? null : matchEntries(text, vocabulary, 'thread')
   const active = options ? Math.min(cursor, options.length - 1) : 0
   const chips = onCommand ? vocabulary.filter((e) => e.kind === 'builtin' && e.position === 'thread') : []

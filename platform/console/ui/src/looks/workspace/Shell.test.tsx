@@ -24,6 +24,7 @@ vi.mock('../../model/session', () => ({
   useConsoleSession: () => ({ ...session, refetch: vi.fn() }),
   useLiveStream: () => connection === 'connected',
   signIn: vi.fn(async () => true),
+  signOut: vi.fn(async () => undefined),
 }))
 vi.mock('../../model/actions', async (importOriginal) => {
   const idle = { mutate: () => undefined, isPending: false, reset: () => undefined, data: undefined, error: null }
@@ -97,7 +98,11 @@ describe('the workspace header', () => {
     expect(within(header).getByText('dana@example.com')).toBeInTheDocument()
   })
 
-  it('shows no sign-out control', () => {
+  it('offers sign-out where the console holds the session, and not behind an external authenticator', () => {
+    const { unmount } = mount()
+    expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
+    unmount()
+    session = { data: { ...SESSION, authMode: 'external' }, isLoading: false }
     mount()
     expect(screen.queryByRole('button', { name: /sign out/i })).toBeNull()
   })

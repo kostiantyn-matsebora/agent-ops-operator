@@ -73,3 +73,17 @@ export function copyText(m: Message, conversation?: Pick<ConversationSummary, 's
   if (m.payload) parts.push(fence(m.payload))
   return parts.filter(Boolean).join('\n\n')
 }
+
+/** The kinds that count toward unread: what a person has to read. */
+export const COUNTED_KINDS: ReadonlySet<string> = new Set(['signal', 'agent', 'relay'])
+
+/**
+ * The first message the viewer has not read: the first counted one after their
+ * read watermark. Absent when there is no watermark (a shared token keeps
+ * none) or everything was read.
+ */
+export function firstUnreadId(messages: Message[], readAt: string | undefined): string | undefined {
+  const watermark = readAt ? Date.parse(readAt) : undefined
+  if (watermark === undefined || Number.isNaN(watermark)) return undefined
+  return messages.find((m) => m.kind !== 'ack' && COUNTED_KINDS.has(m.kind) && Date.parse(m.at) > watermark)?.id
+}

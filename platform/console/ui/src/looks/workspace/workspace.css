@@ -2212,3 +2212,77 @@ html[data-look='workspace'] #root {
 .wk-tbl td.wk-num {
   white-space: nowrap;
 }
+
+/* ---- a failed action on a row, offered choices, notices ------------------ */
+
+.wk-cmdfail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  position: relative;
+  z-index: 1;
+}
+
+.wk-cmdfail .wk-lnk {
+  font-size: 12px;
+}
+
+.wk-choices {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.wk-choices .stale {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--ao-border);
+  color: var(--ao-text-subtle);
+}
+
+.wk-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 14px 0;
+  flex: none;
+}
+
+.wk-notices .wk-alert {
+  margin: 0;
+}
+
+.wk-fix {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.wk-fix code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 4px 8px;
+  background: var(--ao-surface-alt);
+  border-radius: var(--wk-radius-sm);
+}
+
+.wk-fix .wk-cp {
+  position: static;
+  opacity: 1;
+}
+
+.wk-pmark {
+  display: inline-block;
+  vertical-align: -2px;
+  margin-right: 6px;
+  width: 1.1em;
+  height: 1.1em;
+  object-fit: contain;
+}

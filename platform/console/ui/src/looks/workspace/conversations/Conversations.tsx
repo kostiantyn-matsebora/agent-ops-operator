@@ -2,9 +2,10 @@ import { type CSSProperties, type ReactElement, useEffect, useMemo, useRef, useS
 import { useNavigate, useParams } from 'react-router-dom'
 import type { ConversationSummary } from '../../../api/types'
 import {
-  rowUnread, sameScope, scopeKey, useArrivals, useConversationList, useInboxScopes, type Scope,
+  listKeyAction, neighbourName, rowUnread, sameScope, scopeKey, useArrivals, useConversationList, useInboxScopes, type Scope,
 } from '../../../model/conversationList'
 import { useMarkRead, useMarkUnread, useReopen } from '../../../model/actions'
+import { rowCommand, useCommands } from '../../../model/commands'
 import { GENERAL_FEED_NAME, useConsoleSession } from '../../../model/session'
 import { TESTID } from '../../../model/testids'
 import { exitRuntime } from '../../../model/verbs'
@@ -99,6 +100,7 @@ function ListPane({ current, collapsed }: Readonly<{ current?: string; collapsed
   const session = useConsoleSession()
   const canWrite = Boolean(session.data?.canWrite)
   const hasReader = Boolean(session.data?.identity)
+  const commands = useCommands()
   const reopen = useReopen()
   const markRead = useMarkRead()
   const markUnread = useMarkUnread()
@@ -235,7 +237,24 @@ function ListPane({ current, collapsed }: Readonly<{ current?: string; collapsed
           onDone={stopSelecting}
         />
       )}
-      <ul className="wk-rows" aria-label={scopeTitle(scope)}>
+      <ul
+        className="wk-rows"
+        aria-label={scopeTitle(scope)}
+        onKeyDown={(e) => {
+          // Arrows move between rows, Enter opens the focused one (a link does so natively),
+          // Escape ends a selection.
+          const links = [...e.currentTarget.querySelectorAll<HTMLAnchorElement>('.wk-row .open')]
+          const here = links.findIndex((l) => l === document.activeElement)
+          const action = listKeyAction(e.key, links.length, here >= 0 ? String(here) : undefined)
+          if (action === 'clear') {
+            if (selecting) stopSelecting()
+          } else if (action === 'down' || action === 'up') {
+            e.preventDefault()
+            const next = neighbourName(links.map((_, i) => String(i)), here >= 0 ? String(here) : undefined, action === 'down')
+            links[Number(next)]?.focus()
+          }
+        }}
+      >
         {list.isLoading && !list.data && <li className="wk-empty" aria-busy="true">Loading conversations…</li>}
         {Boolean(list.error) && !list.data && (
           <li className="wk-empty">
@@ -259,6 +278,15 @@ function ListPane({ current, collapsed }: Readonly<{ current?: string; collapsed
             onToggleFold={() => toggle(t.row.name)}
             actions={rowActions(t.row, deps)}
             iconOnly={collapsed}
+            command={rowCommand(commands.latest(t.row.name))}
+            onRetry={() => {
+              const c = commands.latest(t.row.name)
+              if (c) void commands.retry(c.id)
+            }}
+            onDismissCommand={() => {
+              const c = commands.latest(t.row.name)
+              if (c) commands.dismiss(c.id)
+            }}
             onMultiSelect={collapsed ? undefined : () => deps.select(t.row.name)}
             selection={selecting && !collapsed ? { selected: selected.has(t.row.name), onToggle: () => toggleSelected(t.row.name) } : undefined}
           />

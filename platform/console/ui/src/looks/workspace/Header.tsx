@@ -10,8 +10,9 @@ import { Icon } from './icons'
 // THE HEADER: the navigation's menu button, the mark, the connection and the
 // work in flight, who the viewer is, the look and the colour scheme. A control
 // appears only where it does something in this deployment
-// (console-workspace-look) — so no sign-out: under a shared token there is no
-// session for it to end (design, open questions).
+// (console-workspace-look): sign-out is shown only where the console holds the
+// session it would end, never behind an external authenticator, where it would
+// clear a cookie that authorized nothing.
 
 const SCHEMES: { id: ThemeChoice; glyph: string; label: string }[] = [
   { id: 'light', glyph: '☀', label: 'Light' },
@@ -49,10 +50,12 @@ export function SchemeControl(): ReactElement {
 }
 
 export function Header({
-  session, connection, inFlight, navOpen, onMenu, onNew, compact,
+  session, connection, inFlight, navOpen, onMenu, onNew, onSignOut, compact,
 }: Readonly<{
   /** Absent where this console cannot start a conversation. */
   onNew?: () => void
+  /** Ends the session — offered only where the console holds one. */
+  onSignOut?: () => void
   session: Session
   connection: Connection
   inFlight: number
@@ -116,6 +119,11 @@ export function Header({
       </span>
       <LookSwitcher className="wk-look" />
       <SchemeControl />
+      {onSignOut && (
+        <button type="button" className="wk-btn" onClick={onSignOut}>
+          Sign out
+        </button>
+      )}
     </header>
   )
 }

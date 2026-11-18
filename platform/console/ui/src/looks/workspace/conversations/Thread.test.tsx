@@ -305,3 +305,54 @@ describe('the runs tab', () => {
     expect(screen.queryByTestId('run-tokens')).toBeNull()
   })
 })
+
+describe('what the classic thread shows that the workspace thread must too', () => {
+  it('offers the latest message\u2019s choices as buttons that fill the reply box, and shows older ones as spent', async () => {
+    mount({
+      messages: [
+        { ...msg('a', 'agent', '2025-06-10T22:05:00Z'), choices: [{ label: 'Old', command: '/old' }] },
+        { ...msg('b', 'agent', '2025-06-10T22:06:00Z'), choices: [{ label: 'Reload', command: '/reload' }] },
+      ],
+    })
+    expect(screen.getAllByTestId('choices')).toHaveLength(1)
+    expect(screen.getByRole('list', { name: /no longer actionable/ })).toHaveTextContent('Old')
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    expect(screen.getByRole('textbox', { name: 'message' })).toHaveValue('/reload ')
+  })
+
+  it('shows no actionable choices to a viewer who cannot write', () => {
+    mount({ canWrite: false, messages: [{ ...msg('b', 'agent', '2025-06-10T22:06:00Z'), choices: [{ label: 'Reload', command: '/reload' }] }] })
+    expect(screen.queryByTestId('choices')).toBeNull()
+  })
+
+  it('divides what the viewer had not read from what they had', () => {
+    mount({ unreadFrom: 'b', messages: [msg('a', 'agent', '2025-06-10T22:05:00Z'), msg('b', 'agent', '2025-06-10T22:06:00Z')] })
+    const order = [...document.querySelectorAll(`[data-testid="${TESTID.message}"], [data-testid="unread-divider"]`)].map((n) => n.getAttribute('data-id') ?? 'divider')
+    expect(order).toEqual(['a', 'divider', 'b'])
+  })
+
+  it('says a conversation has no console thread, with the command that joins one', () => {
+    mount({ joinHint: { reason: 'no binding', fix: 'kubectl patch x' } })
+    expect(screen.getByTestId(TESTID.joinHintFix)).toHaveTextContent('kubectl patch x')
+    expect(screen.getByText('This conversation has no console thread')).toBeInTheDocument()
+  })
+
+  it('says a thread was archived', () => {
+    mount({ archived: true })
+    expect(screen.getByTestId('archived')).toBeInTheDocument()
+  })
+
+  it('names the channels a reply also reaches, and draws the pipeline\u2019s icon', () => {
+    mount({ conversation: conv({ threads: [{ channel: 'console' }, { channel: 'home-telegram' }] } as Partial<ConversationSummary>), pipelineIcon: '🛠' })
+    expect(screen.getByTestId('bound-channels')).toHaveTextContent('console · home-telegram')
+    expect(screen.getByRole('heading', { name: /disk pressure/ }).querySelector('.wk-pmark')).not.toBeNull()
+  })
+
+  it('says why a reply was not sent, until it is dismissed', async () => {
+    let dismissed = false
+    mount({ sendFailure: { error: 'manager unreachable', onDismiss: () => { dismissed = true } } })
+    expect(screen.getByRole('alert')).toHaveTextContent('Not sent — manager unreachable')
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(dismissed).toBe(true)
+  })
+})

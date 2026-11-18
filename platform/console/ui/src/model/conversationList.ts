@@ -318,3 +318,22 @@ export function useArrivals(data: { items: ConversationSummary[] } | undefined, 
   const clear = (name: string) => setNewNames((prev) => dropName(prev, name))
   return { newNames, clear }
 }
+
+export type ListKeyAction = 'clear' | 'open' | 'down' | 'up' | 'none'
+
+/** What a key does on the list: Escape clears, arrows move, Enter opens the highlighted row. */
+export function listKeyAction(key: string, rowCount: number, highlighted: string | undefined): ListKeyAction {
+  if (key === 'Escape') return 'clear'
+  if (rowCount === 0) return 'none'
+  if (key === 'Enter') return highlighted ? 'open' : 'none'
+  if (key === 'ArrowDown') return 'down'
+  if (key === 'ArrowUp') return 'up'
+  return 'none'
+}
+
+/** The row an arrow key lands on, clamped at both ends. */
+export function neighbourName(names: string[], current: string | undefined, down: boolean): string {
+  const idx = current ? names.indexOf(current) : -1
+  const next = down ? Math.min(idx + 1, names.length - 1) : Math.max(idx - 1, 0)
+  return names[Math.max(next, 0)]
+}

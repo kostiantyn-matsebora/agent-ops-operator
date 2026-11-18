@@ -83,23 +83,8 @@ function ListBody({
  * since there is no server-side "exclude closed" param to ask for instead.
  */
 /** The row an arrow key lands on, clamped to the list's ends. */
-function neighbourName(names: string[], current: string | undefined, down: boolean): string {
-  const idx = current ? names.indexOf(current) : -1
-  const next = down ? Math.min(idx + 1, names.length - 1) : Math.max(idx - 1, 0)
-  return names[Math.max(next, 0)]
-}
-
-type ListKeyAction = 'clear' | 'open' | 'down' | 'up' | 'none'
-
-/** What a key does on the list: Escape clears, arrows move, Enter opens the highlighted row. */
-export function listKeyAction(key: string, rowCount: number, highlighted: string | undefined): ListKeyAction {
-  if (key === 'Escape') return 'clear'
-  if (rowCount === 0) return 'none'
-  if (key === 'Enter') return highlighted ? 'open' : 'none'
-  if (key === 'ArrowDown') return 'down'
-  if (key === 'ArrowUp') return 'up'
-  return 'none'
-}
+export { listKeyAction, neighbourName } from '../../../../model/conversationList'
+import { listKeyAction, neighbourName } from '../../../../model/conversationList'
 
 /** A modifier-click on a row toggles its selection instead of opening it. */
 function isMultiSelectClick(e: React.MouseEvent | undefined): boolean {

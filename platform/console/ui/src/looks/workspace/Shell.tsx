@@ -2,7 +2,7 @@ import { Component, type CSSProperties, type ReactElement, type ReactNode, useEf
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import type { Session } from '../../api/types'
 import { useCommands } from '../../model/commands'
-import { useConsoleSession, useLiveStream } from '../../model/session'
+import { signOut, useConsoleSession, useLiveStream } from '../../model/session'
 import { TESTID } from '../../model/testids'
 import { ConversationsPage } from './conversations/Conversations'
 import { Header } from './Header'
@@ -58,6 +58,7 @@ function Workspace({ session }: Readonly<{ session: Session }>): ReactElement {
   const commands = useCommands()
   const arrangement = useArrangement()
   const layout = useWorkspaceLayout()
+  const sessionQuery = useConsoleSession()
   const { pathname } = useLocation()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [newOpen, setNewOpen] = useState(false)
@@ -88,6 +89,7 @@ function Workspace({ session }: Readonly<{ session: Session }>): ReactElement {
         compact={arrangement === 'single'}
         onMenu={() => (drawer ? setDrawerOpen((v) => !v) : layout.update({ navHidden: !layout.navHidden }))}
         onNew={session.canOriginate ? () => setNewOpen(true) : undefined}
+        onSignOut={session.authMode !== 'external' ? () => void signOut().then(() => sessionQuery.refetch()) : undefined}
       />
       <div
         className="wk-cols"

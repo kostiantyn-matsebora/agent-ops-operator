@@ -299,3 +299,41 @@ export function useCommands() {
     }
   }, [commands, connected])
 }
+
+/** What each verb is doing while it is awaiting its outcome, as the row names it. */
+export const VERB_PROGRESS: Readonly<Record<Verb, string>> = {
+  send: 'sending', start: 'starting', exit: 'releasing', close: 'closing', reopen: 'reopening',
+  delete: 'deleting', markRead: 'marking read', markUnread: 'marking unread',
+}
+
+/** What a failed verb did not do, as a short line for a row. */
+export const VERB_FAILED: Readonly<Record<Verb, string>> = {
+  send: 'Not sent', start: 'Not started', exit: 'Not released', close: 'Not closed', reopen: 'Not reopened',
+  delete: 'Not deleted', markRead: 'Not marked read', markUnread: 'Not marked unread',
+}
+
+export interface RowCommand {
+  id: number
+  kind: 'progress' | 'failed'
+  /** `closing…`, or `Not closed`. */
+  label: string
+  /** The server's own words for a failure. */
+  error?: string
+  retryable: boolean
+}
+
+/**
+ * What a conversation's row says about the newest action on it: the verb in
+ * progress, or why it did not happen. A reply is not a row's business — the
+ * thread shows it. Absent once the action is done.
+ */
+export function rowCommand(c: Command | undefined): RowCommand | undefined {
+  if (!c || c.verb === 'send') return undefined
+  if (c.state === 'sending' || c.state === 'accepted') {
+    return { id: c.id, kind: 'progress', label: `${VERB_PROGRESS[c.verb]}…`, retryable: false }
+  }
+  if (c.state === 'failed') {
+    return { id: c.id, kind: 'failed', label: VERB_FAILED[c.verb], error: c.error, retryable: c.retryable }
+  }
+  return undefined
+}

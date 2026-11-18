@@ -9,6 +9,7 @@ import { parse } from '../../../../api/blocks'
 import { fence } from '../../../../api/fence'
 import type { ActivityEvent, Choice, Message } from '../../../../api/types'
 import { groupRunEvents, runEventLabel, type RunGroup } from '../../../../model/run'
+import { firstUnreadId } from '../../../../model/message'
 import { TESTID } from '../../../../model/testids'
 
 // Ported from `prototype/C-rail.html` and `States.html` ("In the thread") —
@@ -19,7 +20,6 @@ import { TESTID } from '../../../../model/testids'
 // SECOND statement of the same rule, which `invariants.md`'s "parse markdown
 // twice" note already accepts as the cost of a wire that carries no parsed
 // structure.
-const COUNTED_KINDS = new Set(['signal', 'agent', 'relay'])
 
 // Run lifecycle events are grouped and labelled by the run model
 // (model/run.ts); this file draws each group as its own inline line.
@@ -201,12 +201,7 @@ export function Timeline({
   // moved past, so they degrade even if nothing newer offered any of its own.
   const latestMessageId = messages.at(-1)?.id
   const runGroups = useMemo(() => groupRunEvents(events), [events])
-  const watermark = readAt ? Date.parse(readAt) : undefined
-  const firstUnreadId = useMemo(() => {
-    if (watermark === undefined) return undefined
-    const hit = bodyMessages.find((m) => COUNTED_KINDS.has(m.kind) && Date.parse(m.at) > watermark)
-    return hit?.id
-  }, [bodyMessages, watermark])
+  const firstUnread = useMemo(() => firstUnreadId(bodyMessages, readAt), [bodyMessages, readAt])
 
   const listRef = useRef<HTMLDivElement>(null)
   const dividerRef = useRef<HTMLDivElement>(null)
@@ -223,7 +218,7 @@ export function Timeline({
     if (!el) return
     const grew = bodyMessages.length > lastCount.current
     lastCount.current = bodyMessages.length
-    if (dividerRef.current && firstUnreadId) {
+    if (dividerRef.current && firstUnread) {
       dividerRef.current.scrollIntoView?.({ block: 'start' })
       return
     }
@@ -288,7 +283,7 @@ export function Timeline({
             const startsGroup = !sameSpeaker || !within
             return (
               <article key={m.id} data-testid={TESTID.message} data-kind={m.kind} style={{ display: 'grid', gridTemplateColumns: '2em 1fr', columnGap: '0.75em', padding: startsGroup ? '0.85em 0 0.15em' : '0.15em 0' }}>
-                {m.id === firstUnreadId && (
+                {m.id === firstUnread && (
                   <div
                     ref={dividerRef}
                     style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, margin: '8px 0 4px', color: 'var(--ao-brand-strong)', fontSize: '0.8em', fontWeight: 700 }}

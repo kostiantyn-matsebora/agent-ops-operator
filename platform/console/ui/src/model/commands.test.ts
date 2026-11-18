@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react'
 import { useStream } from '../api/stream'
 import type { ActivityEvent } from '../api/types'
 import {
-  RETRY_SAFE, confirmCommand, confirmRef, describeError, dismissCommand, errorMessage, observeEvents, resetCommands,
+  RETRY_SAFE, rowCommand, confirmCommand, confirmRef, describeError, dismissCommand, errorMessage, observeEvents, resetCommands,
   retryCommand, runCommand, useCommandStore, useCommands, type Verb,
 } from './commands'
 
@@ -246,5 +246,20 @@ describe('explaining a failure', () => {
   it('adds the body’s message and fix only where present', () => {
     expect(describeError(new Error('boom'))).toBe('boom')
     expect(describeError(Object.assign(new Error('boom'), { body: { fix: 'do x', message: '' } }))).toBe('boom — do x')
+  })
+})
+
+describe('rowCommand', () => {
+  const base = { id: 1, target: 'c', retryable: false, startedAt: 0 } as const
+  it('names the verb in progress, and says nothing of a reply or a finished action', () => {
+    expect(rowCommand({ ...base, verb: 'close', state: 'accepted' })).toMatchObject({ kind: 'progress', label: 'closing…' })
+    expect(rowCommand({ ...base, verb: 'send', state: 'sending' })).toBeUndefined()
+    expect(rowCommand({ ...base, verb: 'close', state: 'done' })).toBeUndefined()
+    expect(rowCommand(undefined)).toBeUndefined()
+  })
+  it('says what did not happen, with the server\u2019s words and whether a retry is safe', () => {
+    expect(rowCommand({ ...base, verb: 'reopen', state: 'failed', error: 'nope', retryable: true })).toEqual({
+      id: 1, kind: 'failed', label: 'Not reopened', error: 'nope', retryable: true,
+    })
   })
 })

@@ -5,7 +5,8 @@ import { useVocabulary } from '../../../model/actions'
 import { skipCloseConfirm, writeSkipCloseConfirm } from '../../../model/closeConfirm'
 import { useCommands } from '../../../model/commands'
 import { budgetLines, escalation } from '../../../model/coordinator'
-import { speakerOf } from '../../../model/message'
+import { firstUnreadId, speakerOf } from '../../../model/message'
+import { resolveIcon } from '../../../model/icon'
 import { runTokens, toolRows, turnRows } from '../../../model/runStats'
 import type { RunDetails as RunDetailsFact, WorkingRun } from '../../../model/run'
 import { GENERAL_FEED_NAME, useGeneralFeed } from '../../../model/session'
@@ -16,6 +17,7 @@ import {
 import { rowTitle } from '../../../model/conversationList'
 import { sendText } from '../../../model/verbs'
 import { Chevron, Icon } from '../icons'
+import { CopyButton } from './CopyButton'
 import { dayKey, day, duration, started } from '../format'
 import { CloseConfirm } from './CloseConfirm'
 import { Composer } from './Composer'
@@ -47,6 +49,18 @@ export interface ThreadViewProps {
   root?: { name: string; title: string }
   /** The entry the member was invoked as. */
   memberEntry?: string
+  /** The first message the viewer had not read when the conversation opened. */
+  unreadFrom?: string
+  /** What an offered choice does: puts its command in the reply box. Absent for a viewer who cannot write. */
+  onChoice?: (command: string) => void
+  /** The Pipeline's own icon reference. */
+  pipelineIcon?: string
+  /** Why this conversation has no console thread, and the command that joins one. */
+  joinHint?: { reason: string; fix: string }
+  /** The thread was archived: the conversation closed and the transcript stays readable. */
+  archived?: boolean
+  /** A reply that did not reach the manager, with why — shown until dismissed. */
+  sendFailure?: { error: string; onDismiss: () => void }
   onBack?: () => void
   onSend?: (text: string) => void
   onVerb?: (verb: '/exit' | '/close') => void
@@ -60,8 +74,8 @@ type Item = { key: string; node: ReactNode; divider?: boolean }
  * on a later day than the one before it. The conversation's start is already
  * on the line under the tabs, so the first day needs no divider of its own.
  */
-export function threadItems(p: Pick<ThreadViewProps, 'messages' | 'startedAt' | 'conversation' | 'runDetails' | 'invoked'>): Item[] {
-  const rows: ({ divider: string; at: string } | { escalated: string } | { message: Message; speaker: ReturnType<typeof speakerOf> })[] = []
+export function threadItems(p: Pick<ThreadViewProps, 'messages' | 'startedAt' | 'conversation' | 'runDetails' | 'invoked'> & Partial<Pick<ThreadViewProps, 'unreadFrom' | 'onChoice'>>): Item[] {
+  const rows: ({ divider: string; at: string } | { unread: true } | { escalated: string } | { message: Message; speaker: ReturnType<typeof speakerOf> })[] = []
   let lastDay = dayKey(p.startedAt) || dayKey(p.messages[0]?.at)
   // The moment a Coordinator root reached a person sits in the stream by time.
   const esc = escalation(p.conversation)
@@ -78,6 +92,7 @@ export function threadItems(p: Pick<ThreadViewProps, 'messages' | 'startedAt' | 
       rows.push({ divider: k, at: m.at })
       lastDay = k
     }
+    if (m.id === p.unreadFrom) rows.push({ unread: true })
     rows.push({ message: m, speaker })
   }
   if (esc && !escPlaced) rows.push({ escalated: esc.label })
@@ -85,14 +100,41 @@ export function threadItems(p: Pick<ThreadViewProps, 'messages' | 'startedAt' | 
     if ('divider' in r) {
       return { key: `day-${r.divider}`, divider: true, node: <div className="wk-dv" role="separator">{day(r.at)}</div> }
     }
+    if ('unread' in r) {
+      return { key: 'unread', divider: true, node: <div className="wk-dv new" role="separator" data-testid="unread-divider">New messages</div> }
+    }
     if ('escalated' in r) {
       return { key: 'escalated', divider: true, node: <div className="wk-dv esc" role="separator" data-testid="escalated">{r.escalated}</div> }
     }
     // The entry before a divider, and the last one, close without their own rule.
     const next = rows[i + 1]
-    const last = !next || 'divider' in next || 'escalated' in next
-    return { key: r.message.id, node: entryFor(r.message, r.speaker, p, last) }
+    const last = !next || 'divider' in next || 'escalated' in next || 'unread' in next
+    // Only the LATEST message's choices are actionable: an older prompt has moved on.
+    const latest = r.message.id === p.messages.at(-1)?.id
+    return { key: r.message.id, node: <>{entryFor(r.message, r.speaker, p, last)}<Choices choices={r.message.choices} interactive={latest && Boolean(p.onChoice)} onPick={p.onChoice} /></> }
   })
+}
+
+function Choices({ choices, interactive, onPick }: Readonly<{ choices?: Message['choices']; interactive: boolean; onPick?: (command: string) => void }>): ReactElement | null {
+  if (!choices || choices.length === 0) return null
+  if (interactive && onPick) {
+    return (
+      <div className="wk-choices" data-testid="choices">
+        {choices.map((c) => (
+          <button key={c.command} type="button" className="wk-btn" onClick={() => onPick(`${c.command} `)}>
+            {c.label || c.command}
+          </button>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <ul className="wk-choices" aria-label="offered choices (no longer actionable)">
+      {choices.map((c) => (
+        <li key={c.command} className="stale">{c.label || c.command}</li>
+      ))}
+    </ul>
+  )
 }
 
 function entryFor(m: Message, speaker: ReturnType<typeof speakerOf>, p: Pick<ThreadViewProps, 'conversation' | 'runDetails' | 'invoked'>, last: boolean) {
@@ -106,6 +148,18 @@ function entryFor(m: Message, speaker: ReturnType<typeof speakerOf>, p: Pick<Thr
     default:
       return <PersonMessage message={m} last={last} />
   }
+}
+
+function PipelineMark({ icon }: Readonly<{ icon?: string }>): ReactElement | null {
+  const r = resolveIcon(icon)
+  if (!r) return null
+  if (r.kind === 'text') return <span className="wk-pmark" aria-hidden="true">{r.text}</span>
+  if (r.kind === 'image') return <img className="wk-pmark" src={r.src} alt="" />
+  return (
+    <svg className="wk-pmark" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d={r.d} />
+    </svg>
+  )
 }
 
 function statusPill(c: ConversationSummary): ReactElement | null {
@@ -237,7 +291,9 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
   const c = p.conversation
   const closed = c.phase === 'Closed'
   const isMember = Boolean(c.causedBy)
-  const items = threadItems(p)
+  const items = threadItems({ ...p, onChoice: p.canWrite && !closed && !isMember && p.onSend ? (command) => setInsert({ text: command, n: Date.now() }) : undefined })
+  const fixRef = useRef<HTMLElement>(null)
+  const [insert, setInsert] = useState<{ text: string; n: number }>()
 
   // A thread opens at its newest message, and follows new ones while the
   // viewer is at the bottom.
@@ -245,9 +301,19 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
   useLayoutEffect(() => {
     stick.current = true
   }, [c.name])
+  const openedAtUnread = useRef(false)
   useLayoutEffect(() => {
     const el = body.current
-    if (el && stick.current && tab === 'conversation') el.scrollTop = el.scrollHeight
+    if (!el || tab !== 'conversation') return
+    // Opening with unread messages lands on what is new, never at the end.
+    const divider = el.querySelector('[data-testid="unread-divider"]')
+    if (divider && !openedAtUnread.current) {
+      openedAtUnread.current = true
+      stick.current = false
+      ;(divider as HTMLElement).scrollIntoView?.({ block: 'start' })
+      return
+    }
+    if (stick.current) el.scrollTop = el.scrollHeight
   }, [c.name, items.length, Boolean(p.working), tab])
   // Arrivals while the viewer is reading higher up are counted, never forced
   // into view: the pill says how many, and jumps on request.
@@ -295,8 +361,16 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
             <Chevron dir="left" />
           </button>
         )}
-        <h2 title={p.title}>{p.title}</h2>
+        <h2 title={p.title}>
+          <PipelineMark icon={p.pipelineIcon} />
+          {p.title}
+        </h2>
         {statusPill(c)}
+        {(c.threads?.length ?? 0) > 0 && (
+          <span className="wk-chip quiet" title="every channel a reply here also reaches" data-testid="bound-channels">
+            {c.threads!.map((t) => t.channel).join(' · ')}
+          </span>
+        )}
         {p.canWrite && !closed && !isMember && p.onVerb && (
           <div className="acts">
             <button type="button" className="wk-btn" disabled={p.busy} onClick={() => p.onVerb?.('/exit')}>
@@ -332,6 +406,32 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
           </time>
         )}
       </div>
+      {tab === 'conversation' && (p.joinHint || p.archived || p.sendFailure) && (
+        <div className="wk-notices">
+          {p.joinHint && (
+            <div className="wk-alert" data-testid="join-hint">
+              <b>This conversation has no console thread</b>
+              <div>{p.joinHint.reason}</div>
+              <div className="wk-fix">
+                <code ref={fixRef} data-testid={TESTID.joinHintFix}>{p.joinHint.fix}</code>
+                <CopyButton text={p.joinHint.fix} target={fixRef} />
+              </div>
+            </div>
+          )}
+          {p.archived && (
+            <div className="wk-alert" data-testid="archived">
+              <b>This thread was archived</b>
+              <div>The conversation was closed. The transcript stays readable.</div>
+            </div>
+          )}
+          {p.sendFailure && (
+            <div className="wk-alert bad" role="alert" data-testid="send-failure">
+              <b>Not sent</b> — {p.sendFailure.error}{' '}
+              <button type="button" className="wk-lnk" onClick={p.sendFailure.onDismiss}>Dismiss</button>
+            </div>
+          )}
+        </div>
+      )}
       {tab === 'conversation' && budget.length > 0 && (
         <div className="wk-bar" data-testid="budget">
           {budget.map((l) => (
@@ -391,7 +491,7 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
         </div>
       )}
       {tab === 'conversation' && !isMember && !closed && p.canWrite && p.onSend && (
-        <Composer onSend={p.onSend} onCommand={p.onVerb ? runCommand : undefined} vocabulary={p.vocabulary} disabled={p.busy} />
+        <Composer onSend={p.onSend} onCommand={p.onVerb ? runCommand : undefined} vocabulary={p.vocabulary} disabled={p.busy} insert={insert} />
       )}
       {closing && (
         <CloseConfirm
@@ -418,6 +518,9 @@ function MemberRoot({ conversation, children }: Readonly<{ conversation: Convers
 function LoadedThread({ thread, onBack }: Readonly<{ thread: ReturnType<typeof useThread> & { conversation: ConversationSummary }; onBack?: () => void }>) {
   const c = thread.conversation
   const commands = useCommands()
+  const [failure, setFailure] = useState<string>()
+  // Read once per open: marking the conversation read must not move the divider under the viewer.
+  const [unreadFrom] = useState(() => firstUnreadId(thread.messages, c.readAt))
   const { members } = useThreadMembers(c, thread.detail?.transcript)
   const vocabulary = useVocabulary()
   // A member binds no channel of its own: its runs' records are its transcript.
@@ -438,7 +541,18 @@ function LoadedThread({ thread, onBack }: Readonly<{ thread: ReturnType<typeof u
     invoked,
     memberEntry: c.causedBy?.entry,
     onBack,
-    onSend: (text) => void sendText(c.name, text),
+    unreadFrom,
+    pipelineIcon: thread.pipelineIcon,
+    joinHint: thread.detail?.joinHint,
+    archived: thread.detail?.archived,
+    sendFailure: failure ? { error: failure, onDismiss: () => setFailure(undefined) } : undefined,
+    onSend: async (text) => {
+      setFailure(undefined)
+      const outcome = await sendText(c.name, text)
+      if (!outcome.ok) setFailure(outcome.error)
+      // The stream is down, so nothing will announce the reply: read it again.
+      else if (commands.connection !== 'connected') void thread.refetch?.()
+    },
     onVerb: (verb) => void sendText(c.name, verb),
     busy: commands.sending(c.name),
   }

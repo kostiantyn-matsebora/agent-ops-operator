@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Message } from '../api/types'
-import { SEVERITIES, copyText, isOwn, replyBlocks, signalAttributes, signalSeverity, speakerOf } from './message'
+import { SEVERITIES, copyText, firstUnreadId, isOwn, replyBlocks, signalAttributes, signalSeverity, speakerOf } from './message'
 
 const msg = (over: Partial<Message>): Message => ({ id: 'm', thread: 't', kind: 'agent', text: '', at: '', ...over })
 
@@ -42,5 +42,17 @@ describe('a message, as every look reads it', () => {
       'Disk is full.\n\nseverity: warning\nsource: node-events\nsender: manager\n\n```json\n{"a":1}\n```',
     )
     expect(copyText(msg({ kind: 'signal', text: 'x' }))).toBe('x\n\nseverity: unrated')
+  })
+})
+
+describe('firstUnreadId', () => {
+  const m = (id: string, kind: string, at: string) => ({ id, thread: 't', kind, text: id, at })
+  const all = [m('a', 'agent', '2025-06-10T22:00:00Z'), m('k', 'ack', '2025-06-10T22:03:00Z'), m('b', 'signal', '2025-06-10T22:05:00Z'), m('c', 'local', '2025-06-10T22:06:00Z')]
+  it('is the first counted message after the watermark, skipping acknowledgements and a person\u2019s own', () => {
+    expect(firstUnreadId(all, '2025-06-10T22:01:00Z')).toBe('b')
+  })
+  it('is absent without a watermark, and when everything was read', () => {
+    expect(firstUnreadId(all, undefined)).toBeUndefined()
+    expect(firstUnreadId(all, '2025-06-10T23:00:00Z')).toBeUndefined()
   })
 })

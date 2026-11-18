@@ -1,6 +1,7 @@
 import { type ReactElement, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ConversationSummary } from '../../../api/types'
+import type { RowCommand } from '../../../model/commands'
 import { phaseDot, rowSnippet, rowTag, rowTitle, rowUnread, type RowStatus } from '../../../model/conversationList'
 import { testid } from '../../../model/testids'
 import type { TreeRow } from '../../../model/tree'
@@ -37,6 +38,10 @@ export interface RowProps {
   selection?: { selected: boolean; onToggle: () => void }
   /** A modifier-click on the row: starts a selection with this row in it, instead of opening it. */
   onMultiSelect?: () => void
+  /** The newest action on this row: the verb in progress, or why it did not happen. */
+  command?: RowCommand
+  onRetry?: () => void
+  onDismissCommand?: () => void
   now?: number
 }
 
@@ -47,7 +52,33 @@ export function lifecycle(status: RowStatus): ('on' | 'cur' | '')[] | undefined 
   return undefined
 }
 
-function StatusPill({ row, status }: Readonly<{ row: ConversationSummary; status: RowStatus }>) {
+function StatusPill({
+  row, status, command, onRetry, onDismiss,
+}: Readonly<{ row: ConversationSummary; status: RowStatus; command?: RowCommand; onRetry?: () => void; onDismiss?: () => void }>) {
+  // An action the viewer took speaks before the conversation's own state.
+  if (command?.kind === 'progress') {
+    return (
+      <span className="wk-pill working" data-testid={`command-${row.name}`} data-state="progress">
+        <span className="wk-spin" aria-hidden="true" />
+        {command.label}
+      </span>
+    )
+  }
+  if (command?.kind === 'failed') {
+    return (
+      <span className="wk-cmdfail" data-testid={`command-${row.name}`} data-state="failed" title={command.error}>
+        <span className="wk-pill bad">{command.label}</span>
+        {command.retryable && onRetry && (
+          <button type="button" className="wk-lnk" onClick={onRetry}>Retry</button>
+        )}
+        {onDismiss && (
+          <button type="button" className="wk-lnk" aria-label={`Dismiss: ${command.error ?? command.label}`} onClick={onDismiss}>
+            Dismiss
+          </button>
+        )}
+      </span>
+    )
+  }
   const tag = rowTag(row, false)
   if (status === 'working') {
     return (
@@ -132,7 +163,7 @@ function RowMenu({ title, actions }: Readonly<{ title: string; actions: RowActio
 }
 
 export function Row({
-  tree, current, arrived, folded, onToggleFold, actions = [], iconOnly, selection, onMultiSelect, now,
+  tree, current, arrived, folded, onToggleFold, actions = [], iconOnly, selection, onMultiSelect, command, onRetry, onDismissCommand, now,
 }: Readonly<RowProps>): ReactElement {
   const row = tree.row
   const title = rowTitle(row)
@@ -226,7 +257,7 @@ export function Row({
             {ago(row.lastActivity ?? row.created, now)}
           </time>
         </span>
-        <StatusPill row={row} status={status} />
+        <StatusPill row={row} status={status} command={command} onRetry={onRetry} onDismiss={onDismissCommand} />
       </div>
       {actions.length > 0 && !iconOnly && <RowMenu title={title} actions={actions} />}
     </li>

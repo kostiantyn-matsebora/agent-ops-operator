@@ -17,6 +17,9 @@ const conv = (name: string, over: Partial<ConversationSummary> = {}): Conversati
 })
 const ITEMS = [conv('c1'), conv('c2', { presence: true, phase: 'Working' })]
 const sent: [string, string][] = []
+const latestCommand: Record<string, unknown> = {}
+const retried: number[] = []
+const dismissed: number[] = []
 const calls: [string, unknown][] = []
 const mutation = (kind: string) => ({ mutate: (arg: unknown, opts?: { onSuccess?: () => void }) => { calls.push([kind, arg]); opts?.onSuccess?.() }, isPending: false, reset: () => undefined, data: undefined, error: null })
 
@@ -45,7 +48,7 @@ vi.mock('../../../model/actions', async (importOriginal) => ({
 }))
 vi.mock('../../../model/commands', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../model/commands')>()),
-  useCommands: () => ({ sending: () => false }),
+  useCommands: () => ({ sending: () => false, latest: (name: string) => latestCommand[name], retry: (id: number) => retried.push(id), dismiss: (id: number) => dismissed.push(id), connection: 'connected' }),
 }))
 vi.mock('../../../model/verbs', () => ({
   sendText: (name: string, text: string) => sent.push([name, text]),
@@ -82,6 +85,9 @@ const mount = (path: string) =>
 beforeEach(() => {
   sent.length = 0
   calls.length = 0
+  retried.length = 0
+  dismissed.length = 0
+  for (const k of Object.keys(latestCommand)) delete latestCommand[k]
   localStorage.clear()
   useWorkspaceLayout.setState(DEFAULT_WORKSPACE_LAYOUT)
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1400 })
@@ -187,6 +193,44 @@ describe('the conversations page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Select' }))
     await userEvent.click(screen.getByTestId(testid.open('c1')))
     expect(screen.getByTestId(TESTID.deleteSelected)).toBeDisabled()
+  })
+
+  it('says a close is in progress on its row, and not on the others', () => {
+    latestCommand.c1 = { id: 1, target: 'c1', verb: 'close', state: 'accepted', retryable: false, startedAt: 0 }
+    mount('/conversations')
+    expect(screen.getByTestId('command-c1')).toHaveTextContent('closing…')
+    expect(screen.queryByTestId('command-c2')).toBeNull()
+  })
+
+  it('says why a close failed, and offers retry and dismiss', async () => {
+    latestCommand.c1 = { id: 7, target: 'c1', verb: 'close', state: 'failed', error: 'manager unreachable', retryable: true, startedAt: 0 }
+    mount('/conversations')
+    const note = screen.getByTestId('command-c1')
+    expect(note).toHaveTextContent('Not closed')
+    expect(note).toHaveAttribute('title', 'manager unreachable')
+    await userEvent.click(within(note).getByRole('button', { name: 'Retry' }))
+    await userEvent.click(within(note).getByRole('button', { name: /Dismiss/ }))
+    expect(retried).toEqual([7])
+    expect(dismissed).toEqual([7])
+  })
+
+  it('offers no retry for a failure that is unsafe to repeat', () => {
+    latestCommand.c1 = { id: 8, target: 'c1', verb: 'start', state: 'failed', error: 'x', retryable: false, startedAt: 0 }
+    mount('/conversations')
+    expect(within(screen.getByTestId('command-c1')).queryByRole('button', { name: 'Retry' })).toBeNull()
+  })
+
+  it('moves between rows with the arrow keys and ends a selection with Escape', async () => {
+    mount('/conversations')
+    screen.getByTestId(testid.open('c1')).focus()
+    await userEvent.keyboard('{ArrowDown}')
+    expect(screen.getByTestId(testid.open('c2'))).toHaveFocus()
+    await userEvent.keyboard('{ArrowUp}')
+    expect(screen.getByTestId(testid.open('c1'))).toHaveFocus()
+    await userEvent.click(screen.getByRole('button', { name: 'Select' }))
+    screen.getByTestId(testid.open('c1')).focus()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByTestId(TESTID.selectionBar)).toBeNull()
   })
 
   it('remembers the show-closed choice', async () => {
