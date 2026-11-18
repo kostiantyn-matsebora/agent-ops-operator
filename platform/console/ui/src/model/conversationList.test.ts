@@ -34,15 +34,15 @@ const TREE = [ROOT, `${ROOT}-triage`, `${ROOT}-mitigate`, `${ROOT}-mitigate-drai
 
 describe('a scope', () => {
   it('asks the server only what the server can answer per tree', () => {
-    expect(scopeParams({ kind: 'all' }, '').toString()).toBe('limit=100')
-    expect(scopeParams({ kind: 'closed' }, '').toString()).toBe('phase=Closed&limit=100')
+    expect(scopeParams({ kind: 'all' }, '').toString()).toBe('limit=500')
+    expect(scopeParams({ kind: 'closed' }, '').toString()).toBe('phase=Closed&limit=500')
     expect(scopeParams({ kind: 'pipeline', name: 'k8s-observe' }, 'oom').toString())
-      .toBe('pipeline=k8s-observe&unread=true&q=oom&limit=100')
+      .toBe('pipeline=k8s-observe&unread=true&q=oom&limit=500')
     // Working, Mine, Errored and a Coordinator are narrowed client-side, per tree.
     for (const kind of ['working', 'mine', 'errored'] as const) {
-      expect(scopeParams({ kind }, '').toString()).toBe('limit=100')
+      expect(scopeParams({ kind }, '').toString()).toBe('limit=500')
     }
-    expect(scopeParams({ kind: 'coordinator', name: 'incident-response' }, '').toString()).toBe('limit=100')
+    expect(scopeParams({ kind: 'coordinator', name: 'incident-response' }, '').toString()).toBe('limit=500')
   })
 
   it('is keyed by kind and name', () => {

@@ -40,8 +40,8 @@ export function sameScope(a: Scope, b: Scope): boolean {
   return scopeKey(a) === scopeKey(b)
 }
 
-/** How many conversations one list request asks for. */
-export const PAGE_SIZE = 100
+/** How many conversations one list request asks for: the server's ceiling. A smaller page cut members off from their coordinator (a tree is only drawn from rows in the page), so a root showed alone. */
+export const PAGE_SIZE = 500
 
 /** The server-side half of a scope: the query the list request carries. */
 export function scopeParams(scope: Scope, search: string): URLSearchParams {
