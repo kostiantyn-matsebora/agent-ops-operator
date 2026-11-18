@@ -66,7 +66,7 @@ Own Go module, the only one with dependencies.
 | `runtimes/claude-cli/` | today's per-unit `claude` CLI spawn, moved verbatim out of `runtimes/claude/` | off by default, same pattern as `ollama`/`copilot`. No live session — `--allowedTools`/`--permission-mode dontAsk`, unchanged |
 | `runtimes/ollama/` | the harness IS the runtime, Go, own loop/tools/transcript | `ollama.go` is the only vendor-aware file. Gate applies ONCE before the request — `Bash(kubectl:*)` grants nothing, never widens |
 | `runtimes/copilot/` | vendor owns tool vocabulary, Node + copilot-sdk | `vocabulary.js` is the boundary — `Bash(kubectl:*)` ENFORCED per call (opposite of ollama, each enforces what it can) |
-| `runtimes/pi/` | vendor SDK in-process, Node + `@earendil-works/pi-coding-agent` | same posture as `claude` — a per-invocation `tool_call` hook, deny by default, never a flag. Its own `pi-mcp` client is the one MCP extension bridging a second vendor's tool registration into the agent-ops contract |
+| `runtimes/pi/` | vendor SDK in-process, Node + `@earendil-works/pi-coding-agent` | same posture as `claude` — a per-invocation `tool_call` hook, deny by default, never a flag. The vendor's `pi-mcp` package is the one MCP extension bridging a second vendor's tool registration into the agent-ops contract |
 
 `runtimes/claude` is ON by default, the chart's default-eligible bundle. The
 other four are optional bundles under `chart/charts/<name>/`, off by default.

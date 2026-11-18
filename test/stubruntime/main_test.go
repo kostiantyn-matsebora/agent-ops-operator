@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -202,6 +205,19 @@ func TestWiringDirectiveReportsAllowedToolsAndMCPServers(t *testing.T) {
 		want := "[stub] wiring allowedTools=[Bash(kubectl:*)] toolsMode=[overwrite] mcp=[alpha,zeta]"
 		if r.Result != want {
 			t.Fatalf("wiring result: got %q want %q", r.Result, want)
+		}
+	})
+	t.Run("a scoped shell pattern logs its narrowing, a bare one does not", func(t *testing.T) {
+		var buf bytes.Buffer
+		log.SetOutput(&buf)
+		t.Cleanup(func() { log.SetOutput(os.Stderr) })
+		logScopedShellNarrowing("Read, Bash(kubectl:*), Bash")
+		out := buf.String()
+		if !strings.Contains(out, `scoped shell pattern "Bash(kubectl:*)" grants no built-in shell, narrowed`) {
+			t.Fatalf("the narrowing line is missing: %q", out)
+		}
+		if strings.Count(out, "narrowed") != 1 {
+			t.Fatalf("only the scoped pattern narrows: %q", out)
 		}
 	})
 	t.Run("an unreadable MCP_CONFIG reports no servers rather than failing", func(t *testing.T) {
