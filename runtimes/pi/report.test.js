@@ -25,9 +25,9 @@ test('the captured session events produce the expected report', () => {
   assert.deepStrictEqual(replay(fixture()), {
     turns: [
       // Turn one both READS and WRITES cache, and the provider reports a
-      // (zero) reasoning breakdown — all three are real, present facts, not
+      // reasoning breakdown — all three are real, present facts, not
       // omitted (API-7 is about an UNKNOWN fact, not a reported zero).
-      { model: 'fake-model', tokensIn: 2400, tokensOut: 42, cacheReadTokens: 1800, cacheCreationTokens: 300, reasoningTokens: 0, stopReason: 'toolUse' },
+      { model: 'fake-model', tokensIn: 2400, tokensOut: 42, cacheReadTokens: 1800, cacheCreationTokens: 300, reasoningTokens: 64, stopReason: 'toolUse' },
       // Turn two's usage carries no cache or reasoning keys at all — omitted,
       // never reported as zero.
       { model: 'fake-model', tokensIn: 2600, tokensOut: 18, stopReason: 'stop' },

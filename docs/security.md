@@ -392,6 +392,7 @@ claim that the rest is handled too.
 | **Tool arguments** | egress control decides which tool may be called, never with what arguments |
 | **Context isolation a runtime does not get** | a runtime declaring no context paths mounts the whole shared context volume into its agent container |
 | **Conversation content in pod logs** | the runtime writes what the agent produced to its pod's stdout |
+| **Repository hooks under `pi.piCode`** | with the `pi` runtime's `pi.piCode` on (the default), a hook in the checked-out repository's `.claude/settings.json` runs as a shell command in the pod. The tool allowlist does not apply to it, and the runtime approves its own workspace because a headless run cannot ask. `pi.piCode: false` removes it |
 | **Signing and attestation** | no image is signed, and the chart carries no attestation |
 | **Depth in a coordination** | a tree of agents invoking agents nests as deep as every level's own budget allows — nothing bounds the number of LEVELS, only a repeated Coordinator is refused |
 | **A member's consent boundary is a prompt, not a gate** | An instruction tells an invoked member not to act past its task, and nothing checks it at `/coordinate/invoke` |

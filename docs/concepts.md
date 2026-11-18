@@ -14,7 +14,7 @@ MCP servers and channels are the Pipeline's:
 
 - **Git repository** — private OK, SSH key or HTTPS PAT via `secretRef`.
 - **Agent role file** in that repo — `.claude/agents/<name>.md` for the
-  claude, ollama and pi runtimes, `.github/agents/<name>.agent.md` for
+  claude, claude-cli, ollama and pi runtimes, `.github/agents/<name>.agent.md` for
   copilot.
 - **Credentials** as `env[]` with `valueFrom`.
 - **Prompts and limits.**
@@ -1156,7 +1156,7 @@ keys are overlaid, with the later ref winning a collision.
 
 The `toolsets` stanza carries a `mode`, and the thing it composes against is the
 **agent's own definition**: the `tools:` frontmatter of the agent's file in the
-profile's repository — `.claude/agents/<agent>.md` on the claude, ollama and
+profile's repository — `.claude/agents/<agent>.md` on the claude, claude-cli, ollama and
 pi runtimes, `.github/agents/<agent>.agent.md` on copilot.
 
 The path is the runtime's fact. The composition rule is the same on all of them.

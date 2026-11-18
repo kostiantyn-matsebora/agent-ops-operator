@@ -69,8 +69,10 @@ a manual step per claim you want to keep.
   reference runtime, and reaches bound MCP servers through the vendor's
   `pi-mcp` package. `pi.piCode` (default `true`) also lets pi read a checkout's
   `.claude/` the way Claude Code does, through the `pi-code` package. It adds
-  no tool and the allowlist still gates every call, but a hook it loads is a
-  shell command from the repository. Set it `false` to turn it off. State lives under `.pi/agent/sessions/**`, declared to
+  no tool, and the allowlist still gates every tool call. A hook in the
+  repository's `.claude/settings.json` runs as a shell command in the pod, and
+  the allowlist does not apply to it. Set `pi.piCode: false` to turn this off.
+  See [Residual risk](security.md#residual-risk). State lives under `.pi/agent/sessions/**`, declared to
   `context-sync` by the bundle.
 
 ### Changed

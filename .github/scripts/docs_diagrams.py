@@ -407,9 +407,9 @@ RUNTIME_DIAGRAMS: dict[str, dict] = {
     },
     # For runtime-pi the point is a THIRD split again: the vendor SDK runs
     # in-process like claude's, but the session is RESUMED from disk by its
-    # own minted id each unit rather than held open in memory, and the one
-    # extension this image ships is the MCP bridge -- pi core has none of
-    # its own.
+    # own minted id each unit rather than held open in memory, and the
+    # extensions this image ships are the permission hook and the MCP bridge --
+    # pi core has no MCP of its own.
     "pi": {
         "dir": "runtimes",
         "alt": "The manager hands a work unit to runtime-pi, which resumes a "

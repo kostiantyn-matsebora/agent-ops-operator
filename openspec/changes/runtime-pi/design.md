@@ -171,6 +171,13 @@ field map.
 branch in the declared-runtime list. Provider, model and credential are env.
 The bundle adds no value that is not env, an image or a context path.
 
+### D8. Pin exactly, from a lockfile
+
+`package.json` pins one version of the SDK package and `npm ci` installs from
+the lockfile. The Dockerfile copies copilot's npm CVE-pin block, since the
+base image is the same. The package scope is pinned in the lockfile, and a
+rename upstream is a deliberate bump.
+
 ### D9. `pi-code` reads the checkout's `.claude/`, optional, on by default
 
 The image carries the `pi-code` package (exact pin, lockfile) so pi reads a
@@ -197,13 +204,6 @@ Alternative: leave it out, since the runtime already reads the agent definition
 itself (D4). Rejected: a team's rules, commands and skills in `.claude/` then
 do nothing under pi. The cost is a larger lockfile (88 more packages) and a
 repository-defined hook surface, which is why it is a flag.
-
-### D8. Pin exactly, from a lockfile
-
-`package.json` pins one version of the SDK package and `npm ci` installs from
-the lockfile. The Dockerfile copies copilot's npm CVE-pin block, since the
-base image is the same. The package scope is pinned in the lockfile, and a
-rename upstream is a deliberate bump.
 
 ## Spikes
 
@@ -420,7 +420,7 @@ Mapped onto `runtimes/copilot/report.js`'s `turns[]` shape:
 | `cacheReadTokens` | `usage.cacheRead` | |
 | `cacheCreationTokens` | `usage.cacheWrite` (+ `cacheWrite1h` split) | NOT a new field — `workreport.go`'s `Turn.CacheCreationTokens` already carries this exact fact for `runtimes/claude`/`runtimes/claude-cli`. Corrected from an earlier draft of this finding, which proposed minting `cacheWriteTokens` before checking the existing contract field |
 | `stopReason` | `message.stopReason` | `"pending"\|"stop"\|"length"\|"toolUse"\|"error"\|"aborted"\|"deferred"` |
-| not in copilot's shape, no existing contract field | `usage.reasoning` | present only when the provider reports a thinking-token breakdown — omit when `undefined`, per the existing "omitted, not zero" rule. `reasoningTokens` is a NEW wire field with no contract entry yet — section 7 decides whether to adopt it |
+| not in copilot's shape, no existing contract field | `usage.reasoning` | present only when the provider reports a thinking-token breakdown — omit when `undefined`, per the existing "omitted, not zero" rule. `reasoningTokens` is a pi-specific extra wire field. It is NOT adopted into the contract by this change (that page is never edited without approval), and the manager ignores it under `COMPAT-2` |
 
 Nothing D6 expected is UNREPORTED. The only gap is the reverse: pi reports
 more than copilot's shape carries a field for.
@@ -534,7 +534,7 @@ beyond what the other three runtimes already prove.
 | 31 | `MGR-4` the manager supplies every Environment variable | N/A — shared | The runtime only reads them (`runtime.js:46-83`). The shared `agentops.piRuntimeEntry` helper (`chart/templates/_helpers.tpl:253-266`) projects `PI_PROVIDER`/`PI_MODEL`/credential alongside every runtime's common env |
 | 32 | `MGR-5` an empty `REPO_URL` is never an error or "clone the default" | Pass, tested | `runtime.js:164`. `runtime.test.js:60` ("syncRepo is a no-op when no REPO_URL is configured (MGR-5)") |
 | 33 | `COMPAT-1` a runtime ignores unknown work-unit fields | Pass, structural | Every consumer (`resolvePrompt`, `runPi`, ...) reads only named properties off the unit object. An unread key has no effect by construction. No dedicated test sends an unknown field, same posture as the other runtimes |
-| 34 | `COMPAT-2` the manager ignores unknown report fields | N/A — shared, and actively relied on | Manager's own decode obligation. The pi runtime's `reasoningTokens` (`report.js:105`) is a field with no contract entry yet, sent in reliance on this guarantee (design's S5 finding) |
+| 34 | `COMPAT-2` the manager ignores unknown report fields | N/A — shared, and actively relied on | Manager's own decode obligation. The pi runtime's `reasoningTokens` (`report.js:105`) is a field with no contract entry, deliberately not adopted by this change, sent in reliance on this guarantee (design's S5 finding) |
 | 35 | `COMPAT-3` a published section anchor is a stable name | N/A | A documentation-versioning rule about this spec page, not something runtime code conforms to or violates |
 
 Items 5 and 17 were initially flagged as code-confirmed but
