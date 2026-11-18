@@ -229,7 +229,7 @@ the poll loop.
 | `RT-3.1` | A runtime that cannot see a repository MUST use `allowedTools` as-is — what `merge` degrades to. |
 | `RT-3.2` | An empty allowlist MUST stay empty. No tool substitutes for one nobody declared. |
 | `RT-3.3` | An absent or unreadable agent definition MUST contribute nothing, whatever a vendor default would be. |
-| `RT-3.4` | Definition path is runtime-specific: `runtimes/claude`/`runtimes/ollama`/`runtimes/pi` read `.claude/agents/<agent>.md`, `runtimes/copilot` reads `.github/agents/<agent>.agent.md`. |
+| `RT-3.4` | Definition path is runtime-specific: `runtimes/claude`/`runtimes/claude-cli`/`runtimes/ollama`/`runtimes/pi` read `.claude/agents/<agent>.md`, `runtimes/copilot` reads `.github/agents/<agent>.agent.md`. |
 
 How the composed allowlist is enforced is the runtime's choice. Passing it to
 the vendor as a flag satisfies `RT-3`, and so does a per-invocation decision —
