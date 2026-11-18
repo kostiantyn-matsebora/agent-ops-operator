@@ -2,10 +2,11 @@ import { type CSSProperties, type ReactElement, useEffect, useMemo, useRef, useS
 import { useNavigate, useParams } from 'react-router-dom'
 import type { ConversationSummary } from '../../../api/types'
 import {
-  listKeyAction, neighbourName, rowUnread, sameScope, scopeKey, useArrivals, useConversationList, useInboxScopes, type Scope,
+  listKeyAction, neighbourName, rowUnread, sameScope, scopeKey, selectionState, useArrivals, useConversationList, useInboxScopes, type Scope,
 } from '../../../model/conversationList'
 import { useMarkRead, useMarkUnread, useReopen } from '../../../model/actions'
 import { rowCommand, useCommands } from '../../../model/commands'
+import { usePipelineIconLookup } from '../../../model/pipelineIcon'
 import { GENERAL_FEED_NAME, useConsoleSession } from '../../../model/session'
 import { TESTID } from '../../../model/testids'
 import { exitRuntime } from '../../../model/verbs'
@@ -104,6 +105,7 @@ function ListPane({ current, collapsed }: Readonly<{ current?: string; collapsed
   const reopen = useReopen()
   const markRead = useMarkRead()
   const markUnread = useMarkUnread()
+  const pipelineIconFor = usePipelineIconLookup()
   // Selecting is a mode the viewer enters: rows carry a box and opening one
   // toggles it. The selection never leaves this page's rows.
   const [selecting, setSelecting] = useState(false)
@@ -155,6 +157,7 @@ function ListPane({ current, collapsed }: Readonly<{ current?: string; collapsed
     },
   }
 
+  const { selectableRows, allSelected } = selectionState(list.items, selected)
   const anyFolded = list.collapsibleNames.some((n) => folded.has(n))
   const toggle = (name: string) =>
     setFolded((prev) => {
@@ -215,6 +218,15 @@ function ListPane({ current, collapsed }: Readonly<{ current?: string; collapsed
             onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
           >
             {selecting ? 'Done selecting' : 'Select'}
+          </button>
+        )}
+        {selecting && !collapsed && selectableRows.length > 0 && (
+          <button
+            type="button"
+            className="wk-btn link"
+            onClick={() => setSelected(allSelected ? new Set() : new Set(selectableRows))}
+          >
+            {allSelected ? 'Clear all' : 'Select all'}
           </button>
         )}
         <label>
@@ -293,6 +305,7 @@ function ListPane({ current, collapsed }: Readonly<{ current?: string; collapsed
             }}
             onMultiSelect={collapsed ? undefined : () => deps.select(t.row.name)}
             selection={selecting && !collapsed ? { selected: selected.has(t.row.name), onToggle: () => toggleSelected(t.row.name) } : undefined}
+            pipelineIcon={pipelineIconFor(t.row.pipeline)}
           />
         ))}
       </ul>

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -8,6 +8,9 @@ import type { RunDetails as RunDetailsFact } from '../../../model/run'
 import { TESTID } from '../../../model/testids'
 import { INVOKED_TESTID, PersonMessage, Reply, SignalCard, WorkingCard } from './Entries'
 import { RUN_DETAILS_TESTID } from './RunDetails'
+
+const exchange = vi.hoisted(() => ({ value: { isLoading: false, error: undefined as unknown, loaded: true, conversation: {}, task: { text: 'check the disk' }, result: { text: 'disk is fine' } } }))
+vi.mock('../../../model/thread', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../../model/thread')>()), useMemberExchange: () => exchange.value }))
 
 const msg = (over: Partial<Message>): Message => ({ id: 'm1', thread: 't', kind: 'agent', text: '', at: '2025-06-11T09:39:00Z', ...over })
 const ev = (kind: string, ts: string): ActivityEvent => ({ cursor: ts, ts, kind, runId: 'run-1', status: 'ok' } as ActivityEvent)
@@ -75,6 +78,16 @@ describe('an agent reply', () => {
     // The fold is closed too.
     expect(screen.getByText('Details (2 lines)')).toBeInTheDocument()
     expect(screen.queryByText('line one')).toBeNull()
+  })
+
+  it('expands an Invoked row to the task sent and the answer, as classic did', async () => {
+    wrap(<Reply message={REPLY} members={[member]} details={details} />)
+    expect(screen.queryByText('Task sent')).toBeNull()
+    await userEvent.click(screen.getByTestId(TESTID.memberInvocationToggle))
+    expect(screen.getByText('Task sent')).toBeInTheDocument()
+    expect(screen.getByText('check the disk')).toBeInTheDocument()
+    expect(screen.getByText('triage responded')).toBeInTheDocument()
+    expect(screen.getByText('disk is fine')).toBeInTheDocument()
   })
 
   it('opens to the tools as one expandable row, the events and the checkpoint, stating no fact twice', async () => {

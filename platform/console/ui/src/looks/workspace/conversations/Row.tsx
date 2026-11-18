@@ -7,6 +7,7 @@ import { testid } from '../../../model/testids'
 import type { TreeRow } from '../../../model/tree'
 import { Chevron, Icon } from '../icons'
 import { ago } from '../format'
+import { prefersReducedMotion } from '../motion'
 
 // ONE LIST ROW, ONE HEIGHT (console-workspace-look: "A list row has a stable
 // shape"). Whatever it shows — a status, a badge, the lifecycle bar, a longer
@@ -43,6 +44,8 @@ export interface RowProps {
   onRetry?: () => void
   onDismissCommand?: () => void
   now?: number
+  /** The pipeline's icon, when available. */
+  pipelineIcon?: string
 }
 
 /** The lifecycle segments a status fills: queued, working, answered. Empty while idle. */
@@ -163,7 +166,7 @@ function RowMenu({ title, actions }: Readonly<{ title: string; actions: RowActio
 }
 
 export function Row({
-  tree, current, arrived, folded, onToggleFold, actions = [], iconOnly, selection, onMultiSelect, command, onRetry, onDismissCommand, now,
+  tree, current, arrived, folded, onToggleFold, actions = [], iconOnly, selection, onMultiSelect, command, onRetry, onDismissCommand, now, pipelineIcon,
 }: Readonly<RowProps>): ReactElement {
   const row = tree.row
   const title = rowTitle(row)
@@ -176,7 +179,7 @@ export function Row({
     .filter(Boolean)
     .join(' · ')
   const segments = lifecycle(status)
-  const cls = ['wk-row', unread && 'unread', tree.depth > 0 && 'mem', status === 'failed' && 'fail', arrived && 'arrived', selection && 'sel']
+  const cls = ['wk-row', unread && 'unread', tree.depth > 0 && 'mem', status === 'failed' && 'fail', arrived && !prefersReducedMotion() && 'arrived', selection && 'sel']
     .filter(Boolean)
     .join(' ')
 
@@ -234,7 +237,7 @@ export function Row({
         <span aria-hidden="true" />
       )}
       <span className={`wk-av${member ? ' agent' : ''}`} aria-hidden="true">
-        <Icon name={member ? 'member' : 'bot'} />
+        <Icon name={pipelineIcon ? undefined : (member ? 'member' : 'bot')} icon={pipelineIcon} />
         <span className={`d ${status}`} />
         {iconOnly && unread && <span className="bd">{row.unreadCount}</span>}
       </span>

@@ -61,9 +61,16 @@ export interface ThreadViewProps {
   archived?: boolean
   /** A reply that did not reach the manager, with why — shown until dismissed. */
   sendFailure?: { error: string; onDismiss: () => void }
+  /** A gap in the activity buffer — console-thread-live-cues: "Lost history is marked". */
+  activityGap?: boolean
+  /** The members could not be loaded: their invocations are missing from the transcript. */
+  membersError?: string
+  /** Object metadata for the YAML tab. */
+  metadata?: { name: string; namespace?: string; uid?: string; resourceVersion?: string; creationTimestamp?: string; labels?: Record<string, string>; annotations?: Record<string, string> }
   onBack?: () => void
   onSend?: (text: string) => void
   onVerb?: (verb: '/exit' | '/close') => void
+  onSentOffline?: () => void
   busy?: boolean
 }
 
@@ -104,7 +111,17 @@ export function threadItems(p: Pick<ThreadViewProps, 'messages' | 'startedAt' | 
       return { key: 'unread', divider: true, node: <div className="wk-dv new" role="separator" data-testid="unread-divider">New messages</div> }
     }
     if ('escalated' in r) {
-      return { key: 'escalated', divider: true, node: <div className="wk-dv esc" role="separator" data-testid="escalated">{r.escalated}</div> }
+      const escTime = escalation(p.conversation)
+      return {
+        key: 'escalated',
+        divider: true,
+        node: (
+          <div className="wk-dv esc" role="separator" data-testid="escalated">
+            {r.escalated}
+            {escTime && <> · {new Date(escTime.at).toLocaleString()}</>}
+          </div>
+        ),
+      }
     }
     // The entry before a divider, and the last one, close without their own rule.
     const next = rows[i + 1]
@@ -211,7 +228,7 @@ function RunCard({ run }: Readonly<{ run: Run }>) {
       {run.result && (
         <div className="wk-sec">
           <b>Result</b>
-          <pre className="wk-result">{run.result}</pre>
+          <pre className="wk-result" >{run.result}</pre>
         </div>
       )}
       {turns.length > 0 && (
@@ -291,7 +308,7 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
   const c = p.conversation
   const closed = c.phase === 'Closed'
   const isMember = Boolean(c.causedBy)
-  const items = threadItems({ ...p, onChoice: p.canWrite && !closed && !isMember && p.onSend ? (command) => setInsert({ text: command, n: Date.now() }) : undefined })
+  const items = threadItems({ messages: p.messages, startedAt: p.startedAt, conversation: p.conversation, runDetails: p.runDetails, invoked: p.invoked, unreadFrom: p.unreadFrom, onChoice: p.canWrite && !closed && !isMember && p.onSend ? (command) => setInsert({ text: command, n: Date.now() }) : undefined })
   const fixRef = useRef<HTMLElement>(null)
   const [insert, setInsert] = useState<{ text: string; n: number }>()
 
@@ -383,6 +400,11 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
         )}
       </div>
       {c.brief && <p className="wk-brief">{c.brief}</p>}
+      {p.activityGap && tab === 'conversation' && (
+        <div className="wk-gap-notice" data-testid="activity-gap">
+          — some activity here was not recorded —
+        </div>
+      )}
       <div className="wk-tabs" role="tablist" aria-label="conversation views">
         {tabs.map((t) => (
           <button
@@ -406,7 +428,7 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
           </time>
         )}
       </div>
-      {tab === 'conversation' && (p.joinHint || p.archived || p.sendFailure) && (
+      {tab === 'conversation' && (p.joinHint || p.archived || p.sendFailure || p.membersError) && (
         <div className="wk-notices">
           {p.joinHint && (
             <div className="wk-alert" data-testid="join-hint">
@@ -416,6 +438,12 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
                 <code ref={fixRef} data-testid={TESTID.joinHintFix}>{p.joinHint.fix}</code>
                 <CopyButton text={p.joinHint.fix} target={fixRef} />
               </div>
+            </div>
+          )}
+          {p.membersError && (
+            <div className="wk-alert danger" role="alert" data-testid="members-error">
+              <b>Could not load member conversations</b>
+              <div>{p.membersError}</div>
             </div>
           )}
           {p.archived && (
@@ -478,9 +506,56 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
         {tab === 'graph' && <GraphTab name={c.name} />}
         {tab === 'sequence' && <SequenceTab events={p.events ?? []} />}
         {tab === 'yaml' && (
-          <div className="wk-card">
-            <pre className="wk-yaml">{p.yaml || 'No YAML for this conversation.'}</pre>
-          </div>
+          <>
+            {p.metadata && (
+              <div className="wk-card" data-testid="metadata-card">
+                <h4>Metadata</h4>
+                <dl className="wk-kv">
+                  <dt>Name</dt>
+                  <dd>{p.metadata.name}</dd>
+                  {p.metadata.namespace && (
+                    <>
+                      <dt>Namespace</dt>
+                      <dd>{p.metadata.namespace}</dd>
+                    </>
+                  )}
+                  {p.metadata.creationTimestamp && (
+                    <>
+                      <dt>Created</dt>
+                      <dd>{new Date(p.metadata.creationTimestamp).toLocaleString()}</dd>
+                    </>
+                  )}
+                  {p.metadata.uid && (
+                    <>
+                      <dt>UID</dt>
+                      <dd><small>{p.metadata.uid}</small></dd>
+                    </>
+                  )}
+                  {p.metadata.resourceVersion && (
+                    <>
+                      <dt>Resource version</dt>
+                      <dd><small>{p.metadata.resourceVersion}</small></dd>
+                    </>
+                  )}
+                  {p.metadata.labels && Object.keys(p.metadata.labels).length > 0 && (
+                    <>
+                      <dt>Labels</dt>
+                      <dd><small>{Object.entries(p.metadata.labels).map(([k, v]) => `${k}=${v}`).join(', ')}</small></dd>
+                    </>
+                  )}
+                  {p.metadata.annotations && Object.keys(p.metadata.annotations).length > 0 && (
+                    <>
+                      <dt>Annotations</dt>
+                      <dd><small>{Object.entries(p.metadata.annotations).slice(0, 6).map(([k, v]) => `${k}=${v}`).join(', ')}</small></dd>
+                    </>
+                  )}
+                </dl>
+              </div>
+            )}
+            <div className="wk-card">
+              <pre className="wk-yaml">{p.yaml || 'No YAML for this conversation.'}</pre>
+            </div>
+          </>
         )}
       </div>
       {tab === 'conversation' && isMember && p.root && (
@@ -521,7 +596,7 @@ function LoadedThread({ thread, onBack }: Readonly<{ thread: ReturnType<typeof u
   const [failure, setFailure] = useState<string>()
   // Read once per open: marking the conversation read must not move the divider under the viewer.
   const [unreadFrom] = useState(() => firstUnreadId(thread.messages, c.readAt))
-  const { members } = useThreadMembers(c, thread.detail?.transcript)
+  const { members, error: membersError } = useThreadMembers(c, thread.detail?.transcript)
   const vocabulary = useVocabulary()
   // A member binds no channel of its own: its runs' records are its transcript.
   const messages = thread.isMember && thread.messages.length === 0 ? memberTranscript(c, thread.runs) : thread.messages
@@ -536,6 +611,9 @@ function LoadedThread({ thread, onBack }: Readonly<{ thread: ReturnType<typeof u
     startedAt: thread.startedAt,
     yaml: thread.detail?.yaml,
     events: thread.detail?.events ?? [],
+    activityGap: (thread.detail as any)?.activityGap,
+    membersError: membersError ? String(membersError) : undefined,
+    metadata: thread.detail?.object?.metadata,
     vocabulary: vocabulary.data?.entries,
     canWrite: thread.canWrite,
     invoked,
@@ -551,7 +629,10 @@ function LoadedThread({ thread, onBack }: Readonly<{ thread: ReturnType<typeof u
       const outcome = await sendText(c.name, text)
       if (!outcome.ok) setFailure(outcome.error)
       // The stream is down, so nothing will announce the reply: read it again.
-      else if (commands.connection !== 'connected') void thread.refetch?.()
+      else if (commands.connection !== 'connected') {
+        void thread.refetch?.()
+        props.onSentOffline?.()
+      }
     },
     onVerb: (verb) => void sendText(c.name, verb),
     busy: commands.sending(c.name),

@@ -50,6 +50,9 @@ vi.mock('../../../model/commands', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../model/commands')>()),
   useCommands: () => ({ sending: () => false, latest: (name: string) => latestCommand[name], retry: (id: number) => retried.push(id), dismiss: (id: number) => dismissed.push(id), connection: 'connected' }),
 }))
+vi.mock('../../../model/pipelineIcon', () => ({
+  usePipelineIconLookup: () => () => undefined,
+}))
 vi.mock('../../../model/verbs', () => ({
   sendText: (name: string, text: string) => sent.push([name, text]),
   exitRuntime: (name: string) => sent.push([name, '/exit']),
@@ -174,6 +177,16 @@ describe('the conversations page', () => {
     expect(calls).toEqual([['close', { names: ['c1', 'c2'], includeWorking: true }]])
     // The batch ends the mode.
     expect(screen.queryByTestId(TESTID.selectionBar)).toBeNull()
+  })
+
+  it('selects every row at once, and clears them again', async () => {
+    mount('/conversations')
+    expect(screen.queryByRole('button', { name: 'Select all' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Select' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Select all' }))
+    expect(screen.getByTestId(TESTID.selectionBar)).toHaveTextContent(`${ITEMS.length} selected`)
+    await userEvent.click(screen.getByRole('button', { name: 'Clear all' }))
+    expect(screen.getByTestId(TESTID.selectionBar)).toHaveTextContent('0 selected')
   })
 
   it('starts a selection from a modifier-click, without opening the row', async () => {

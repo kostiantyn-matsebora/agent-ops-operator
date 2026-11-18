@@ -6,7 +6,7 @@ import {
 } from '../../../model/message'
 import type { RunDetails as RunDetailsFact, WorkingRun } from '../../../model/run'
 import { TESTID } from '../../../model/testids'
-import { chainStepLabel } from '../../../model/thread'
+import { chainStepLabel, useMemberExchange } from '../../../model/thread'
 import { Chevron, Icon, SEVERITY_ICON } from '../icons'
 import { clock, elapsed } from '../format'
 import { CopyButton } from './CopyButton'
@@ -148,17 +148,48 @@ function ReplyBody({ blocks }: Readonly<{ blocks: Block[] }>) {
 
 export const INVOKED_TESTID = (name: string) => `invoked-${name}`
 
-/** A member the reply opened: always visible, with the control that opens it. */
+/** A member the reply opened: always visible, with the controls that open it. */
 function Invoked({ member }: Readonly<{ member: ConversationSummary }>) {
+  const [open, setOpen] = useState(false)
+  const exchange = useMemberExchange(member.name, open)
+  const entry = member.causedBy?.entry ?? member.name
   return (
-    <div className="wk-rm" data-testid={INVOKED_TESTID(member.name)}>
-      <span>
-        Invoked {chainStepLabel(member)} · {(member.phase ?? 'unknown').toLowerCase()}
-      </span>
-      <Link className="wk-lnk" to={`/conversations/${encodeURIComponent(member.name)}`} title={`Open ${member.name}`}>
-        open conversation →
-      </Link>
-    </div>
+    <>
+      <div className="wk-rm" data-testid={INVOKED_TESTID(member.name)}>
+        <span>
+          Invoked {chainStepLabel(member)} · {(member.phase ?? 'unknown').toLowerCase()}
+          {member.errored ? ' · run failed' : ''}
+        </span>
+        <button
+          type="button"
+          className="wk-lnk"
+          data-testid={TESTID.memberInvocationToggle}
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? 'hide task and answer' : 'show task and answer'}
+        </button>
+        <Link className="wk-lnk" to={`/conversations/${encodeURIComponent(member.name)}`} title={`Open ${member.name}`}>
+          open conversation →
+        </Link>
+      </div>
+      {open && (
+        <div className="wk-rm-body">
+          {exchange.isLoading && !exchange.loaded && <p>Loading…</p>}
+          {(exchange.error || (!exchange.isLoading && !exchange.loaded)) && (
+            <p role="alert"><strong>Could not load this member</strong> {String(exchange.error ?? '')}</p>
+          )}
+          {exchange.loaded && (
+            <>
+              <h4>Task sent</h4>
+              {exchange.task?.text ? <Markdown>{exchange.task.text}</Markdown> : <small>No recorded input</small>}
+              <h4>{entry} responded</h4>
+              {exchange.result?.text ? <Markdown>{exchange.result.text}</Markdown> : <small>No result yet</small>}
+            </>
+          )}
+        </div>
+      )}
+    </>
   )
 }
 

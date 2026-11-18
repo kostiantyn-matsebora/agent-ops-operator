@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import type { Severity } from '../../model/message'
+import { resolveIcon } from '../../model/icon'
 
 // The workspace's icons: line drawings on a 24-unit grid, stroked in the
 // current colour, the prototype's set. Decorative unless given a label — the
@@ -103,7 +104,31 @@ const PATHS = {
 
 export type IconName = keyof typeof PATHS
 
-export function Icon({ name, label }: Readonly<{ name: IconName; label?: string }>): ReactElement {
+export function Icon({ name, label, icon }: Readonly<{ name?: IconName; label?: string; icon?: string }>): ReactElement | null {
+  // Custom icon reference (pipeline icons)
+  if (icon) {
+    const r = resolveIcon(icon)
+    if (!r) return null
+    if (r.kind === 'path') {
+      return (
+        <svg
+          className="wk-i"
+          viewBox="0 0 24 24"
+          role={label ? 'img' : undefined}
+          aria-label={label}
+          aria-hidden={label ? undefined : true}
+        >
+          <path d={r.d} fill="currentColor" />
+        </svg>
+      )
+    }
+    if (r.kind === 'image') {
+      return <img src={r.src} alt={label ?? ''} className="wk-i" style={{ objectFit: 'contain' }} />
+    }
+    return <span aria-hidden>{r.text}</span>
+  }
+  // Built-in icon
+  if (!name) return null
   return (
     <svg
       className="wk-i"
