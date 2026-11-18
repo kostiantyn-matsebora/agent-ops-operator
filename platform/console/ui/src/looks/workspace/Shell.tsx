@@ -11,9 +11,11 @@ import {
 } from './layout'
 import { NavPanel } from './NavPanel'
 import { LoginPage } from './pages/Login'
-import {
-  ConfigDetailPage, ConfigKindPage, ConfigPage, NewConversationDialog, OverviewPage, QueuesPage, TopologyPage,
-} from './pages/Placeholders'
+import { ConfigDetailPage, ConfigKindPage, ConfigPage } from './pages/config'
+import { NewConversationDialog } from './pages/NewConversation'
+import { OverviewPage } from './pages/Overview'
+import { QueuesPage } from './pages/Queues'
+import { TopologyPage } from './pages/topology'
 import { Splitter } from './Splitter'
 import './workspace.css'
 

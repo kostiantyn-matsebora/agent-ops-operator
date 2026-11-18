@@ -1,0 +1,142 @@
+/* The Overview page of the workspace look. Tokens only — both schemes. */
+
+.wk-ov-crumb {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--ao-text-subtle);
+}
+
+.wk-ov-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 14px;
+}
+
+.wk-ov-card > h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.wk-ov-dl {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.wk-ov-dl dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ao-text-subtle);
+}
+
+.wk-ov-dl dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.wk-ov-sub {
+  display: block;
+  color: var(--ao-text-subtle);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.wk-ov-meter {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--ao-border);
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.wk-ov-meter > i {
+  display: block;
+  height: 100%;
+  background: var(--ao-brand);
+  border-radius: 4px;
+}
+
+.wk-ov-meter.full > i {
+  background: var(--ao-warning);
+}
+
+.wk-ov-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wk-ov-link {
+  color: var(--ao-brand-strong);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+.wk-ov-link:hover {
+  text-decoration-style: solid;
+}
+
+.wk-ov-card .wk-tbl td,
+.wk-ov-card .wk-tbl th {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.wk-ov-alert {
+  border: 1px solid var(--ao-border);
+  border-inline-start-width: 4px;
+  border-radius: var(--wk-radius);
+  padding: 10px 14px;
+  background: var(--ao-surface);
+}
+
+.wk-ov-alert.danger {
+  border-color: var(--ao-danger);
+  background: var(--wk-danger-soft);
+}
+
+.wk-ov-alert.warning {
+  border-color: var(--ao-warning);
+  background: var(--wk-warn-soft);
+}
+
+.wk-ov-alert > b {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.wk-ov-empty {
+  color: var(--ao-text-subtle);
+}
+
+.wk-ov-empty > b {
+  display: block;
+  color: var(--ao-text);
+}
+
+.wk-ov-state {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+  color: var(--ao-text-subtle);
+}
+
+.wk-ov-state.error > b {
+  color: var(--ao-danger);
+}
+
+.wk-ov-state > b {
+  display: block;
+}
+
+@media (pointer: coarse), (hover: none) {
+  .wk-ov-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}

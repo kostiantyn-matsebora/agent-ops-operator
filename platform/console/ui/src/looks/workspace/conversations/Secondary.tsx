@@ -9,7 +9,7 @@ import { useConversationGraphPage } from '../../../model/topology'
 
 // The graph canvas is loaded on first use, so a viewer who never opens the
 // tab never pays for it.
-const Graph = lazy(() => import('../../../graph/Graph').then((m) => ({ default: m.Graph })))
+const Graph = lazy(() => import('../pages/topology/ConversationGraph').then((m) => ({ default: m.ConversationGraph })))
 
 export function GraphTab({ name }: Readonly<{ name: string }>): ReactElement {
   const page = useConversationGraphPage(name)

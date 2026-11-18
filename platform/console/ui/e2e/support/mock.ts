@@ -91,7 +91,8 @@ export function answer(path: string, query: URLSearchParams, extra: Extra = {}):
   if (path === '/api/session') return SESSION
   if (path === '/api/topology') return { topology: TOPOLOGY, oldestEvent: at(-120), unjoinedPipelines: [], synced: {}, metricsAvailable: false }
   if (path === `/api/conversations/${ROOT.name}/graph`) return { ...TOPOLOGY, events: DETAIL.events, diverged: false, pipeline: 'incident' }
-  if (path === '/api/vocabulary') return { entries: [{ kind: 'coordinator', name: 'incident' }, { kind: 'pipeline', name: 'k8s-observe' }, ...(extra.vocabulary ?? [])] }
+  if (path === '/api/sources') return { sources: [{ name: 'console', wired: true, pipeline: 'k8s-observe' }], canOriginate: true, writeEnabled: true }
+  if (path === '/api/vocabulary') return { entries: [{ kind: 'coordinator', name: 'incident', position: 'general' }, { kind: 'pipeline', name: 'k8s-observe', position: 'general' }, ...(extra.vocabulary ?? [])] }
   if (path === '/api/conversations') {
     const page = { total: rows.length, unreadTotal: 1, rootTotal: 5, offset: 0, limit: 100, scopes: { working: 1, mine: 0, errored: 1, closed: 0, incident: 1 } }
     return query.get('count') === '1' ? { ...page, items: [] } : { ...page, items: rows }

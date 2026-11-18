@@ -84,11 +84,17 @@ async function mockApi(page: Page) {
     }))
 }
 
-test('the graph animates exactly the edges the events name, and hiding a class keeps health honest', async ({
+// The same assertions in both looks: the look changes how the page is drawn,
+// never what it does (console-workspace-look, "The other pages keep their
+// structure"). `?look=` pins the look for the visit.
+const LOOKS = ['classic', 'workspace'] as const
+
+for (const look of LOOKS) {
+test(`[${look}] the graph animates exactly the edges the events name, and hiding a class keeps health honest`, async ({
   page,
 }) => {
   await mockApi(page)
-  await page.goto('/topology')
+  await page.goto(`/topology?look=${look}`)
 
   const fed = page.getByTestId('edge-signalsources/events->pipelines/ops')
   const dispatched = page.getByTestId('edge-pipelines/ops->agentruntimes/default')
@@ -143,11 +149,11 @@ test('the graph animates exactly the edges the events name, and hiding a class k
 // fit until it has one). This pins the OUTCOME: a real graph, laid out by a real
 // browser, ends up scaled to its viewport and centred in it. jsdom reports every
 // element as 0x0, so it can never tell those apart.
-test('scoping narrows the graph to what an element is connected to, and the graph fits its viewport', async ({
+test(`[${look}] scoping narrows the graph to what an element is connected to, and the graph fits its viewport`, async ({
   page,
 }) => {
   await mockApi(page)
-  await page.goto('/topology')
+  await page.goto(`/topology?look=${look}`)
   await page.getByTestId('node-pipelines/ops').waitFor()
 
   // The capability layer starts shown (`VIEW_DEFAULTS` hides nothing), so the
@@ -208,3 +214,4 @@ test('scoping narrows the graph to what an element is connected to, and the grap
   await expect(page.getByTestId('scope-bar')).toHaveCount(0)
 
 })
+}

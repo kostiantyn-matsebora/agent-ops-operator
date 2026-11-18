@@ -33,6 +33,13 @@ vi.mock('../../model/actions', async (importOriginal) => {
     useCloseBatch: () => idle, useDeleteBatch: () => idle, useVocabulary: () => ({ data: { entries: [] } }),
   }
 })
+vi.mock('../../model/newConversation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../model/newConversation')>()),
+  useNewConversation: () => ({
+    availability: 'ready', externalAuthenticator: '', wired: [], unwired: [], ambiguous: false, vocabularyLoading: false,
+    startable: [], busy: false, start: async () => ({ ok: true }),
+  }),
+}))
 vi.mock('../../model/commands', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../model/commands')>()),
   useCommands: () => ({ inFlight, connection, sending: () => false }),

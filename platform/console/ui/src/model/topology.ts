@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useActivityBuffer, useChart, useConversationGraph, useTopology } from '../api/hooks'
+import { useActivityBuffer, useChart, useConversation, useConversationGraph, useTopology } from '../api/hooks'
 import { useStream } from '../api/stream'
 import { useDisplay } from '../graph/display'
 import { mergeEvents } from '../graph/hops'
@@ -82,4 +82,13 @@ export function useHistoryChart(chartKey: string) {
   const windowSeconds = useDisplay((s) => s.windowSeconds)
   const range = Math.max(windowSeconds, 6 * 3600)
   return useChart(chartKey, range, true)
+}
+
+/**
+ * The conversation a hop belongs to, joined by id from its durable status — the
+ * same query the conversation page reads, kept current by the stream. Idle when
+ * the hop names none.
+ */
+export function useHopConversation(name?: string) {
+  return useConversation(name ?? '', Boolean(name))
 }

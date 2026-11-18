@@ -1,0 +1,361 @@
+/* Workspace look: the Configuration pages. Tokens only (--ao-*, --wk-*). */
+
+.wk-cfg {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.wk-cfg-crumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.wk-cfg-crumb a,
+.wk-cfg-link {
+  color: var(--ao-brand-strong);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.wk-cfg-crumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wk-cfg-crumb i {
+  font-style: normal;
+  color: var(--ao-text-subtle);
+}
+
+.wk-cfg-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  overflow-wrap: anywhere;
+}
+
+.wk-cfg-title .wk-pill {
+  font-size: 13px;
+}
+
+.wk-cfg-h {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.wk-cfg-glyph {
+  flex: none;
+  color: var(--ao-text-subtle);
+}
+
+.wk-cfg-icon {
+  vertical-align: -0.125em;
+  flex: none;
+}
+
+.wk-cfg-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wk-cfg-dim {
+  color: var(--ao-text-subtle);
+}
+
+.wk-cfg-small {
+  font-size: 12px;
+}
+
+.wk-cfg-multi {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- kind index ---- */
+
+.wk-cfg-kgrid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr));
+  gap: 12px;
+}
+
+.wk-cfg-kcard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 76px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--wk-radius);
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  text-decoration: none;
+}
+
+.wk-cfg-kcard:hover {
+  background: var(--ao-surface-alt);
+}
+
+.wk-cfg-kcard b {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ao-brand-strong);
+  font-weight: 600;
+}
+
+.wk-cfg-kcard > span {
+  color: var(--ao-text-subtle);
+  font-size: 13px;
+}
+
+/* ---- tables ---- */
+
+.wk-cfg-flush {
+  padding: 4px 8px;
+}
+
+.wk-cfg-tw {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.wk-cfg-tbl td {
+  min-width: 0;
+}
+
+.wk-cfg-tbl td .wk-cfg-multi {
+  overflow-wrap: anywhere;
+}
+
+.wk-cfg-findings {
+  margin-inline-start: 6px;
+}
+
+.wk-cfg-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wk-cfg-kvchip {
+  display: inline-block;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 12px;
+  background: var(--ao-surface-alt);
+  color: var(--ao-text-subtle);
+}
+
+.wk-cfg-kvchip.blue {
+  background: var(--ao-brand-soft);
+  color: var(--ao-brand-strong);
+}
+
+.wk-cfg-kvchip.more {
+  font-weight: 600;
+}
+
+.wk-cfg-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wk-cfg-filters select {
+  min-height: var(--wk-control-h);
+  max-width: 100%;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--wk-radius-sm);
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  padding: 0 8px;
+}
+
+/* ---- detail ---- */
+
+.wk-cfg-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.wk-cfg-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--ao-border);
+}
+
+.wk-cfg-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 8px 14px;
+  min-height: 36px;
+  color: var(--ao-text-subtle);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wk-cfg-tabs button[aria-selected='true'] {
+  color: var(--ao-text);
+  border-bottom-color: var(--ao-brand);
+}
+
+.wk-cfg-kv {
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 8px 14px;
+}
+
+.wk-cfg-kv dt {
+  color: var(--ao-text);
+}
+
+.wk-cfg-history {
+  margin-bottom: 12px;
+}
+
+.wk-cfg-kvrow {
+  display: contents;
+}
+
+.wk-cfg-routehead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.wk-cfg-reason {
+  border-radius: var(--wk-radius-sm);
+  padding: 2px 10px;
+  font-weight: 600;
+}
+
+.wk-cfg-reason.bad {
+  background: var(--wk-danger-soft);
+}
+
+.wk-cfg-reason.warn {
+  background: var(--wk-warn-soft);
+}
+
+.wk-cfg-tools {
+  padding: 8px 10px;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--wk-radius-sm);
+  background: var(--ao-code-bg);
+  overflow: auto;
+}
+
+/* ---- states ---- */
+
+.wk-cfg-state,
+.wk-cfg-empty {
+  text-align: center;
+  color: var(--ao-text-subtle);
+  padding: 16px;
+}
+
+.wk-cfg-state[data-state='error'] b {
+  color: var(--ao-danger, inherit);
+}
+
+/* ---- YAML ---- */
+
+.wk-cfg-yamlbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.wk-cfg-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wk-cfg-yaml {
+  padding: 12px;
+  max-height: 65vh;
+  max-width: 100%;
+  border-radius: var(--wk-radius-sm);
+  background: var(--ao-code-bg);
+  border: 1px solid var(--ao-border);
+  tab-size: 2;
+}
+
+.wk-cfg-yaml.wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wk-cfg-yl {
+  display: flex;
+}
+
+.wk-cfg-yn {
+  flex: none;
+  user-select: none;
+  text-align: right;
+  margin-inline-end: 12px;
+  color: var(--ao-text-subtle);
+  opacity: 0.7;
+}
+
+.wk-cfg-yt {
+  flex: 1 1 auto;
+  white-space: inherit;
+}
+
+.wk-cfg-y-key {
+  color: var(--ao-brand);
+}
+
+.wk-cfg-y-string {
+  color: var(--ao-success);
+}
+
+.wk-cfg-y-number,
+.wk-cfg-y-literal {
+  color: var(--ao-accent);
+}
+
+.wk-cfg-y-comment,
+.wk-cfg-y-punct {
+  color: var(--ao-text-subtle);
+}
+
+@media (max-width: 640px) {
+  .wk-cfg-kv {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .wk-cfg-kv dd {
+    margin-bottom: 8px;
+  }
+}

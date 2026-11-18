@@ -1,9 +1,10 @@
 import type { LookModule } from '../registry'
 import { ConversationsPage } from './conversations/Conversations'
 import { LoginPage } from './pages/Login'
-import {
-  ConfigDetailPage, ConfigKindPage, ConfigPage, OverviewPage, QueuesPage, TopologyPage,
-} from './pages/Placeholders'
+import { ConfigDetailPage, ConfigKindPage, ConfigPage } from './pages/config'
+import { OverviewPage } from './pages/Overview'
+import { QueuesPage } from './pages/Queues'
+import { TopologyPage } from './pages/topology'
 import { Shell as WorkspaceShell } from './Shell'
 
 // The workspace look: the conversations as one workspace — a navigation
@@ -11,8 +12,6 @@ import { Shell as WorkspaceShell } from './Shell'
 // CSS (workspace.css) over the model layer. It imports `model/` and
 // `api/types`, never the API client and never another look.
 //
-// The pages other than Conversations and Login are TODO(4.x) markers until
-// section 4 of console-visual-refresh restyles them.
 
 export const Shell: LookModule['Shell'] = WorkspaceShell
 

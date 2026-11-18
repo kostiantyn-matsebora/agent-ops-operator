@@ -1,0 +1,479 @@
+/* Workspace look: the Topology page and the conversation's graph. Tokens only
+   (--ao-*, --wk-*); the graph itself is the shared canvas, drawn in its own
+   colours. Geometry follows the prototype's .ttool / .tsplit / .tcanvas. */
+
+.wk-tp-page {
+  min-width: 0;
+}
+
+.wk-tp-crumb {
+  font-size: 13px;
+  color: var(--ao-text-subtle);
+}
+
+.wk-tp {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* ---- the toolbar ------------------------------------------------------- */
+
+.wk-tp-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wk-tp-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wk-tp select,
+.wk-tp input[type='text'],
+.wk-tp input:not([type]) {
+  font: inherit;
+  color: var(--ao-text);
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border-strong);
+  border-radius: 8px;
+  padding: 5px 10px;
+  min-height: var(--wk-control-h);
+  max-width: 100%;
+}
+
+.wk-tp-row input:not([type]) {
+  width: 160px;
+}
+
+.wk-tp-pop {
+  position: relative;
+}
+
+.wk-tp-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  max-height: 320px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border-strong);
+  border-radius: var(--wk-radius);
+  box-shadow: var(--wk-shadow);
+}
+
+.wk-tp-menu .wk-btn.link {
+  align-self: flex-start;
+  min-height: var(--wk-control-h);
+}
+
+.wk-tp-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.wk-tp-check input {
+  accent-color: var(--ao-brand);
+}
+
+.wk-tp-labelled {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--ao-text-subtle);
+}
+
+/* ---- the replay bars --------------------------------------------------- */
+
+.wk-tp-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  border: 1px solid var(--ao-brand);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--ao-surface);
+}
+
+.wk-tp-bar > b {
+  color: var(--ao-brand-strong);
+}
+
+.wk-tp-bar input[type='range'] {
+  flex: 1 1 220px;
+  min-width: 160px;
+  accent-color: var(--ao-brand);
+}
+
+/* ---- notices and chips ------------------------------------------------- */
+
+.wk-tp-notice {
+  border-radius: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--ao-border);
+  background: var(--ao-surface-alt);
+  color: var(--ao-text);
+  font-size: 13px;
+}
+
+.wk-tp-notice.warn {
+  background: var(--wk-warn-soft);
+  border-color: color-mix(in srgb, var(--ao-warning) 35%, var(--ao-border));
+}
+
+.wk-tp-notice.info {
+  background: var(--ao-brand-soft);
+  border-color: color-mix(in srgb, var(--ao-brand) 30%, var(--ao-border));
+}
+
+.wk-tp-notice.quiet {
+  background: none;
+}
+
+.wk-tp-notice > b {
+  display: block;
+}
+
+.wk-tp-scope {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.wk-pill.acc {
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent);
+}
+
+/* ---- the canvas and the side column ------------------------------------ */
+
+.wk-tp-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 14px;
+  align-items: start;
+}
+
+.wk-tp[data-side='hidden'] .wk-tp-split {
+  grid-template-columns: minmax(0, 1fr) 40px;
+}
+
+.wk-tp-canvas {
+  min-width: 0;
+}
+
+.wk-tp-canvas [data-testid='graph-viewport'] {
+  background: var(--ao-surface-alt) !important;
+  border-radius: var(--wk-radius) !important;
+}
+
+.wk-tp-side {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.wk-tp-sidebtn {
+  flex: none;
+  padding: 4px 8px;
+}
+
+.wk-tp-stack {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+
+@container (max-width: 860px) {
+  .wk-tp-split,
+  .wk-tp[data-side='hidden'] .wk-tp-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wk-tp-side {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wk-tp-sidebtn {
+    align-self: flex-start;
+  }
+}
+
+.wk-tp-zoom {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.wk-tp-zoom .wk-btn {
+  min-width: 36px;
+  padding: 2px 8px;
+  background: var(--ao-surface);
+}
+
+/* ---- cards and their parts --------------------------------------------- */
+
+.wk-tp-card {
+  min-width: 0;
+}
+
+.wk-tp-fold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ao-text);
+  text-align: left;
+  min-height: var(--wk-control-h);
+  cursor: pointer;
+}
+
+.wk-tp-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.wk-tp-body > p {
+  margin: 0;
+}
+
+.wk-tp-head small {
+  display: block;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  color: var(--ao-text-subtle);
+}
+
+.wk-tp-head h3,
+.wk-tp-h {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.wk-tp-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wk-tp-facts {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.wk-tp-facts > div {
+  display: grid;
+  grid-template-columns: minmax(70px, 100px) minmax(0, 1fr);
+  gap: 10px;
+  font-size: 13px;
+}
+
+.wk-tp-facts dt {
+  color: var(--ao-text-subtle);
+}
+
+.wk-tp-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.wk-tp-multi {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wk-tp-actions,
+.wk-tp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wk-tp-set {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wk-tp-set legend {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.wk-tp-table {
+  width: 100%;
+  font-size: 12.5px;
+  border-collapse: collapse;
+}
+
+.wk-tp-table th {
+  color: var(--ao-text-subtle);
+  text-align: left;
+  font-weight: 500;
+}
+
+.wk-tp-table th:not(:first-child),
+.wk-tp-table td:not(:first-child) {
+  text-align: right;
+}
+
+.wk-tp-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px/1.45 var(--wk-mono);
+  margin: 4px 0 0;
+}
+
+.wk-tp-hops {
+  display: grid;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--wk-radius-sm);
+}
+
+.wk-tp-hop {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) auto;
+  gap: 8px;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--ao-border);
+  background: none;
+  color: var(--ao-text);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.wk-tp-hop:hover,
+.wk-tp-hop.now {
+  background: var(--ao-brand-soft);
+}
+
+.wk-tp-hop b {
+  font: 500 12px var(--wk-mono);
+}
+
+.wk-tp-t,
+.wk-tp-sub {
+  color: var(--ao-text-subtle);
+}
+
+.wk-tp-sub {
+  display: block;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.wk-tp-err {
+  color: var(--ao-danger);
+  font-weight: 500;
+}
+
+.wk-tp-name,
+.wk-tp-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wk-tp-icon {
+  vertical-align: -0.125em;
+  flex: none;
+}
+
+/* ---- the History card -------------------------------------------------- */
+
+.wk-tp-histgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.wk-tp-histchart {
+  min-width: 0;
+}
+
+.wk-tp-empty {
+  padding: 12px 4px;
+  color: var(--ao-text-subtle);
+}
+
+.wk-tp-empty b {
+  display: block;
+  color: var(--ao-text);
+}
+
+.wk-tp-chart {
+  margin: 0;
+}
+
+.wk-tp-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.wk-tp-chart .grid {
+  stroke: var(--ao-border);
+  stroke-width: 1;
+}
+
+.wk-tp-chart text {
+  fill: var(--ao-text-subtle);
+  font-size: 9px;
+}
+
+.wk-tp-chart figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--ao-text-subtle);
+}
+
+.wk-tp-chart figcaption i {
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  margin-right: 4px;
+  vertical-align: middle;
+}

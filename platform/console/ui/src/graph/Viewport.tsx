@@ -1,5 +1,5 @@
-import { createContext, useCallback, useEffect, useRef, useState, type ReactNode, type WheelEvent } from 'react'
-import { Button, Tooltip } from '@patternfly/react-core'
+import { createContext, useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode, type WheelEvent } from 'react'
+import type { ZoomProps } from './chrome'
 
 // Pan and zoom.
 //
@@ -37,6 +37,8 @@ export interface ViewportProps {
   /** Drawn over the canvas, top left: what the picture is scoped to. */
   overlay?: ReactNode
   onBackgroundClick?: () => void
+  /** The look's own zoom controls. */
+  Zoom?: ComponentType<ZoomProps>
 }
 
 /**
@@ -63,8 +65,9 @@ function clamp(k: number): number {
 
 export function Viewport({
   contentWidth, contentHeight, contentX = 0, contentY = 0, children, ariaLabel, fitKey, aspect, maxHeight, overlay,
-  onBackgroundClick,
+  onBackgroundClick, Zoom,
 }: ViewportProps) {
+  const Controls = Zoom ?? PlainZoom
   const host = useRef<HTMLDivElement>(null)
   const [t, setT] = useState<Transform>({ x: 0, y: 0, k: 1 })
   const [height, setHeight] = useState<number | undefined>()
@@ -212,37 +215,23 @@ export function Viewport({
         </div>
       )}
 
-      <div
-        style={{ position: 'absolute', right: 12, bottom: 12, display: 'flex', gap: 4 }}
-        data-testid="zoom-controls"
-      >
-        <Tooltip content="Zoom in">
-          <Button variant="control" aria-label="zoom in" onClick={() => zoomAt(STEP)}>
-            +
-          </Button>
-        </Tooltip>
-        <Tooltip content="Zoom out">
-          <Button variant="control" aria-label="zoom out" onClick={() => zoomAt(1 / STEP)}>
-            −
-          </Button>
-        </Tooltip>
-        <Tooltip content="Fit to view">
-          <Button variant="control" aria-label="fit to view" onClick={fit}>
-            ⤢
-          </Button>
-        </Tooltip>
-        <span
-          aria-label="zoom level"
-          style={{
-            alignSelf: 'center',
-            padding: '0 8px',
-            fontSize: 12,
-            color: 'var(--ao-text-subtle)',
-          }}
-        >
-          {Math.round(t.k * 100)}%
-        </span>
+      <div style={{ position: 'absolute', right: 12, bottom: 12 }} data-testid="zoom-controls">
+        <Controls percent={Math.round(t.k * 100)} onIn={() => zoomAt(STEP)} onOut={() => zoomAt(1 / STEP)} onFit={fit} />
       </div>
+    </div>
+  )
+}
+
+/** The plain zoom controls, for a look that draws none of its own. */
+export function PlainZoom({ percent, onIn, onOut, onFit }: ZoomProps) {
+  return (
+    <div style={{ display: 'flex', gap: 4 }}>
+      <button type="button" aria-label="zoom in" title="Zoom in" onClick={onIn}>+</button>
+      <button type="button" aria-label="zoom out" title="Zoom out" onClick={onOut}>−</button>
+      <button type="button" aria-label="fit to view" title="Fit to view" onClick={onFit}>⤢</button>
+      <span aria-label="zoom level" style={{ alignSelf: 'center', padding: '0 8px', fontSize: 12, color: 'var(--ao-text-subtle)' }}>
+        {percent}%
+      </span>
     </div>
   )
 }
