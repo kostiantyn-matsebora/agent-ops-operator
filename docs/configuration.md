@@ -462,8 +462,8 @@ pi:
   provider: anthropic                         # any provider pi's SDK supports
   model: claude-sonnet-5
   credentialsSecret:
-  piCode: true                                # default: read the checkout's .claude/ like Claude Code, false turns it off
     token: placeholder-token                  # the chosen provider's own API key
+  piCode: true                                # default: read the checkout's .claude/ like Claude Code, false turns it off
 
 pipelines:
   - name: house-ops
