@@ -3,7 +3,7 @@
 ### Requirement: Selection is explicit and the confirmation names the cost
 The conversation list SHALL offer per-row selection on root conversations and a select-all control scoped to the root rows on the current page.
 
-The close action SHALL be disabled with nothing selected, and SHALL require a confirmation that states how many root conversations will be closed, how many of them are working, and that the cascade also reaches their members.
+The close action SHALL be disabled with nothing selected, and SHALL require a confirmation that states how many root conversations will be closed, how many of them are working, that the cascade also reaches their members, and that closing cannot be undone.
 
 There SHALL be no control that selects conversations beyond the current page.
 

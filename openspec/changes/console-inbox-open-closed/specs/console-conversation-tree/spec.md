@@ -37,5 +37,9 @@ and a member SHALL NOT be selectable.
 - **THEN** the confirmation title says one conversation deletes and a separate line says three members delete with it
 
 #### Scenario: A member cannot be deleted directly
-- **WHEN** the operator selects a closed root
-- **THEN** its cascade reaches every closed descendant, none of which carried a selection control
+- **WHEN** the list shows a closed root and its closed members
+- **THEN** the members carry no selection control, select-all selects the root only, and no delete request names a member
+
+#### Scenario: The cascade reaches unselected members
+- **WHEN** the operator deletes a closed root
+- **THEN** its cascade reaches every closed descendant although none was selected
