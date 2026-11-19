@@ -90,9 +90,13 @@ claude:
   enabled: %[2]s
   image: agentops-runtime-claude:e2e
 # pi is ON by default and flagged default, which the stub's own "default: true"
-# below would collide with. The pack runs the stub, so pi is off.
+# below would collide with, so it is not the default here. It stays ON: the
+# manager only gets CONTEXT_SYNC_IMAGE when a chart-declared runtime declares
+# contextSync paths, and the pi bundle is the one that does. Without it the pi
+# lanes' runtimes get no context-sync sidecar. No pod ever runs this runtime.
 pi:
-  enabled: false
+  enabled: true
+  default: false
 runtimes:
   - name: %[3]s
     default: true
