@@ -170,7 +170,7 @@ The `Ready` condition on `Pipeline` and `Coordinator`, the two holders of a reso
 | `agentFile.repo` or a prompt qualifier names a repository not in the resolved list | the repo and the list |
 | `workingDir` names a repository not in the resolved list | the repo and the list |
 | `workingDir` is set with fewer than two repositories | the count |
-| `agentFile.repo` is missing with two or more repositories | the list |
+| `agentFile` is declared, `agentFile.repo` is missing and two or more repositories resolve | the list |
 
 An `AgentCapability` has no `Ready` condition for these causes. It reaches a conversation only through a holder, and an unwired capability is inert.
 

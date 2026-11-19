@@ -34,3 +34,8 @@ The runtime SHALL conform to the version of `docs/contracts/runtime.md` its page
 #### Scenario: Missing configuration is a crash, not an idle exit
 - **WHEN** the runtime starts without `CONTROL_URL`, `CONVO_ID` or the model credential it needs
 - **THEN** it exits nonzero before the first poll, naming what is missing
+
+#### Scenario: The runtime does not clone
+
+- **WHEN** a runtime pod starts
+- **THEN** the pi runtime finds `/workspace` already populated and performs no clone and reads no `GIT_*` variable

@@ -6,7 +6,24 @@ The workspace is populated before the agent starts, by an init container in its 
 
 ### Requirement: An init container clones every repository before the runtime starts
 
-The manager SHALL add an init container to a runtime pod whose resolved repository list is non-empty. The container SHALL run the image of the `platform/workspace-sync` component, published as `agentops-workspace-sync` and built for `linux/amd64` and `linux/arm64`. It SHALL mount the workspace at `/workspace`, clone each entry per the layout in `multi-repo-workspace`, and exit before the agent container starts. The list SHALL reach it as one JSON array in the environment variable `WORKSPACE_REPOS`, and a resolved `agentFile` as one JSON object `{"repo": ..., "path": ...}` in `WORKSPACE_AGENT_FILE`, set only when the file is declared. Each entry SHALL carry its `name`, `url`, `ref`, `keepGit` and `auth.type`. The credential of the entry at position `<n>` arrives in the variable `REPO_CRED_<n>`, with `<n>` the entry's zero-based position in the list, because a repository name may hold characters an environment variable name cannot. For example, the second entry's token or ssh key arrives as `REPO_CRED_1`.
+The manager SHALL add an init container to a runtime pod whose resolved repository list is non-empty.
+
+The container:
+
+- SHALL run the image of the `platform/workspace-sync` component, published as `agentops-workspace-sync` and built for `linux/amd64` and `linux/arm64`.
+- SHALL mount the workspace at `/workspace`.
+- SHALL clone each entry per the layout in `multi-repo-workspace`.
+- SHALL exit before the agent container starts.
+
+Its input is environment:
+
+| Variable | Holds |
+|---|---|
+| `WORKSPACE_REPOS` | a JSON array, one entry per repository, each with `name`, `url`, `ref`, `keepGit` and `auth.type` |
+| `WORKSPACE_AGENT_FILE` | a JSON object `{"repo": ..., "path": ...}`, set only when an agent file is declared |
+| `REPO_CRED_<n>` | the credential of the entry at zero-based position `<n>`, for example `REPO_CRED_1` for the second entry |
+
+The credential is named by position because a repository name may hold characters an environment variable name cannot.
 
 #### Scenario: Two repositories are ready before the agent starts
 
@@ -20,9 +37,14 @@ The manager SHALL add an init container to a runtime pod whose resolved reposito
 
 ### Requirement: Credentials reach the init container only and never persist
 
-The manager SHALL read no secret. Each repository's `auth.secretRef` SHALL compile to `valueFrom` environment on the init container alone, with per-repository variable names. The agent container, and every sidecar, SHALL hold no git credential.
+The manager SHALL read no secret. Each repository's `auth.secretRef` SHALL compile to `valueFrom` environment on the init container alone. The agent container, and every sidecar, SHALL hold no git credential.
 
-The init container SHALL NOT write a credential into `.git/config`, a remote URL, the workspace or any file under it. An https token SHALL be supplied per command through `GIT_ASKPASS` or a credential helper, or an `http.extraHeader`. An ssh key SHALL be written to a file outside the workspace and used through `GIT_SSH_COMMAND`. The remote `origin` SHALL hold the URL as declared.
+The init container SHALL NOT write a credential into `.git/config`, a remote URL, the workspace or any file under it. The remote `origin` SHALL hold the URL as declared.
+
+| Auth | How the credential is supplied |
+|---|---|
+| https token | per command, through `GIT_ASKPASS`, a credential helper or an `http.extraHeader` |
+| ssh key | written to a file outside the workspace, used through `GIT_SSH_COMMAND` |
 
 #### Scenario: The token is not in origin
 
