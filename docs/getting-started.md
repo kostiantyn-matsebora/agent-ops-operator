@@ -139,6 +139,10 @@ fifteen minutes, most of it the install.
 
 ## What you just installed
 
+Demo mode runs **one manager and one state server**, so it fits a one-node
+cluster. A real install runs two managers and at least three state servers, see
+[Installation]({{ '/installation/' | relative_url }}).
+
 That answer came from objects the chart created:
 
 | Object | What it is |
