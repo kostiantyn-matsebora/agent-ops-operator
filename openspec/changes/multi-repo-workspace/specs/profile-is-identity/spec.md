@@ -84,7 +84,13 @@ names a tool grants nothing.
 
 ### Requirement: A profile declares its repositories and where its agent definition lives
 
-`AgentProfile.spec` SHALL accept `repositories[]`, `agentFile` and `workingDir` with the semantics `multi-repo-workspace` states. `spec.repository` SHALL remain as a DEPRECATED one-entry shorthand and SHALL NOT be set with `repositories`. `spec.agent` and `spec.agentFile` SHALL be mutually exclusive. These fields are IDENTITY: they say where the agent's definition and material live, never what the agent may call or run as.
+`AgentProfile.spec` SHALL accept `repositories[]`, `agentFile` and `workingDir` with the semantics `multi-repo-workspace` states.
+
+- `spec.repository` SHALL remain as a DEPRECATED one-entry shorthand.
+- `spec.repository` SHALL NOT be set together with `repositories`.
+- `spec.agent` and `spec.agentFile` SHALL be mutually exclusive.
+
+These fields are IDENTITY: they say where the agent's definition and material live, never what the agent may call or run as.
 
 #### Scenario: A profile with two repositories and a file in the second
 
