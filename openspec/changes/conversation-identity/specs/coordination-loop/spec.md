@@ -16,4 +16,4 @@ reason: the same id-equality rule every signal routes by.
 
 #### Scenario: Attach reported
 - **WHEN** a coordinator invokes the same `agents[]` entry a live member was already invoked as
-- **THEN** the invoke returns that member's name and reports `attached`, because both invokes mint the same id
+- **THEN** the invoke returns that member's `ID` and reports `attached`, because both invokes mint the same id

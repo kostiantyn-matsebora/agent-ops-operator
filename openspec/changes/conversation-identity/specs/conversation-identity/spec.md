@@ -39,7 +39,7 @@ Wherever the system, not a person, refers to a conversation, it SHALL use the `I
 | the runtime's `CONVO_ID` (`runtime-contract`) | the `ID` |
 | an operation id and a thread id the manager derives | the `ID` |
 | a stored cross-reference, `causedBy.parent` and any other conversation named by a record | the `ID` of the conversation it names |
-| an operation on the adapter wire (`channel-adapter-contract`) | `conversationUid` carries the `ID`, beside the display name in `conversation` |
+| an operation on the adapter wire (`channel-adapter-contract`) | `conversationId` carries the `ID`, beside the display name in `conversation` |
 | the runtime pod | the label `agentops.dev/conversation-id` |
 
 A reference by `ID` SHALL NOT resolve to a later conversation that reuses the name. A reference whose `ID` names no live conversation SHALL be treated as pointing at a conversation that is gone, and SHALL NOT be re-pointed at a conversation of the same name.

@@ -37,29 +37,31 @@ The signature becomes `(T, Revision, error)`. A backend returns what it stored: 
 
 Alternative: leave `Create` alone and have the three callers `Get` after. Rejected. It is a second round trip on the hot creation path and lets a caller forget to.
 
-### 3. The wire field is `conversationUid`
+### 3. The wire field is `conversationId`
 
 Three words now sit near each other on an op:
 
 | Field | Is |
 |---|---|
 | `conversation` | display name, as today |
-| `correlationId` | the signal's adopted key, renamed from `conversationId` |
-| `conversationUid` | the system identity, new |
+| `conversationId` | the system identity, the `ID` |
+| `correlationId` | the signal's adopted key, renamed from the old `conversationId` |
 
-`conversationUid` cannot be read as the name (it is not `conversation`) and cannot be read as the correlation key (it does not contain `Id`). Rejected:
+`conversationId` is the natural name for the conversation's identifier, and the contract has no vendor word in it. The field changes meaning, so the contract version moves (Decision 4) and an adapter on the old version is refused. It is never served a `conversationId` that quietly means something else.
 
-- `conversationId`: the retired name of the correlation key. Reusing it would make an old adapter silently read the identity as a correlation key.
+Rejected:
+
+- `conversationUid`: embeds a Kubernetes word in a public contract.
 - `id`: ambiguous beside the op's own id.
 - `conversationRef`: reads as a reference to something else.
 
-The suffix says "unique identifier" and nothing about where it came from. The value stays opaque to the adapter. The same `ID` is `CONVO_ID` and the pod label, and no vendor name appears in the contract.
+The value stays opaque to the adapter. The same `ID` is `CONVO_ID` and the pod label.
 
-Adapters point back by `threadId` on `inbound` and `read`, so those requests need no new field. An adapter uses `conversationUid` only to key its own per-conversation state.
+Adapters point back by `threadId` on `inbound` and `read`, so those requests need no new field. An adapter uses `conversationId` only to key its own per-conversation state.
 
 ### 4. The wire `contract` moves from `2` to `3`
 
-Renaming `conversationId` to `correlationId` removes a field adapters read. Compatibility rules call that MAJOR. Carrying on at `2` would hand an old adapter ops that silently lack the field it reads. At `3` it is refused with the existing `400` naming the version to build against, an explicit error. The `conversationUid` field rides the same bump and is not what forces it. `channels/telegram` and `platform/console` move together with the manager.
+Moving the correlation key to `correlationId` changes what a field adapters read means. Compatibility rules call that MAJOR. The rename moves its meaning to `correlationId` and the same key now holds the identity. Carrying on at `2` would hand an old adapter a `conversationId` that quietly means something else. At `3` it is refused with the existing `400` naming the version to build against, an explicit error. `channels/telegram` and `platform/console` move together with the manager.
 
 The document moves MAJOR for the same reason. The signal contract's wire is unchanged, since `initiationId` is untouched, and only its prose is renamed.
 
@@ -106,7 +108,7 @@ The wire name of the index moves from `conversationId` to `correlationId`, and a
 - **[Existing conversations are unusable after upgrade]** → no migration, per `proposal.md`. The record without an `ID` is reported with the instruction to delete it, and the chart major version and upgrade notes say so.
 - **[A pod of a deleted conversation outlives it]** → its `convo` poll is refused by `ID` and it is not adopted by a same-named conversation.
 - **[Conflict with `multi-repo-workspace`]** → none of its requirement headers is modified here. If an unforeseen overlap arises in `docs/contracts/runtime.md`, the later landing resolves it there. The spec files do not collide.
-- **[`conversationUid` reads like a Kubernetes word]** → it is a neutral "unique identifier" and the value is opaque. The `nats` backend mints a NUID, which shares nothing with a Kubernetes uid.
+- **[An adapter reading `conversationId` after upgrade gets a different value]** → deliberate and guarded by Decision 4: the contract version refuses an adapter that has not moved.
 
 ## Migration Plan
 

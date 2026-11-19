@@ -42,7 +42,7 @@ Not in scope:
 - `state-store`: `Create` returns the stored record, and a `ByID` index exists for conversations.
 - `state-store-nats`: the NATS backend returns the minted `ID` and `CreatedAt` from `Create`.
 - `conversation-naming`: the name is display, and the allocator hands the created record back.
-- `channel-adapter-contract`: the wire carries the `ID` beside the name, and `conversationId` is renamed.
+- `channel-adapter-contract`: the op's `conversationId` carries the `ID` beside the display name, and the correlation key moves to `correlationId`.
 - `signal-adapter-contract`: `conversationId` is renamed to `correlationId`.
 - `chat-signal-origination`, `pipeline-model`, `conversation-provenance`, `conversation-capacity`, `conversation-housekeeping`, `console-origination`, `coordination-loop`, `signal-persistence`: the rename wherever each states the field.
 - `runtime-workspace-persistence`: the workspace subdirectory is named by the `ID`.

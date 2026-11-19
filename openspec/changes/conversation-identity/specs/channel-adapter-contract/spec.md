@@ -11,7 +11,7 @@ Each operation delivered on `/channel/ops` SHALL additionally carry the conversa
 
 This makes the adapter's thread mapping pure transport translation: `correlationId` on one side, the transport's thread id on the other. No adapter needs the retired signature-hash label, a `status.threads` lookup of its own, or a member-origin backref.
 
-The operation's `conversationId` field is removed and this one replaces it. That is a BREAKING change for an adapter that read it: the wire `contract` value moves from `2` to `3` and the specification document moves MAJOR. An adapter declaring `2` SHALL be refused with the existing `400` naming the version to build against, never served an operation silently missing the field it reads.
+The operation's `conversationId` field changes meaning. It carried the signal's correlation key and now carries the conversation's system identity, while the correlation key moves to `correlationId`. That is a BREAKING change for an adapter that read it: the wire `contract` value moves from `2` to `3` and the specification document moves MAJOR. An adapter declaring `2` SHALL be refused with the existing `400` naming the version to build against, never served an operation whose `conversationId` silently means something else.
 
 #### Scenario: An op arrives with the id
 
@@ -57,11 +57,11 @@ Origination from a chat surface stays on the signal lane, owned by `chat-signal-
 
 ### Requirement: Every outbound operation carries the conversation's identity
 
-Each operation delivered on `/channel/ops` SHALL additionally carry `conversationUid`, the conversation's system identity (`conversation-identity`), beside the display name in `conversation` and the `correlationId`. The value is OPAQUE to the adapter — carried, compared for equality, never parsed, and never shown to a person as a name.
+Each operation delivered on `/channel/ops` SHALL additionally carry `conversationId`, the conversation's system identity (`conversation-identity`), beside the display name in `conversation` and the `correlationId`. The value is OPAQUE to the adapter — carried, compared for equality, never parsed, and never shown to a person as a name.
 
-`conversationUid` is the field an adapter keys its own per-conversation state on. `conversation` stays what a person reads. A name can be reused by a later conversation and `conversationUid` never is, so state keyed on the name can be inherited by a stranger.
+`conversationId` is the field an adapter keys its own per-conversation state on. `conversation` stays what a person reads. A name can be reused by a later conversation and `conversationId` never is, so state keyed on the name can be inherited by a stranger.
 
-An adapter points back at a conversation by `threadId` on `POST /channel/inbound` and `POST /channel/read`, never by name or by `conversationUid`. Those requests are unchanged.
+An adapter points back at a conversation by `threadId` on `POST /channel/inbound` and `POST /channel/read`, never by name or by `conversationId`. Those requests are unchanged.
 
 The field travels with the `contract` `3` bump of the requirement above. An adapter that does not use it SHALL remain fully conformant, ignoring it as it ignores any field it does not know.
 
@@ -70,20 +70,20 @@ The three names are distinct and SHALL NOT be conflated:
 | Field | Is |
 |---|---|
 | `conversation` | the display name, reusable, what a person types |
-| `conversationUid` | the system identity, unique for one life of a conversation |
+| `conversationId` | the system identity, unique for one life of a conversation |
 | `correlationId` | the signal's adopted `initiationId`, shared by many conversations, empty for a chat-originated one |
 
 #### Scenario: An op carries all three
 
 - **WHEN** an adapter receives an operation for a signal-originated conversation named `alert-node-down-ns-2`
-- **THEN** the operation carries `conversation` as `alert-node-down-ns-2`, `conversationUid` as the identity minted for that life of the name, and `correlationId` as the adopted `initiationId`
+- **THEN** the operation carries `conversation` as `alert-node-down-ns-2`, `conversationId` as the identity minted for that life of the name, and `correlationId` as the adopted `initiationId`
 
 #### Scenario: A reused name is told apart
 
-- **WHEN** a conversation is deleted, a new one is created under the same name, and an adapter still holds state keyed on the first one's `conversationUid`
-- **THEN** operations for the new conversation carry a different `conversationUid`, and the adapter's state for the first is not applied to it
+- **WHEN** a conversation is deleted, a new one is created under the same name, and an adapter still holds state keyed on the first one's `conversationId`
+- **THEN** operations for the new conversation carry a different `conversationId`, and the adapter's state for the first is not applied to it
 
 #### Scenario: An adapter at the current contract may ignore the field
 
-- **WHEN** an adapter declaring `contract` `3` never reads `conversationUid`
+- **WHEN** an adapter declaring `contract` `3` never reads `conversationId`
 - **THEN** it receives and completes operations as any conformant adapter does
