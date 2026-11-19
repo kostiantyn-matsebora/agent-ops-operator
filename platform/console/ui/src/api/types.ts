@@ -967,6 +967,8 @@ export interface Session {
   canWrite: boolean
   canOriginate: boolean
   metrics: boolean
+  /** The install's default look; omitted when it names no known look. */
+  defaultLook?: string
 }
 
 // ---- charts ------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { ANY_ROW, TESTID, testid } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 import { kubectl, listConversations, portForward, waitFor } from './support/kube'
 
@@ -36,11 +37,11 @@ async function run(browser: import('@playwright/test').Browser) {
 
   // A conversation of this spec's own, to close later.
   await actor.goto('/conversations')
-  await actor.getByTestId('new-conversation').click()
-  await actor.getByTestId('destination-e2e-console').click()
+  await actor.getByTestId(TESTID.newConversation).click()
+  await actor.getByTestId(testid.destination('e2e-console')).click()
   const marker = `e2e-stream-${f.stamp}-${Date.now()}`
   await actor.getByLabel('task', { exact: true }).fill(`echo ${marker}`)
-  await actor.getByTestId('start-conversation').click()
+  await actor.getByTestId(TESTID.startConversation).click()
   await expect(actor.getByText(/is answering/)).toBeVisible({ timeout: 20_000 })
   const name = await waitFor('the started conversation to exist', () => rowNameByTitle(marker), 30_000)
 
@@ -55,9 +56,9 @@ async function run(browser: import('@playwright/test').Browser) {
 
   // The watcher goes to the Archive scope and stays there.
   await watcher.goto('/conversations')
-  await expect(watcher.getByTestId('inbox')).toBeVisible()
-  await watcher.getByTestId('scope-Archive').click()
-  await expect(watcher.getByTestId(`row-${name}`)).toBeHidden()
+  await expect(watcher.getByTestId(TESTID.inbox)).toBeVisible()
+  await watcher.getByTestId(testid.scope('Archive')).click()
+  await expect(watcher.getByTestId(testid.row(name))).toBeHidden()
 
   // Roll the manager under both pages.
   kubectl(['rollout', 'restart', 'deployment/agentops-manager'])
@@ -65,13 +66,13 @@ async function run(browser: import('@playwright/test').Browser) {
 
   // Close it from the other page.
   await actor.goto(`/conversations/${name}`)
-  await expect(actor.getByTestId('timeline')).toBeVisible({ timeout: 30_000 })
+  await expect(actor.getByTestId(TESTID.timeline)).toBeVisible({ timeout: 30_000 })
   const composer = actor.getByLabel('message', { exact: true })
   await composer.fill('/close')
   await actor.getByRole('button', { name: 'Send', exact: true }).click()
-  const modal = actor.getByTestId('close-confirm-modal')
+  const modal = actor.getByTestId(TESTID.closeConfirmModal)
   if (await modal.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await modal.getByTestId('close-confirm-ok').click()
+    await modal.getByTestId(TESTID.closeConfirmOk).click()
   }
   try {
     await expect(actor.getByText('This thread was archived')).toBeVisible({ timeout: 30_000 })
@@ -107,9 +108,9 @@ async function run(browser: import('@playwright/test').Browser) {
 
   // The never-reloaded page sees it.
   try {
-    await expect(watcher.getByTestId(`row-${name}`)).toBeVisible({ timeout: 60_000 })
+    await expect(watcher.getByTestId(testid.row(name))).toBeVisible({ timeout: 60_000 })
   } catch (e) {
-    const ids = await watcher.locator('[data-testid^="row-"]').evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))
+    const ids = await watcher.getByTestId(ANY_ROW).evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))
     // Tell a browser that missed the update from a console that never had it:
     // the console's own listing, and what a reload of this page shows.
     const consolePhase = await watcher.evaluate(async (n) => {
@@ -120,8 +121,8 @@ async function run(browser: import('@playwright/test').Browser) {
       return hit ? JSON.stringify(hit).slice(0, 200) : 'absent'
     }, name)
     await watcher.reload()
-    await watcher.getByTestId('scope-Archive').click()
-    const afterReload = await watcher.getByTestId(`row-${name}`).isVisible({ timeout: 10_000 }).catch(() => false)
+    await watcher.getByTestId(testid.scope('Archive')).click()
+    const afterReload = await watcher.getByTestId(testid.row(name)).isVisible({ timeout: 10_000 }).catch(() => false)
     throw new Error(`row-${name} never appeared in the open Archive view. Rows present: ${JSON.stringify(ids)}. Console says: ${consolePhase}. Visible after a reload: ${afterReload}\n${(e as Error).message}`)
   }
   await watcher.screenshot({ path: 'e2e-live/proofs/34-stream-survives-manager-restart.png', fullPage: true })

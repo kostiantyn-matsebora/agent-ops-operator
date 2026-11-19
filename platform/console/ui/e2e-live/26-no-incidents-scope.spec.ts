@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID, testid } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
 // Item #26 — there is no "Incidents" scope anywhere, ever: not the expanded
@@ -20,16 +21,16 @@ const f = loadFixtures()
 
 test('#26 no "Incidents" scope in the expanded sidebar or the collapsed icon rail', async ({ page }) => {
   await page.goto('/conversations')
-  const inbox = page.getByTestId('inbox')
+  const inbox = page.getByTestId(TESTID.inbox)
   await expect(inbox).toBeVisible()
   await expect(page.getByText('Incidents', { exact: true })).toHaveCount(0)
-  await expect(inbox.getByTestId('scope-Incidents')).toHaveCount(0)
+  await expect(inbox.getByTestId(testid.scope('Incidents'))).toHaveCount(0)
 
   // The collapsed icon rail is a SEPARATE render branch (`Inbox.tsx`'s
   // `collapsed` early return) — the expanded check above proves nothing
   // about it.
   await page.getByRole('button', { name: 'collapse the inbox' }).click()
-  const collapsedRail = page.getByTestId('inbox-collapsed')
+  const collapsedRail = page.getByTestId(TESTID.inboxCollapsed)
   await expect(collapsedRail).toBeVisible()
   await expect(collapsedRail.getByText('Incidents', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /incidents/i })).toHaveCount(0)
@@ -41,12 +42,12 @@ test('#26 no "Incidents" scope in the expanded sidebar or the collapsed icon rai
 
 test('#26 the inbox lists only All / Unread / Working / Mine / Errored as fixed scopes', async ({ page }) => {
   await page.goto('/conversations')
-  await expect(page.getByTestId('inbox')).toBeVisible()
+  await expect(page.getByTestId(TESTID.inbox)).toBeVisible()
   for (const label of ['All', 'Unread', 'Working', 'Mine', 'Errored']) {
-    await expect(page.getByTestId(`scope-${label}`)).toBeVisible()
+    await expect(page.getByTestId(testid.scope(label))).toBeVisible()
   }
-  await expect(page.getByTestId('scope-Incidents')).toHaveCount(0)
+  await expect(page.getByTestId(testid.scope('Incidents'))).toHaveCount(0)
   // Sanity: the fixture set really is present, so an empty sidebar could
   // never pass this test by accident.
-  await expect(page.getByTestId(`row-${f.conversations.coordOpenRoot}`)).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId(testid.row(f.conversations.coordOpenRoot))).toBeVisible({ timeout: 20_000 })
 })

@@ -602,7 +602,7 @@ const conversationDetail: ConversationDetail = {
   ].join('\n'),
   archived: false,
   transcript: [
-    // The console renders wire text PLAIN, deliberately (src/components/Text.tsx),
+    // The console renders wire text PLAIN, deliberately (src/looks/classic/components/Text.tsx),
     // so the fixture writes prose. Markdown here would publish a screenshot of
     // asterisks and read as a rendering fault.
     {

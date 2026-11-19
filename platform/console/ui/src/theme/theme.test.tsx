@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { ThemeSwitcher } from '../components/ThemeSwitcher'
+import { ThemeSwitcher } from '../looks/classic/components/ThemeSwitcher'
 import { applyTheme, resolve, startThemeSync, useThemeStore } from './useTheme'
 
 // The theme is applied to <html>, because that is where PatternFly's tokens and

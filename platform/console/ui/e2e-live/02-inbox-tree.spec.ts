@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID, testid, ANY_ROW } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 import { ManagerClient } from './support/manager'
 
@@ -10,15 +11,15 @@ const SOURCE_TASKS = 'e2e-tasks'
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/conversations')
-  await expect(page.getByTestId('inbox')).toBeVisible()
+  await expect(page.getByTestId(TESTID.inbox)).toBeVisible()
 })
 
 test('#2 Expand all / Collapse all actually expand and collapse a multi-member coordinator tree', async ({ page }) => {
   const [member1, member2] = f.conversations.coordOpenMembers
-  const rootRow = page.getByTestId(`row-${f.conversations.coordOpenRoot}`)
+  const rootRow = page.getByTestId(testid.row(f.conversations.coordOpenRoot))
   await expect(rootRow).toBeVisible({ timeout: 20_000 })
-  const memberRow1 = page.getByTestId(`row-${member1}`)
-  const memberRow2 = page.getByTestId(`row-${member2}`)
+  const memberRow1 = page.getByTestId(testid.row(member1))
+  const memberRow2 = page.getByTestId(testid.row(member2))
 
   // Starts expanded (ChatView's default `collapsedRoots` is empty).
   await expect(memberRow1).toBeVisible()
@@ -43,7 +44,7 @@ test('#2 Expand all / Collapse all actually expand and collapse a multi-member c
 test('#9 a new row arriving shows no toast, only the row-level tint/tag', async ({ page }) => {
   // No toast-shaped element exists before the arrival either — the baseline
   // that makes "still none after" meaningful rather than assumed.
-  await expect(page.locator('[class*="alert-group"]')).toHaveCount(0)
+  await expect(page.getByTestId(TESTID.toast)).toHaveCount(0)
 
   const manager = new ManagerClient(f.managerUrl, f.adapterToken)
   const marker = `arrival-${Date.now()}`
@@ -52,11 +53,11 @@ test('#9 a new row arriving shows no toast, only the row-level tint/tag', async 
   // The live stream inserts the row with no page reload (apply.ts's
   // `writeConversation`, on the unfiltered first page) — this is the
   // SIGNAL that something arrived.
-  const newRow = page.locator('li', { hasText: marker })
+  const newRow = page.getByTestId(ANY_ROW).filter({ hasText: marker })
   await expect(newRow).toBeVisible({ timeout: 20_000 })
   await expect(newRow.getByText('new', { exact: true })).toBeVisible({ timeout: 5000 })
   await page.screenshot({ path: 'e2e-live/proofs/09-no-toast-just-tag.png', fullPage: true })
 
   // And still no toast — the row's own tint/tag is the WHOLE of the signal.
-  await expect(page.locator('[class*="alert-group"]')).toHaveCount(0)
+  await expect(page.getByTestId(TESTID.toast)).toHaveCount(0)
 })

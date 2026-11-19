@@ -1,0 +1,103 @@
+import {
+  Alert, Card, CardBody, CardTitle, Label, PageSection, Stack, StackItem,
+} from '@patternfly/react-core'
+import { ErrorState, Loading } from '../components/States'
+import { useTopologyPage } from '../../../model/topology'
+import { Graph } from '../../../graph/Graph'
+import { PlainText } from '../components/Text'
+import { Crumbs } from '../components/Crumbs'
+import { HistoryCharts } from './History'
+
+export function TopologyPage() {
+  const { data, isLoading, error, events, bufferStart, bufferCovers, historyOpen, toggleHistory } = useTopologyPage()
+
+  if (isLoading && !data) return <Loading />
+  if (error || !data) return <ErrorState title="Could not load the topology">{String(error)}</ErrorState>
+
+  return (
+    <>
+      <Crumbs items={[{ label: 'Topology' }]} />
+      <PageSection>
+      {/* No title under the crumb: the crumb names the page, and every row
+          above the canvas is a row the picture does not get. */}
+      <Stack hasGutter>
+        {!bufferCovers && (
+          <StackItem>
+            {/* Two DIFFERENT situations that the same sentence used to describe,
+                which read as "no backend configured" even when one was. */}
+            {data.metricsAvailable ? (
+              <Alert
+                variant="info"
+                isInline
+                title="Edge rates cover the manager's live buffer, not the whole window"
+              >
+                A metrics backend <strong>is</strong> connected, but it cannot extend these
+                particular numbers: metric labels are bounded by CR count, so there is no per-edge
+                series to read. Edge rates are therefore always live-buffer only. The aggregate
+                charts below do cover this window.
+              </Alert>
+            ) : (
+              <Alert variant="warning" isInline title="No metrics backend is configured">
+                Edge rates cover only what the manager still holds in memory, and nothing covers
+                longer windows. Set <code>console.metrics.url</code> to a Prometheus or
+                VictoriaMetrics query endpoint for historical aggregates.
+              </Alert>
+            )}
+          </StackItem>
+        )}
+        {!data.stream.connected && (
+          <StackItem>
+            <Alert variant="warning" isInline title="The activity stream is disconnected">
+              Edges will not animate — this graph shows wiring, not current traffic.
+            </Alert>
+          </StackItem>
+        )}
+        {data.stream.lastGap && (
+          <StackItem>
+            {/* A quiet edge and an edge whose traffic was never recorded look
+                identical. Only one of them means the system was idle. */}
+            <Alert variant="info" isInline title="This window has a gap in recorded activity">
+              Nothing was recorded before {new Date(data.stream.lastGap.ts).toLocaleTimeString()} — the
+              manager's activity buffer is in memory, so a restart or an overflow ends its history.
+              Edge rates covering that stretch under-report; the wiring itself is read from
+              Kubernetes and is complete.
+            </Alert>
+          </StackItem>
+        )}
+
+        <StackItem>
+          <Graph topology={data.topology} events={events} bufferStart={bufferStart} reserveBelow={132} />
+        </StackItem>
+
+        {(data.unjoinedPipelines ?? []).length > 0 && (
+          <StackItem>
+            <Card>
+              <CardTitle>Pipelines the console is not joined to</CardTitle>
+              <CardBody>
+                <p>
+                  Their conversations are visible but read-only — no console thread means nowhere to
+                  reply. Add <code>{data.consoleChannel}</code> to a pipeline's{' '}
+                  <code>channelRefs</code> to join it. The console never edits a Pipeline.
+                </p>
+                {(data.unjoinedPipelines ?? []).map((p) => (
+                  <Label key={p} style={{ marginRight: 8 }}>
+                    <PlainText>{p}</PlainText>
+                  </Label>
+                ))}
+              </CardBody>
+            </Card>
+          </StackItem>
+        )}
+
+        <StackItem>
+          <HistoryCharts
+            available={data.metricsAvailable}
+            expanded={historyOpen}
+            onToggle={toggleHistory}
+          />
+        </StackItem>
+      </Stack>
+      </PageSection>
+    </>
+  )
+}

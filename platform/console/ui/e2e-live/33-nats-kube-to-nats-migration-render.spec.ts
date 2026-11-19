@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID, testid } from '../src/model/testids'
 import { listConversations } from './support/kube'
 
 // nats-state-store-default task 5.10 — the migration lane
@@ -22,21 +23,21 @@ function findMigratedConversationName(): string | undefined {
 }
 
 test('the pre-upgrade conversation, its run and its unread state render after the kube-to-nats migration', async ({ page }) => {
-  const name = findMigratedConversationName()
+  const name = findMigratedConversationName() ?? ''
   test.skip(!name, 'no e2e-nats-import-conv- fixture on this cluster — the kube-to-nats migration lane (task 5.5) did not run before this suite')
 
   await page.goto('/conversations')
-  await expect(page.getByTestId('inbox')).toBeVisible()
-  const row = page.getByTestId(`row-${name}`)
+  await expect(page.getByTestId(TESTID.inbox)).toBeVisible()
+  const row = page.getByTestId(testid.row(name))
   await expect(row).toBeVisible({ timeout: 20_000 })
 
   // Never read by anything before this spec (task 5.5's lane posts only
   // through /signal/inbound, never through the console) — the migrated
   // record's genuinely unread state must still render correctly.
-  await expect(page.getByTestId(`unread-${name}`)).toBeVisible()
+  await expect(page.getByTestId(testid.unread(name))).toBeVisible()
 
-  await page.getByTestId(`open-${name}`).click()
-  await expect(page.getByTestId('timeline')).toBeVisible({ timeout: 20_000 })
+  await page.getByTestId(testid.open(name)).click()
+  await expect(page.getByTestId(TESTID.timeline)).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('e2e-nats-import-conv-', { exact: false }).first()).toBeVisible()
 
   await page.screenshot({ path: 'e2e-live/proofs/33-nats-kube-to-nats-migration-render.png', fullPage: true })

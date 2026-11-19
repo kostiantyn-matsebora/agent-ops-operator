@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID, testid } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 import { kubectl, listConversations, waitFor } from './support/kube'
 
@@ -19,22 +20,22 @@ test('a state server pod dying mid-conversation never breaks the console view, a
   test.setTimeout(150_000)
 
   await page.goto('/conversations')
-  await expect(page.getByTestId('new-conversation')).toBeVisible()
-  await page.getByTestId('new-conversation').click()
-  await expect(page.getByTestId('destination-cards')).toBeVisible()
-  await page.getByTestId('destination-e2e-console').click()
+  await expect(page.getByTestId(TESTID.newConversation)).toBeVisible()
+  await page.getByTestId(TESTID.newConversation).click()
+  await expect(page.getByTestId(TESTID.destinationCards)).toBeVisible()
+  await page.getByTestId(testid.destination('e2e-console')).click()
 
   const marker = `e2e-nats-pod-${f.stamp}-${Date.now()}`
   await page.getByLabel('task', { exact: true }).fill(`echo ${marker}`)
-  await page.getByTestId('start-conversation').click()
+  await page.getByTestId(TESTID.startConversation).click()
   await expect(page.getByText(/is answering/)).toBeVisible({ timeout: 20_000 })
 
   const name = await waitFor('the started conversation to exist, by its marker', () => findRowNameByTitleSubstring(marker), 30_000)
 
   await page.goto('/conversations')
-  await expect(page.getByTestId(`row-${name}`)).toBeVisible({ timeout: 20_000 })
-  await page.getByTestId(`open-${name}`).click()
-  await expect(page.getByTestId('timeline')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId(testid.row(name))).toBeVisible({ timeout: 20_000 })
+  await page.getByTestId(testid.open(name)).click()
+  await expect(page.getByTestId(TESTID.timeline)).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText(marker, { exact: false }).first()).toBeVisible()
 
   const victim = kubectl(['get', 'pods', '-l', 'app.kubernetes.io/name=agentops-nats',
@@ -45,19 +46,19 @@ test('a state server pod dying mid-conversation never breaks the console view, a
   // The page keeps rendering through the pod's death — reloaded, not read
   // from a cached view, so this actually exercises a fresh read.
   await page.reload()
-  await expect(page.getByTestId('timeline')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId(TESTID.timeline)).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText(marker, { exact: false }).first()).toBeVisible()
 
   // Thread + unread state survive: back on the list, the row this spec just
   // opened (and therefore already read) is still there, rendering cleanly.
   await page.goto('/conversations')
-  await expect(page.getByTestId(`row-${name}`)).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByTestId(`unread-${name}`)).toHaveCount(0)
+  await expect(page.getByTestId(testid.row(name))).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId(testid.unread(name))).toHaveCount(0)
 
   // A new message still arrives once the StatefulSet replaces the pod and
   // quorum holds again — no scaling here, only the controller's own
   // replacement, which is the point.
-  await page.getByTestId(`open-${name}`).click()
+  await page.getByTestId(testid.open(name)).click()
   const composer = page.getByLabel('message', { exact: true })
   await expect(composer).toBeVisible({ timeout: 30_000 })
   const reply = `echo nats-pod-reply-${f.stamp}-${Date.now()}`

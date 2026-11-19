@@ -4,7 +4,7 @@ import {
   MenuToggle, Select, SelectList, SelectOption, Stack, StackItem, Switch, TextInput,
   ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
-import { Icon } from '../components/Icon'
+import { Icon } from '../looks/classic/components/Icon'
 import { useDisplay } from './display'
 import type { HiddenSummary } from './filter'
 import type { EdgeLabel } from './hops'
@@ -14,30 +14,12 @@ import { plural, styleFor } from './shapes'
 import { VIEWS, type ViewId } from './types'
 import { SPINE_CLASS, VIEW_CLASSES } from './views/classes'
 import type { Detail } from './views'
+import { WINDOWS, type Mode, type ToolbarProps } from './chrome'
 
 // The graph's toolbar, in PatternFly controls rather than the mockup's own.
 // Everything here but find, hide and the scope is persisted per view.
 
-export const WINDOWS = [
-  { seconds: 60, label: 'Last 1m' },
-  { seconds: 300, label: 'Last 5m' },
-  { seconds: 600, label: 'Last 10m' },
-  { seconds: 1800, label: 'Last 30m' },
-]
-
-export type Mode = 'live' | 'replay' | 'conversation'
-
-export interface ToolbarProps {
-  pipelines: string[]
-  /** A pipeline's declared icon, by name, for the selector's rows. */
-  iconFor: (name: string) => string | undefined
-  find: string
-  hide: string
-  onFind: (v: string) => void
-  onHide: (v: string) => void
-  mode: Mode
-  onMode: (m: 'live' | 'replay') => void
-}
+export { WINDOWS, type Mode }
 
 export function GraphToolbar({ pipelines, iconFor, find, hide, onFind, onHide, mode, onMode }: ToolbarProps) {
   const d = useDisplay()

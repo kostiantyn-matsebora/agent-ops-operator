@@ -6,13 +6,16 @@ import {
 import { Link } from 'react-router-dom'
 import { healthVariant, useConversation } from '../api/hooks'
 import type { ActivityEvent, EdgeTraffic } from '../api/types'
-import { PipelineName } from '../components/PipelineName'
-import { PlainText } from '../components/Text'
+import { PipelineName } from '../looks/classic/components/PipelineName'
+import { PlainText } from '../looks/classic/components/Text'
 import { hopContent, hopSummary } from './content'
 import type { EdgeTone } from './hops'
 import type { Step } from './replay'
 import { plural, styleFor } from './shapes'
 import type { ViewEdge, ViewNode } from './types'
+import { clock, hopPath } from './format'
+
+export { clock, hopPath }
 
 // The side panel: the hop feed when nothing is selected, else what was.
 //
@@ -20,15 +23,8 @@ import type { ViewEdge, ViewNode } from './types'
 // this graph is the Wired=False message a reconciler wrote, and paraphrasing it
 // would put the console's words in the cluster's mouth.
 
-export const clock = (ts: string | number) =>
-  new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-
 const seconds = (ms?: number) => (ms ? `${(ms / 1000).toFixed(1)}s` : '')
 const latency = (ms?: number) => (ms ? (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`) : '—')
-
-export function hopPath(ev: ActivityEvent): string {
-  return `${ev.from?.name ?? '∅'} → ${ev.to?.name ?? '∅'}`
-}
 
 function Facts({ rows }: { rows: [string, ReactNode][] }) {
   return (

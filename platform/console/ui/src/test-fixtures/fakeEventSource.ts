@@ -1,3 +1,5 @@
+import { flushStream } from '../api/stream'
+
 /**
  * An EventSource the tests drive by hand.
  *
@@ -26,6 +28,13 @@ export class FakeEventSource {
   }
   /** Deliver one server event, exactly as EventSource would. */
   emit(name: string, payload: unknown) {
+    this.listeners[name]?.({ data: JSON.stringify(payload) })
+    // The stream gathers events for a moment before applying them; a test that
+    // delivers one wants its effect now.
+    flushStream()
+  }
+  /** Deliver one server event WITHOUT applying it yet, as a burst arrives. */
+  emitQueued(name: string, payload: unknown) {
     this.listeners[name]?.({ data: JSON.stringify(payload) })
   }
   close() {

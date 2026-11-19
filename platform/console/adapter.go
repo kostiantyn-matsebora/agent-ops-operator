@@ -53,6 +53,9 @@ type consoleChannelConfig struct {
 	// MetricsURL is an optional Prometheus/VictoriaMetrics query endpoint for
 	// windows beyond the manager's activity buffer.
 	MetricsURL string `json:"metricsUrl,omitempty"`
+	// DefaultLook names the look a viewer gets when they have chosen none.
+	// Unvalidated here: the API layer passes only a known look to the browser.
+	DefaultLook string `json:"defaultLook,omitempty"`
 }
 
 const (

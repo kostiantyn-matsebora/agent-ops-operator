@@ -1,0 +1,100 @@
+/* The Queues page of the workspace look. Tokens only — both schemes. */
+
+.wk-q-crumb {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--ao-text-subtle);
+}
+
+.wk-q-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 14px;
+}
+
+.wk-q-card > h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.wk-q-card .wk-tbl td,
+.wk-q-card .wk-tbl th {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.wk-q-sub {
+  display: block;
+  color: var(--ao-text-subtle);
+  font-size: 12px;
+}
+
+.wk-q-link {
+  color: var(--ao-brand-strong);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+.wk-q-link:hover {
+  text-decoration-style: solid;
+}
+
+.wk-q-pipeline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wk-q-pipeline svg,
+.wk-q-pipeline img {
+  flex: none;
+}
+
+.wk-q-alert {
+  border: 1px solid var(--ao-warning);
+  border-inline-start-width: 4px;
+  border-radius: var(--wk-radius);
+  padding: 10px 14px;
+  background: var(--wk-warn-soft);
+}
+
+.wk-q-alert > b {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.wk-q-empty {
+  color: var(--ao-text-subtle);
+}
+
+.wk-q-empty > b {
+  display: block;
+  color: var(--ao-text);
+}
+
+.wk-q-state {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+  color: var(--ao-text-subtle);
+}
+
+.wk-q-state > b {
+  display: block;
+}
+
+.wk-q-state.error > b {
+  color: var(--ao-danger);
+}
+
+@media (pointer: coarse), (hover: none) {
+  .wk-q-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}

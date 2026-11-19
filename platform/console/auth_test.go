@@ -208,6 +208,8 @@ type sessionView struct {
 	ExternalAuthenticator string `json:"externalAuthenticator"`
 	WriteEnabled          bool   `json:"writeEnabled"`
 	CanWrite              bool   `json:"canWrite"`
+	// a pointer so a test can tell "omitted" from "empty"
+	DefaultLook *string `json:"defaultLook"`
 }
 
 func decodeSession(t *testing.T, rec *httptest.ResponseRecorder) sessionView {
@@ -217,6 +219,39 @@ func decodeSession(t *testing.T, rec *httptest.ResponseRecorder) sessionView {
 		t.Fatalf("session body %q: %v", rec.Body.String(), err)
 	}
 	return s
+}
+
+// The install's default look reaches the browser with the session, read from
+// the served Channel's config. Only a look this build knows passes through; an
+// unknown one is omitted, so the browser falls back to its own default rather
+// than being told to render something it cannot.
+func TestSessionReportsOnlyAKnownDefaultLook(t *testing.T) {
+	cases := []struct {
+		name   string
+		config string
+		want   string // "" means the key must be absent
+	}{
+		{"workspace passes through", `{"defaultLook":"workspace"}`, "workspace"},
+		{"classic passes through", `{"defaultLook":"classic"}`, "classic"},
+		{"an unknown look is dropped", `{"defaultLook":"sparkly"}`, ""},
+		{"a wrong-case look is dropped", `{"defaultLook":"Classic"}`, ""},
+		{"no look named", `{}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api, f := authAPI(t, "tok", true, "")
+			f.channels = []ChannelInfo{{Name: "console", Config: json.RawMessage(tc.config)}}
+			api.adapter.refreshChannels(context.Background())
+
+			s := decodeSession(t, authed(t, api.Handler(http.NotFoundHandler()), "GET", "/api/session", ""))
+			switch {
+			case tc.want == "" && s.DefaultLook != nil:
+				t.Fatalf("defaultLook must be omitted, got %q", *s.DefaultLook)
+			case tc.want != "" && (s.DefaultLook == nil || *s.DefaultLook != tc.want):
+				t.Fatalf("defaultLook = %v, want %q", s.DefaultLook, tc.want)
+			}
+		})
+	}
 }
 
 // authorized answers the same verdict as admit, without the identity, for

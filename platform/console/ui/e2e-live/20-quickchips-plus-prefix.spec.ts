@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
 // Item #20 — RESHAPED by direct, repeated instruction after this spec was
@@ -16,8 +17,8 @@ const f = loadFixtures()
 
 test('#20 a thread command renders as an ICON with no visible "/name" text, and no starter chip exists any more', async ({ page }) => {
   await page.goto(`/conversations/${f.conversations.markTask}`)
-  await expect(page.getByTestId('timeline')).toBeVisible({ timeout: 20_000 })
-  const chips = page.getByTestId('quick-chips')
+  await expect(page.getByTestId(TESTID.timeline)).toBeVisible({ timeout: 20_000 })
+  const chips = page.getByTestId(TESTID.quickChips)
   await expect(chips).toBeVisible()
 
   // No starter chip of any shape exists any more — nothing here begins a

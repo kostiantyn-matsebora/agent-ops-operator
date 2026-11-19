@@ -2,38 +2,40 @@
 
 Role: `frontend-developer`. Nothing here is visible to a viewer.
 
-- [ ] 1.1 Add `looks/registry.ts` with `classic` as the only entry, and verify a unit test lists it
-- [ ] 1.2 Move today's `pages/` and `components/` into `looks/classic/` with only import paths edited, and verify the existing `npm test` and `npm run typecheck` stay green
-- [ ] 1.3 Add the `useLookStore` beside the colour-scheme store with key `agentops-console-look`, and verify resolution order with a unit test (query, stored, install default, build default)
-- [ ] 1.4 Set `data-look` on the root and lazy-load the active look, and verify a test that only the active look's chunk loads
-- [ ] 1.5 Add the look switcher to the shared header and verify it lists every registered look and marks the active one
-- [ ] 1.6 Add the import-boundary test (model imports no component library or look, a look imports no other look) and verify it fails on a planted violation
+- [x] 1.1 Add `looks/registry.ts` with `classic` as the only entry, and verify a unit test lists it
+- [x] 1.2 Move today's `pages/` and `components/` into `looks/classic/` with only import paths edited, and verify the existing `npm test` and `npm run typecheck` stay green
+- [x] 1.3 Add the `useLookStore` beside the colour-scheme store with key `agentops-console-look`, and verify resolution order with a unit test (query, stored, install default, build default)
+- [x] 1.4 Set `data-look` on the root and lazy-load the active look, and verify a test that only the active look's chunk loads
+- [x] 1.5 Add the look switcher to the shared header and verify it lists every registered look and marks the active one
+- [x] 1.6 Add the import-boundary test (model imports no component library or look, a look imports no other look) and verify it fails on a planted violation
 
 ## 2. The model layer
 
 Role: `frontend-developer`. Move `classic` onto each model as it lands.
 
-- [ ] 2.1 Extract the conversation list model (scopes, counts, ordering, unread) and verify unit tests pin its output against the current fixtures
-- [ ] 2.2 Extract the thread model (messages with their source markdown, signals, runs, members, start time) and verify the `classic` thread renders unchanged
-- [ ] 2.3 Extract the working-run model as `{ elapsed, latest, count }` that attaches tools and events to the reply on arrival, and verify a test for a viewer-sent run and a signal-started run
-- [ ] 2.4 Add `useCommands` with the states sending, accepted, done and failed, the in-flight count and the connection state, and verify unit tests for each transition and for retry on a safe verb only
-- [ ] 2.5 Make `accepted` optional so a synchronous verb goes from sending to done, and verify with a test
-- [ ] 2.6 Publish stable test identifiers from the model contract and verify the `e2e-live` specs use them in place of classes
+- [x] 2.1 Extract the conversation list model (scopes, counts, ordering, unread) and verify unit tests pin its output against the current fixtures
+- [x] 2.2 Extract the thread model (messages with their source markdown, signals, runs, members, start time) and verify the `classic` thread renders unchanged
+- [x] 2.3 Extract the working-run model as `{ elapsed, latest, count }` that attaches tools and events to the reply on arrival, and verify a test for a viewer-sent run and a signal-started run
+- [x] 2.4 Add `useCommands` with the states sending, accepted, done and failed, the in-flight count and the connection state, and verify unit tests for each transition and for retry on a safe verb only
+- [x] 2.5 Make `accepted` optional so a synchronous verb goes from sending to done, and verify with a test
+- [x] 2.6 Publish stable test identifiers from the model contract and verify the `e2e-live` specs use them in place of classes
 
 ## 3. The workspace look: shell and conversations
 
 Role: `frontend-developer`. PORT from `mockup/console.html`: composition, spacing, wording and timings come from it. Behaviour comes from the specs.
 
-- [ ] 3.1 Build the workspace shell (header, navigation panel, collapse, drawer) with `--wk-*` tokens, and verify a screenshot at laptop width against the prototype
-- [ ] 3.2 Make the shell fill the viewport with no width cap, and verify a 2560 by 1300 spec asserts the panes reach both edges and the page does not scroll
-- [ ] 3.3 Build the list row with a fixed height, a reserved lifecycle line and the right-hand time, badge and status column, and verify a test that a status change moves no row
-- [ ] 3.4 Build the thread with the date label under the tabs, day dividers only on a day change, and signal cards with severity as an icon, and verify a unit test per contract value
-- [ ] 3.5 Build the folded run detail with the always-visible `Invoked` row, and verify a spec that a finished reply shows only the reply, `Invoked` and the collapsed `Run details`
-- [ ] 3.6 Add the quiet inline code style and the block form for long commands, and verify a screenshot at both colour schemes
-- [ ] 3.7 Add a copy control to every message, copying markdown, with in-place confirmation and a selected-text fallback, and verify a spec reads the clipboard for a reply, a person's message and a signal
-- [ ] 3.8 Persist pane sizes and collapsed states under keys of this look, and verify they survive a reload
-- [ ] 3.9 Keep every `--wk-*` token in `looks/workspace/workspace.css` and out of `theme/theme.css`, and verify by grep that `theme.css` holds none and the site CSS needs none
-- [ ] 3.10 If the work changes any shared `--ao-*` value in `theme/theme.css`, copy it into the token block at the head of `docs/assets/css/agentops.css` as `palette-and-mark.md` requires, and verify the hex grep from that rule finds hits only in the token blocks
+- [x] 3.1 Build the workspace shell (header, navigation panel, collapse, drawer) with `--wk-*` tokens, and verify a screenshot at laptop width against the prototype
+- [x] 3.2 Make the shell fill the viewport with no width cap, and verify a 2560 by 1300 spec asserts the panes reach both edges and the page does not scroll
+- [x] 3.3 Build the list row with a fixed height, a reserved lifecycle line and the right-hand time, badge and status column, and verify a test that a status change moves no row
+- [x] 3.4 Build the thread with the date label under the tabs, day dividers only on a day change, and signal cards with severity as an icon, and verify a unit test per contract value
+- [x] 3.5 Build the folded run detail with the always-visible `Invoked` row, and verify a spec that a finished reply shows only the reply, `Invoked` and the collapsed `Run details`
+- [x] 3.6 Add the quiet inline code style and the block form for long commands, and verify a screenshot at both colour schemes
+- [x] 3.7 Add a copy control to every message, copying markdown, with in-place confirmation and a selected-text fallback, and verify a spec reads the clipboard for a reply, a person's message and a signal
+- [x] 3.8 Persist pane sizes and collapsed states under keys of this look, and verify they survive a reload
+- [x] 3.9 Keep every `--wk-*` token in `looks/workspace/workspace.css` and out of `theme/theme.css`, and verify by grep that `theme.css` holds none and the site CSS needs none
+- [x] 3.10 If the work changes any shared `--ao-*` value in `theme/theme.css`, copy it into the token block at the head of `docs/assets/css/agentops.css` as `palette-and-mark.md` requires, and verify the hex grep from that rule finds hits only in the token blocks
+
+- [x] 3.11 Give the workspace conversations page the actions `classic` has and the first cut lacks: Graph and Sequence tabs, select and bulk actions, reopen and delete, the escalation bar, the jump-to-new pill, slash typeahead and quick chips, and verify a per-look conformance test that names any action one look exposes and the other omits
 
 ## 4. The workspace look: the other pages
 
@@ -62,15 +64,15 @@ Role: `testing-specialist`.
 
 - [ ] 6.1 Define the six named viewports once (phone, tablet portrait, tablet landscape, laptop, desktop, wide) with Playwright device presets for touch, and verify the list matches `console-looks`
 - [ ] 6.2 Add a mocked-tier spec that loads every page of every look at every viewport and asserts no sideways scroll, reachable controls and 44 pixel touch targets, and verify it fails on a planted overflow
-- [ ] 6.3 Run the `e2e-live` suite once per look at the desktop viewport and verify both runs pass in CI
+- [ ] 6.3 Parametrise the `e2e-live` suite to run once per look at the desktop viewport, pinning each with `?look=`, and verify the nightly job runs both
 - [ ] 6.4 Check the tablet layouts in both orientations by screenshot and read the images, per `visual-check.md`
 
 ## 7. The install default
 
 Role: `backend-developer` for the service, `deployment-engineer` for the chart.
 
-- [ ] 7.1 Return `defaultLook` in `Session` and read it from the channel config, and verify a Go test that an unknown value is dropped
-- [ ] 7.2 Add `console.defaultLook` to the chart with values schema and `configSchema` entry, and verify a render test for the default and for a value that is neither look failing with both named
+- [x] 7.1 Return `defaultLook` in `Session` and read it from the channel config, and verify a Go test that an unknown value is dropped
+- [x] 7.2 Add `console.defaultLook` to the chart with values schema and `configSchema` entry, and verify a render test for the default and for a value that is neither look failing with both named
 - [ ] 7.3 Wire it into the browser's resolution order, and verify a unit test that a viewer's stored choice wins
 - [ ] 7.4 Flip the build default to `workspace` and verify the first-visit test
 
@@ -82,12 +84,14 @@ Role: `testing-specialist`.
 - [ ] 8.2 Run `go build ./... && go vet ./... && go test ./...` in `platform/console` and verify green
 - [ ] 8.3 Run the chart render tests and verify green
 - [ ] 8.4 Verify coverage with the flags `build-test.md` names has no uncovered new behaviour
+- [ ] 8.5 Run the mocked browser tier (`npm run test:e2e`, the `console-e2e` gate) for every look, including the viewport matrix from 6.2, and verify green
 
 ## 9. System tests
 
 Role: `testing-specialist`.
 
-- [ ] 9.1 State why the cluster tier does not apply, since nothing here is decided by a kubelet, RBAC or an informer, and the browser tiers in section 6 carry the proof
+- [ ] 9.1 State why the manager's system pack gains no lane, since nothing here is decided by a kubelet, RBAC or an informer
+- [ ] 9.2 Run the `e2e-live` suite once per look against a real install (k3d or a local cluster, per `docs/testing.md`), and verify both runs pass with the specs reading only stable test identifiers
 
 ## 10. Documentation
 

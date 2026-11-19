@@ -1,6 +1,6 @@
 import { Alert, Button, FormSelect, FormSelectOption, Label, ToggleGroup, ToggleGroupItem } from '@patternfly/react-core'
-import { PlainText } from '../components/Text'
-import { clock } from './Panel'
+import { PlainText } from '../looks/classic/components/Text'
+import { clock } from './format'
 import { INTERVALS, SPEEDS, describeNotHeld, frameHeld, frameTime, type ReplayWindow, type Step } from './replay'
 
 // Kiali's replay toolbar, exactly: an interval, ten second frames, a slider,

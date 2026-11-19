@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { TESTID } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
 // Item #29 QA — a member conversation carries the SAME `turns[]`/`toolCalls[]`
@@ -17,7 +18,7 @@ const f = loadFixtures()
 test('#29 a member has its own Runs tab, and Graph/Sequence stay root-only', async ({ page }) => {
   const [member1] = f.conversations.coordOpenMembers
   await page.goto(`/conversations/${member1}`)
-  await expect(page.getByTestId('timeline')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId(TESTID.timeline)).toBeVisible({ timeout: 20_000 })
 
   await expect(page.getByRole('button', { name: 'Graph', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Sequence', exact: true })).toHaveCount(0)
@@ -26,7 +27,7 @@ test('#29 a member has its own Runs tab, and Graph/Sequence stay root-only', asy
   await expect(runsBtn).toBeVisible()
   await runsBtn.click()
 
-  const runsView = page.getByTestId('runs-view')
+  const runsView = page.getByTestId(TESTID.runsView)
   await expect(runsView).toBeVisible()
   // The member's own task and the agent's own answer, not an empty shell.
   await expect(runsView.getByText('Finished')).toBeVisible()
