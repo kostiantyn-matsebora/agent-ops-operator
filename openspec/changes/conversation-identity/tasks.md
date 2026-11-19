@@ -16,9 +16,10 @@
 - [ ] 3.1 Name the workspace subdirectory by `ID` in `runtimepod`, and set `CONVO_ID` to the `ID`. Verify pod-spec tests for both.
 - [ ] 3.2 Add the `agentops.dev/conversation-id` label to the runtime pod and reconcile from it. Verify a test with a pod whose name matches a different conversation resolves by the label.
 - [ ] 3.3 Derive op ids and thread ids from the `ID` and store the `ID` in cross-references such as `causedBy`. Verify the ops and coordination tests, including a recreated name that no longer collides with its predecessor's op.
-- [ ] 3.4 Resolve `/work?convo=` and every person-typed name through the live-match rule, refusing a record with no `ID` with the documented reason. Verify per verb class: read, reopen, delete, exit, close, escalate and add-input, each with a Closed match.
-- [ ] 3.5 Match orphan workspace directories to conversations by `ID` in housekeeping. Verify a recreated name does not protect a deleted conversation's directory.
-- [ ] 3.6 Review the remaining `conv.Name` uses (about 130) and move each system use to `ID`, leaving display and store-key uses. Verify with a grep-backed table in the PR description listing the categories, not every line.
+- [ ] 3.4 Resolve `/work?convo=` strictly by `ID`, refusing an unknown `ID` and a record with no `ID` with the documented reason. Verify with tests for an unknown, a stale and a missing `ID`.
+- [ ] 3.5 Resolve every person-typed name through the live-match rule. Verify per verb class: read, reopen, delete, exit, close, escalate and add-input, each with a Closed match.
+- [ ] 3.6 Match orphan workspace directories to conversations by `ID` in housekeeping. Verify a recreated name does not protect a deleted conversation's directory.
+- [ ] 3.7 Review the remaining `conv.Name` uses (about 130) and move each system use to `ID`, leaving display and store-key uses. Verify with a grep-backed table in the PR description listing the categories, not every line.
 
 ## 4. Consumers — backend-developer
 

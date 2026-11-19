@@ -6,7 +6,12 @@ A conversation has one identifier the system uses to refer to it, unique for the
 
 ### Requirement: A conversation's identity is its ID, minted by the store
 
-A conversation SHALL carry an `ID`, an opaque string minted by the state backend at create, the same value `A record carries a backend-minted identity` (`state-store`) already requires. It SHALL stay the same for the conversation's whole life, SHALL differ between two conversations created one after the other under the same name, and SHALL NOT be settable by a caller. No component SHALL parse it or derive meaning from its shape.
+A conversation SHALL carry an `ID`, an opaque string minted by the state backend at create, the same value `A record carries a backend-minted identity` (`state-store`) already requires. The `ID`:
+
+- SHALL stay the same for the conversation's whole life.
+- SHALL differ between two conversations created one after the other under the same name.
+- SHALL NOT be settable by a caller.
+- SHALL NOT be parsed, and no component SHALL derive meaning from its shape.
 
 The `ID` SHALL be safe as a Kubernetes label value on every backend: at most 63 characters, only alphanumerics, `-`, `_` and `.`, beginning and ending with an alphanumeric. The conformance suite SHALL assert this for every backend, so a backend that mints a longer or differently shaped value fails it.
 
@@ -122,7 +127,13 @@ Its meaning SHALL NOT change. It is written once at creation, never changed and 
 
 ### Requirement: An existing conversation is not migrated
 
-A conversation created before this change is not carried across it. The manager SHALL NOT invent an `ID` for a record that lacks one, SHALL NOT infer a `correlationId` from a retired field, and SHALL NOT rewrite a stored cross-reference. An install upgrading across the change SHALL have its conversations deleted first, and the upgrade documentation SHALL state this.
+A conversation created before this change is not carried across it. The manager:
+
+- SHALL NOT invent an `ID` for a record that lacks one.
+- SHALL NOT infer a `correlationId` from a retired field.
+- SHALL NOT rewrite a stored cross-reference.
+
+An install upgrading across the change SHALL have its conversations deleted first, and the upgrade documentation SHALL state this.
 
 #### Scenario: A record without an identity is not served as a conversation
 

@@ -56,4 +56,4 @@ Not in scope:
 - **Chart**: manager and console image tags and the chart version, since a CRD field and a wire field are renamed.
 - **Reference docs**: `docs/concepts.md`, `docs/contracts.md`, `docs/contracts/channel-adapter.md`, `docs/contracts/signal-adapter.md`, `docs/contracts/runtime.md`, `docs/crds/conversation.md`, `docs/CHANGELOG.md`, `docs/gotchas.md`.
 - **Adopter site**: `docs/guides/signal-adapter.md`, `docs/guides/channel-adapter.md`, `docs/installation.md` for the delete-before-upgrade step, and any page showing `conversationId`.
-- **Rules**: `.claude/rules/terminology.md` and `.claude/rules/invariants.md`, plus a `retired-vocabulary` entry for `conversationId`.
+- **Rules**: `.claude/rules/terminology.md` and `.claude/rules/invariants.md`, plus a `retired-vocabulary` entry scoped to `conversationId` as the signal correlation key, since the same name now carries the identity on the wire.
