@@ -21,6 +21,10 @@ When a work unit names an agent, or carries the resolved `agentFile` path, and t
 - **WHEN** one profile's repository, named by agent name, is executed by a route on a claude runtime and by a route on a copilot runtime
 - **THEN** each runtime reads the definition path its vendor defines, and neither treats the other's absent path as an error
 
+#### Scenario: A runtime without a definition format of its own reads the shared one
+- **WHEN** a route on the pi runtime executes a unit naming an agent whose definition is at `.claude/agents/<agent>.md`
+- **THEN** the runtime reads that file, exactly as a claude runtime does
+
 #### Scenario: A permissive vendor default does not become a grant
 - **WHEN** a runtime's vendor would read an agent definition with no `tools:` as granting every tool
 - **THEN** that runtime passes the composed allowlist explicitly instead, so the agent still contributes nothing and an empty composition stays empty
