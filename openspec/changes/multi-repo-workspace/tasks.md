@@ -58,7 +58,7 @@
 - [ ] 9.1.1 Update `docs/contracts/runtime.md` (RT-1 and MGR-5 gone, `/workspace`, `WORKSPACE`, `START_DIR`, `agentFile`) and `docs/contracts.md`.
 - [ ] 9.1.2 Update `docs/concepts.md` for the repository list, resolution, layout and the path move, and `docs/crds/agent-profile.md` and `docs/crds/agent-capability.md` through their markers.
 - [ ] 9.1.3 Update `docs/security.md` (the credential is no longer in the agent container), `docs/gotchas.md`, and `docs/CHANGELOG.md` with the breaking change and upgrade steps.
-- [ ] 9.1.4 Update `.claude/rules/terminology.md` and `.claude/rules/invariants.md` where they state `/data/workspace` never moves.
+- [ ] 9.1.4 Replace the "`/data/workspace` never moves" section of `.claude/rules/terminology.md` and the matching row in `.claude/rules/invariants.md` with one statement that the workspace is `/workspace` and the context volume is `/data/context`, pointing to the `runtime-workspace-persistence` spec for the reason.
 - [ ] 9.1.5 Re-run `python3 .github/scripts/docs-generate.py` and commit the generated blocks.
 
 ### 9.2 Adopter site

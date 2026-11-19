@@ -131,7 +131,7 @@ workingDir: infra:  agent cwd = /workspace/infra
 | `repo` | optional when exactly one repository resolves, required when two or more |
 | `path` | relative to the repository root, never absolute, never containing `..`, never escaping the repository through a symlink |
 
-`agentFile` SHALL travel with the repository list. A capability that replaces the list also replaces `agentFile`. The manager SHALL resolve the file's absolute path under `/workspace` and hand it to the runtime. Each runtime SHALL decide how to apply it. The runtime reads the definition's tools as the `agent-definition-tools` requirement "The agent definition's declared tools are honoured" states, and its body as the separate change `agent-definition-adopted-by-runtime` specifies. This capability states only where the file is.
+`agentFile` SHALL travel with the repository list. A capability that replaces the list also replaces `agentFile`, so one that sets none leaves the conversation with no agent file and never inherits the profile's. The manager SHALL resolve the file's absolute path under `/workspace` and hand it to the runtime. Each runtime SHALL decide how to apply it. The runtime reads the definition's tools as the `agent-definition-tools` requirement "The agent definition's declared tools are honoured" states, and its body as the separate change `agent-definition-adopted-by-runtime` specifies. This capability states only where the file is.
 
 `prompt` and `replyPrompt` SHALL resolve against the agent file's repository, or the sole repository when there is no `agentFile`. A value MAY carry a repository qualifier in the form `<repo>:<path>` to name another entry.
 
