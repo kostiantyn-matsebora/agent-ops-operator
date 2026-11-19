@@ -209,10 +209,11 @@ exists, so changing your mind means deleting it and starting again.
 - **`ReadWriteOnce`** works too, and pins every agent pod to one node.
 
 **The state servers need at least three pods.** The default state store runs
-on NATS, and outside demo mode the chart refuses `nats.replicas` below `3`.
-More is fine, and each stream still keeps three copies. Only
-[the demo]({{ '/getting-started/' | relative_url }}) runs one pod, one manager
-included, because it runs on one node.
+on NATS.
+
+- Outside demo mode the chart refuses `nats.replicas` below `3`.
+- More than three is fine, and each stream still keeps three copies.
+- Only [the demo]({{ '/getting-started/' | relative_url }}) runs one pod, and one manager too, because it runs on one node.
 
 Whether context persists at all, its size, and whether workspace persists too
 are all reversible — see the [configuration reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#storage).
