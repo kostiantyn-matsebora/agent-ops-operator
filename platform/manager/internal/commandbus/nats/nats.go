@@ -73,9 +73,6 @@ type Config struct {
 	ConnectTimeout time.Duration
 }
 
-// replicas is the configured replica count, passed through as given.
-func (c Config) replicas() int { return c.Replicas }
-
 // Conn is a live connection to the server, the one handle Open bootstraps
 // every bucket from.
 type Conn struct {
