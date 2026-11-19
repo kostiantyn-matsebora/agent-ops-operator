@@ -100,7 +100,7 @@ Every counter the console shows for conversations after this change. The **Chang
 | Close dialog title | Close dialog | `count(selected roots)` | Was `send.length + memberCount`. |
 | Delete dialog title | Delete dialog | `count(selected roots)` | Was `send.length + memberCount`. |
 | Member line | Close and delete dialogs | `M = Σ over selected roots of len(descendantsOf(items, root))` | Informational only, not part of the title. |
-| Working warning | Close dialog | `count(selected roots with phase=Working)` | Was working rows in the selection. Working members: open question. |
+| Working warning | Close dialog | `count(selected roots with phase=Working)` | Was working rows in the selection. The member line also names working members. |
 | N closed / skipped / failed | Close result | Per-root server outcomes. | No local member-skips. |
 | N deleted / skipped / failed | Delete result | Per-root server outcomes. | No local member-skips. |
 | Select all | List header | Selects all roots on the page that are not `deleting`. | Was every row, members included. |
