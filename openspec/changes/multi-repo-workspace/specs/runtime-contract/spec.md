@@ -25,7 +25,7 @@ directs, report on `POST $CONTROL_URL/work/done` within the bounds, and exit
 `0` after `RUNTIME_IDLE_TTL_M` minutes without work.
 
 **Repository checkout is neither party's obligation at run time.** An init
-container of the `workspace-clone-init` capability populates `/workspace`
+container of the `workspace-sync` capability populates `/workspace`
 before the runtime starts. A runtime SHALL NOT clone, SHALL NOT read a git
 credential and SHALL NOT expect `REPO_URL`, `REPO_REF` or any `GIT_*`
 variable.

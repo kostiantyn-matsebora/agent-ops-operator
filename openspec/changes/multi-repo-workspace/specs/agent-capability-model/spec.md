@@ -20,17 +20,11 @@ and no other field that reaches a signal or a surface.
 
 ## ADDED Requirements
 
-### Requirement: A capability's repositories replace the profile's
+### Requirement: A capability's repository fields resolve as multi-repo-workspace states
 
-An `AgentCapability` that declares a non-empty `repositories` SHALL replace the list the profile declares for the conversation, never merge with it, exactly as `multi-repo-workspace` states. Its `agentFile` and `workingDir` SHALL travel with the list, so a capability that replaces the list also replaces them. The inline capability on a `Pipeline` or `Coordinator` SHALL behave identically, and neither kind SHALL carry a repository field of its own.
-
-#### Scenario: The replacement is wholesale
-
-- **WHEN** a profile declares `agentFile` against `app` and a capability declares `repositories: [docs]` and no `agentFile`
-- **THEN** the resolved declaration has `docs` and no agent file
+An `AgentCapability`'s `repositories`, `agentFile` and `workingDir` SHALL resolve against the profile's as the requirement "A capability's list replaces the profile's list" in `multi-repo-workspace` states, and SHALL behave identically whether declared inline on a `Pipeline` or `Coordinator` or on a referenced `AgentCapability`.
 
 #### Scenario: Inline and referenced agree
 
 - **WHEN** a Pipeline declares `repositories` inline and another references an AgentCapability with the same ones
 - **THEN** both resolve to the same list
-

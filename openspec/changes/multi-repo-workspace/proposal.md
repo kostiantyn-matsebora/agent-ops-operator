@@ -34,7 +34,7 @@ Not in scope:
 
 ### New Capabilities
 - `multi-repo-workspace`: the repository list, its resolution and snapshot, the workspace layout, `workingDir`, `agentFile` and the validation condition.
-- `workspace-clone-init`: the init container that clones, its credential handling, its idempotent re-run and `keepGit`.
+- `workspace-sync`: the init container that clones, its credential handling, its idempotent re-run and `keepGit`.
 
 ### Modified Capabilities
 - `runtime-contract`: the runtime no longer clones. It covers `claude` and `claude-cli`, which have no capability spec of their own. It receives a populated `/workspace`, a start directory and a resolved agent file path.

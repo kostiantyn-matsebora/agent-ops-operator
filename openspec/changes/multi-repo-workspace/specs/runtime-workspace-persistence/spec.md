@@ -73,7 +73,7 @@ remain ephemeral.
 The workspace path SHALL stay `/workspace` — claude-code keys its stored
 transcripts by working directory, and relocating it breaks resume. When the
 workspace survives a restart, the init container leaves a completed clone
-untouched, as `workspace-clone-init` specifies.
+untouched, as `workspace-sync` specifies.
 
 #### Scenario: Workspace claim is mounted
 - **WHEN** a route resolves a workspace claim

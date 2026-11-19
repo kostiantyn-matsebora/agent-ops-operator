@@ -7,7 +7,7 @@ See `proposal.md` for the motivation. The current state that shapes the approach
 - The pod builder reads the `AgentProfile` live at every build. A pod rebuilt after an edit follows the new profile.
 - Stored transcripts are keyed by the working directory. Any move of the workspace path strands them.
 
-The requirements live in `specs/multi-repo-workspace` and `specs/workspace-clone-init`. This document records the choices behind them.
+The requirements live in `specs/multi-repo-workspace` and `specs/workspace-sync`. This document records the choices behind them.
 
 **Dependency.** `agent-definition-adopted-by-runtime` makes the runtime read the definition's body and tools. This change gives that definition an explicit location and does not repeat its requirements.
 
@@ -142,4 +142,4 @@ The init container exits non-zero and the pod stays `Init:Error`, so it never re
 
 ## Open Questions
 
-- None. The manifest is `WORKSPACE_REPOS` and each credential is `REPO_CRED_<n>`, as `workspace-clone-init` states.
+- None. The manifest is `WORKSPACE_REPOS` and each credential is `REPO_CRED_<n>`, as `workspace-sync` states.
