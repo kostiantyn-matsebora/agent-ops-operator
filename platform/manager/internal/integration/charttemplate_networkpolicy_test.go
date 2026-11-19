@@ -5,27 +5,63 @@ import (
 	"testing"
 )
 
+// namespaceLayouts is the pair of layouts split-conversation-namespace
+// promises ONE code path across: the chart's own default split, and a
+// single-namespace release got by pointing conversationNamespace at the
+// release namespace helmTemplate itself renders into ("default", confirmed
+// by TestSingleNamespaceRenderMatchesThePreSplitShape). Every test below
+// that claims a NetworkPolicy property runs it once per layout, table-driven
+// like TestParentOwnsExactlyOneRuntime's own combo table.
+var namespaceLayouts = []struct {
+	name string
+	args []string
+}{
+	{"split (default)", nil},
+	{"single-namespace", []string{"--set", "global.agentops.conversationNamespace=default"}},
+}
+
+// withLayout prepends a layout's own --set args to a helmTemplate call's
+// own, so a test's existing argument list needs no change beyond the call
+// site itself.
+func withLayout(layout []string, args ...string) []string {
+	return append(append([]string{}, layout...), args...)
+}
+
 // Network restriction is off unless asked for. On a cluster that DOES enforce,
 // a policy missing one flow breaks it, and that is not a surprise to hand an
 // install by default.
 func TestNetworkPolicyIsOptIn(t *testing.T) {
-	if out := helmTemplate(t); strings.Contains(out, "kind: NetworkPolicy") {
-		t.Fatal("no policy may render by default")
-	}
-	on := helmTemplate(t, "--set", "global.agentops.networkPolicy.enabled=true")
-	if !strings.Contains(on, "kind: NetworkPolicy") {
-		t.Fatal("enabling it must render policies")
+	for _, layout := range namespaceLayouts {
+		t.Run(layout.name, func(t *testing.T) {
+			if out := helmTemplate(t, layout.args...); strings.Contains(out, "kind: NetworkPolicy") {
+				t.Fatal("no policy may render by default")
+			}
+			on := helmTemplate(t, withLayout(layout.args, "--set", "global.agentops.networkPolicy.enabled=true")...)
+			if !strings.Contains(on, "kind: NetworkPolicy") {
+				t.Fatal("enabling it must render policies")
+			}
+		})
 	}
 }
 
-// Task 5.4 — every wired flow is pinned, so tightening the policy later cannot
-// silently sever one. Each entry is a flow that, if dropped, breaks a lane an
-// adopter is using right now.
+// Task 5.4 / split-conversation-namespace task 9.10 — every wired flow is
+// pinned, so tightening the policy later cannot silently sever one, IN
+// EITHER NAMESPACE LAYOUT. Each entry is a flow that, if dropped, breaks a
+// lane an adopter is using right now.
 func TestEveryWiredFlowIsAllowed(t *testing.T) {
-	out := helmTemplate(t,
+	for _, layout := range namespaceLayouts {
+		t.Run(layout.name, func(t *testing.T) {
+			assertEveryWiredFlowIsAllowed(t, layout.args)
+		})
+	}
+}
+
+func assertEveryWiredFlowIsAllowed(t *testing.T, layout []string) {
+	t.Helper()
+	out := helmTemplate(t, withLayout(layout,
 		"--set", "global.agentops.networkPolicy.enabled=true",
 		"--set", "kubernetes.enabled=true",
-		"--set", "housekeeping.enabled=true")
+		"--set", "housekeeping.enabled=true")...)
 
 	policies := splitPolicies(out)
 
@@ -57,9 +93,9 @@ func TestEveryWiredFlowIsAllowed(t *testing.T) {
 	}
 
 	// The adapters' policy is the BUNDLE's, because only it knows their ports.
-	tg := helmTemplate(t,
+	tg := helmTemplate(t, withLayout(layout,
 		"--set", "global.agentops.networkPolicy.enabled=true",
-		"--set", "telegram.enabled=true")
+		"--set", "telegram.enabled=true")...)
 	tgPolicies := splitPolicies(tg)
 	for _, name := range []string{"agentops-telegram-adapters", "agentops-telegram-signal-adapter"} {
 		p, ok := tgPolicies[name]

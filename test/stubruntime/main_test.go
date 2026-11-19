@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -167,6 +170,74 @@ func TestHoldDirectiveNamesItsWindowAndSucceeds(t *testing.T) {
 	}
 	if got := holdFor("soon"); got != 30*time.Second {
 		t.Fatalf("a non-number falls back to thirty seconds, got %s", got)
+	}
+}
+
+// The wiring directive echoes back the allowedTools/toolsMode this unit
+// carried and the MCP server keys found in MCP_CONFIG's file, and logs a
+// narrowing for any scoped shell pattern — the fact 9.4/9.5 need, with no
+// agent asked to demonstrate it live.
+func TestWiringDirectiveReportsAllowedToolsAndMCPServers(t *testing.T) {
+	withHome(t)
+	t.Run("no MCP_CONFIG set reports no servers", func(t *testing.T) {
+		r, ok := perform(unit{RunID: "r", Convo: "c", AllowedTools: "Read,Grep,Glob",
+			PromptVars: map[string]string{"USER_TASK": "wiring"}})
+		if !ok || r.Status != "succeeded" {
+			t.Fatalf("wiring: %+v", r)
+		}
+		want := "[stub] wiring allowedTools=[Read,Grep,Glob] toolsMode=[] mcp=[]"
+		if r.Result != want {
+			t.Fatalf("wiring result: got %q want %q", r.Result, want)
+		}
+	})
+	t.Run("a mounted mcp.json's server keys are reported, sorted", func(t *testing.T) {
+		dir := t.TempDir()
+		path := dir + "/mcp.json"
+		if err := os.WriteFile(path, []byte(`{"mcpServers":{"zeta":{},"alpha":{}}}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("MCP_CONFIG", path)
+		r, ok := perform(unit{RunID: "r", Convo: "c", AllowedTools: "Bash(kubectl:*)", ToolsMode: "overwrite",
+			PromptVars: map[string]string{"USER_TASK": "wiring"}})
+		if !ok || r.Status != "succeeded" {
+			t.Fatalf("wiring: %+v", r)
+		}
+		want := "[stub] wiring allowedTools=[Bash(kubectl:*)] toolsMode=[overwrite] mcp=[alpha,zeta]"
+		if r.Result != want {
+			t.Fatalf("wiring result: got %q want %q", r.Result, want)
+		}
+	})
+	t.Run("a scoped shell pattern logs its narrowing, a bare one does not", func(t *testing.T) {
+		var buf bytes.Buffer
+		log.SetOutput(&buf)
+		t.Cleanup(func() { log.SetOutput(os.Stderr) })
+		logScopedShellNarrowing("Read, Bash(kubectl:*), Bash")
+		out := buf.String()
+		if !strings.Contains(out, `scoped shell pattern "Bash(kubectl:*)" grants no built-in shell, narrowed`) {
+			t.Fatalf("the narrowing line is missing: %q", out)
+		}
+		if strings.Count(out, "narrowed") != 1 {
+			t.Fatalf("only the scoped pattern narrows: %q", out)
+		}
+	})
+	t.Run("an unreadable MCP_CONFIG reports no servers rather than failing", func(t *testing.T) {
+		t.Setenv("MCP_CONFIG", t.TempDir()+"/absent.json")
+		r, ok := perform(unit{RunID: "r", Convo: "c", PromptVars: map[string]string{"USER_TASK": "wiring"}})
+		if !ok || r.Status != "succeeded" || r.Result != "[stub] wiring allowedTools=[] toolsMode=[] mcp=[]" {
+			t.Fatalf("wiring with an absent MCP_CONFIG: %+v", r)
+		}
+	})
+}
+
+// Every OTHER directive must still ignore AllowedTools/ToolsMode exactly as
+// before the stub decoded them — adding the fields must change nothing for
+// a caller that never sends them.
+func TestExistingDirectivesIgnoreTheNewWiringFields(t *testing.T) {
+	withHome(t)
+	r, ok := perform(unit{RunID: "r", Convo: "c", AllowedTools: "Bash", ToolsMode: "merge",
+		PromptVars: map[string]string{"USER_TASK": "echo hi there"}})
+	if !ok || r.Result != "[stub] hi there" || r.Status != "succeeded" {
+		t.Fatalf("echo must be unaffected by AllowedTools/ToolsMode: %+v", r)
 	}
 }
 

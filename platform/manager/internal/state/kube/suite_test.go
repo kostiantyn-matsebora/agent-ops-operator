@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
@@ -84,9 +85,18 @@ func newNamespace(t testing.TB) string {
 // backend refuses.
 func openBackend(t testing.TB, c client.WithWatch, ns string, opts ...Option) *Backend {
 	t.Helper()
-	b, err := OpenStores(c, ns, opts...)
+	return openBackendPair(t, c, namespace.Namespaces{Control: ns, Conversations: ns}, opts...)
+}
+
+// openBackendPair is openBackend's own split-aware sibling (split-
+// conversation-namespace task 9.4): the pair need not be equal, since
+// OpenStores itself takes one — a single-namespace caller is just the
+// special case where both fields happen to name the same string.
+func openBackendPair(t testing.TB, c client.WithWatch, pair namespace.Namespaces, opts ...Option) *Backend {
+	t.Helper()
+	b, err := OpenStores(c, pair, opts...)
 	if err != nil {
-		t.Fatalf("OpenStores: %v", err)
+		t.Fatalf("OpenStores(%+v): %v", pair, err)
 	}
 	return b
 }

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"strings"
 	"testing"
 
@@ -48,7 +49,7 @@ func closeFixture(t *testing.T, objs ...client.Object) (*Router, *OpQueue, clien
 	// that never touches the bus directly — a fresh, unshared memory bus per
 	// fixture, exactly like every other OpQueue test in this package.
 	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
-	return &Router{Client: c, Reader: c, Conversations: newTestStore(c), Runs: newTestRuns(c), Blobs: newTestBlobs(c), Namespace: testNS, Ops: q}, q, c
+	return &Router{Client: c, Reader: c, Conversations: newTestStore(c), Runs: newTestRuns(c), Blobs: newTestBlobs(c), Namespaces: namespace.Namespaces{Control: testNS, Conversations: testNS}, Ops: q}, q, c
 }
 
 func nsChannel(name, adapter string) *agentopsv1alpha1.Channel {

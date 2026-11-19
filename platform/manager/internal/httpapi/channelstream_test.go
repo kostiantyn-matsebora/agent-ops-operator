@@ -57,7 +57,7 @@ func secondReplica(s *Server, bus commandbus.Bus) *Server {
 	}
 	return &Server{
 		Reader: s.Reader, Client: s.Client, Conversations: s.Conversations, Runs: s.Runs, Blobs: s.Blobs,
-		Namespace: s.Namespace, AdapterToken: s.AdapterToken, Ops: q, Router: s.Router, Bus: bus,
+		Namespaces: s.Namespaces, AdapterToken: s.AdapterToken, Ops: q, Router: s.Router, Bus: bus,
 	}
 }
 

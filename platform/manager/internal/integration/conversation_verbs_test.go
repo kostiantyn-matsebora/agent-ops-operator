@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"strings"
 	"testing"
 
@@ -300,7 +301,7 @@ func TestDeletionTellsEveryBoundThread(t *testing.T) {
 	ops := testOps()
 	r := &controller.ConversationReconciler{
 		Client:        k8sClient,
-		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns}, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
 		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
 	}
 	mkChannel(t, "gone-ch", "tg")
@@ -352,7 +353,7 @@ func TestCloseTopicSkipsAThreadWithNoTopicYet(t *testing.T) {
 	ops := testOps()
 	r := &controller.ConversationReconciler{
 		Client:        k8sClient,
-		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns}, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
 		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
 	}
 	mkChannel(t, "no-topic-ch", "tg")
@@ -386,7 +387,7 @@ func TestCloseTopicResumesOnceATopicArrives(t *testing.T) {
 	ops := testOps()
 	r := &controller.ConversationReconciler{
 		Client:        k8sClient,
-		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns}, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
 		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
 	}
 	mkChannel(t, "late-topic-ch", "tg")

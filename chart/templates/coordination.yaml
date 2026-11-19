@@ -132,6 +132,13 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: agentops-runtime
+          {{- if include "agentops.namespacesSplit" . }}
+          # Runtime pods run in the conversations namespace, not this
+          # server's own.
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "agentops.conversationNamespace" . }}
+          {{- end }}
         {{- with $np.probesFrom }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

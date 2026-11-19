@@ -45,6 +45,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/addressing"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namewords"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
@@ -70,9 +71,13 @@ type Router struct {
 	// Runs holds their append-only run history.
 	Runs state.Appended[state.ConversationRecord, state.Run]
 	// Blobs holds their queued input payloads.
-	Blobs     state.Blobs
-	Namespace string
-	Ops       *OpQueue
+	Blobs state.Blobs
+	// Namespaces is the control/conversations pair (split-conversation-
+	// namespace). Every wiring read (Pipeline, Coordinator, AgentProfile,
+	// AgentRuntime, Channel) names Namespaces.Control; the one pod read
+	// (ReleaseRuntime) names Namespaces.Conversations.
+	Namespaces namespace.Namespaces
+	Ops        *OpQueue
 	// Activity records the inbound hop. Nil is inert.
 	Activity *activity.Log
 	// Runtime is the bootstrap runtime config — the same value httpapi.Server
@@ -155,7 +160,7 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 		return err
 	}
 	pipeline := ""
-	if p := PipelineForConversation(ctx, r.Reader, r.Namespace, conv); p != nil {
+	if p := PipelineForConversation(ctx, r.Reader, r.Namespaces.Control, conv); p != nil {
 		pipeline = p.Name
 	}
 	// From the CHANNEL, not its adapter: a reply travels surface -> conversation,
@@ -266,7 +271,7 @@ func (r *Router) ReleaseRuntime(ctx context.Context, conv *state.ConversationRec
 		return nil
 	}
 	var pod corev1.Pod
-	name := types.NamespacedName{Namespace: r.Namespace, Name: runtimepod.PodName(conv.Name)}
+	name := types.NamespacedName{Namespace: r.Namespaces.Conversations, Name: runtimepod.PodName(conv.Name)}
 	if err := r.Client.Get(ctx, name, &pod); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return err
@@ -304,7 +309,7 @@ func (r *Router) releaseText(ctx context.Context, conv *state.ConversationRecord
 	// The profile is NOT read here any more: it is no longer an input to what
 	// executes a conversation, and reading one to answer this would be the
 	// habit this change ended.
-	resolved, err := runtimepod.ResolveFor(ctx, r.Reader, r.Conversations, r.Namespace, conv, r.Runtime)
+	resolved, err := runtimepod.ResolveFor(ctx, r.Reader, r.Conversations, r.Namespaces.Control, conv, r.Runtime)
 	if err != nil {
 		// Degrade to the neutral wording rather than failing: the pod is already
 		// gone, and refusing to report a completed release because a Get failed
@@ -475,7 +480,7 @@ func (r *Router) validateRefs(ctx context.Context, conv *state.ConversationRecor
 		return fmt.Errorf("conversation %s names no profile", conv.Name)
 	}
 	var profile agentopsv1alpha1.AgentProfile
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: conv.ProfileRef}, &profile); err != nil {
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: conv.ProfileRef}, &profile); err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("cannot reopen %s: AgentProfile %q no longer exists", conv.Name, conv.ProfileRef)
 		}
@@ -483,7 +488,7 @@ func (r *Router) validateRefs(ctx context.Context, conv *state.ConversationRecor
 	}
 	for _, ref := range conv.ChannelRefs {
 		var ch agentopsv1alpha1.Channel
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &ch); err != nil {
+		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: ref}, &ch); err != nil {
 			if apierrors.IsNotFound(err) {
 				return fmt.Errorf("cannot reopen %s: Channel %q no longer exists", conv.Name, ref)
 			}
@@ -555,7 +560,7 @@ func (r *Router) handleListPipelines(ctx context.Context, ch *agentopsv1alpha1.C
 // claim check, no Ready check — exactly as it was before a second kind
 // existed. Returns a nil Claimant, not an error, when neither exists.
 func (r *Router) resolveClaimant(ctx context.Context, name string) (Claimant, error) {
-	return ResolveClaimant(ctx, r.Reader, r.Namespace, name)
+	return ResolveClaimant(ctx, r.Reader, r.Namespaces.Control, name)
 }
 
 // HandleCommand answers chat input that addresses a pipeline. Called from the
@@ -693,7 +698,7 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		// resolved capability. An addressed command grants its wiring, and the
 		// execution identity and the storage are part of that wiring, not half
 		// of it.
-		snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, origin.GetName(), capability, r.Runtime)
+		snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespaces.Control, origin.GetName(), capability, r.Runtime)
 		conv.RuntimeRef = snap.RuntimeRef
 		conv.ServiceAccountName = snap.ServiceAccountName
 		conv.ContextClaimName = snap.ContextClaimName
@@ -829,7 +834,7 @@ func (r *Router) eachBoundThread(ctx context.Context, conv *state.ConversationRe
 			continue
 		}
 		var bound agentopsv1alpha1.Channel
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &bound); err != nil {
+		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: ref}, &bound); err != nil {
 			continue
 		}
 		fn(&bound, tid)
@@ -848,7 +853,7 @@ func (r *Router) conversation(ctx context.Context, name string) (*state.Conversa
 
 // env is what the delivery helpers read through.
 func (r *Router) env() Env {
-	return Env{Reader: r.Reader, Blobs: r.Blobs, Conversations: r.Conversations, Namespace: r.Namespace}
+	return Env{Reader: r.Reader, Blobs: r.Blobs, Conversations: r.Conversations, Namespace: r.Namespaces.Control}
 }
 
 // appendInput queues item on the conversation, re-reading the record on a lost

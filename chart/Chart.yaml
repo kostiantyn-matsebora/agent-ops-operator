@@ -12,8 +12,8 @@ type: application
 sources:
   - https://github.com/kostiantyn-matsebora/agent-ops-operator
 home: https://kostiantyn-matsebora.github.io/agent-ops-operator/
-version: 19.0.1
-appVersion: "0.62.0"
+version: 20.0.0
+appVersion: "0.63.0"
 dependencies:
   # embedded subchart (chart/charts/prometheus); templates are
   # additionally self-gated on prometheus.enabled
@@ -26,7 +26,7 @@ dependencies:
   # only the first existing path — it could never express the OR. Every template
   # self-gates instead.
   - name: kubernetes
-    version: 0.4.2
+    version: 0.4.3
     repository: ""
   # embedded subchart (chart/charts/telegram); templates are
   # additionally self-gated on telegram.enabled
@@ -69,6 +69,13 @@ dependencies:
     version: 0.1.0
     repository: ""
     condition: copilot.enabled
+  # embedded subchart (chart/charts/pi) — a further vendor runtime, the pi coding
+  # agent. ON by default and the default runtime; a route selects the other
+  # with `runtimeRef: claude`.
+  - name: pi
+    version: 0.1.0
+    repository: ""
+    condition: pi.enabled
   # embedded subchart (chart/charts/claude-cli) — today's spawn-per-unit
   # claude-code runtime, kept running once `claude` moves to the SDK. OFF by
   # default; a route selects it with `runtimeRef: claude-cli`.

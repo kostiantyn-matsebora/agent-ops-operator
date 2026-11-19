@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"net/http/httptest"
 	"testing"
 
@@ -40,7 +41,7 @@ func TestHandleStatusCountsSlotsFromLivePodsNotStatus(t *testing.T) {
 	convC.Name, convC.Namespace = "conv-c", "agent-ops"
 
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(runningPod, convA, convB, convC).Build()
-	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespace: "agent-ops", MaxActiveConversations: 5, Version: "test"}
+	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, MaxActiveConversations: 5, Version: "test"}
 
 	rec := httptest.NewRecorder()
 	s.handleStatus(rec, httptest.NewRequest("GET", "/status", nil))
@@ -72,7 +73,7 @@ func TestHandleStatusExcludesClosedConversationsFromWaiting(t *testing.T) {
 	closed.Spec.Inputs = []agentopsv1alpha1.InputItem{{ID: "in-1", Type: agentopsv1alpha1.InputTask}}
 
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(closed).Build()
-	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespace: "agent-ops", MaxActiveConversations: 5, Version: "test"}
+	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, MaxActiveConversations: 5, Version: "test"}
 
 	rec := httptest.NewRecorder()
 	s.handleStatus(rec, httptest.NewRequest("GET", "/status", nil))
@@ -88,7 +89,7 @@ func TestHandleStatusExcludesClosedConversationsFromWaiting(t *testing.T) {
 // edges feed.
 func TestHandleStatusReportsAnOpenStorageBreaker(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).Build()
-	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespace: "agent-ops"}
+	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 	for i := 0; i < storagebreaker.Threshold; i++ {
 		s.breaker().Report()
 	}
@@ -115,13 +116,13 @@ func TestLeaderIdentityReadsTheLeaseHolder(t *testing.T) {
 	lease.Name, lease.Namespace = LeaseName, "agent-ops"
 	lease.Spec.HolderIdentity = &holder
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(lease).Build()
-	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops"}
+	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 
 	if got := s.leaderIdentity(context.Background()); got != holder {
 		t.Fatalf("got %q, want %q", got, holder)
 	}
 
-	empty := &Server{Reader: fake.NewClientBuilder().WithScheme(stateTestScheme(t)).Build(), Namespace: "agent-ops"}
+	empty := &Server{Reader: fake.NewClientBuilder().WithScheme(stateTestScheme(t)).Build(), Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 	if got := empty.leaderIdentity(context.Background()); got != "" {
 		t.Fatalf("unreadable lease must report empty, got %q", got)
 	}
@@ -131,7 +132,7 @@ func TestLeaderIdentityReadsTheLeaseHolder(t *testing.T) {
 // test, and any Server wired with no leader election behind it, answers
 // exactly as it always has.
 func TestIsLeaderIsTrueWhenReplicaIdentityIsUnset(t *testing.T) {
-	s := &Server{Reader: fake.NewClientBuilder().WithScheme(stateTestScheme(t)).Build(), Namespace: "agent-ops"}
+	s := &Server{Reader: fake.NewClientBuilder().WithScheme(stateTestScheme(t)).Build(), Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 	if !s.isLeader(context.Background()) {
 		t.Fatal("no ReplicaIdentity configured must always answer leader=true")
 	}
@@ -151,12 +152,12 @@ func TestIsLeaderMatchesTheUUIDSuffixedHolderIdentity(t *testing.T) {
 	lease.Spec.HolderIdentity = &suffixed
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(lease).Build()
 
-	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops", ReplicaIdentity: "replica-b"}
+	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, ReplicaIdentity: "replica-b"}
 	if !s.isLeader(context.Background()) {
 		t.Fatal("a uuid-suffixed holder identity must still match the bare ReplicaIdentity it was derived from")
 	}
 
-	other := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespace: "agent-ops", ReplicaIdentity: "replica-a"}
+	other := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, ReplicaIdentity: "replica-a"}
 	if other.isLeader(context.Background()) {
 		t.Fatal("a different replica's suffixed identity must not match — prefix, not substring")
 	}
@@ -169,7 +170,7 @@ func TestIsLeaderMatchesTheUUIDSuffixedHolderIdentity(t *testing.T) {
 
 func TestHandlePipelineResolvedUnknownPipeline(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).Build()
-	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespace: "agent-ops"}
+	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 
 	req := httptest.NewRequest("GET", "/pipelines/nope/resolved", nil)
 	req.SetPathValue("name", "nope")
@@ -185,7 +186,7 @@ func TestHandlePipelineResolvedMissingProfileIsUnresolvedNotAnError(t *testing.T
 	p.Name, p.Namespace = "p1", "agent-ops"
 	p.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: "ghost"}
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(p).Build()
-	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespace: "agent-ops"}
+	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 
 	rec := decodeResolved(t, s, "p1")
 	if rec.Code != 200 {
@@ -228,7 +229,7 @@ func TestHandlePipelineResolvedComposesToolsetsAndMCPConfigs(t *testing.T) {
 	}
 
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(p, prof, ts, cfg).Build()
-	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespace: "agent-ops"}
+	s := &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}}
 
 	rec := decodeResolved(t, s, "p1")
 	var out resolvedResponse

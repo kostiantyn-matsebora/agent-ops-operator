@@ -8,6 +8,184 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [Unreleased]
+
+**BREAKING. The default runtime is now pi, not claude.** A route that names no
+`runtimeRef` runs on `agentops-runtime-pi` 0.1.0, on provider `anthropic` with
+model `claude-sonnet-5`. The `claude` runtime stays on and a route selects it
+with `runtimeRef: claude`. Read [Upgrade](#upgrade) before upgrading.
+
+### Added
+
+- **A fifth runtime: `agentops-runtime-pi` 0.1.0, shipped as the `pi`
+  bundle.** ON by default and flagged `default: true`, so the `default`
+  `AgentRuntime` is a copy of it. `pi.provider` (default `anthropic`) and
+  `pi.model` (default `claude-sonnet-5`) select the model, and the credential
+  is the Secret `agentops-pi` with the key `apiKey`, or
+  `pi.credentialsSecret.token` to have the chart create it. A route selects
+  the runtime with `pipelines[].runtimeRef: pi`. Pi reads
+  `.claude/agents/<agent>.md`, the same path and composition rules as the
+  reference runtime, and reaches bound MCP servers through the vendor's
+  `pi-mcp` package. State lives under `.pi/agent/sessions/**`, declared to
+  `context-sync` by the bundle.
+- `pi.piCode` (default `true`) lets pi read a checkout's `.claude/` the way
+  Claude Code does, through the `pi-code` package. It adds no tool, and the
+  allowlist still gates every tool call. A hook in the repository's
+  `.claude/settings.json` runs as a shell command in the pod, and the
+  allowlist does not apply to it. Set `pi.piCode: false` to turn this off.
+  See [Residual risk](security.md#residual-risk).
+
+### Upgrade
+
+Create the credential before you upgrade, in the namespace runtime pods run in:
+
+```sh
+kubectl -n agent-ops-conversations create secret generic agentops-pi \
+  --from-literal=apiKey=$ANTHROPIC_API_KEY
+```
+
+```powershell
+kubectl -n agent-ops-conversations create secret generic agentops-pi `
+  --from-literal=apiKey=$env:ANTHROPIC_API_KEY
+```
+
+Without it a runtime pod exits at start naming `PI_API_KEY`.
+
+**To keep running on claude**, set `pi.default=false`, and the `default`
+runtime is a copy of claude again. Set `pi.enabled=false` to render no pi
+runtime at all. Open conversations keep the runtime they started on.
+
+## [20.0.0] — 2026-11-17
+
+Images: manager 0.63.0, console 0.42.0, signal-k8s-events 0.7.0. Bundle
+kubernetes 0.4.3.
+
+**BREAKING. A release now resolves two namespaces, split by default.** The
+control namespace (the manager, wiring, adapters, state store) is unchanged.
+
+A new conversations namespace holds runtime pods and everything they run
+as, mount or resolve. Read [Upgrade](#upgrade) before upgrading. It needs
+a manual step per claim you want to keep.
+
+### Added
+
+- `global.agentops.conversationNamespace` (default `agent-ops-conversations`)
+  and `global.agentops.createConversationNamespace` (default `true`). Setting
+  the former to the release namespace reproduces the single-namespace layout
+  exactly, with no object split in two.
+- `CONVERSATION_NAMESPACE`, read by the manager at startup, defaulting to
+  `NAMESPACE`. Injected as a literal value on every channel and signal
+  adapter, beside `POD_NAMESPACE`.
+- A second manager Role, in the conversations namespace: pods, configmaps, `conversations`
+  and `conversationinputs` and their status, events, PVC
+  `get`/`list`/`watch`/`create` — never `delete`, `update` or `patch`. No ClusterRole is added.
+  Single-namespace installs still render one merged Role, identical in
+  substance to today's. The control Role keeps a read on pods, for the
+  manager's own replicas.
+- A second console Role, in the conversations namespace: `pods`
+  `get`/`list`/`watch` alone, so the Infrastructure view keeps every runtime
+  pod. The console reads `CONVERSATION_NAMESPACE`, defaulting to
+  `POD_NAMESPACE`.
+- An expected-references condition on the `Conversation`, naming every
+  Secret and ConfigMap its pod will resolve — profile repository auth,
+  profile and runtime `env[].valueFrom`, MCP config `valueFrom` and raw
+  references. Derived from the referencing CRs alone. The manager still
+  reads no Secret.
+- `signals/k8s-events` gains a fourth, unconfigurable self-exclusion
+  mechanism: every event in the conversations namespace is dropped whenever
+  it differs from `POD_NAMESPACE`, with no object read. The signal adapter
+  specification moves to **2.5.0** — `POD_NAMESPACE` and
+  `CONVERSATION_NAMESPACE` join [Environment](contracts/signal-adapter.md#environment),
+  and `ADP-10` names the new mechanism. Every shipped adapter's claimed
+  version moves to 2.5.0. Only `signals/k8s-events` implements `ADP-10` —
+  the others carry no namespace-scoped exclusion to extend.
+- The chart creates the conversations namespace by default, with the
+  release's labels and `helm.sh/resource-policy: keep` — `helm uninstall`
+  leaves it, its Secrets and its claims standing.
+- A `SignalAdapter` pod receives `ADAPTER_NAME` (the CR's name), the same env
+  name channel adapters get, replacing `SOURCE_TYPE`. Rename it in any
+  self-registering sender that read the old name.
+- The `SignalAdapter` reconciler creates no ServiceAccount. It names the
+  account in `spec.serviceAccountName` and falls back to the release floor.
+
+### Changed
+
+- **BREAKING: runtime pods, their MCP ConfigMaps, every chart-rendered and
+  manager-created persistence claim, every `rbac.runtime.serviceAccounts`
+  entry and bundle route account, and the housekeeping and context-probe
+  CronJobs all move to the conversations namespace.** The floor account
+  `agentops-runtime` now renders in both namespaces, bound to nothing in
+  either.
+- **BREAKING: every Secret and ConfigMap a runtime pod resolves — profile
+  repository auth, profile env, the runtime's model credential, MCP config
+  references, image pull secrets — must exist in the conversations
+  namespace.** The manager does not copy them there. See
+  [Upgrade](#upgrade).
+- The chart renders every Secret it creates that a runtime pod resolves into
+  the conversations namespace, so a token-supplied credential needs no copy.
+  `agentops-ha-operator` renders in both namespaces, since the admin MCP server
+  and the log source read it from the release namespace too.
+- Under the `kube` state backend, `Conversation` and `ConversationInput` move
+  to the conversations namespace. `Signal`s and the rest of the state store
+  stay in control. Under `nats` (the default) nothing here is a CR, so
+  nothing moves.
+- The chart's generated `stateReadAuth` token now renders into both
+  namespaces from the same value, since housekeeping moved with its claims.
+  `allowPodExecution` guards this copy exactly as it already guards every
+  adopter Secret a runtime pod resolves.
+- NetworkPolicy peers (under the existing, default-off
+  `global.agentops.networkPolicy.enabled`) gain a `namespaceSelector`
+  wherever they cross the split: the manager's own ingress, `mcp-aops`, the
+  `kubernetes`, `home-assistant`, `prometheus` and `pulse` MCP servers. The runtime ingress-deny
+  policy now renders in the conversations namespace.
+
+### Upgrade
+
+This release moves objects between namespaces. There is no code path that
+moves state for you — follow these steps in order, on the release you are
+upgrading:
+
+1. **Close every open conversation**, so no pod or claim is in use.
+2. **Create the conversations namespace**, or let the chart create it
+   (`createConversationNamespace: true`, the default).
+3. **Create every Secret a runtime pod resolves in the new namespace** —
+   profile repository auth, profile env, the runtime's model credential, MCP
+   config references, image pull secrets.
+   The Secrets the chart creates itself from a token (the `claude` and
+   `copilot` runtime credential, the home-assistant control and operator
+   tokens, the pulse observer and operator tokens) are rendered there for you.
+   Only a Secret you reference by name, or create out of band, needs this step.
+4. **Carry each persistence claim across:**
+   1. Set the bound PV's reclaim policy to `Retain`.
+   2. Delete the old claim, then clear the PV's `claimRef`.
+   3. Pre-create the claim in the new namespace, `volumeName` set to that PV.
+   4. Point the chart at it with `persistence.<volume>.existingClaim`. A
+      manager-created claim needs no setting — the manager is idempotent by
+      existence.
+5. **Apply the CRDs, then `helm upgrade`:**
+
+   ```sh
+   kubectl apply -f chart/crds/
+   helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator -n agent-ops
+   ```
+
+   ```powershell
+   kubectl apply -f chart/crds/
+   helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator -n agent-ops
+   ```
+6. **Under the `kube` state backend, delete the `Conversation` CRs left in
+   the release namespace** — they receive no reconciliation there.
+7. **Verify** with an ordinary signal, and confirm the pod appears in the
+   conversations namespace.
+
+**Rollback** is `conversationNamespace` set back to the release namespace.
+Objects in the new namespace go inert rather than disappearing — every claim
+still carries `resource-policy: keep`.
+
+**Context survives only where the claim was carried.** A conversation
+promised context it no longer has fails its run rather than answering
+fresh, same as any other `promised-and-lost` case.
+
 ## [19.0.1] — 2026-11-14
 
 A security patch. Six images are rebuilt on current base images, with no
@@ -42,7 +220,7 @@ No values or CRDs change. Upgrade with `helm upgrade` as usual.
 
 **BREAKING.** The default state backend is now `nats`, the manager accepts
 work through a durable command bus, and channel adapters read, acknowledge,
-then report each op. Read [Upgrade](#upgrade) before upgrading.
+then report each op. Read [Upgrade](#upgrade-1) before upgrading.
 
 - `manager` 0.62.0, `console` 0.41.0, `channel-telegram` 0.27.0,
   `housekeeping` 0.3.0, `mcp-aops` 0.2.0, `runtime-claude` 0.13.0,
@@ -1039,113 +1217,11 @@ CVE-2026-97031 (`crypto/tls`), fixed upstream in 1.26.9 and 1.27.2.
    by default) is what renders the new `agentops-mcp-aops` component —
    leaving it off costs nothing.
 
-## [13.4.0] — 2026-09-06
-
-**Every first-party image is rebuilt and re-pinned.** Beside the two entries
-below, each image carries what landed on it since its last tag:
-
-- `manager` 0.57.3 — status patches on ensure-topic use optimistic locking
-  and retry on conflict. Send op ids carry a per-process epoch, so a restart
-  cannot reuse one. `x/crypto` and `x/net` bumped.
-- `channel-telegram` 0.25.0 — the outbound base URL is configuration
-  (`TELEGRAM_API_BASE`, or the bot Secret's `apiBase` key), completed ops
-  are remembered in a bounded set, logs are sanitised.
-- `gateway-telegram` 0.6.0 — `TELEGRAM_API_BASE`, and the poll loop split
-  into named steps.
-- `signal-telegram` 0.6.4 — logs are sanitised.
-- `console` 0.38.3 — the session cookie is `Secure` behind TLS or
-  `X-Forwarded-Proto: https`. Logs are sanitised. The image builds with
-  `npm ci --ignore-scripts`.
-- `egress-proxy` 0.2.5 — refuses a connection whose original destination is
-  the proxy itself.
-- `runtime-claude` 0.9.0 — `@anthropic-ai/claude-code` pinned to 2.1.252
-  (was `@latest`) and installed with `--ignore-scripts` plus its own
-  installer. `apt-get upgrade`, so a cached layer cannot keep a patched CVE
-  out. The prompt file is confined to the workspace. Logs are sanitised.
-- `runtime-copilot` 0.1.1 and `runtime-ollama` 0.1.1 — the same image
-  hygiene: pinned npm, `--ignore-scripts`, `apt-get upgrade`, confined
-  prompt file, sanitised logs.
-- `signal-alertmanager` 0.7.4, `housekeeping` 0.2.4, `context-sync` 0.2.4 —
-  rebuilt on the current base image, no behaviour change.
-- `signal-ha` 0.4.0 and `signal-k8s-events` 0.4.5 — below.
-
-### Added
-
-- **`signal-k8s-events` gained a fourth suppression axis: node STATE.** While
-  a node is cordoned or maintenance-tainted, every event on its objects (and
-  on the Node itself) is suppressed for exactly as long as the drain lasts —
-  a rolling reboot manager (kured is the canonical case) now opens ZERO
-  conversations, whatever it does to the pods scheduled there. Configured
-  under a source's `spec.config.route`: `drainingNodes` (`suppress`, the
-  default, or `report` to opt a source out), `drainingNodeMatchers` to
-  narrow it, `drainingNodeBound` (default `1h`) — past which a forgotten
-  cordon is reported once (`kind: Node`, reason `NodeDrainExceeded`) and
-  suppression on that node is released. Needs the events `ClusterRole`'s new
-  `nodes` `list`/`watch` grant (cluster-wide installs only — see below).
-- **`signal-ha` 0.4.0: the Home Assistant lane watches the four health
-  surfaces beside the log.** Home Assistant reports most of what is wrong
-  with a house somewhere other than its log. An integration that cannot
-  reach its device sits in a config entry state and logs one line at
-  startup. A problem it has diagnosed is a repair. A device fault is a
-  `problem` or `connectivity` binary sensor. A package behind is an
-  `update.*` entity. Each is now a record kind on the same source, through
-  the same rules, dwell and self-exclusion, labelled `surface=`
-  (`log`, `config-entry`, `repair`, `sensor`, `update`) so a rule can select
-  it. One signal per failed entry (with its reason), per repair, per faulting
-  sensor. ONE digest listing every pending update, re-posted when the set
-  grows. Each surface is switchable and tunable under
-  `logsAdapter.source.surfaces` — config entries, repairs and sensors on by
-  default, the update digest off — and a surface that is off is never read.
-  The shipped rules open with one per surface, ahead of the log rules. A
-  values file that replaces `rules` replaces those too.
-
-### Changed
-
-
-- **The `kubernetes` bundle's events `ClusterRole` gains `nodes`
-  `list`/`watch`** (cluster-wide RBAC only. A namespaced install has no
-  equivalent, since nodes are cluster-scoped — drain awareness is simply off
-  there, and every source's Ready condition notes it once).
-- **The shipped tier-3 node-condition rule now matches `kind="Node"`.**
-  `NodeHasDiskPressure` / `NodeHasMemoryPressure` are unaffected — the
-  kubelet already reports those once, against the Node object. `NodeNotReady`
-  is NOT: the node lifecycle controller stamps it on every pod scheduled on
-  the affected node, so before this change one node blip fired once per
-  workload at `for: 0`, with no chance to notice the node recovering. A
-  pod-level `NodeNotReady` now falls to the catch-all rule instead, which
-  already dwells and re-checks the pod's own health before emitting — so a
-  reboot that recovers within that dwell (the ordinary case) is no longer
-  reported at all, and one that does not is reported once it recurs.
-  **If your `spec.config.rules` overrides the shipped tier 3** (rather than
-  inheriting the chart default), add the `kind="Node"` matcher yourself to
-  get the same benefit — an override is untouched by this change otherwise,
-  and keeps firing on every pod-level `NodeNotReady` exactly as before.
-- **The SonarCloud quality gate is a required check.** The scan step in CI
-  waits on the gate and fails the component's job on `ERROR`, reported
-  through `ci-green`. Contributor-facing only. Nothing in the chart or the
-  operator changes. See `CONTRIBUTING.md`, *Code analysis* and *Pull
-  requests* (the `autofix` label).
-
-### Fixed
-
-- **`signal-ha` 0.3.0: the Home Assistant log lane observes records on a
-  default Home Assistant install.** The adapter learned of live records only
-  from `system_log_event`, which Home Assistant fires solely under
-  `system_log: fire_event: true` — off by default, and named nowhere in this
-  project. On such an install the adapter saw the log once per reconnect,
-  judged every record "quiet" because nothing ever recurred from its point
-  of view, and posted nothing while its source reported `Ready=True`. It now
-  POLLS `system_log/list` every fifteen seconds and feeds what is newer than
-  its cursor through the same rule path. The event stays as a lower-latency
-  path where the instance fires it, and an occurrence is considered once
-  whichever path brings it. `backfill: false` keeps its meaning by moving
-  the cursor past the listing on connect. No configuration changes. The
-  bundle's pinned tag moves to 0.3.0.
-
 ## Older versions
 
 | Archive | Covers |
 |---|---|
+| [CHANGELOG-13.4.0.md](changelog/CHANGELOG-13.4.0.md) | chart 13.4.0 |
 | [CHANGELOG-13.3.0.md](changelog/CHANGELOG-13.3.0.md) | chart 13.3.0 |
 | [CHANGELOG-13.2.0.md](changelog/CHANGELOG-13.2.0.md) | chart 13.2.0 |
 | [CHANGELOG-13.1.1.md](changelog/CHANGELOG-13.1.1.md) | chart 13.1.1 |

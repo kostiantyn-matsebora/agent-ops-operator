@@ -23,32 +23,63 @@ import (
 // pod's failure. Routing that knowledge back through the ingest pipeline to
 // wake an agent is the architectural error, not merely a noisy one.
 //
-// Three INDEPENDENT mechanisms, because any one of them can be blind:
+// FOUR INDEPENDENT mechanisms, because any one of them can be blind — numbered
+// to match docs/contracts/signal-self-exclusion's own spec, not evaluation
+// order (Excludes still checks the name prefix FIRST, since that is the one
+// that must hold before any cache is warm):
 //
-//	1. name prefix     — needs no object read, so it holds before any cache is
-//	                     warm; that is exactly when a mass pod-creation failure
-//	                     is most likely to be in flight
-//	2. owner/label     — precise, but needs the pod cache (see enrich.go)
-//	3. own namespace   — coarse; the ONLY one of the three that is configurable
+//	1. owner/label                   — precise, but needs the pod cache
+//	                                   (see enrich.go)
+//	2. name prefix                   — needs no object read, so it holds
+//	                                   before any cache is warm; that is
+//	                                   exactly when a mass pod-creation
+//	                                   failure is most likely to be in flight
+//	3. release-namespace exclusion    — coarse; the ONLY one of the four that
+//	                                   is configurable, for an install that
+//	                                   co-locates its own workloads
+//	4. conversations-namespace exclusion — every event in CONVERSATION_NAMESPACE
+//	                                   is dropped whenever it is set and
+//	                                   differs from POD_NAMESPACE; that
+//	                                   namespace holds only agent-ops
+//	                                   machinery by construction (split-
+//	                                   conversation-namespace), so, like
+//	                                   mechanism 2, it needs no object read
 //
-// Mechanisms 1 and 2 are deliberately NOT configurable. A deny-list is
+// Mechanisms 1, 2 and 4 are deliberately NOT configurable. A deny-list is
 // editable, and an editable loop breaker means a values typo can take out a
-// cluster.
+// cluster. Mechanism 4 cannot be the same deny-list risk: it is a single
+// namespace name the manager itself resolved at startup, never a pattern an
+// adopter edits.
 
 // ownedNamePrefixes are the workload names agent-ops gives its own pods:
-// runtime pods (runtimepod.PodName), channel adapter workloads, signal adapter
-// workloads, and the housekeeping CronJob's pods. Matching on the name alone
-// requires no API read.
+// runtime pods (runtimepod.PodName), their MCP ConfigMaps
+// (ConversationReconciler.MCPConfigMapName), channel adapter workloads,
+// signal adapter workloads, and the housekeeping CronJob's pods. Matching on
+// the name alone requires no API read.
 //
 // The housekeeping entry matters more than its size suggests: a CronJob fails
 // on a SCHEDULE, so without it every failed cleanup run emits a Warning event,
 // that event becomes a signal, and the signal wakes an agent about agent-ops'
 // own maintenance — repeatedly. agent-ops' own health is STATUS, not SIGNAL.
+//
+// agentops-mcp-conv- (split-conversation-namespace task 5.3) is what excludes
+// an MCP ConfigMap under the nats backend, where it carries no owner
+// reference back to a Conversation for mechanism 1 to follow — mechanism 2
+// is the only one of the four that catches it there.
+//
+// agentops-context-probe- (split-conversation-namespace) is the same gap for
+// the context-probe CronJob's pods in a SINGLE-namespace release, where
+// mechanism 4 never applies: the chart gives it an `app.kubernetes.io/name`
+// (mechanism 1), but a Job's pod carries no owner reference to a Conversation
+// for that mechanism to follow, so the name alone must catch it, exactly like
+// housekeeping.
 var ownedNamePrefixes = []string{
 	"agentops-conv-",
+	"agentops-mcp-conv-",
 	"agentops-adapter-",
 	"agentops-signal-",
 	"agentops-housekeeping-",
+	"agentops-context-probe-",
 }
 
 // ownedAppLabels are the `app.kubernetes.io/name` values agent-ops stamps on
@@ -58,6 +89,7 @@ var ownedAppLabels = map[string]bool{
 	"agentops-manager":        true,
 	"agentops-adapter":        true,
 	"agentops-signal-adapter": true,
+	"agentops-context-probe":  true,
 }
 
 // ownLabelPrefix marks any object carrying an agent-ops label key
@@ -77,6 +109,13 @@ type selfExcluder struct {
 	// every adapter workload — it is not a permission, and does not depend on
 	// spec.serviceAccountName.
 	ownNamespace string
+	// conversationsNamespace is CONVERSATION_NAMESPACE (split-conversation-
+	// namespace), a LITERAL value the SignalAdapter reconciler injects
+	// beside POD_NAMESPACE — never a downward-API field, since it names a
+	// namespace other than the one this pod runs in. Empty, or equal to
+	// ownNamespace, means a single-namespace release: mechanism 4 then
+	// never applies, and mechanisms 1-3 govern alone.
+	conversationsNamespace string
 	// cache answers the owner/label rule. Nil is valid and means only the
 	// name-prefix and namespace rules apply.
 	cache objectLookup
@@ -93,7 +132,10 @@ type objectLookup interface {
 }
 
 func newSelfExcluder() *selfExcluder {
-	return &selfExcluder{ownNamespace: os.Getenv("POD_NAMESPACE")}
+	return &selfExcluder{
+		ownNamespace:           os.Getenv("POD_NAMESPACE"),
+		conversationsNamespace: os.Getenv("CONVERSATION_NAMESPACE"),
+	}
 }
 
 // withCache returns the excluder wired to an object cache, enabling mechanism 2.
@@ -103,16 +145,19 @@ func (s *selfExcluder) withCache(c objectLookup) *selfExcluder {
 }
 
 // Excludes reports whether this event is about agent-ops' own machinery, and
-// why. includeOwnNamespace disables mechanism 3 ONLY — 1 and 2 always apply.
+// why. includeOwnNamespace disables mechanism 3 ONLY — 1, 2 and 4 always
+// apply, mechanism 4 whenever it is set and differs from ownNamespace.
 //
-// A nil receiver still applies mechanism 1. That is deliberate: the failure
-// mode this invariant guards against must not be reachable by forgetting to
-// wire the excluder up, so an unconfigured excluder degrades to the rule that
-// needs no configuration rather than to no rule at all.
+// A nil receiver still applies mechanism 2 (the name-prefix rule). That is
+// deliberate: the failure mode this invariant guards against must not be
+// reachable by forgetting to wire the excluder up, so an unconfigured
+// excluder degrades to the rule that needs no configuration rather than to
+// no rule at all.
 func (s *selfExcluder) Excludes(ev *Event, includeOwnNamespace bool) (bool, string) {
 	name := ev.InvolvedObject.Name
 
-	// 1. name prefix — no read, works with a cold cache or no excluder at all
+	// 2. name prefix — no read, works with a cold cache or no excluder at
+	// all, so it is checked FIRST even though the spec numbers it second.
 	for _, p := range ownedNamePrefixes {
 		if strings.HasPrefix(name, p) {
 			return true, "agent-ops workload name prefix " + p
@@ -122,14 +167,22 @@ func (s *selfExcluder) Excludes(ev *Event, includeOwnNamespace bool) (bool, stri
 		return false, ""
 	}
 
-	// 2. owner/label — precise, needs the cache
+	// 4. conversations-namespace exclusion — also no read, and NOT gated by
+	// includeOwnNamespace: that flag names an installation co-locating its
+	// OWN workloads beside the operator, and the conversations namespace
+	// never holds anything but agent-ops machinery.
+	if s.conversationsNamespace != "" && s.conversationsNamespace != s.ownNamespace && ev.Namespace() == s.conversationsNamespace {
+		return true, "event is in the conversations namespace " + s.conversationsNamespace
+	}
+
+	// 1. owner/label — precise, needs the cache
 	if s.cache != nil {
 		if owned, known := s.cache.OwnedByAgentOps(ev.Namespace(), ev.InvolvedObject.Kind, name); known && owned {
 			return true, "object is labelled or owned by agent-ops"
 		}
 	}
 
-	// 3. own namespace — the configurable one
+	// 3. release-namespace exclusion — the configurable one
 	if !includeOwnNamespace && s.ownNamespace != "" && ev.Namespace() == s.ownNamespace {
 		return true, "event is in the operator's own namespace " + s.ownNamespace
 	}

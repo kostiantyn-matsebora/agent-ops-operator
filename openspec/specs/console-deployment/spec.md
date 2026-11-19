@@ -11,7 +11,9 @@ It is on by default, which is why the token's source order and the guard on the
 console's published identity are part of this capability: a redeploy must never
 sign every browser out, and a subchart must never name a console identity the
 parent did not render.
+
 ## Requirements
+
 ### Requirement: Console ships as an opt-in chart bundle of CRs
 The console SHALL ship as a chart bundle of CRs and RBAC — a ChannelAdapter, a Channel, an externally-served SignalAdapter, a SignalSource, the UI token Secret, and a read-only Role/RoleBinding — and SHALL be **enabled by default** (`console.enabled: true`). The chart SHALL ship no workload or connectivity of its own: the ChannelAdapter reconciler owns the Deployment and, because `spec.port` is set, the Service.
 
@@ -42,9 +44,18 @@ The UI token Secret SHALL take its value from a defined source order — an expl
 - **THEN** the token is unchanged and browser sessions established from it keep working
 
 ### Requirement: Read-only RBAC granted by the chart, not the operator
-The chart SHALL grant SA `agentops-adapter-console` a namespaced read-only Role covering `get`, `list`, `watch` on every `agentops.dev` kind **and on `deployments` and `pods`** — the latter because versions, image digests, restart counts and manager health exist in no CR. No write verb SHALL be granted on any resource, and no reconciler SHALL create or bind RBAC.
+The chart SHALL grant SA `agentops-adapter-console` a namespaced read-only Role covering `get`, `list`, `watch` on every `agentops.dev` kind **and on `deployments` and `pods`**. The latter are there because versions, image digests, restart counts and manager health exist in no CR.
 
-The trust boundary SHALL be documented: whoever holds the UI token can read everything this ServiceAccount can read, conversation payloads included, and — when writes are enabled — can instruct any agent the console can reach.
+No write verb SHALL be granted on any resource, and no reconciler SHALL create or bind RBAC.
+
+In a split release the chart SHALL also grant the console a read-only Role on
+`pods` in the conversations namespace, bound by a RoleBinding, so runtime pods stay visible. The
+console SHALL read `CONVERSATION_NAMESPACE`, defaulting to `POD_NAMESPACE`.
+
+The trust boundary SHALL be documented. Whoever holds the UI token:
+
+- can read everything this ServiceAccount can read, conversation payloads included
+- can instruct any agent the console can reach, when writes are enabled
 
 #### Scenario: Read-only in fact
 - **WHEN** the console's Role is inspected
@@ -57,6 +68,10 @@ The trust boundary SHALL be documented: whoever holds the UI token can read ever
 #### Scenario: A broken pod is visible
 - **WHEN** a component is in CrashLoopBackOff
 - **THEN** the console reports it, having read pod state directly
+
+#### Scenario: Runtime pods stay visible across the split
+- **WHEN** a runtime pod runs in the conversations namespace of a split release
+- **THEN** the console lists it from that namespace, under a Role that grants no write verb
 
 ### Requirement: Browser access is authenticated
 Read access SHALL require a bearer token or a session established from it, sourced from the console Channel's projected `uiToken` credential, UNLESS the release declares that an external authenticator fronts the console. An unconfigured token SHALL authorize nobody and SHALL be indistinguishable from a wrong token.
@@ -177,4 +192,3 @@ the one it most needs to catch — is not skipped.
 
 - **WHEN** the chart is installed with its defaults
 - **THEN** the published names match what the console renders and nothing fails
-

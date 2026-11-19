@@ -25,6 +25,16 @@
 //	hold <seconds>  keep the unit inflight that long (default 30), then report success saying
 //	                how long it held — the window a lane needs to act on a run while it is
 //	                still running
+//	wiring          succeed; result names the wiring this unit actually carried — the
+//	                composed allowedTools/toolsMode wire fields (dispatch.WorkUnit), and
+//	                the MCP server keys found in the file MCP_CONFIG names, i.e. what the
+//	                pod actually mounts. A scoped shell pattern ("Bash(...)") is logged as
+//	                a narrowing. This mirrors, rather than replicates, runtimes/pi's own
+//	                vocabulary.js: the per-tool mapping and real MCP reachability are
+//	                pinned at the unit and conformance tiers already (runtimes/pi's own
+//	                tests, platform/manager/test/conformance/runtimepi_test.go); this
+//	                directive proves only that the WIRING the manager composed reaches the
+//	                pod — the one fact only a real cluster can show.
 //
 // Anything else is `echo`. Identical input, identical report: no clock, no
 // randomness and no pod name reaches a result.
@@ -44,6 +54,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +74,12 @@ type unit struct {
 	PromptText       string            `json:"promptText,omitempty"`
 	PromptFile       string            `json:"promptFile,omitempty"`
 	PromptVars       map[string]string `json:"promptVars,omitempty"`
+	// AllowedTools and ToolsMode carry dispatch.WorkUnit's own wire fields —
+	// the wiring's half of the tool allowlist. Decoded only so the `wiring`
+	// directive can echo them back; every other directive ignores both, so
+	// decoding them costs no existing directive anything.
+	AllowedTools string `json:"allowedTools,omitempty"`
+	ToolsMode    string `json:"toolsMode,omitempty"`
 }
 
 type report struct {
@@ -106,7 +123,7 @@ var scriptedCalls = struct {
 	tools: []toolCall{{Tool: "mcp__stub__lookup", Server: "stub", DurationMs: 5, ResultBytes: 64}},
 }
 
-var directives = []string{"echo", "fail", "stale-context", "no-context", "die", "stall", "storage-outage", "calls", "hold"}
+var directives = []string{"echo", "fail", "stale-context", "no-context", "die", "stall", "storage-outage", "calls", "hold", "wiring"}
 
 // input extracts the task text a unit carries: USER_TASK when the manager
 // left rendering to the runtime; else the task the manager's own template
@@ -224,6 +241,11 @@ func perform(u unit) (report, bool) {
 		r.Result = resultPrefix + "held for " + holdFor(rest).String()
 		r.Continuity = continuity(handle)
 		r.RuntimeContextID = keep(u.Convo, handle)
+	case "wiring":
+		logScopedShellNarrowing(u.AllowedTools)
+		r.Result = resultPrefix + wiringReport(u)
+		r.Continuity = continuity(handle)
+		r.RuntimeContextID = keep(u.Convo, handle)
 	default: // echo
 		r.Result = resultPrefix + rest
 		r.Continuity = continuity(handle)
@@ -259,6 +281,59 @@ func keep(convo, handle string) string {
 		log.Printf("[stub] cannot write context %s: %v", handle, err)
 	}
 	return handle
+}
+
+// wiringReport renders what this unit's own wiring fields carried, in a
+// fixed, greppable shape — never omitting a section, so a test can assert an
+// empty allowlist/MCP set as confidently as a populated one.
+func wiringReport(u unit) string {
+	return "wiring allowedTools=[" + u.AllowedTools + "] toolsMode=[" + u.ToolsMode + "] mcp=[" + strings.Join(mcpServerKeys(), ",") + "]"
+}
+
+// mcpServerKeys reads the file MCP_CONFIG names (the manager's own compiled
+// mcp.json, mounted exactly as a real runtime reads it — see
+// internal/mcpcompile) and returns its server keys, sorted. Absent env,
+// unreadable file or unparseable JSON all report no keys rather than
+// failing the run: a missing MCP binding is itself a fact worth reporting,
+// not a reason to crash.
+func mcpServerKeys() []string {
+	path := os.Getenv("MCP_CONFIG")
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		McpServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if json.Unmarshal(data, &doc) != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(doc.McpServers))
+	for k := range doc.McpServers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// logScopedShellNarrowing logs every scoped shell pattern ("Bash(...)") the
+// wiring granted. It is a STAND-IN for runtimes/pi's own vocabulary.js
+// (design D2, task 2.5), which does the real per-tool mapping and logs the
+// same narrowing from inside the actual runtime image — not exercised here,
+// since this lane runs the stub. What this proves instead is that the
+// composed allowedTools string the manager hands a runtime pod never
+// upgrades a scoped pattern into a bare "Bash" grant, which is the MANAGER's
+// own obligation and is provable without the real image.
+func logScopedShellNarrowing(allowedTools string) {
+	for _, tok := range strings.Split(allowedTools, ",") {
+		tok = strings.TrimSpace(tok)
+		if strings.HasPrefix(tok, "Bash(") {
+			log.Printf("[stub] scoped shell pattern %q grants no built-in shell, narrowed", tok)
+		}
+	}
 }
 
 func main() {

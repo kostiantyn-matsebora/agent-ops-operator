@@ -128,7 +128,7 @@ func ReservedCommands() []string {
 // the ONE place either is turned into a vocabulary Entry.
 func (r *Router) readyPipelines(ctx context.Context) []Entry {
 	var list agentopsv1alpha1.PipelineList
-	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace)); err != nil {
+	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespaces.Control)); err != nil {
 		return nil
 	}
 	out := make([]Entry, 0, len(list.Items))
@@ -144,7 +144,7 @@ func (r *Router) readyPipelines(ctx context.Context) []Entry {
 		})
 	}
 	var coordinators agentopsv1alpha1.CoordinatorList
-	if err := r.Reader.List(ctx, &coordinators, client.InNamespace(r.Namespace)); err != nil {
+	if err := r.Reader.List(ctx, &coordinators, client.InNamespace(r.Namespaces.Control)); err != nil {
 		return nil
 	}
 	for i := range coordinators.Items {

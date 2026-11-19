@@ -43,11 +43,20 @@ func main() {
 		// startup names the missing grant instead of serving empty pages.
 		log.Fatalf("kubernetes access: %v (ChannelAdapter needs kubernetesAccess: true and a chart-granted read-only Role)", err)
 	}
+	// Built unconditionally, even when ConversationsNamespace equals
+	// Namespace (split-conversation-namespace): a single-namespace release
+	// is two equal values, never a branch on whether they differ. Pods are
+	// the ONE kind podsAcrossNamespaces (kube_split.go) reads from this
+	// second client — everything else stays on kube alone.
+	conversationsKube, err := NewInClusterKube(cfg.ConversationsNamespace)
+	if err != nil {
+		log.Fatalf("kubernetes access (conversations namespace): %v", err)
+	}
 
 	// Conversations and signals come from the manager's state read surface
 	// (state.go), not the Kubernetes API — compositeSource is what lets one
 	// Cache hold both origins (state-store-generic-contract, design D-8).
-	src := newCompositeSource(kube, newStateSource(cfg))
+	src := newCompositeSource(newPodsAcrossNamespaces(kube, conversationsKube), newStateSource(cfg))
 	cache := NewCache(src, append(append([]string{}, ConfigurableKinds...), InstallKinds...))
 	transcripts := NewTranscripts()
 	mgr := NewManager(cfg.ManagerURL, cfg.AdapterToken)

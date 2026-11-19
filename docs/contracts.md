@@ -785,6 +785,14 @@ This pattern applies to whatever resident lands here next.
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics + the `agentops_*` set above |
 
+**No request or response on any surface above carries a namespace.** A
+release may resolve a control namespace and a conversations namespace (see
+[Concepts](concepts.md#where-things-run-the-control-and-conversations-namespaces)).
+
+That is deployment topology, never the wire contract. An adapter or a
+runtime pod needs no namespace-aware configuration to reach any endpoint
+here.
+
 **There is no programmatic origination endpoint.** To start a conversation from
 a script, post a `kind: task` signal to a `SignalSource` a Ready Pipeline
 claims:
@@ -814,5 +822,5 @@ its task's consumer runs.
 
 The `conversations` field is withdrawn, and every routing outcome lives on
 the `Signal`. See [Concepts](concepts.md#signal) for the kind and
-[the adapter specification](contracts/signal-adapter.md), version 2.4.0, for
+[the adapter specification](contracts/signal-adapter.md), version 2.5.0, for
 the contract.

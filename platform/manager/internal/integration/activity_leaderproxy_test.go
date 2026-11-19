@@ -20,6 +20,7 @@ import (
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 )
 
 // /activity* gets the same dumb-proxy treatment /channel/ops used to, for a
@@ -28,9 +29,27 @@ import (
 // leader-elected) only ever lands in the leader's own buffer. A reader
 // pinned to any replica must still see it.
 func TestActivityProxiesToLeaderWhenReachable(t *testing.T) {
+	assertActivityProxiedToLeader(t, namespace.Namespaces{Control: ns, Conversations: ns})
+}
+
+// TestLeaderProxyFindsTheLeaderInControlUnderASplit: the manager's own
+// replicas run in the CONTROL namespace, never beside runtime pods. The
+// leader's pod was once looked up in the conversations namespace, where it
+// never is, so under a split every non-leader silently served its own empty
+// buffer instead of proxying.
+func TestLeaderProxyFindsTheLeaderInControlUnderASplit(t *testing.T) {
+	assertActivityProxiedToLeader(t, namespace.Namespaces{Control: ns, Conversations: createNamespace(t)})
+}
+
+// assertActivityProxiedToLeader runs a follower over the given namespace
+// pair, with the leader's pod and Lease in pair.Control, and asserts a read
+// on the follower answers from the leader's own log.
+func assertActivityProxiedToLeader(t *testing.T, pair namespace.Namespaces) {
+	t.Helper()
 	ctx := context.Background()
 
 	leaderSrv, leaderLog := apiServerWithActivity()
+	leaderSrv.Namespaces = pair
 	leaderSrv.ReplicaIdentity = "activity-proxy-leader"
 	leaderHTTP := httptest.NewServer(leaderSrv.Handler())
 	t.Cleanup(leaderHTTP.Close)
@@ -39,11 +58,12 @@ func TestActivityProxiesToLeaderWhenReachable(t *testing.T) {
 	leaderSrv.Addr = port
 
 	followerSrv, followerLog := apiServerWithActivity()
+	followerSrv.Namespaces = pair
 	followerSrv.ReplicaIdentity = "activity-proxy-follower"
 	followerSrv.Addr = port
 
 	pod := &corev1.Pod{}
-	pod.Name, pod.Namespace = "activity-proxy-leader", ns
+	pod.Name, pod.Namespace = "activity-proxy-leader", pair.Control
 	pod.Labels = map[string]string{"app.kubernetes.io/name": "agentops-manager"}
 	pod.Spec.Containers = []corev1.Container{{Name: "manager", Image: "busybox:stub"}}
 	if err := k8sClient.Create(ctx, pod); err != nil {
@@ -56,7 +76,7 @@ func TestActivityProxiesToLeaderWhenReachable(t *testing.T) {
 	}
 
 	lease := &coordinationv1.Lease{}
-	lease.Name, lease.Namespace = httpapi.LeaseName, ns
+	lease.Name, lease.Namespace = httpapi.LeaseName, pair.Control
 	holder := "activity-proxy-leader"
 	lease.Spec.HolderIdentity = &holder
 	if err := k8sClient.Create(ctx, lease); err != nil {

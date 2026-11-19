@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ import (
 func retentionReconciler(ops *chat.OpQueue, router *chat.Router, closeAge, deleteAge time.Duration) *controller.ConversationReconciler {
 	r := &controller.ConversationReconciler{
 		Client:        k8sClient,
-		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns},
 		Scheme:                 scheme,
 		MaxActiveConversations: 100,
 		Ops:                    ops,
@@ -87,7 +88,7 @@ func TestBothTimersOffDoNothing(t *testing.T) {
 
 func TestAutoCloseClosesAnIdleFinishedConversation(t *testing.T) {
 	ops := testOps()
-	router := &chat.Router{Client: k8sClient, Reader: k8sClient, Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Ops: ops}
+	router := &chat.Router{Client: k8sClient, Reader: k8sClient, Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns}, Ops: ops}
 	mkFinishedConv(t, "ret-idle", 400*time.Hour)
 
 	retentionRun(t, retentionReconciler(ops, router, 168*time.Hour, 0), "ret-idle")
@@ -109,7 +110,7 @@ func TestAutoCloseClosesAnIdleFinishedConversation(t *testing.T) {
 // answered a moment ago is busy, not old.
 func TestRecentlyActiveConversationSurvivesItsWindow(t *testing.T) {
 	ops := testOps()
-	router := &chat.Router{Client: k8sClient, Reader: k8sClient, Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Ops: ops}
+	router := &chat.Router{Client: k8sClient, Reader: k8sClient, Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns}, Ops: ops}
 	mkFinishedConv(t, "ret-busy", time.Minute)
 
 	res := retentionRun(t, retentionReconciler(ops, router, time.Hour, 0), "ret-busy")
@@ -126,7 +127,7 @@ func TestRecentlyActiveConversationSurvivesItsWindow(t *testing.T) {
 // finished, however idle: closing then archives the thread out from under it.
 func TestAnUndeliveredRunHoldsAConversationOpen(t *testing.T) {
 	ops := testOps()
-	router := &chat.Router{Client: k8sClient, Reader: k8sClient, Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns, Ops: ops}
+	router := &chat.Router{Client: k8sClient, Reader: k8sClient, Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns}, Ops: ops}
 	mkChannel(t, "ret-ch", "tg")
 	conv := mkFinishedConv(t, "ret-undelivered", 400*time.Hour, "ret-ch")
 	conv.Status.Runs[0].Delivered = nil // recorded, but never reached the thread

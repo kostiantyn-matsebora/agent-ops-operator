@@ -6,7 +6,7 @@ container, one directory, grouped by runtime role.
 | Group | Holds | Type |
 |---|---|---|
 | `platform/` | `manager` `console` `housekeeping` `context-sync` `egress-proxy` `mcp-aops` | product components |
-| `runtimes/` | `claude` `claude-cli` `ollama` `copilot` | client side of the work contract |
+| `runtimes/` | `claude` `claude-cli` `ollama` `copilot` `pi` | client side of the work contract |
 | `signals/` | `cron` `alertmanager` `k8s-events` `ha` `pulse` `telegram` | push to `/signal/inbound` |
 | `channels/` | `telegram` | serve `/channel/*` |
 | `gateways/` | `telegram` | no agent-ops contract |
@@ -16,6 +16,14 @@ container, one directory, grouped by runtime role.
   group → nothing: `signals/cron`→`agentops-signal-cron`,
   `platform/console`→`agentops-console`. `.github/components.sh` derives
   and asserts uniqueness — moving a directory renames a published image.
+- **THE GROUPING ABOVE IS NOT A NAMESPACE.** `platform/` groups by runtime
+  role, not by where a release puts the workload. See `invariants.md`'s
+  placement rule.
+  - `platform/housekeeping/`'s CronJob runs in CONVERSATIONS, beside the
+    claims it mounts.
+  - `platform/context-sync/` and `platform/egress-proxy/` run in
+    CONVERSATIONS, sidecars inside the runtime pod.
+  - Every other `platform/` component stays in CONTROL.
 - **BUILD CONTEXT IS THE DIRECTORY.** `COPY ../shared` cannot work. `-f`
   lets 9 components share one Dockerfile while building only from their own
   dir. An own Dockerfile (`manager`, `console`, `egress-proxy`,
@@ -58,9 +66,10 @@ Own Go module, the only one with dependencies.
 | `runtimes/claude-cli/` | today's per-unit `claude` CLI spawn, moved verbatim out of `runtimes/claude/` | off by default, same pattern as `ollama`/`copilot`. No live session — `--allowedTools`/`--permission-mode dontAsk`, unchanged |
 | `runtimes/ollama/` | the harness IS the runtime, Go, own loop/tools/transcript | `ollama.go` is the only vendor-aware file. Gate applies ONCE before the request — `Bash(kubectl:*)` grants nothing, never widens |
 | `runtimes/copilot/` | vendor owns tool vocabulary, Node + copilot-sdk | `vocabulary.js` is the boundary — `Bash(kubectl:*)` ENFORCED per call (opposite of ollama, each enforces what it can) |
+| `runtimes/pi/` | vendor SDK in-process, Node + `@earendil-works/pi-coding-agent` | same posture as `claude` — a per-invocation `tool_call` hook, deny by default, never a flag. The vendor's `pi-mcp` package is the one MCP extension bridging a second vendor's tool registration into the agent-ops contract |
 
-`runtimes/claude` is ON by default, the chart's default-eligible bundle. The
-other three are optional bundles under `chart/charts/<name>/`, off by default.
+`runtimes/pi` is ON by default and the chart's default runtime, and `runtimes/claude`
+is on beside it. The other three are optional bundles under `chart/charts/<name>/`, off by default.
 
 ### Signals and channels
 

@@ -100,13 +100,17 @@ DOCUMENTED_PLACEHOLDERS = {
     # public model name, both shapes the allowlist permits.
     "http://ollama.ollama.svc:11434",
     "qwen2.5:14b",
+    # pi/values.yaml examples — a public provider id and a public model name,
+    # the chart's own documented example (pi.provider/pi.model comments).
+    "anthropic",
+    "claude-sonnet-5",
     # chart/values.yaml, global.agentops.wiringMode — one of the two literal
     # values the field accepts, not an invented example.
     "pipelines",
 }
 # A value too generic to prove documentation by bare substring is anchored to
 # the chart text that actually documents it.
-PLACEHOLDER_ANCHORS = {"pipelines": "wiringMode: pipelines"}
+PLACEHOLDER_ANCHORS = {"pipelines": "wiringMode: pipelines", "anthropic": "provider: anthropic"}
 CREDENTIAL_PLACEHOLDERS = {
     "placeholder-token",
     "placeholder:token",
@@ -128,6 +132,10 @@ ALLOWED_HOSTS = {
     # still runs over those files: a real hostname DRAWN into a diagram is as
     # published as one typed into prose, and harder to notice.
     "www.w3.org",
+    # runtimes/pi.md's own link to its upstream SDK package — a public
+    # project's own listing, not a private deployment, same reasoning as
+    # publication-allowlist.json's "UPSTREAM PROJECTS" entries.
+    "www.npmjs.com",
 }
 
 # CLUSTER-INTERNAL SUFFIXES, READ FROM THE PUBLICATION ALLOWLIST rather than
@@ -367,6 +375,17 @@ BUNDLES = {
     # "Always" row is the CR alone.
     "claude-cli": {
         "enable": {},
+        "components": {},
+    },
+    # `provider`/`model` are REQUIRED once enabled -- the render fails naming
+    # the key otherwise, unlike copilot's optional token -- so turning the
+    # bundle on for this diff must set both. The credential stays optional,
+    # same as every other runtime bundle.
+    "pi": {
+        "enable": {
+            "provider": "anthropic",
+            "model": "claude-sonnet-5",
+        },
         "components": {},
     },
     "telegram": {

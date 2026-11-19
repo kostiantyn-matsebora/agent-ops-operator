@@ -37,6 +37,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/convtask"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/storagebreaker"
@@ -98,13 +99,18 @@ type ConversationReconciler struct {
 	Runtime runtimepod.Config
 	// Conversations, Runs and Blobs are the only way the reconciler reaches a
 	// Conversation, its run history or a queued input's payload (state-store
-	// design D-2). Their scope is one namespace; Namespace names it for the
-	// pods, ConfigMaps and channels that live beside the conversations, which
-	// stay Kubernetes objects under every backend.
+	// design D-2).
 	Conversations state.Collection[state.ConversationRecord]
 	Runs          state.Appended[state.ConversationRecord, state.Run]
 	Blobs         state.Blobs
-	Namespace     string
+	// Namespaces is the control/conversations pair (split-conversation-
+	// namespace). The runtime pod, its MCP ConfigMap, `liveRuntimePods` and
+	// the synthetic owner reference to this Conversation (kube backend) all
+	// name Namespaces.Conversations — a pod cannot run as an account or mount
+	// a claim across a namespace, so the owner and its dependents share one.
+	// Every wiring read (Pipeline, AgentProfile, AgentRuntime, Channel,
+	// toolsets, MCP configs) names Namespaces.Control.
+	Namespaces namespace.Namespaces
 	// NoOwnerReference stops the reconciler putting an owner reference on the
 	// runtime pod and the MCP ConfigMap. Set it when conversations are NOT
 	// Kubernetes objects (the nats backend): the garbage collector reads an
@@ -275,7 +281,7 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// the conversation counting against the cap.
 	var pod corev1.Pod
 	podName := runtimepod.PodName(conv.Name)
-	podErr := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: podName}, &pod)
+	podErr := r.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Conversations, Name: podName}, &pod)
 	podExists := podErr == nil
 
 	if podExists && (pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed) {
@@ -724,7 +730,7 @@ func (r *ConversationReconciler) reapUnstartedPod(ctx context.Context, conv *sta
 func (r *ConversationReconciler) eventRef(conv *state.ConversationRecord) *corev1.ObjectReference {
 	return &corev1.ObjectReference{
 		APIVersion: agentopsv1alpha1.GroupVersion.String(), Kind: conversationKind,
-		Namespace: r.Namespace, Name: conv.Name, UID: types.UID(conv.ID),
+		Namespace: r.Namespaces.Conversations, Name: conv.Name, UID: types.UID(conv.ID),
 	}
 }
 
@@ -739,7 +745,7 @@ func (r *ConversationReconciler) ownerOf(conv *state.ConversationRecord) *metav1
 	return &metav1.PartialObjectMetadata{
 		TypeMeta: metav1.TypeMeta{APIVersion: agentopsv1alpha1.GroupVersion.String(), Kind: conversationKind},
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: r.Namespace, Name: conv.Name, UID: types.UID(conv.ID),
+			Namespace: r.Namespaces.Conversations, Name: conv.Name, UID: types.UID(conv.ID),
 		},
 	}
 }
@@ -832,7 +838,7 @@ func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *stat
 // or names none.
 func (r *ConversationReconciler) servingChannel(ctx context.Context, name string) *agentopsv1alpha1.Channel {
 	var ch agentopsv1alpha1.Channel
-	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: name}, &ch); err != nil || ch.Spec.Adapter == "" {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: name}, &ch); err != nil || ch.Spec.Adapter == "" {
 		return nil
 	}
 	return &ch
@@ -871,12 +877,12 @@ func (r *ConversationReconciler) enqueueDeleteConversations(ctx context.Context,
 // Absence is not an error: both are routinely already gone.
 func (r *ConversationReconciler) releaseWorkload(ctx context.Context, conv *state.ConversationRecord) error {
 	pod := &corev1.Pod{}
-	pod.Namespace, pod.Name = r.Namespace, runtimepod.PodName(conv.Name)
+	pod.Namespace, pod.Name = r.Namespaces.Conversations, runtimepod.PodName(conv.Name)
 	if err := r.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
 	cm := &corev1.ConfigMap{}
-	cm.Namespace, cm.Name = r.Namespace, convMCPConfigMapName(conv.Name)
+	cm.Namespace, cm.Name = r.Namespaces.Conversations, convMCPConfigMapName(conv.Name)
 	if err := r.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
@@ -1047,7 +1053,7 @@ func (r *ConversationReconciler) waitingFIFO(all []state.ConversationRecord, has
 // createRuntimePod does the eviction, and admitting on that basis is what keeps
 // a burst from blocking behind a worker that is doing nothing.
 func (r *ConversationReconciler) admit(ctx context.Context, conv *state.ConversationRecord) (bool, error) {
-	live, err := r.liveRuntimePods(ctx, r.Namespace)
+	live, err := r.liveRuntimePods(ctx, r.Namespaces.Conversations)
 	if err != nil {
 		return false, err
 	}
@@ -1149,7 +1155,7 @@ func (r *ConversationReconciler) notifyQueued(ctx context.Context, conv *state.C
 	}
 	ref := conv.ChannelRefs[0]
 	var ch agentopsv1alpha1.Channel
-	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &ch); err != nil || ch.Spec.Adapter == "" {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: ref}, &ch); err != nil || ch.Spec.Adapter == "" {
 		return
 	}
 	r.Ops.EnqueueMessage(ctx, &ch, conv, conv.ThreadFor(ref), chat.Notice(
@@ -1190,7 +1196,7 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *state.C
 			continue
 		}
 		var ch agentopsv1alpha1.Channel
-		if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &ch); err != nil {
+		if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: ref}, &ch); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -1255,7 +1261,7 @@ func (r *ConversationReconciler) topicDescriptor(ctx context.Context, conv *stat
 // this is the same inference /status and the console already use, and a blank
 // answer is the honest one rather than a guess.
 func (r *ConversationReconciler) inferredPipeline(ctx context.Context, conv *state.ConversationRecord) string {
-	if p := chat.PipelineForConversation(ctx, r.Client, r.Namespace, conv); p != nil {
+	if p := chat.PipelineForConversation(ctx, r.Client, r.Namespaces.Control, conv); p != nil {
 		return p.Name
 	}
 	return ""
@@ -1276,7 +1282,7 @@ func (r *ConversationReconciler) inferredPipeline(ctx context.Context, conv *sta
 //     one migration hazard: without it, upgrading would re-post every recent
 //     answer to every bound thread.
 func (r *ConversationReconciler) fanOutThread(ctx context.Context, conv *state.ConversationRecord, runs []state.Run) {
-	owed := chat.FanOutThread(ctx, chat.Env{Reader: r.Client, Blobs: r.Blobs, Conversations: r.Conversations, Namespace: r.Namespace}, r.Ops, conv, runs)
+	owed := chat.FanOutThread(ctx, chat.Env{Reader: r.Client, Blobs: r.Blobs, Conversations: r.Conversations, Namespace: r.Namespaces.Control}, r.Ops, conv, runs)
 	if len(conv.ChannelRefs) == 0 || len(runs) == 0 {
 		return
 	}
@@ -1475,7 +1481,7 @@ func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv *stat
 func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *state.ConversationRecord) (bool, error) {
 	logger := log.FromContext(ctx)
 
-	live, err := r.liveRuntimePods(ctx, r.Namespace)
+	live, err := r.liveRuntimePods(ctx, r.Namespaces.Conversations)
 	if err != nil {
 		return false, err
 	}
@@ -1486,7 +1492,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *sta
 	}
 
 	var profile agentopsv1alpha1.AgentProfile
-	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: conv.ProfileRef}, &profile); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: conv.ProfileRef}, &profile); err != nil {
 		return false, err
 	}
 	mcpRes, mcpCM, err := r.ensureMCPConfigMap(ctx, conv)
@@ -1508,10 +1514,15 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *sta
 	// bootstrap, with conv.serviceAccountName overriding the runtime's identity.
 	// The Pipeline is deliberately absent — its choice was resolved into these
 	// fields at creation, so editing it cannot re-wire this pod.
-	resolved, err := runtimepod.ResolveFor(ctx, r.Client, r.Conversations, r.Namespace, conv, r.Runtime)
+	resolved, err := runtimepod.ResolveFor(ctx, r.Client, r.Conversations, r.Namespaces.Control, conv, r.Runtime)
 	if err != nil {
 		return false, err
 	}
+
+	// Named from the CRs alone, no Secret or ConfigMap read (decision 5 of
+	// split-conversation-namespace): what the pod about to be built will ask
+	// the kubelet to resolve, in the conversations namespace.
+	r.setExpectedReferencesCondition(ctx, conv, &profile, mcpRes, resolved.Config)
 
 	// A KNOWN-BAD volume costs CONTINUITY, not availability.
 	//
@@ -1534,7 +1545,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *sta
 	}
 
 	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, resolved, r.MasterToken)
-	pod.Namespace = r.Namespace
+	pod.Namespace = r.Namespaces.Conversations
 	if err := r.own(conv, pod); err != nil {
 		return false, err
 	}
@@ -1619,7 +1630,7 @@ func (r *ConversationReconciler) ensureMCPConfigMap(ctx context.Context,
 	if binding := conv.MCPConfigs; binding != nil {
 		for _, ref := range binding.Refs {
 			var mc agentopsv1alpha1.MCPConfig
-			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &mc); err != nil {
+			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: ref}, &mc); err != nil {
 				return mcpcompile.Result{}, "", fmt.Errorf("bound MCPConfig %q: %w", ref, err)
 			}
 			configs = append(configs, mc.Spec)
@@ -1634,7 +1645,7 @@ func (r *ConversationReconciler) ensureMCPConfigMap(ctx context.Context,
 		return res, "", nil
 	}
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
-		Name: convMCPConfigMapName(conv.Name), Namespace: r.Namespace,
+		Name: convMCPConfigMapName(conv.Name), Namespace: r.Namespaces.Conversations,
 	}}
 	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
 		cm.Data = map[string]string{"mcp.json": res.JSON}
@@ -1668,7 +1679,7 @@ func (r *ConversationReconciler) setToolingCondition(ctx context.Context, conv *
 func (r *ConversationReconciler) MapRuntimePodToPending(ctx context.Context, obj client.Object) []reconcile.Request {
 	// The store is scoped to one namespace (design D-2), so a pod beside another
 	// install's conversations has nothing to wake here.
-	if obj != nil && obj.GetNamespace() != "" && obj.GetNamespace() != r.Namespace {
+	if obj != nil && obj.GetNamespace() != "" && obj.GetNamespace() != r.Namespaces.Conversations {
 		return nil
 	}
 	pending, err := r.Conversations.List(ctx, state.ByPhase, state.PhasePending)
@@ -1695,7 +1706,7 @@ func (r *ConversationReconciler) MapRuntimePodToPending(ctx context.Context, obj
 	out := make([]reconcile.Request, 0, len(pending))
 	for i := range pending {
 		out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{
-			Namespace: r.Namespace, Name: pending[i].Name,
+			Namespace: r.Namespaces.Conversations, Name: pending[i].Name,
 		}})
 	}
 	return out

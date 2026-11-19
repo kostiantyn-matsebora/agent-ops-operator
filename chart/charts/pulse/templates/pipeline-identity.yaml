@@ -21,11 +21,14 @@ suppresses the one rendered here.
 {{- if include "pulse.routeAccountRendered" (dict "ctx" $ "cfg" $cfg "p" $p) }}
 {{- $sa := include "pulse.routeServiceAccount" (dict "ctx" $ "route" $cfg.name) }}
 ---
+# split-conversation-namespace: route ServiceAccounts follow the runtime
+# pods they identify — rendered in the CONVERSATIONS namespace, never the
+# release namespace this bundle's other objects use.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ $sa }}
-  namespace: {{ $.Release.Namespace }}
+  namespace: {{ include "agentops.conversationNamespace" $ }}
   labels:
     app.kubernetes.io/name: agentops-pulse
 {{- $rbac := $cfg.rbac | default dict }}
@@ -49,7 +52,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
-    namespace: {{ $.Release.Namespace }}
+    namespace: {{ include "agentops.conversationNamespace" $ }}
 {{- end }}
 {{- range $rbac.bindClusterRoles | default list }}
 {{- if or (has . (list "cluster-admin" "admin" "edit" "view")) (hasPrefix "system:" .) }}
@@ -67,7 +70,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
-    namespace: {{ $.Release.Namespace }}
+    namespace: {{ include "agentops.conversationNamespace" $ }}
 {{- end }}
 {{- end }}
 {{- end }}

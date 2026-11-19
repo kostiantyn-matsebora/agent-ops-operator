@@ -38,6 +38,22 @@ new generated credential.
 {{- end }}
 {{- $connected := eq (include "agentops.clusterConnected" .) "true" }}
 {{- if or $explicit $existingVal .Release.IsInstall $connected }}
+{{- /* THE TOKEN VALUE, DECIDED ONCE. split-conversation-namespace renders
+this Secret a SECOND time below — the chart rendering its own credential
+twice, never a copy job crossing a trust boundary — so the value has to be
+computed once and reused, rather than re-derived (and, for the random case,
+re-rolled into a DIFFERENT value) per namespace. */ -}}
+{{- $tokenB64 := "" }}
+{{- if $explicit }}
+{{- $tokenB64 = $explicit | b64enc }}
+{{- else if $existingVal }}
+{{- /* adopt a Secret already there — a previous release retained it, or a
+       connected render created it on an earlier upgrade — rather than mint
+       a credential housekeeping still holds */}}
+{{- $tokenB64 = $existingVal }}
+{{- else }}
+{{- $tokenB64 = randAlphaNum 32 | b64enc }}
+{{- end }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -53,15 +69,30 @@ metadata:
     helm.sh/resource-policy: keep
 type: Opaque
 data:
-  {{- if $explicit }}
-  token: {{ $explicit | b64enc }}
-  {{- else if $existingVal }}
-  {{- /* adopt a Secret already there — a previous release retained it, or a
-         connected render created it on an earlier upgrade — rather than mint
-         a credential housekeeping still holds */}}
-  token: {{ $existingVal }}
-  {{- else }}
-  token: {{ randAlphaNum 32 | b64enc }}
-  {{- end }}
+  token: {{ $tokenB64 }}
+{{- if include "agentops.namespacesSplit" . }}
+---
+# THE SAME CREDENTIAL, RENDERED A SECOND TIME (split-conversation-namespace
+# decision 9/5): housekeeping now runs in the conversations namespace and
+# the kubelet resolves a secretKeyRef in the POD's own namespace, so its copy
+# of STATE_READ_TOKEN has to exist there too. One generated value, one
+# lookup, two Secret objects — never a copy job reading a Secret across the
+# boundary this change exists to fence (the manager holds no `secrets` verb
+# in either namespace). No lookup in THIS namespace on purpose: the value is
+# always the one resolved from the control copy above, so a re-render keeps
+# both Secrets equal and a stale or missing copy here is repaired by it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "agentops.conversationNamespace" . }}
+  labels:
+    app.kubernetes.io/name: agentops-manager
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  token: {{ $tokenB64 }}
+{{- end }}
 {{- end }}
 {{- end }}

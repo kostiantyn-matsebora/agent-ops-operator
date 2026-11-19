@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"strings"
 	"testing"
 	"time"
@@ -36,8 +37,8 @@ func memberWorkReportServer(t *testing.T, parent *agentopsv1alpha1.Conversation,
 		WithStatusSubresource(member, parent).Build()
 	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
 	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: memory.Open()}
-	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
-	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Activity: activity.New(64), Router: router}, member
+	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Ops: q}
+	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Activity: activity.New(64), Router: router}, member
 }
 
 func TestHandleWorkDoneRoutesAMemberResultToItsParent(t *testing.T) {
@@ -149,8 +150,8 @@ func rootWorkReportServer(t *testing.T, root *agentopsv1alpha1.Conversation) *Se
 		WithStatusSubresource(root).Build()
 	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
 	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: memory.Open()}
-	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Ops: q}
-	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespace: "agent-ops", Activity: activity.New(64), Router: router}
+	router := &chat.Router{Client: c, Reader: c, Conversations: store, Runs: runs, Blobs: blobs, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Ops: q}
+	return &Server{Reader: c, Client: c, Conversations: store, Runs: runs, Blobs: blobs, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Activity: activity.New(64), Router: router}
 }
 
 // judgedRoot is a root whose run r1 consumed the given inputs.

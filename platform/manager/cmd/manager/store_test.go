@@ -18,7 +18,7 @@ import (
 )
 
 func TestNewStateStoresRefusesAnUnknownBackend(t *testing.T) {
-	if _, err := newStateStores("nosuch", nil, "agent-ops"); err == nil || !strings.Contains(err.Error(), `"nosuch"`) {
+	if _, err := newStateStores("nosuch", nil, testNamespaces); err == nil || !strings.Contains(err.Error(), `"nosuch"`) {
 		t.Fatalf("want an error naming nosuch, got %v", err)
 	}
 }
@@ -130,7 +130,7 @@ func TestStateBackendAcceptsNats(t *testing.T) {
 // connects" posture stateBackendFromEnv itself has.
 func TestNewNatsStoresRequiresNatsURL(t *testing.T) {
 	t.Setenv("NATS_URL", "")
-	if _, err := newNatsStores(nil, "agent-ops"); err == nil {
+	if _, err := newNatsStores(nil, testNamespaces); err == nil {
 		t.Fatal("want an error with NATS_URL unset")
 	}
 }

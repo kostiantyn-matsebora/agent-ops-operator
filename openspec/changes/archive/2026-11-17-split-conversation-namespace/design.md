@@ -84,8 +84,11 @@ decision 1.
 
 - Single-namespace sets both to one value. The only difference between
   layouts is two strings resolved at startup.
-- The cache is configured with both namespaces. Equal values collapse to one
-  entry.
+- The cache covers both namespaces, each kind only where its Role grants
+  it: control by default, `conversations`, `conversationinputs` and PVCs in
+  conversations, pods and configmaps in both. A kind cached in a namespace
+  that its Role does not grant never syncs. Equal values collapse every
+  entry to one.
 - Leader election stays in control.
 - `CONVERSATION_NAMESPACE` is read at startup, defaulting to `NAMESPACE`.
 
@@ -108,11 +111,18 @@ adapter state open in Control.
 
 ### 4. RBAC: two manager Roles and a console Role, no new ClusterRole
 
-| Role | Namespace | Rules |
+| Role | Namespace | Grant |
 |---|---|---|
-| manager control Role | control | every wiring kind, `signals`, adapter Deployments, Services, configmaps, leases, events |
-| manager conversations Role | conversations | pods, configmaps, `conversations`, `conversationinputs` and status, PVC `get/list/watch/create`, events |
-| console read-only Role | conversations | pods `get/list/watch` |
+| manager control | control | every wiring kind, `signals` |
+| manager control | control | adapter Deployments, Services, configmaps, leases, events |
+| manager control | control | serviceaccounts `get/list/watch/create/update/patch`, no `delete` |
+| manager control | control | pods `get/list/watch` |
+| manager conversations | conversations | pods, configmaps, events |
+| manager conversations | conversations | `conversations`, `conversationinputs` and their status |
+| manager conversations | conversations | PVC `get/list/watch/create` |
+| console read-only | conversations | pods `get/list/watch` |
+
+The control Role's pod read reaches every pod in control: RBAC cannot scope it to the manager's own replicas.
 
 - In single-namespace mode both rule sets render into one Role, identical to
   today's.

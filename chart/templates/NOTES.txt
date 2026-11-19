@@ -1,5 +1,22 @@
 agent-ops-operator {{ .Chart.Version }} deployed (manager {{ .Values.image.tag }}).
 
+{{- $convNS := include "agentops.conversationNamespace" . }}
+{{- if include "agentops.namespacesSplit" . }}
+Control plane (manager, wiring, adapters):  {{ .Release.Namespace }}
+Conversations (runtime pods, their claims): {{ $convNS }}
+{{- else }}
+Everything in this release lives in one namespace: {{ .Release.Namespace }}
+(conversationNamespace equals the release namespace — single-namespace layout.)
+{{- end }}
+{{- /* Only the upgrade that introduces the split: the conversations namespace does not exist yet. */ -}}
+{{- if and .Release.IsUpgrade (include "agentops.namespacesSplit" .) (not (lookup "v1" "Namespace" "" $convNS)) }}
+Upgrading from a release without conversationNamespace? Read the Upgrade
+section of the docs/CHANGELOG.md entry that adds it BEFORE running
+`helm upgrade` — it splits conversation-scoped objects into a second
+namespace by default, and migrating in place needs Secrets placed there and
+a claim carried across first.
+{{- end }}
+
 Quick check:   kubectl -n {{ .Release.Namespace }} get pipelines,signalsources,channels,channeladapters,signaladapters
 Ask an agent:  a task is an ordinary signal — post it to a SignalSource a Ready
                Pipeline claims (there is no endpoint that names a Pipeline):
@@ -42,10 +59,12 @@ which profiles have no Pipeline granting them anything:
 
 A conversation's accumulated context persists by default: claim {{ .Values.persistence.context.existingClaim | default .Values.persistence.context.name }} backs
 /data/context, so conversational history survives a runtime pod restart.
+It lives in the conversations namespace ({{ $convNS }}), alongside the pods
+that mount it.
 
 If runtime pods never start, check the claim FIRST — a Pending PVC produces no
 error anywhere else, just conversations that queue forever:
-  kubectl -n {{ .Release.Namespace }} get pvc {{ .Values.persistence.context.existingClaim | default .Values.persistence.context.name }}
+  kubectl -n {{ $convNS }} get pvc {{ .Values.persistence.context.existingClaim | default .Values.persistence.context.name }}
 Pending with "no persistent volumes available" or "storageclass not found"
 means this cluster has no default StorageClass or no {{ join "/" $contextAccessModes }} provisioner.
 Either name one (persistence.context.storageClassName) or turn storage off:

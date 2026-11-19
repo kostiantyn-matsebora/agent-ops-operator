@@ -18,7 +18,10 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ $ctx.name }}
-  namespace: {{ .Release.Namespace }}
+  # split-conversation-namespace: every chart-rendered claim moves to the
+  # conversations namespace — it is mounted by a runtime pod, and a runtime
+  # pod mounts it there now.
+  namespace: {{ include "agentops.conversationNamespace" $ }}
   annotations:
     # never delete a conversation's accumulated context on uninstall
     helm.sh/resource-policy: keep
@@ -44,7 +47,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ $ws.name }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "agentops.conversationNamespace" $ }}
   annotations:
     # never delete uncommitted agent work on uninstall
     helm.sh/resource-policy: keep
@@ -88,7 +91,7 @@ metadata:
   # The name the MANAGER derives for this binding. Both sides must spell it the
   # same way or the route gets two claims and mounts the wrong one.
   name: agentops-{{ $p.name }}-{{ $b.vol }}
-  namespace: {{ $.Release.Namespace }}
+  namespace: {{ include "agentops.conversationNamespace" $ }}
   labels:
     app.kubernetes.io/name: agentops
     agentops.dev/pipeline: {{ $p.name }}

@@ -27,6 +27,13 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: agentops-runtime
+          {{- if include "agentops.namespacesSplit" . }}
+          # split-conversation-namespace: runtime pods now run in the
+          # conversations namespace, not this server's own.
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "agentops.conversationNamespace" . }}
+          {{- end }}
         {{- with $np.probesFrom }}
         # The kubelet's probe, which reaches this server on the SAME port it
         # serves MCP on — so it cannot be opened to everyone the way the

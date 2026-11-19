@@ -45,6 +45,13 @@ type ChannelAdapterReconciler struct {
 	// configuration. An adapter naming none runs as it — bound to nothing, and
 	// refused as a binding target by the chart that renders it.
 	FloorServiceAccount string
+	// ConversationNamespace is injected as CONVERSATION_NAMESPACE, a literal
+	// value beside POD_NAMESPACE (split-conversation-namespace). Equal to
+	// POD_NAMESPACE in a single-namespace release. Every channel adapter gets
+	// it, the same way every one gets POD_NAMESPACE — only the console reads
+	// it today, but it is a protocol constant the reconciler injects, not CR
+	// configuration, so there is nothing adapter-specific to gate it on.
+	ConversationNamespace string
 }
 
 // Reconcile renders the adapter workload for one ChannelAdapter. Each step
@@ -116,6 +123,7 @@ func (r *ChannelAdapterReconciler) buildAdapterEnv(adapter *agentopsv1alpha1.Cha
 	env := []corev1.EnvVar{
 		{Name: "MANAGER_URL", Value: r.ManagerURL},
 		{Name: "ADAPTER_NAME", Value: adapter.Name},
+		{Name: "CONVERSATION_NAMESPACE", Value: r.ConversationNamespace},
 	}
 	if r.MasterToken != "" {
 		env = append(env, corev1.EnvVar{Name: "ADAPTER_TOKEN", Value: chat.DeriveAdapterToken(r.MasterToken, adapter.Name)})

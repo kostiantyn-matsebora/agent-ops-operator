@@ -24,6 +24,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/signalroute"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
@@ -59,7 +60,7 @@ func newSigEnv(t *testing.T, objs ...client.Object) *sigEnv {
 		WithStatusSubresource(&agentopsv1alpha1.Signal{}, &agentopsv1alpha1.Conversation{}, &agentopsv1alpha1.SignalSource{}).
 		WithObjects(objs...).Build()
 	acts := activity.New(256)
-	backend, err := kube.OpenStores(c, sigNS)
+	backend, err := kube.OpenStores(c, namespace.Namespaces{Control: sigNS, Conversations: sigNS})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,6 +16,13 @@
   THIS ENFORCES NOTHING WITHOUT A CNI THAT IMPLEMENTS POLICY. See NOTES.txt.
 */}}
 {{- $ns := .Release.Namespace }}
+{{- /* split-conversation-namespace (decision 6): a peer that moved to the
+conversations namespace — runtime pods, and now housekeeping — needs a
+`namespaceSelector` alongside its `podSelector`, or the bare podSelector
+silently scopes to THIS policy's own namespace and admits nothing. Gated on
+the split itself, so a single-namespace render stays byte-identical. */ -}}
+{{- $convNS := include "agentops.conversationNamespace" . }}
+{{- $split := include "agentops.namespacesSplit" . }}
 ---
 # The manager's API. Its work contract requires no credential, so until this
 # exists any pod in the cluster can steal a queued work unit or forge an answer.
@@ -43,6 +50,11 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: agentops-runtime
+          {{- if $split }}
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $convNS }}
+          {{- end }}
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: agentops-adapter
@@ -59,6 +71,13 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: agentops-housekeeping
+          {{- if $split }}
+          # split-conversation-namespace: housekeeping now runs where it
+          # mounts the claims, in the conversations namespace.
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $convNS }}
+          {{- end }}
         # The console reads conversations and signals through /state/* too
         # (spec.stateAccess), so it needs the same admission.
         {{- if .Values.console }}{{- if .Values.console.enabled }}
@@ -143,11 +162,14 @@ spec:
 # Runtime pods accept nothing. They are clients of everything and a server to
 # no one, so an empty ingress list is the whole policy — and it is what stops a
 # compromised pod being reachable from elsewhere in the cluster.
+#
+# split-conversation-namespace (decision 6): renders in the CONVERSATIONS
+# namespace now — that is where the pods it selects actually run.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: agentops-runtime
-  namespace: {{ $ns }}
+  namespace: {{ $convNS }}
 spec:
   podSelector:
     matchLabels:

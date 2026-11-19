@@ -25,16 +25,21 @@ read-only demo on your cluster in fifteen minutes.
    ```sh
    kubectl create namespace agent-ops
 
-   kubectl -n agent-ops create secret generic agentops-claude \
-     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+   kubectl -n agent-ops create secret generic agentops-pi \
+     --from-literal=apiKey=$ANTHROPIC_API_KEY   # the default runtime is pi, on Anthropic
    ```
 
    ```powershell
    kubectl create namespace agent-ops
 
-   kubectl -n agent-ops create secret generic agentops-claude `
-     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+   kubectl -n agent-ops create secret generic agentops-pi `
+     --from-literal=apiKey=$env:ANTHROPIC_API_KEY   # the default runtime is pi, on Anthropic
    ```
+
+   The default runtime is [pi]({{ '/runtimes/pi/' | relative_url }}), on
+   `anthropic` with model `claude-sonnet-5`. A route that names
+   `runtimeRef: claude` needs the `agentops-claude` Secret instead, and
+   `pi.default=false` hands the default back to claude.
 
 2. **Install the chart** from the registry. There is no repo to add and no
    checkout to clone.
@@ -49,13 +54,13 @@ read-only demo on your cluster in fifteen minutes.
    ```sh
    helm install agent-ops \
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     --version 19.0.1 -n agent-ops
+     --version 20.0.0 -n agent-ops
    ```
 
    ```powershell
    helm install agent-ops `
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     --version 19.0.1 -n agent-ops
+     --version 20.0.0 -n agent-ops
    ```
 
    **No registry credential.** The chart and every image it renders are public
@@ -160,10 +165,30 @@ component. See
 
 ## Configure
 
-**Storage is the only setting that must be right before you install.**
-Everything else is a `helm upgrade` away and safe at its default, and every
-value the chart takes is in the
+**Storage and the conversations namespace are the only settings that must be
+right before you install.** Everything else is a `helm upgrade` away and safe
+at its default, and every value the chart takes is in the
 [configuration reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md).
+
+### Namespaces
+
+A release resolves two namespaces — see
+[Concepts]({{ '/concepts/#where-things-run-the-control-and-conversations-namespaces' | relative_url }})
+for what lives in each.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `global.agentops.conversationNamespace` | `agent-ops-conversations` | where runtime pods, their claims and their accounts run. The release namespace is the single-namespace layout |
+| `global.agentops.createConversationNamespace` | `true` | `false` means you create it, labeled however you need |
+
+Pick it before you install. Switching it later is a manual migration, not a
+plain upgrade: close every open conversation, move your Secrets, and rebind
+each claim's PV.
+
+The steps are the `conversationNamespace` upgrade path in
+[the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
+A namespace the chart created carries `helm.sh/resource-policy: keep`, so an
+uninstall leaves it, its Secrets and its claims standing.
 
 ### Storage
 
@@ -234,6 +259,20 @@ helm upgrade agent-ops `
 Read [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
 first, since it is the only place migration steps live, keyed by chart version
 and newest first.
+
+**The next release is BREAKING**: a release now resolves a second namespace, for
+runtime pods and everything they run as, mount or resolve. Split by
+default — the chart creates `agent-ops-conversations` for you.
+
+This needs a manual step per claim and per Secret you want to keep.
+The full procedure, in order, with commands, is the `[Unreleased]` entry's
+Upgrade section in [the
+changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
+Read it before you upgrade a production install.
+
+Pin today's single-namespace layout instead with
+`global.agentops.conversationNamespace` set to your release namespace — no
+object splits, and no manual step is owed.
 
 **19.0.0 is BREAKING**:
 

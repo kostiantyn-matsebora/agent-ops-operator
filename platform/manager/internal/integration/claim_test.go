@@ -9,6 +9,7 @@ package integration
 
 import (
 	"context"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +33,7 @@ import (
 func reconcilerAs(ops *chat.OpQueue, identity string) *controller.ConversationReconciler {
 	return &controller.ConversationReconciler{
 		Client:        k8sClient,
-		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespace: ns,
+		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns},
 		Scheme:                 scheme,
 		MaxActiveConversations: 100,
 		Ops:                    ops,

@@ -10,6 +10,7 @@ module's unit tests so one captured payload cannot drift between the two.
 | `telegram-update-topic.json` | the same shape inside a forum TOPIC — a continuation | `channels/telegram` tests, and the pack feeds it to the fake Bot API |
 | `claude-stream-json.jsonl` | claude-code's `--output-format stream-json` for a run of three turns, one MCP and one built-in tool call | `runtimes/claude` tests, for the turns and tool calls the work result reports |
 | `copilot-session-events.jsonl` | the Copilot SDK's session events for a run of two turns, one MCP and one built-in tool call | `runtimes/copilot` tests, for the same report |
+| `pi-session-events.jsonl` | pi's `AgentSession` events for a run of two turns, one MCP and one built-in tool call, a hand-written fixture shaped after spike S5's capture, not a live capture, with pi's own lowercase built-in names (`bash`) | `runtimes/pi` tests, for the same report |
 
 **Every identifier is a placeholder the publication allowlist permits by
 name** (`.github/publication-allowlist.json`): the documented chat id, the

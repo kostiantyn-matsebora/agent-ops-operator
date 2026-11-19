@@ -13,7 +13,9 @@ work together.
 MCP servers and channels are the Pipeline's:
 
 - **Git repository** — private OK, SSH key or HTTPS PAT via `secretRef`.
-- **Agent role file** in that repo — `.claude/agents/<name>.md` for the claude and ollama runtimes, `.github/agents/<name>.agent.md` for copilot.
+- **Agent role file** in that repo — `.claude/agents/<name>.md` for the
+  claude, claude-cli, ollama and pi runtimes, `.github/agents/<name>.agent.md` for
+  copilot.
 - **Credentials** as `env[]` with `valueFrom`.
 - **Prompts and limits.**
 
@@ -760,8 +762,9 @@ fact.
 It is the same whether a conversation started from a Prometheus alert, a cluster
 Event or a person typing on Telegram.
 
-**A BUNDLE MAY SHIP A RUNTIME.** The reference one does: `claude` is a subchart,
-on by default, and an install using another vendor turns it off.
+**A BUNDLE MAY SHIP A RUNTIME.** Two do: `pi` and `claude` are subcharts, both on
+by default, and `pi` is flagged as the default runtime. An install using another
+vendor turns them off, or hands the default back with `pi.default=false`.
 
 What no bundle renders is the DEFAULTS or the FLOOR — defaults differing per
 bundle would be one fact in as many places as there are vendors.
@@ -938,9 +941,14 @@ the moment it exists.
 - **No component logs message content**, so the pod logs an agent can read carry
   no conversation text.
 
-What an agent gains in the operator's namespace is pod names and specs
+What an agent gains in the namespace its pod runs in is pod names and specs
 (credentials are `valueFrom` references, not values), Services, events and the
 compiled MCP ConfigMaps.
+
+**In a split release that is the conversations namespace.** The control
+namespace, where the manager and adapters run, is not
+where the agent's RBAC reaches. It holds none of those objects by default. See
+[Where things run](#where-things-run-the-control-and-conversations-namespaces).
 
 {: .ao-callout}
 > **On a route naming a `full` account it can also restart or delete those
@@ -1027,6 +1035,57 @@ Widening the agent therefore widens the MCP path unless you say otherwise — se
 [kubernetes](integrations/kubernetes.md#may-it-act) for the
 override that recovers the separation.
 
+## Where things run: the control and conversations namespaces
+
+A release resolves two namespaces, not one:
+
+| Namespace | Holds | Set by |
+|---|---|---|
+| control | the manager, every wiring/identity CR, the state store, adapters, the console, every MCP server | `.Release.Namespace` |
+| conversations | runtime pods and what they run as, mount or resolve | `global.agentops.conversationNamespace` |
+
+Equal values are the single-namespace layout — the same deployment this chart
+shipped before, with two names resolving to one. **An object moves to
+conversations if a runtime pod runs as it, mounts it, or resolves it.**
+
+**So does conversation-scoped state. Nothing else moves:**
+
+| Object | Namespace |
+|---|---|
+| runtime pod `agentops-conv-<name>`, its MCP ConfigMap `agentops-mcp-conv-<name>` | conversations |
+| `Conversation`, `ConversationInput` (`kube` state backend only) | conversations |
+| every `rbac.runtime.serviceAccounts` entry and bundle route account | conversations |
+| every persistence claim, chart-rendered or manager-created | conversations |
+| the housekeeping and context-probe CronJobs | conversations |
+| the floor account `agentops-runtime`, bound to nothing | both |
+| the manager, its Service, Lease and control-namespace Role (it holds a second Role in conversations) | control |
+| the nodes ClusterRole (cluster-scoped, so no namespace) | none |
+| every wiring and identity CR, `Signal` and the rest of the state store | control |
+| NATS, adapters, the gateway, the console, every MCP server | control |
+
+No manager HTTP surface carries a namespace — see [contracts](contracts.md).
+
+{: .ao-callout}
+> **A Secret or ConfigMap a runtime pod resolves must
+> exist in the conversations namespace, placed by you.** The manager never
+> reads a Secret through the API, so it cannot copy one there. It names what
+> a conversation's pod will need on the conversation's own conditions
+> instead, derived from the referencing CRs alone.
+
+RBAC splits the same way, into two manager Roles:
+
+| Role | Namespace | Covers |
+|---|---|---|
+| control | control | wiring, `signals`, adapter workloads, leases, a read on every pod in the control namespace |
+| conversations | conversations | pods, configmaps, events, `conversations`/`conversationinputs`, PVC `get`/`list`/`watch`/`create` — never `delete`, `update` or `patch` |
+
+Equal namespaces render as one Role, the exact union a pre-split release had.
+No ClusterRole is added for the manager.
+
+See [installation](installation.md) for `conversationNamespace` /
+`createConversationNamespace` and the upgrade from a single-namespace
+release, which the release that ships the split documents.
+
 ## Capabilities are wiring
 
 An `AgentProfile` is an identity — repository, agent role, prompts, env, limits.
@@ -1098,8 +1157,8 @@ keys are overlaid, with the later ref winning a collision.
 
 The `toolsets` stanza carries a `mode`, and the thing it composes against is the
 **agent's own definition**: the `tools:` frontmatter of the agent's file in the
-profile's repository — `.claude/agents/<agent>.md` on the claude and ollama
-runtimes, `.github/agents/<agent>.agent.md` on copilot.
+profile's repository — `.claude/agents/<agent>.md` on the claude, claude-cli, ollama and
+pi runtimes, `.github/agents/<agent>.agent.md` on copilot.
 
 The path is the runtime's fact. The composition rule is the same on all of them.
 
@@ -2235,10 +2294,11 @@ ships.** The value above is `runtime-claude`'s, and it is the default in
 `chart/charts/claude/values.yaml` — beside that runtime's image and its model
 credential, which live there for the same reason.
 
-`chart/charts/ollama/` ships its own, `.agentops/contexts/**`, and
-`chart/charts/copilot/` ships `.copilot/session-state/**`, for the same
-reason again. So a default install with a context volume runs synchronised
-without anyone setting anything.
+`chart/charts/ollama/` ships its own, `.agentops/contexts/**`,
+`chart/charts/copilot/` ships `.copilot/session-state/**`, and
+`chart/charts/pi/` ships `.pi/agent/sessions/**`, for the same reason again.
+So a default install with a context volume runs synchronised without
+anyone setting anything.
 
 **Not the release-wide runtime defaults.** Those are what every runtime
 inherits, and an include list is one vendor's filesystem layout: it

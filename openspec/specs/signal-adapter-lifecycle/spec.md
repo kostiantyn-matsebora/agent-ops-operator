@@ -34,7 +34,12 @@ The Deployment SHALL carry:
 - `MANAGER_URL`
 - **`ADAPTER_NAME`** (the CR's name — the same env name channel adapters receive, replacing `SOURCE_TYPE`)
 - `POD_NAMESPACE`
+- **`CONVERSATION_NAMESPACE`** (the release's conversations namespace, as the manager resolved it at startup)
 - `ADAPTER_TOKEN` (the per-adapter derived token)
+
+`CONVERSATION_NAMESPACE` SHALL be injected as a literal value, equal to
+`POD_NAMESPACE` in a single-namespace release. It names a namespace and grants
+nothing. It SHALL NOT appear on any `/signal/*` request or response.
 
 It SHALL run `replicas 1` with `Recreate` when singleton, and project each
 served SignalSource's `credentialsSecretRef` as `envFrom` under
@@ -100,6 +105,14 @@ than a chart template plus a Go reconciler.
 #### Scenario: Distinct instances carry distinct instance labels
 - **WHEN** `SignalAdapter`s named `cron` and `alertmanager` are both reconciled
 - **THEN** both Deployments carry `app.kubernetes.io/name: agentops-signal-adapter`, and their Pod templates carry `app.kubernetes.io/instance: cron` and `app.kubernetes.io/instance: alertmanager` respectively
+
+#### Scenario: A split release names its conversations namespace to every signal adapter
+- **WHEN** the manager runs in `agent-ops` with `CONVERSATION_NAMESPACE=agent-ops-conversations` and a SignalAdapter is reconciled
+- **THEN** its pod runs with `POD_NAMESPACE=agent-ops` and `CONVERSATION_NAMESPACE=agent-ops-conversations`
+
+#### Scenario: A single-namespace release injects equal values
+- **WHEN** `conversationNamespace` equals the release namespace `agent-ops` and a SignalAdapter is reconciled
+- **THEN** its pod runs with `POD_NAMESPACE=agent-ops` and `CONVERSATION_NAMESPACE=agent-ops`
 
 ### Requirement: An adapter's identity is a reference, and absent means the floor
 

@@ -174,7 +174,12 @@ An unreadable path SHALL be treated as present, and the run retried once. A cont
 ### Requirement: Telemetry reports what pi observed, bounded and never invented
 The runtime SHALL report one `turns[]` entry per model call and one `toolCalls[]` entry per tool call. They come from the events pi emits and are trimmed to the published bounds before posting.
 
-A fact pi does not report SHALL be omitted, never reported as zero. A tool's input or output SHALL NOT be reported. Neither array SHALL be reported when the run made neither kind of call.
+A fact pi's events do not carry SHALL be omitted, never reported as zero.
+
+- One vendor limit is a known gap. Pi's own usage accumulator default-fills `tokensIn`, `tokensOut`, `cacheReadTokens` and `cacheCreationTokens` with zero when a provider sends no `usage` object.
+- Those four cannot then be told apart from a real zero. Only `reasoningTokens` stays absent.
+
+A tool's input or output SHALL NOT be reported. Neither array SHALL be reported when the run made neither kind of call.
 
 Tool names in `toolCalls[]` SHALL be in the agent-ops vocabulary: `Read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob`, or `mcp__<server>__<tool>`.
 
@@ -197,16 +202,38 @@ The runtime SHALL take its model provider, model and credential from environment
 - **WHEN** the bundle is enabled with a credential Secret
 - **THEN** the runtime's pod receives the credential through `valueFrom` or `envFrom`, and the manager reads no secret
 
+### Requirement: Reading the checkout's `.claude/` configuration is optional, on by default, and adds no tool
+The image SHALL carry the `pi-code` package at an exact version from the lockfile.
+
+- The runtime SHALL load it only when `PI_CODE_ENABLED` is not `false`, `0`, `no` or `off`.
+- The bundle SHALL expose one boolean, `pi.piCode`, default true, that becomes that env.
+- The package SHALL add no tool to a session.
+- The runtime's permission extension (its `tool_call` hook) SHALL still answer every call from the composed allowlist.
+- The runtime SHALL record its own workspace as approved, so the package loads the checkout's configuration on a headless run.
+- With it off, the session SHALL load exactly the runtime's own two extensions.
+
+#### Scenario: The flag is off
+- **WHEN** `pi.piCode` is `false`
+- **THEN** the runtime pod carries `PI_CODE_ENABLED=false`, the session loads only the permission and MCP extensions, and no approval is recorded
+
+#### Scenario: The flag is unset
+- **WHEN** the bundle is enabled and `pi.piCode` is not set
+- **THEN** the pod carries `PI_CODE_ENABLED=true` and the package's extensions load beside the runtime's own, with no load error
+
 ### Requirement: The runtime ships as a bundle that declares only its vendor
-The chart SHALL ship the runtime as `chart/charts/pi/`, OFF by default, in the same shape as the other runtime bundles. It is one `AgentRuntime` rendered through the parent's shared runtime renderer.
+The chart SHALL ship the runtime as `chart/charts/pi/`, ON by default (`pi.enabled`), flagged as the default runtime (`pi.default`), in the same shape as the other runtime bundles. The chart booleans `pi.enabled` and `pi.default` turn it off and hand the default back. It is one `AgentRuntime` rendered through the parent's shared runtime renderer.
 
 It SHALL carry only what names this vendor: the image, its credential Secret reference, its `contextSync.paths` and its own env. It SHALL render no defaults, no floor account, no context volume and no identity of its own.
 
 The bundle SHALL be visible to the parent's declared-runtime list, so that the default-runtime guard, the `default` copy and the manager's bootstrap env account for it as for any other runtime. The image SHALL be pinned to an exact vendor version and installed from a lockfile.
 
-#### Scenario: Existing installs render byte-identically
-- **WHEN** the chart is upgraded with no `pi` values set
-- **THEN** nothing of the bundle renders and every other object is unchanged
+#### Scenario: Pi is the default out of the box
+- **WHEN** the chart is rendered with no `pi` values set
+- **THEN** a `pi` runtime renders with provider `anthropic` and model `claude-sonnet-5`, the `default` runtime is a copy of it, and the `claude` runtime still renders
+
+#### Scenario: Pi can hand the default back or be turned off
+- **WHEN** `pi.default` is `false`, or `pi.enabled` is `false`
+- **THEN** the `default` runtime is a copy of `claude`, and with `pi.enabled` false no pi object renders
 
 #### Scenario: A route selects it by name
 - **WHEN** the bundle is enabled and a `Pipeline` states `runtimeRef: pi`

@@ -82,14 +82,16 @@ already in it.
 - Any model you can run
   {: .ao-icon-runtime}
 
-  Claude Code, Ollama and GitHub Copilot ship with it. Point it at your own
-  image and the work contract is unchanged.
+  Claude Code, Ollama, GitHub Copilot and pi ship with it. Point it at your
+  own image and the work contract is unchanged.
 
-- A pod per conversation
+- A pod per conversation, in the conversations namespace
   {: .ao-icon-conversation}
 
   Isolated, serial and capped. One runaway conversation cannot take the others
-  with it, and an idle one is reaped.
+  with it. An idle conversation is reaped.
+
+  The conversations namespace holds no manager or adapter credential.
 
 - Tools that come from the wiring
   {: .ao-icon-toolset}

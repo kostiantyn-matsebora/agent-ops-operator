@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 	natsstate "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/nats"
@@ -51,31 +52,31 @@ func stateBackendFromEnv() (string, error) {
 }
 
 // newStateStores constructs the selected backend's state.Stores once, scoped to
-// namespace, and registers whatever a field must run beside the manager (the
+// namespaces, and registers whatever a field must run beside the manager (the
 // signals' expiry sweep, and — for nats — the leader-gated one-time import
 // and the readiness check it gates, design D-10). The inventory is built here
 // and nowhere else: the reconcilers, the HTTP API and chat each take the
 // typed fields they use, so what a component may do with state is what its
 // field types allow.
-func newStateStores(backend string, mgr ctrl.Manager, namespace string) (state.Stores, error) {
+func newStateStores(backend string, mgr ctrl.Manager, namespaces namespace.Namespaces) (state.Stores, error) {
 	switch backend {
 	case backendKube:
-		return newKubeStores(mgr, namespace)
+		return newKubeStores(mgr, namespaces)
 	case backendNats:
-		return newNatsStores(mgr, namespace)
+		return newNatsStores(mgr, namespaces)
 	}
 	return state.Stores{}, fmt.Errorf("%s=%q is not a state backend this manager carries", stateBackendEnv, backend)
 }
 
-// newKubeStores is unchanged from before this change: an uncached client for
-// the compare-and-swap writes, lists served from the informer cache (state-
-// store design D-4, amended).
-func newKubeStores(mgr ctrl.Manager, namespace string) (state.Stores, error) {
+// newKubeStores is unchanged from before this change beyond the namespace
+// pair: an uncached client for the compare-and-swap writes, lists served from
+// the informer cache (state-store design D-4, amended).
+func newKubeStores(mgr ctrl.Manager, namespaces namespace.Namespaces) (state.Stores, error) {
 	c, err := client.NewWithWatch(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
 	if err != nil {
 		return state.Stores{}, fmt.Errorf("building the uncached client for the kube state store: %w", err)
 	}
-	kubeStores, err := kube.OpenStores(c, namespace, kube.WithCachedLists(mgr.GetCache()))
+	kubeStores, err := kube.OpenStores(c, namespaces, kube.WithCachedLists(mgr.GetCache()))
 	if err != nil {
 		return state.Stores{}, fmt.Errorf("opening the kube state store: %w", err)
 	}
@@ -98,7 +99,7 @@ func newKubeStores(mgr ctrl.Manager, namespace string) (state.Stores, error) {
 // its buckets. A variable so a test need not wait it out.
 var natsOpenTimeout = 2 * time.Minute
 
-func newNatsStores(mgr ctrl.Manager, namespace string) (state.Stores, error) {
+func newNatsStores(mgr ctrl.Manager, namespaces namespace.Namespaces) (state.Stores, error) {
 	cfg, err := natsstate.ConfigFromEnv()
 	if err != nil {
 		return state.Stores{}, fmt.Errorf("nats state store: %w", err)
@@ -112,7 +113,12 @@ func newNatsStores(mgr ctrl.Manager, namespace string) (state.Stores, error) {
 	// Wait for it, bounded, instead of exiting into a crash loop.
 	openCtx, cancelOpen := context.WithTimeout(context.Background(), natsOpenTimeout)
 	defer cancelOpen()
-	backend, err := natsstate.OpenStoresWhenReady(openCtx, conn, namespace, natsstate.DefaultOpenRetryInterval)
+	// Under nats a conversation is a record, not a CR (design D-1 of
+	// split-conversation-namespace): the split moves no CR here, only
+	// workloads and claims, so the backend keeps the single install-scope
+	// string it always took — the CONTROL half, which is what today's
+	// single-namespace value already was.
+	backend, err := natsstate.OpenStoresWhenReady(openCtx, conn, namespaces.Control, natsstate.DefaultOpenRetryInterval)
 	if err != nil {
 		return state.Stores{}, fmt.Errorf("opening the nats state store: %w", err)
 	}
@@ -123,7 +129,10 @@ func newNatsStores(mgr ctrl.Manager, namespace string) (state.Stores, error) {
 		return state.Stores{}, fmt.Errorf("registering the nats state store's expiry sweep: %w", err)
 	}
 
-	if err := registerNatsImport(mgr, conn, backend, namespace); err != nil {
+	// The one-time import's kube SOURCE spans both namespaces, by kind (task
+	// 3.2): conversation kinds read from Conversations, everything else from
+	// Control — exactly kube.OpenStores' own split below.
+	if err := registerNatsImport(mgr, conn, backend, namespaces); err != nil {
 		return state.Stores{}, err
 	}
 	if err := mgr.AddReadyzCheck("state-store", natsReadinessCheck(conn, backend, mgr.Elected())); err != nil {
@@ -167,20 +176,22 @@ func natsReadinessCheck(conn *natsstate.Conn, backend *natsstate.Backend, electe
 // backend read-only and the SignalSource/Channel names and adapter-state
 // entries the generic contract cannot enumerate on its own (import.go's own
 // SourceNames).
-func registerNatsImport(mgr ctrl.Manager, conn *natsstate.Conn, backend *natsstate.Backend, namespace string) error {
+func registerNatsImport(mgr ctrl.Manager, conn *natsstate.Conn, backend *natsstate.Backend, namespaces namespace.Namespaces) error {
 	kubeClient, err := client.NewWithWatch(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
 	if err != nil {
 		return fmt.Errorf("building the read-only client for the import's kube source: %w", err)
 	}
-	kubeStores, err := kube.OpenStores(kubeClient, namespace)
+	kubeStores, err := kube.OpenStores(kubeClient, namespaces)
 	if err != nil {
 		return fmt.Errorf("opening the import's kube source: %w", err)
 	}
 	importer := &natsstate.Importer{
-		Source:            kubeStores.Stores,
-		SourceNames:       kubeSourceNames{c: kubeClient, namespace: namespace},
+		Source: kubeStores.Stores,
+		// SignalSource and adapter state are control-plane reads, same as
+		// every other kube-store kind outside the conversation ones.
+		SourceNames:       kubeSourceNames{c: kubeClient, namespace: namespaces.Control},
 		Dest:              backend,
-		OldReplicaPresent: oldManagerReplicaPresent(kubeClient, namespace, env("VERSION", "dev")),
+		OldReplicaPresent: oldManagerReplicaPresent(kubeClient, namespaces.Control, env("VERSION", "dev")),
 	}
 	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		return runWhenElected(ctx, mgr.Elected(), importer)

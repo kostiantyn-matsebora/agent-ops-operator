@@ -15,6 +15,17 @@ helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 ```
 
+## Namespaces
+
+The conversations namespace is set once, before install — see
+[Installation](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/#namespaces).
+Switching it later is a migration, not a `helm upgrade`.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `global.agentops.conversationNamespace` | `agent-ops-conversations` | where runtime pods, their claims and the runtime accounts live. The release namespace gives the single-namespace layout |
+| `global.agentops.createConversationNamespace` | `true` | the chart creates the namespace and keeps it on uninstall. `false` when you made it yourself |
+
 ## Storage
 
 The access mode and storage class are set once, before install — see
@@ -426,8 +437,9 @@ defensible default, and therefore the only thing you must supply.
 **Another vendor, or the same vendor run a different way, is a bundle, or an
 entry stating only its difference.** The chart ships
 [Claude CLI](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/claude-cli/),
-[Ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/) and
-[GitHub Copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/) as bundles:
+[Ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/),
+[GitHub Copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/) and
+[pi](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/pi/) as bundles:
 
 ```yaml
 claude-cli:
@@ -445,6 +457,14 @@ copilot:
   credentialsSecret:
     token: placeholder-token                  # a GitHub token with Copilot access
 
+pi:
+  enabled: true
+  provider: anthropic                         # any provider pi's SDK supports
+  model: claude-sonnet-5
+  credentialsSecret:
+    token: placeholder-token                  # the chosen provider's own API key
+  piCode: true                                # default: read the checkout's .claude/ like Claude Code, false turns it off
+
 pipelines:
   - name: house-ops
     runtimeRef: claude-cli        # spawns the CLI per unit instead of the default's held-open session
@@ -452,6 +472,8 @@ pipelines:
     runtimeRef: ollama
   - name: on-call
     runtimeRef: copilot
+  - name: release-notes
+    runtimeRef: pi
 ```
 
 A vendor with no bundle is a `runtimes:` entry with its own image, and
@@ -464,9 +486,11 @@ own name.
 Which one is copied is `default: true` on that runtime — on a bundle or a
 `runtimes:` entry — or, with none flagged, the first configured.
 
-Every runtime is optional. The `claude` bundle is the first shipped and on
-by default, so it is the default on a fresh install, and turning it off with
-another on moves the default there with no rename.
+Every runtime is optional. The `pi` bundle is on by default and flagged
+`default: true`, so it is the default on a fresh install, with `claude` beside it.
+
+`pi.default=false` hands the default back to the first configured runtime.
+Turning a bundle off moves the default with no rename.
 
 **No runtime at all FAILS the render** when a
 route still needs one, naming the routes — rather than leaving conversations in

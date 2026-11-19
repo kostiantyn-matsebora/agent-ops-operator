@@ -79,6 +79,11 @@ fields, and omitting both is the ordinary case.
 | `runtimeRef` | the `AgentRuntime` | the one named `default` runs it |
 | `serviceAccountName` | the identity that runtime executes under | it inherits the release's default, which ships as an account bound to NOTHING |
 
+**A service account a Pipeline names lives in the conversations
+namespace**, beside the pods that run as it. It exists only once
+`rbac.runtime.serviceAccounts` or a bundle declares it. In a single-namespace layout
+that is the same namespace as everything else.
+
 **This is the same decision as `toolsets`.** One says which tools may be called.
 The other says with whose credentials. Both are here so that ONE object states
 what an agent may do.
@@ -122,9 +127,11 @@ rbac:
 ```
 
 **Naming an account does not create one.** A bundle renders an account only
-where it also grants that route something, `rbac.runtime.serviceAccounts` is where you declare yours, and
-an account this chart never sees is a perfectly good reference. A name nothing
-backs fails when the pod is created, saying which account.
+where it also grants that route something. `rbac.runtime.serviceAccounts` is
+where you declare yours, and an account this chart never sees is a
+perfectly good reference.
+
+A name nothing backs fails when the pod is created, saying which account.
 
 **THE FLOOR IS HOW YOU RESTRICT ONE ROUTE.** On an install whose inherited
 default is an account of yours that carries rights, naming `agentops-runtime`
@@ -175,6 +182,13 @@ it.
 
 **The API server refuses both fields at once.** They decide who creates the
 claim, so both is two answers rather than a preference.
+
+**Either way, the claim is in the conversations namespace**, where the
+runtime pod that mounts it runs. A `claimName` you pre-create belongs there
+too.
+
+In a split layout that is not the release namespace. In a single-namespace
+layout the two are the same.
 
 {: .ao-callout}
 > **The claim outlives the route.** It carries no ownerRef on the Pipeline and
@@ -320,7 +334,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-kubernetes
-    helm.sh/chart: "kubernetes-0.4.2"
+    helm.sh/chart: "kubernetes-0.4.3"
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.

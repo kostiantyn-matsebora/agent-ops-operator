@@ -4,7 +4,7 @@ dependencies:
   version: 0.2.3
 - name: kubernetes
   repository: ""
-  version: 0.4.2
+  version: 0.4.3
 - name: telegram
   repository: ""
   version: 0.6.1
@@ -23,6 +23,9 @@ dependencies:
 - name: copilot
   repository: ""
   version: 0.1.0
+- name: pi
+  repository: ""
+  version: 0.1.0
 - name: claude-cli
   repository: ""
   version: 0.1.0
@@ -32,5 +35,5 @@ dependencies:
 - name: commandbus
   repository: ""
   version: 0.1.0
-digest: sha256:071a098cd0b09dff0c5ec48b2c65cd952195b0eacf4ed54d6da26f9ade27db7d
-generated: "2026-11-14T18:24:22.289886456+02:00"
+digest: sha256:b05439166704be5202886877d65c4f32a0693a6a421c4c3a3a763ad06148dab4
+generated: "2026-11-18T01:03:23.331441263+02:00"
