@@ -49,7 +49,7 @@ repositories:
 
 ### Requirement: A capability's list replaces the profile's list
 
-The list a conversation uses SHALL be resolved as follows. A capability that declares a non-empty `repositories` (or an `agentFile`) REPLACES the profile's list, never merges with it. A capability that declares none leaves the profile's list in force. A Pipeline or Coordinator SHALL reach a list only through its inline `AgentCapabilitySpec` or through `agentRef` to an `AgentCapability`. Neither kind SHALL gain a field of its own for it.
+The list a conversation uses SHALL be resolved as follows. A capability that declares a non-empty `repositories` REPLACES the profile's list, never merges with it. A capability that declares none leaves the profile's list in force. A Pipeline or Coordinator SHALL reach a list only through its inline `AgentCapabilitySpec` or through `capabilityRef` to an `AgentCapability`. Neither kind SHALL gain a field of its own for it.
 
 When the resolved list is empty, the conversation SHALL have no checkout and its pod SHALL have no init container for one.
 

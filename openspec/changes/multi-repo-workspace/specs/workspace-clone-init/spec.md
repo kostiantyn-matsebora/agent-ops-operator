@@ -6,7 +6,7 @@ The workspace is populated before the agent starts, by an init container in its 
 
 ### Requirement: An init container clones every repository before the runtime starts
 
-The manager SHALL add an init container to a runtime pod whose resolved repository list is non-empty. The container SHALL run the image of the `platform/workspace-sync` component, published as `agentops-workspace-sync` and built for `linux/amd64` and `linux/arm64`. It SHALL mount the workspace at `/workspace`, clone each entry per the layout in `multi-repo-workspace`, and exit before the agent container starts. The list SHALL reach it as one JSON array in the environment variable `WORKSPACE_REPOS`. Each entry SHALL carry its `name`, `url`, `ref`, `keepGit` and `credentialEnv`, the name of the environment variable holding its credential. A credential variable is named `REPO_CRED_<n>`, where `<n>` is the entry's zero-based position in the list, because a repository name may hold characters an environment variable name cannot. For example, the second entry's token or ssh key arrives as `REPO_CRED_1`.
+The manager SHALL add an init container to a runtime pod whose resolved repository list is non-empty. The container SHALL run the image of the `platform/workspace-sync` component, published as `agentops-workspace-sync` and built for `linux/amd64` and `linux/arm64`. It SHALL mount the workspace at `/workspace`, clone each entry per the layout in `multi-repo-workspace`, and exit before the agent container starts. The list SHALL reach it as one JSON array in the environment variable `WORKSPACE_REPOS`. Each entry SHALL carry its `name`, `url`, `ref`, `keepGit` and `authType`. The credential of the entry at position `<n>` arrives in the variable `REPO_CRED_<n>`, with `<n>` the entry's zero-based position in the list, because a repository name may hold characters an environment variable name cannot. For example, the second entry's token or ssh key arrives as `REPO_CRED_1`.
 
 #### Scenario: Two repositories are ready before the agent starts
 
@@ -57,6 +57,7 @@ The init container SHALL record completion per repository, as a marker under `/w
 | directory empty or absent | clone |
 | marker present | leave the repository untouched, whatever `keepGit` says |
 | no marker (a partial clone) | remove that repository's contents and clone again |
+| marker present but the repository's directory is gone | remove the stale marker and clone again |
 
 For a single repository the clone is `/workspace` itself, so removal SHALL spare `/workspace/.agentops`. When `.git` is kept, `.agentops/` SHALL be added to `.git/info/exclude`.
 

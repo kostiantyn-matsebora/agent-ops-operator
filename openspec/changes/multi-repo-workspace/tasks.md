@@ -59,7 +59,7 @@
 - [ ] 9.1.2 Update `docs/concepts.md` for the repository list, resolution, layout and the path move, and `docs/crds/agent-profile.md` and `docs/crds/agent-capability.md` through their markers.
 - [ ] 9.1.3 Update `docs/security.md` (the credential is no longer in the agent container), `docs/gotchas.md`, and `docs/CHANGELOG.md` with the breaking change and upgrade steps.
 - [ ] 9.1.4 Update `.claude/rules/terminology.md` and `.claude/rules/invariants.md` where they state `/data/workspace` never moves.
-- [ ] 9.1.5 Re-run `python3 .github/scripts/docs-generate.py` and commit the generated blocks and `docs/cr-reference.md`.
+- [ ] 9.1.5 Re-run `python3 .github/scripts/docs-generate.py` and commit the generated blocks.
 
 ### 9.2 Adopter site
 

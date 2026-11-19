@@ -10,7 +10,7 @@ The clone is also copied into every runtime. Five runtimes now carry their own c
 
 - **Many repositories.** `repositories[]` on `AgentProfile` and on `AgentCapability`. Each entry has `name`, `url`, `ref`, `auth` and `keepGit` (default `true`).
   - A capability's list replaces the profile's. Lists never merge.
-  - A Pipeline or Coordinator reaches a list through its inline capability or an `agentRef`, so neither kind gains a field.
+  - A Pipeline or Coordinator reaches a list through its inline capability or a `capabilityRef`, so neither kind gains a field.
   - `repository` stays as deprecated shorthand for a one-entry list.
   - The resolved list is snapshotted onto the Conversation at creation, like the persistence claim names.
 - **Workspace layout.**

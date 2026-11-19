@@ -22,7 +22,7 @@ and no other field that reaches a signal or a surface.
 
 ### Requirement: A capability's repositories replace the profile's
 
-An `AgentCapability` that declares `repositories` SHALL replace the list the profile declares for the conversation, never merge with it. Its `agentFile` and `workingDir` SHALL travel with the list, so a capability that replaces the list also replaces them. The inline capability on a `Pipeline` or `Coordinator` SHALL behave identically, and neither kind SHALL carry a repository field of its own.
+An `AgentCapability` that declares a non-empty `repositories` SHALL replace the list the profile declares for the conversation, never merge with it, exactly as `multi-repo-workspace` states. Its `agentFile` and `workingDir` SHALL travel with the list, so a capability that replaces the list also replaces them. The inline capability on a `Pipeline` or `Coordinator` SHALL behave identically, and neither kind SHALL carry a repository field of its own.
 
 #### Scenario: The replacement is wholesale
 
