@@ -103,7 +103,7 @@ Every counter the console shows for conversations after this change. The **Chang
 | Working warning | Close dialog | `count(selected roots with phase=Working)` | Was working rows in the selection. The member line also names working members. |
 | N closed / skipped / failed | Close result | Per-root server outcomes. | No local member-skips. |
 | N deleted / skipped / failed | Delete result | Per-root server outcomes. | No local member-skips. |
-| Select all | List header | Selects all roots on the page that are not `deleting`. | Was every row, members included. |
+| Select all | List header | Selects all roots on the page that are not already closing or being deleted. | Was every row, members included. |
 | Mark read / unread: marked / skipped / failed | Result of mark read or unread | Count of per-root outcomes. | — |
 | Mark read sets | Read watermark | `max(newestCounted.at, lastActivity)` → `unreadCount=0` | — |
 | Mark unread sets | Read watermark | `newestCounted.at − 1ns` → `unreadCount=1` | — |
