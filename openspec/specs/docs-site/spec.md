@@ -164,9 +164,10 @@ component library.
 
 ### Requirement: Fonts are self-hosted with no third-party requests
 
-Every font the site loads, which is the Red Hat Text variable font the inlined domain-model figure names, SHALL be vendored into the repository under
-`docs/assets/fonts/` and declared with `@font-face` rules served from the site's
-own origin. The site SHALL make NO request to any third-party host at
+The Red Hat variable fonts SHALL stay vendored under `docs/assets/fonts/` and
+declared with `@font-face` rules served from the site's own origin. They are
+for the inlined domain-model figure, whose text names them. The page's own type
+is the console's stack and loads no font file. The site SHALL make NO request to any third-party host at
 runtime — no font CDN, no analytics, no external stylesheet or script — and
 SHALL render identically with no network access beyond its own origin.
 
