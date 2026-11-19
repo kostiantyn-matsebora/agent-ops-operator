@@ -115,12 +115,10 @@ sections 2 to 4 depends on an answer until its spike is recorded.
   domain tooling, and `HOME=/data/context`. Verify:
   `.github/components.sh images` lists `agentops-runtime-pi`, and a local
   `docker buildx build --platform linux/amd64,linux/arm64` of the directory
-  succeeds. Component discovery and a `linux/amd64` build were verified from
-  this remote session. The sandbox has no privileged mode/binfmt_misc, so the
-  `linux/arm64` leg of the local build was not performed here. The
-  Dockerfile is architecture-neutral (no native binaries, confirmed), and
-  CI's own multi-arch build is the gate that actually proves it, per
-  `remote-session.md`.
+  succeeds. Component discovery was verified from a remote session. A local
+  `docker buildx build --platform linux/amd64,linux/arm64` of this directory
+  later succeeded and pushed `dev-a9841cb3`, and the pushed manifest lists both
+  `linux/amd64` and `linux/arm64`.
 - [x] 5.2 Run the image scan locally the way CI does and clear fixable
   CRITICAL and HIGH findings, pinning as copilot does. Verify: the scan
   reports none. Run against the `linux/amd64` build above, via the same
@@ -253,7 +251,7 @@ acting, and every real finding was fixed on the branch, none dropped.
 
 ## 9. System tests — testing-specialist
 
-- [x] 9.1 Add a pi lane to `platform/manager/test/system/`: a route with
+- [ ] 9.1 Add a pi lane to `platform/manager/test/system/`: a route with
   `runtimeRef: pi` answers a signal and every bound thread receives it.
   Verify: the lane passes against the cluster, run from this working copy's
   tree and not the default branch's. WRITTEN
@@ -262,19 +260,19 @@ acting, and every real finding was fixed on the branch, none dropped.
   run — no cluster in this remote session (`remote-session.md`). Compiles
   (`go test -tags system -c ./test/system/`, exit 0) and `go vet -tags
   system ./...` is clean, independently re-verified.
-- [x] 9.2 In that lane, assert the pod's shape: the `context-sync` sidecar
+- [ ] 9.2 In that lane, assert the pod's shape: the `context-sync` sidecar
   and the egress init container are present, and the session state is under
   the declared path. Verify: the lane reads the pod spec and the volume.
   WRITTEN (`TestPiRuntimePodShapeHasContextSyncAndEgress`), not run, same
   gap as 9.1. Reads `pod.Spec.InitContainers` and `kubectl exec ... test -e`
   against the live state file.
-- [x] 9.3 Context continuity: a second run resumes the same context, and
+- [ ] 9.3 Context continuity: a second run resumes the same context, and
   deleting the session state fails the next run with the cannot-be-continued
   message rather than answering fresh. Verify: both outcomes asserted.
   WRITTEN (`TestPiRuntimeContextContinuityAndLoss`), not run, same gap.
   Widens this lane's own `IdleTTLMinutes` to 5 so all three runs land on one
   pod, with the reasoning recorded in the test's own comment.
-- [x] 9.4 Tools: with observation-only toolsets the shell is absent on one
+- [ ] 9.4 Tools: with observation-only toolsets the shell is absent on one
   route while the same profile keeps it on another, and a bound
   `Bash(kubectl:*)` grants no shell and is logged. Verify: both asserted.
   WRITTEN (`TestPiRuntimeToolsetsNarrowAndScopeTheShell`), not run, same
@@ -285,7 +283,7 @@ acting, and every real finding was fixed on the branch, none dropped.
   pinned at the unit tier (`runtimes/pi/vocabulary.test.js`). Re-verified:
   `cd test/stubruntime && go build ./... && go vet ./... && go test ./...`
   all pass, including the two new stub tests.
-- [x] 9.5 MCP: a bound `MCPConfig` makes its tools reachable and an unbound
+- [ ] 9.5 MCP: a bound `MCPConfig` makes its tools reachable and an unbound
   server's are not. Verify: both asserted through the lane's stub server.
   WRITTEN (`TestPiRuntimeMCPBindingReachesTheMountedConfigAndExcludesTheUnbound`),
   not run, same gap. Proves the manager's `internal/mcpcompile` delivers a

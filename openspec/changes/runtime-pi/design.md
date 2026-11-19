@@ -191,7 +191,7 @@ rename upstream is a deliberate bump.
 The image carries the `pi-code` package (exact pin, lockfile) so pi reads a
 checkout's `.claude/` the way Claude Code does: CLAUDE.md and its @imports,
 path-scoped rules, commands, skills, output styles and hooks. The bundle's
-`pi.piCode` boolean (default true) becomes `PI_CODE_ENABLED`; the runtime adds
+`pi.piCode` boolean (default true) becomes `PI_CODE_ENABLED`. The runtime adds
 the package through `additionalExtensionPaths` only when it is on. Four facts
 bound it, each tested:
 

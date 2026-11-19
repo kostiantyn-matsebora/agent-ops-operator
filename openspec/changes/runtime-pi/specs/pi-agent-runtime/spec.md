@@ -202,8 +202,8 @@ The runtime SHALL take its model provider, model and credential from environment
 - **WHEN** the bundle is enabled with a credential Secret
 - **THEN** the runtime's pod receives the credential through `valueFrom` or `envFrom`, and the manager reads no secret
 
-### Requirement: Reading the checkout's `.claude/` like Claude Code is optional, on by default, and adds no tool
-The image SHALL carry the `pi-code` package at an exact version from the lockfile, and the runtime SHALL load it only when `PI_CODE_ENABLED` is not `false`, `0`, `no` or `off`. The bundle SHALL expose one boolean, `pi.piCode`, default true, that becomes that env. The package SHALL add no tool to a session, and the `tool_call` permission decision SHALL still answer every call from the composed allowlist. The runtime SHALL record its own workspace as approved so the package loads the checkout's configuration on a headless run. With it off, the session SHALL load exactly the runtime's own two extensions.
+### Requirement: Reading the checkout's `.claude/` configuration is optional, on by default, and adds no tool
+The image SHALL carry the `pi-code` package at an exact version from the lockfile, and the runtime SHALL load it only when `PI_CODE_ENABLED` is not `false`, `0`, `no` or `off`. The bundle SHALL expose one boolean, `pi.piCode`, default true, that becomes that env. The package SHALL add no tool to a session, and the runtime's permission extension (its `tool_call` hook) SHALL still answer every call from the composed allowlist. The runtime SHALL record its own workspace as approved so the package loads the checkout's configuration on a headless run. With it off, the session SHALL load exactly the runtime's own two extensions.
 
 #### Scenario: The flag is off
 - **WHEN** `pi.piCode` is `false`

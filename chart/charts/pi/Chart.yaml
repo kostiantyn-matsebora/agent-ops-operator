@@ -2,6 +2,6 @@ apiVersion: v2
 name: pi
 description: >-
   A model-agnostic agent runtime — the operator's work contract implemented over
-  the pi coding SDK — shipped as a bundle, off by default.
+  the pi coding SDK — shipped as a bundle, on by default and the default runtime.
 type: application
 version: 0.1.0

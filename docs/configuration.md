@@ -487,9 +487,10 @@ Which one is copied is `default: true` on that runtime — on a bundle or a
 `runtimes:` entry — or, with none flagged, the first configured.
 
 Every runtime is optional. The `pi` bundle is on by default and flagged
-`default: true`, so it is the default on a fresh install, with `claude` beside
-it. `pi.default=false` hands the default back to the first configured runtime,
-and turning a bundle off moves the default with no rename.
+`default: true`, so it is the default on a fresh install, with `claude` beside it.
+
+`pi.default=false` hands the default back to the first configured runtime.
+Turning a bundle off moves the default with no rename.
 
 **No runtime at all FAILS the render** when a
 route still needs one, naming the routes — rather than leaving conversations in

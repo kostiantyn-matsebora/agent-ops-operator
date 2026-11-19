@@ -107,6 +107,7 @@ a manual step per claim you want to keep.
   self-registering sender that read the old name.
 - The `SignalAdapter` reconciler creates no ServiceAccount. It names the
   account in `spec.serviceAccountName` and falls back to the release floor.
+
 ### Changed
 
 - **BREAKING: runtime pods, their MCP ConfigMaps, every chart-rendered and
