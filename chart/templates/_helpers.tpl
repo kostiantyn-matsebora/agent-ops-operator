@@ -254,13 +254,19 @@ own CR and for the parent's `default` copy, so both carry identical env. */ -}}
 {{- $v := . -}}
 {{- $provider := $v.provider | required "pi.provider is required when the bundle is enabled — pi talks to many model providers through one SDK and has none to fall back on" -}}
 {{- $model := $v.model | required "pi.model is required when the bundle is enabled — the chosen provider's own model id" -}}
-{{- $env := list
+{{- $generated := list
   (dict "name" "PI_PROVIDER" "value" ($provider | toString))
   (dict "name" "PI_MODEL" "value" ($model | toString))
   (dict "name" "PI_CODE_ENABLED" "value" ((ternary $v.piCode true (hasKey $v "piCode")) | toString)) -}}
-{{- range ($v.env | default list) }}{{ $env = append $env . }}{{ end -}}
 {{- $cred := $v.credentialsSecret | default dict -}}
-{{- if $cred.name }}{{ $env = append $env (dict "name" ($cred.envName | default "PI_API_KEY") "valueFrom" (dict "secretKeyRef" (dict "name" $cred.name "key" ($cred.key | default "apiKey")))) }}{{ end -}}
+{{- if $cred.name }}{{ $generated = append $generated (dict "name" ($cred.envName | default "PI_API_KEY") "valueFrom" (dict "secretKeyRef" (dict "name" $cred.name "key" ($cred.key | default "apiKey")))) }}{{ end -}}
+{{- /* `pi.env` is laid OVER the generated entries: a name it states REPLACES the generated one, so the list never carries a name twice (a duplicate breaks server-side apply). */ -}}
+{{- $user := $v.env | default list -}}
+{{- $userNames := list -}}
+{{- range $user }}{{ $userNames = append $userNames .name }}{{ end -}}
+{{- $env := list -}}
+{{- range $g := $generated }}{{ if not (has $g.name $userNames) }}{{ $env = append $env $g }}{{ end }}{{ end -}}
+{{- range $user }}{{ $env = append $env . }}{{ end -}}
 {{- $entry := omit $v "enabled" "global" "provider" "model" "env" "credentialsSecret" "piCode" -}}
 {{- $_ := set $entry "env" $env -}}
 {{- toYaml $entry -}}

@@ -256,4 +256,4 @@ was supplied.
 - [Installation]({{ '/installation/' | relative_url }}) — the runtime defaults
   every runtime inherits, and the storage they share.
 - [Claude]({{ '/runtimes/claude/' | relative_url }}) — the reference runtime,
-  and the one a fresh install runs on.
+  on beside pi and selectable with `runtimeRef: claude`.

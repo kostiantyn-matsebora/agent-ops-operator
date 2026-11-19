@@ -3464,6 +3464,26 @@ func TestPiBundlePiCodeFlagReachesTheRuntimeAsEnv(t *testing.T) {
 	}
 }
 
+// `pi.env` is laid OVER the generated entries. A name it states replaces the
+// generated one, so no name appears twice: a duplicate in the env list breaks
+// server-side apply, which keys the list on the name.
+func TestPiEnvOverlaysReplaceGeneratedNamesWithoutDuplicates(t *testing.T) {
+	rt := findDocByKindAndMetaName(helmTemplateDefaults(t,
+		"--set", "pi.env[0].name=PI_MODEL", "--set", "pi.env[0].value=other-model",
+		"--set", "pi.env[1].name=PI_RUN_TIMEOUT_S", "--set-string", "pi.env[1].value=60"), "AgentRuntime", "pi")
+	if rt == "" {
+		t.Fatal("no AgentRuntime named pi rendered")
+	}
+	if n := strings.Count(rt, "name: PI_MODEL\n"); n != 1 {
+		t.Errorf("PI_MODEL must appear exactly once, got %d:\n%s", n, rt)
+	}
+	for _, want := range []string{"name: PI_MODEL\n      value: other-model\n", "name: PI_RUN_TIMEOUT_S\n      value: \"60\"\n", "name: PI_PROVIDER\n      value: anthropic\n"} {
+		if !strings.Contains(rt, want) {
+			t.Errorf("pi runtime lacks %q:\n%s", want, rt)
+		}
+	}
+}
+
 func assertPiRuntimeShape(t *testing.T, rt string) {
 	t.Helper()
 	for _, want := range []string{

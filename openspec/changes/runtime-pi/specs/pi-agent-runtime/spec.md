@@ -214,7 +214,7 @@ The image SHALL carry the `pi-code` package at an exact version from the lockfil
 - **THEN** the pod carries `PI_CODE_ENABLED=true` and the package's extensions load beside the runtime's own, with no load error
 
 ### Requirement: The runtime ships as a bundle that declares only its vendor
-The chart SHALL ship the runtime as `chart/charts/pi/`, ON by default, flagged as the default runtime, in the same shape as the other runtime bundles. It is one `AgentRuntime` rendered through the parent's shared runtime renderer.
+The chart SHALL ship the runtime as `chart/charts/pi/`, ON by default (`pi.enabled`), flagged as the default runtime (`pi.default`), in the same shape as the other runtime bundles. The chart booleans `pi.enabled` and `pi.default` turn it off and hand the default back. It is one `AgentRuntime` rendered through the parent's shared runtime renderer.
 
 It SHALL carry only what names this vendor: the image, its credential Secret reference, its `contextSync.paths` and its own env. It SHALL render no defaults, no floor account, no context volume and no identity of its own.
 

@@ -68,8 +68,8 @@ Own Go module, the only one with dependencies.
 | `runtimes/copilot/` | vendor owns tool vocabulary, Node + copilot-sdk | `vocabulary.js` is the boundary — `Bash(kubectl:*)` ENFORCED per call (opposite of ollama, each enforces what it can) |
 | `runtimes/pi/` | vendor SDK in-process, Node + `@earendil-works/pi-coding-agent` | same posture as `claude` — a per-invocation `tool_call` hook, deny by default, never a flag. The vendor's `pi-mcp` package is the one MCP extension bridging a second vendor's tool registration into the agent-ops contract |
 
-`runtimes/claude` is ON by default, the chart's default-eligible bundle. The
-other four are optional bundles under `chart/charts/<name>/`, off by default.
+`runtimes/pi` is ON by default and the chart's default runtime, and `runtimes/claude`
+is on beside it. The other three are optional bundles under `chart/charts/<name>/`, off by default.
 
 ### Signals and channels
 

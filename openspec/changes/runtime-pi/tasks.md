@@ -398,9 +398,9 @@ archive hook checks it.
   refused by the environment's own auto-mode classifier (starting a
   background server), so this is recorded as a workstation-only gap per
   `remote-session.md` rather than claimed done.
-- [x] 10.12 `docs/runtimes/pi.md` states `pi.piCode`, what it loads, that it adds no tool, and the hook and approval consequence; `docs/CHANGELOG.md` names it under the pi bundle entry.
-- [x] 10.13 The install pages (`docs/installation.md`, `docs/getting-started.md`, `README.md`) create `agentops-pi`, `docs/runtimes/pi.md` leads with the default, and `docs/CHANGELOG.md` carries an `[Unreleased]` breaking entry with the upgrade step.
-- [x] 10.11 `docs-generate.py --check`, `retired-vocabulary-guard.py` and
+- [x] 10.11 `docs/runtimes/pi.md` states `pi.piCode`, what it loads, that it adds no tool, and the hook and approval consequence; `docs/CHANGELOG.md` names it under the pi bundle entry.
+- [x] 10.12 The install pages (`docs/installation.md`, `docs/getting-started.md`, `README.md`) create `agentops-pi`, `docs/runtimes/pi.md` leads with the default, and `docs/CHANGELOG.md` carries an `[Unreleased]` breaking entry with the upgrade step.
+- [x] 10.13 `docs-generate.py --check`, `retired-vocabulary-guard.py` and
   `publication-guard.py` pass. Verify: each exits zero. All three
   independently re-run after every edit above, each exiting 0:
 
