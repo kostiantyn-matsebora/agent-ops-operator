@@ -13,7 +13,7 @@ result totals. A member SHALL NOT contribute to any of them.
 
 #### Scenario: Confirmation states the count
 - **WHEN** an operator triggers the close action over four selected root conversations
-- **THEN** a confirmation names the four conversations to be closed
+- **THEN** a confirmation names the four conversations to be closed and that closing cannot be undone
 
 #### Scenario: The selection label counts roots
 - **WHEN** an operator selects two roots that have five members between them
