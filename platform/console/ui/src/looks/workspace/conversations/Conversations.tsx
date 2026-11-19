@@ -292,7 +292,7 @@ function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; co
             tree={t}
             current={t.row.name === current}
             arrived={newNames.has(t.row.name)}
-            folded={!flatten && t.memberCount > 0 ? folded.has(t.row.name) : undefined}
+            folded={!flatten && t.memberCount > 0 ? folded.has(t.row.name) && t.membersActive === 0 : undefined}
             onToggleFold={() => toggle(t.row.name)}
             actions={rowActions(t.row, deps)}
             iconOnly={collapsed}

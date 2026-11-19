@@ -28,7 +28,7 @@ export default defineConfig({
     // the smoke test exercises the SAME bundle the image embeds.
     command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
     url: 'http://127.0.0.1:4173',
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 180_000,
   },
 })

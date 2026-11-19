@@ -12,7 +12,7 @@ import type { RunDetails as RunDetailsFact, WorkingRun } from '../../../model/ru
 import { GENERAL_FEED_NAME, useGeneralFeed } from '../../../model/session'
 import { TESTID, testid } from '../../../model/testids'
 import {
-  invokedByReply, memberTranscript, useMemberChain, useThread, useThreadMembers,
+  invokedByReply, memberTranscript, useMemberChain, useThread, useThreadMembers, waitingOn, type WaitedOn,
 } from '../../../model/thread'
 import { rowTitle } from '../../../model/conversationList'
 import { sendText } from '../../../model/verbs'
@@ -21,7 +21,7 @@ import { CopyButton } from './CopyButton'
 import { dayKey, day, duration, started } from '../format'
 import { CloseConfirm } from './CloseConfirm'
 import { Composer } from './Composer'
-import { Notice, PersonMessage, Reply, SignalCard, WorkingCard } from './Entries'
+import { Notice, PersonMessage, Reply, SignalCard, WaitingCard, WorkingCard } from './Entries'
 import { GraphTab, SequenceTab } from './Secondary'
 
 // THE THREAD: one conversation, opened beside the list. The container reads
@@ -36,6 +36,8 @@ export interface ThreadViewProps {
   runs: Run[]
   runDetails: Map<string, RunDetailsFact>
   working?: WorkingRun
+  /** Members this conversation invoked that are still at work: its answer is waiting on them. */
+  waitingOn?: WaitedOn[]
   startedAt?: string
   yaml?: string
   /** The conversation's recorded hops, for the Sequence tab. */
@@ -179,7 +181,15 @@ function PipelineMark({ icon }: Readonly<{ icon?: string }>): ReactElement | nul
   )
 }
 
-function statusPill(c: ConversationSummary): ReactElement | null {
+function statusPill(c: ConversationSummary, waiting: WaitedOn[] = []): ReactElement | null {
+  if (!c.presence && !c.errored && c.phase !== 'Closed' && waiting.length > 0) {
+    return (
+      <span className="wk-pill working" data-testid="waiting-pill">
+        <span className="wk-spin" aria-hidden="true" />
+        {`Waiting on ${waiting.length}`}
+      </span>
+    )
+  }
   if (c.presence) {
     return (
       <span className="wk-pill working">
@@ -382,7 +392,7 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
           <PipelineMark icon={p.pipelineIcon} />
           {p.title}
         </h2>
-        {statusPill(c)}
+        {statusPill(c, p.waitingOn)}
         {(c.threads?.length ?? 0) > 0 && (
           <span className="wk-chip quiet" title="every channel a reply here also reaches" data-testid="bound-channels">
             {c.threads!.map((t) => t.channel).join(' · ')}
@@ -487,13 +497,14 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
             {items.map((it) => (
               <Fragment key={it.key}>{it.node}</Fragment>
             ))}
-            {items.length === 0 && !p.working && (
+            {items.length === 0 && !p.working && !(p.waitingOn && p.waitingOn.length > 0) && (
               <div className="wk-empty">
                 <h2>No messages yet</h2>
                 {closed ? 'This conversation closed before anything was said.' : 'The first message will appear here.'}
               </div>
             )}
             {p.working && <WorkingCard working={p.working} />}
+            {!p.working && p.waitingOn && p.waitingOn.length > 0 && <WaitingCard members={p.waitingOn} />}
             {closed && <div className="wk-closed-note">This conversation is closed. Its history is kept.</div>}
             {away > 0 && (
               <button type="button" className="wk-btn primary wk-jump" data-testid={TESTID.jumpPill} onClick={jumpToEnd}>
@@ -608,6 +619,7 @@ function LoadedThread({ thread, onBack }: Readonly<{ thread: ReturnType<typeof u
     runs: thread.runs,
     runDetails: thread.runDetails,
     working: thread.working,
+    waitingOn: waitingOn(members),
     startedAt: thread.startedAt,
     yaml: thread.detail?.yaml,
     events: thread.detail?.events ?? [],

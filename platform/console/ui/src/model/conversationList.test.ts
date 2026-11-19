@@ -4,7 +4,7 @@ import { curatedConversations as page } from '../test-fixtures/conversations'
 import type { ConversationPage, ConversationSummary, VocabularyEntry } from '../api/types'
 import {
   ARRIVAL_HOLD_MS, phaseDot, rowSnippet, rowTag, rowTitle, rowUnread, sameScope, scopeKey, scopeParams,
-  selectionState, useArrivals, useConversationList, useInboxScopes, visibleItems, visibleRows, type Scope,
+  rowStatus, selectionState, useArrivals, useConversationList, useInboxScopes, visibleItems, visibleRows, waitingSnippet, type Scope,
 } from './conversationList'
 import { buildTree } from './tree'
 
@@ -240,5 +240,18 @@ describe('useArrivals', () => {
     expect(result.current.newNames.has('fresh')).toBe(true)
     act(() => result.current.clear('fresh'))
     expect(result.current.newNames.has('fresh')).toBe(false)
+  })
+})
+
+describe('rowStatus', () => {
+  const row = (over: Record<string, unknown> = {}) => ({ name: 'r', phase: 'Idle', ...over }) as never
+  it('is waiting for an idle row whose members are at work', () => expect(rowStatus(row(), 2)).toBe('waiting'))
+  it('is idle with nothing to wait on', () => expect(rowStatus(row(), 0)).toBe('idle'))
+  it('lets the row\u2019s own work win', () => expect(rowStatus(row({ presence: true }), 2)).toBe('working'))
+  it('lets a failure win', () => expect(rowStatus(row({ errored: true }), 2)).toBe('failed'))
+  it('says who it waits on, with a cap', () => {
+    expect(waitingSnippet(['a', 'b'], 2)).toBe('waiting on a, b…')
+    expect(waitingSnippet(['a', 'b', 'c', 'd'], 4)).toBe('waiting on a, b, c +1…')
+    expect(waitingSnippet([], 2)).toBe('waiting on 2 members…')
   })
 })

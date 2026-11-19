@@ -76,6 +76,46 @@ export function invalidateDerived(client: QueryClient, kinds: Set<string>) {
   }
 }
 
+/**
+ * Folds a burst of deltas to what each object ends as. Two writes to one object
+ * in a window are one write — the later row is the whole truth — and a
+ * creation followed by changes is still a creation, so the listing inserts it.
+ */
+export function coalesceDeltas(events: DeltaEvent[]): DeltaEvent[] {
+  const byObject = new Map<string, DeltaEvent>()
+  for (const ev of events) {
+    if (ev.type === 'RESYNC') {
+      byObject.set(`resync/${ev.kind}`, ev)
+      continue
+    }
+    const key = `${ev.kind}/${ev.name}`
+    const prev = byObject.get(key)
+    if (prev && prev.type === 'ADDED' && ev.type === 'MODIFIED') byObject.set(key, { ...ev, type: 'ADDED' })
+    else if (prev && prev.type === 'DELETED' && ev.type === 'MODIFIED') byObject.set(key, { ...ev, type: 'ADDED' })
+    else byObject.set(key, ev)
+  }
+  return [...byObject.values()]
+}
+
+/**
+ * Applies a burst in one pass. Every conversation row in it is written into
+ * each held listing ONCE — a write per row would re-compare the whole page for
+ * each, which is the cost that froze the console under a storm of changes.
+ */
+export function applyDeltas(client: QueryClient, events: DeltaEvent[]) {
+  const folded = coalesceDeltas(events)
+  const rows: { type: 'ADDED' | 'MODIFIED'; row: ConversationPage['items'][number] }[] = []
+  for (const ev of folded) {
+    if (ev.type !== 'ADDED' && ev.type !== 'MODIFIED') {
+      applyDelta(client, ev)
+      continue
+    }
+    if (ev.conversationRow) rows.push({ type: ev.type, row: ev.conversationRow })
+    applyDelta(client, { ...ev, conversationRow: undefined })
+  }
+  if (rows.length > 0) writeConversations(client, rows)
+}
+
 /** applyDelta writes one CR change into every view holding that object. */
 export function applyDelta(client: QueryClient, ev: DeltaEvent) {
   // A resync is not an apply. Its whole meaning is "stop trusting what you
@@ -143,6 +183,38 @@ function unfilteredFirstPage(params: string): boolean {
   return (p.get('offset') ?? '0') === '0'
 }
 
+function writeConversations(client: QueryClient, changes: { type: 'ADDED' | 'MODIFIED'; row: ConversationPage['items'][number] }[]) {
+  const byName = new Map(changes.map((c) => [c.row.name, c]))
+  for (const [key, page] of client.getQueriesData<ConversationPage>({ queryKey: ['conversations'] })) {
+    if (!page) continue
+    const held = new Set(page.items.map((c) => c.name))
+    const params = String(key[1] ?? '')
+    let items = page.items
+    let changed = false
+    if (page.items.some((c) => byName.has(c.name))) {
+      items = page.items.map((c) => byName.get(c.name)?.row ?? c)
+      changed = true
+    }
+    const absent = changes.filter((c) => !held.has(c.row.name))
+    if (absent.length > 0) {
+      if (!unfilteredFirstPage(params)) {
+        // The server decides whether these belong on a filtered page; one re-read for the burst.
+        void client.invalidateQueries({ queryKey: key })
+      } else {
+        const added = absent.filter((c) => c.type === 'ADDED').map((c) => c.row)
+        if (added.length > 0) {
+          items = [...added.reverse(), ...items]
+          changed = true
+        }
+      }
+    }
+    if (changed) {
+      const grown = items.length - page.items.length
+      client.setQueryData<ConversationPage>(key, { ...page, items, total: page.total + Math.max(0, grown) })
+    }
+  }
+}
+
 function writeConversation(
   client: QueryClient,
   type: 'ADDED' | 'MODIFIED',
@@ -170,10 +242,12 @@ function writeConversation(
       void client.invalidateQueries({ queryKey: key })
       continue
     }
-    const limit = page.limit || page.items.length + 1
+    // The page is counted in trees, not rows, so it is not trimmed here: a
+    // trim by row count would drop members of a tree the page still holds. The
+    // next read of the page puts it back to its limit.
     client.setQueryData<ConversationPage>(key, {
       ...page,
-      items: [row, ...page.items].slice(0, limit),
+      items: [row, ...page.items],
       total: page.total + 1,
     })
   }

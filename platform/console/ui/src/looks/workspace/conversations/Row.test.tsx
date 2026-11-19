@@ -19,7 +19,7 @@ function conv(over: Partial<ConversationSummary> = {}): ConversationSummary {
 }
 
 const tree = (row: ConversationSummary, over: Partial<TreeRow> = {}): TreeRow => ({
-  row, depth: 0, rootName: row.name, parentMissing: false, memberCount: 0, ...over,
+  row, depth: 0, rootName: row.name, parentMissing: false, memberCount: 0, membersActive: 0, activeEntries: [], ...over,
 })
 
 const mount = (row: ConversationSummary, over: Partial<TreeRow> = {}) =>
@@ -138,5 +138,29 @@ describe('a list row', () => {
       </MemoryRouter>,
     )
     expect(screen.getByTestId(testid.row('conv-1')).querySelector('.wk-av .bd')).toHaveTextContent('4')
+  })
+})
+
+describe('a root waiting on its members', () => {
+  const idleRoot = () => conv({ phase: 'Idle', presence: false, coordinator: 'incident' })
+
+  it('says Waiting, names who, animates the lifecycle bar and carries a testid', () => {
+    mount(idleRoot(), { memberCount: 2, membersActive: 2, activeEntries: ['triage', 'ops'] })
+    const row = screen.getByTestId(`row-${idleRoot().name}`)
+    expect(row).toHaveAttribute('data-status', 'waiting')
+    expect(screen.getByTestId(`waiting-${idleRoot().name}`)).toHaveTextContent('Waiting')
+    expect(row).toHaveTextContent('waiting on triage, ops…')
+    expect(row.querySelectorAll('.lc s.cur')).toHaveLength(1)
+  })
+
+  it('is plainly idle when no member is at work', () => {
+    mount(idleRoot(), { memberCount: 2, membersActive: 0 })
+    expect(screen.getByTestId(`row-${idleRoot().name}`)).toHaveAttribute('data-status', 'idle')
+    expect(screen.queryByTestId(`waiting-${idleRoot().name}`)).toBeNull()
+  })
+
+  it('leaves its own working state alone', () => {
+    mount(conv({ phase: 'Working', presence: true }), { memberCount: 1, membersActive: 1, activeEntries: ['triage'] })
+    expect(screen.getByText('Working')).toBeInTheDocument()
   })
 })

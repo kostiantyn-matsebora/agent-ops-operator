@@ -202,7 +202,7 @@ export function rowTag(row: ConversationSummary, isNew: boolean): string | undef
   return undefined
 }
 
-export type RowStatus = 'working' | 'pending' | 'failed' | 'idle' | 'none'
+export type RowStatus = 'working' | 'waiting' | 'pending' | 'failed' | 'idle' | 'none'
 
 /** The row's one status, in precedence order. */
 export function phaseDot(row: ConversationSummary): RowStatus {
@@ -211,6 +211,23 @@ export function phaseDot(row: ConversationSummary): RowStatus {
   if (row.phase === 'Pending' || row.phase === 'Queued') return 'pending'
   if (row.phase === 'Closed') return 'none'
   return 'idle'
+}
+
+/**
+ * The row's status once its members are known. A conversation with nothing of
+ * its own running but members still at work is WAITING on them — not idle: its
+ * answer is not in yet, and the list must say so.
+ */
+export function rowStatus(row: ConversationSummary, membersActive: number): RowStatus {
+  const own = phaseDot(row)
+  return own === 'idle' && membersActive > 0 ? 'waiting' : own
+}
+
+/** What a waiting row says on its second line: who it is waiting on. */
+export function waitingSnippet(entries: string[], count: number): string {
+  const who = entries.slice(0, 3).join(', ')
+  const more = entries.length > 3 ? ` +${entries.length - 3}` : ''
+  return `waiting on ${who || `${count} member${count === 1 ? '' : 's'}`}${more}…`
 }
 
 // ---- the hooks ----------------------------------------------------------------
@@ -233,7 +250,13 @@ export function useConversationList({ scope, search, showClosed, flatten, collap
   const { data, isLoading, error } = useConversations(params)
   const items = useMemo(() => visibleItems(data?.items ?? [], scope, showClosed), [data, scope, showClosed])
   const tree = useMemo(() => buildTree(items, !flatten), [items, flatten])
-  const rows = useMemo(() => visibleRows(tree, items, collapsedRoots), [tree, items, collapsedRoots])
+  // A root waiting on a member is never folded: the work is the news, and the
+  // member that is doing it must be in view (an explicit fold returns once the wait ends).
+  const collapsed = useMemo(() => {
+    const waitingRoots = new Set(tree.filter((t) => t.membersActive > 0).map((t) => t.row.name))
+    return waitingRoots.size === 0 ? collapsedRoots : new Set([...collapsedRoots].filter((n) => !waitingRoots.has(n)))
+  }, [tree, collapsedRoots])
+  const rows = useMemo(() => visibleRows(tree, items, collapsed), [tree, items, collapsed])
   const collapsibleNames = useMemo(() => tree.filter((t) => t.memberCount > 0).map((t) => t.row.name), [tree])
   return { data, isLoading, error, items, tree, rows, collapsibleNames }
 }

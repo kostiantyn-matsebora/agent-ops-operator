@@ -2,7 +2,7 @@ import { type ReactElement, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ConversationSummary } from '../../../api/types'
 import type { RowCommand } from '../../../model/commands'
-import { phaseDot, rowSnippet, rowTag, rowTitle, rowUnread, type RowStatus } from '../../../model/conversationList'
+import { rowSnippet, rowStatus, rowTag, rowTitle, rowUnread, waitingSnippet, type RowStatus } from '../../../model/conversationList'
 import { testid } from '../../../model/testids'
 import type { TreeRow } from '../../../model/tree'
 import { Chevron, Icon } from '../icons'
@@ -51,7 +51,7 @@ export interface RowProps {
 /** The lifecycle segments a status fills: queued, working, answered. Empty while idle. */
 export function lifecycle(status: RowStatus): ('on' | 'cur' | '')[] | undefined {
   if (status === 'pending') return ['cur', '', '']
-  if (status === 'working') return ['on', 'cur', '']
+  if (status === 'working' || status === 'waiting') return ['on', 'cur', '']
   return undefined
 }
 
@@ -88,6 +88,14 @@ function StatusPill({
       <span className="wk-pill working">
         <span className="wk-spin" aria-hidden="true" />
         Working
+      </span>
+    )
+  }
+  if (status === 'waiting') {
+    return (
+      <span className="wk-pill working" data-testid={`waiting-${row.name}`} title="its members are still at work">
+        <span className="wk-spin" aria-hidden="true" />
+        Waiting
       </span>
     )
   }
@@ -170,10 +178,10 @@ export function Row({
 }: Readonly<RowProps>): ReactElement {
   const row = tree.row
   const title = rowTitle(row)
-  const status = phaseDot(row)
+  const status = rowStatus(row, tree.membersActive)
   const unread = rowUnread(row)
   const member = tree.depth > 0 || Boolean(row.causedBy)
-  const snippet = rowSnippet(row)
+  const snippet = status === 'waiting' ? waitingSnippet(tree.activeEntries, tree.membersActive) : rowSnippet(row)
   const attribution = row.causedBy ? `via ${row.causedBy.entry}` : row.coordinator || row.pipeline || row.profile
   const third = [attribution, tree.memberCount > 0 && folded !== undefined ? `${tree.memberCount} members` : '']
     .filter(Boolean)

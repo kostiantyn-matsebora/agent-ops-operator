@@ -814,7 +814,8 @@ html[data-look='workspace'] #root {
   background: var(--ao-success);
 }
 
-.wk-av .d.working {
+.wk-av .d.working,
+.wk-av .d.waiting {
   background: var(--ao-brand);
 }
 
@@ -2350,4 +2351,27 @@ html[data-look='workspace'] #root {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ao-text-subtle);
+}
+
+/* A root waiting on its members: the same working look, with the members listed. */
+.wk-waiting {
+  width: min(92%, 420px);
+}
+
+.wk-wlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  white-space: normal;
+  font-family: var(--wk-font);
+  font-size: 13px;
+}
+
+.wk-wlist li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }

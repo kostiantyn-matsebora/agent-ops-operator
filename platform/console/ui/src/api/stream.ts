@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import type { QueryClient } from '@tanstack/react-query'
-import { applyDelta, applyMessage, invalidateDerived } from './apply'
+import { notifyManager, type QueryClient } from '@tanstack/react-query'
+import { applyDeltas, applyMessage, invalidateDerived } from './apply'
 import type { ActivityEvent, DeltaEvent, Message, Queues } from './types'
 
 // ONE SSE connection into a Zustand store and the react-query cache.
@@ -89,6 +89,58 @@ export function noteDerived(client: QueryClient, kind: string) {
   }
 }
 
+/**
+ * How long stream events are gathered before they are applied, in ms.
+ *
+ * A busy install streams hundreds of changes a second. Applying each as its own
+ * task puts a full render of the list behind every one, and a person clicking
+ * meanwhile waits behind all of them — the console looks frozen although every
+ * single change is cheap. Events are applied IN ORDER, but in one batch per
+ * window, so the list renders once for the burst, not once per change.
+ */
+export const STREAM_BATCH_MS = 50
+
+let queue: Array<() => void> = []
+let pendingDeltas: DeltaEvent[] = []
+let pendingActivity: ActivityEvent[] = []
+let batchTimer: ReturnType<typeof setTimeout> | undefined
+let liveClient: QueryClient | undefined
+
+function enqueue(client: QueryClient, apply: () => void) {
+  liveClient = client
+  queue.push(apply)
+  if (batchTimer === undefined) batchTimer = setTimeout(flushStream, STREAM_BATCH_MS)
+}
+
+/** Applies everything gathered so far, in arrival order. Exported for tests. */
+export function flushStream() {
+  if (batchTimer !== undefined) clearTimeout(batchTimer)
+  batchTimer = undefined
+  const work = queue
+  const deltas = pendingDeltas
+  const activity = pendingActivity
+  queue = []
+  pendingDeltas = []
+  pendingActivity = []
+  if (work.length === 0 && deltas.length === 0 && activity.length === 0) return
+  const run = () => {
+    if (deltas.length > 0) {
+      applyDeltas(liveClient!, deltas)
+      for (const kind of new Set(deltas.map((d) => d.kind))) noteDerived(liveClient!, kind)
+    }
+    for (const apply of work) apply()
+    if (activity.length > 0) {
+      useStream.setState((s) => {
+        const last = activity[activity.length - 1]
+        const newest = activity.reduce((c, e) => (e.cursor > c ? e.cursor : c), s.cursor)
+        return { events: [...s.events, ...activity].slice(-MAX_LIVE_EVENTS), cursor: last ? newest : s.cursor }
+      })
+    }
+  }
+  if (liveClient) notifyManager.batch(run)
+  else run()
+}
+
 /** Reconnect backoff bounds, in ms. */
 const RETRY_MIN = 1_000
 const RETRY_MAX = 30_000
@@ -136,6 +188,7 @@ export function connectStream(client: QueryClient): () => void {
 
   open()
   return () => {
+    flushStream()
     stopped = true
     if (retryTimer) clearTimeout(retryTimer)
     retryTimer = undefined
@@ -161,19 +214,21 @@ function wire(es: EventSource, client: QueryClient) {
 
   es.addEventListener('delta', (ev) => {
     const d = JSON.parse((ev as MessageEvent).data) as DeltaEvent
-    applyDelta(client, d)
     // What one object cannot answer for — counts, graphs, cross-object findings
-    // — is re-read on a stable key, so the page updates without blanking.
-    noteDerived(client, d.kind)
+    // — is re-read on a stable key (noteDerived, at the flush), so the page
+    // updates without blanking.
+    liveClient = client
+    pendingDeltas.push(d)
+    if (batchTimer === undefined) batchTimer = setTimeout(flushStream, STREAM_BATCH_MS)
   })
 
   es.addEventListener('activity', (ev) => {
     const e = JSON.parse((ev as MessageEvent).data) as ActivityEvent
-    useStream.setState((s) => ({
-      events: [...s.events, e].slice(-MAX_LIVE_EVENTS),
-      // A gap carries no cursor — it is not a hop the manager sequenced.
-      cursor: e.cursor > s.cursor ? e.cursor : s.cursor,
-    }))
+    // A gap carries no cursor — it is not a hop the manager sequenced; the cursor
+    // only moves for events that have one (an empty one never sorts above a held one).
+    liveClient = client
+    pendingActivity.push(e)
+    if (batchTimer === undefined) batchTimer = setTimeout(flushStream, STREAM_BATCH_MS)
     // The gap itself lives on the stream HEALTH, so that a browser opened after
     // the fact still sees it. Reloading is how a browser already open learns of
     // one without a second copy of the fact in this store — and it is a resync
@@ -186,6 +241,7 @@ function wire(es: EventSource, client: QueryClient) {
   })
 
   es.addEventListener('message', (ev) => {
-    applyMessage(client, JSON.parse((ev as MessageEvent).data) as Message)
+    const m = JSON.parse((ev as MessageEvent).data) as Message
+    enqueue(client, () => applyMessage(client, m))
   })
 }

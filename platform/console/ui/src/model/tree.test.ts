@@ -126,3 +126,20 @@ describe('descendantsOf', () => {
     expect(descendantsOf(items, 'root-1').map((c) => c.name).sort()).toEqual(['leaf-1', 'mid-1'])
   })
 })
+
+describe('waiting on members', () => {
+  const root = { name: 'r', phase: 'Idle' } as ConversationSummary
+  const member = (name: string, phase: string, extra: Partial<ConversationSummary> = {}) =>
+    ({ name, phase, causedBy: { parent: 'r', entry: name }, ...extra }) as ConversationSummary
+
+  it('counts the members at work and names the entries they were invoked as', () => {
+    const t = buildTree([root, member('triage', 'Working', { presence: true }), member('ops', 'Pending'), member('done', 'Closed')], true)
+    expect(t[0].membersActive).toBe(2)
+    expect(t[0].activeEntries).toEqual(['triage', 'ops'])
+  })
+
+  it('counts none while every member is idle or closed', () => {
+    const t = buildTree([root, member('a', 'Idle'), member('b', 'Closed')], true)
+    expect(t[0].membersActive).toBe(0)
+  })
+})

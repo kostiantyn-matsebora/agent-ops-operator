@@ -6,7 +6,7 @@ import {
 } from '../../../model/message'
 import type { RunDetails as RunDetailsFact, WorkingRun } from '../../../model/run'
 import { TESTID } from '../../../model/testids'
-import { chainStepLabel, useMemberExchange } from '../../../model/thread'
+import { chainStepLabel, useMemberExchange, type WaitedOn } from '../../../model/thread'
 import { Chevron, Icon, SEVERITY_ICON } from '../icons'
 import { clock, elapsed } from '../format'
 import { CopyButton } from './CopyButton'
@@ -273,6 +273,27 @@ export function WorkingCard({ working }: Readonly<{ working: WorkingRun }>): Rea
         {working.latest ? working.latest.label : 'waiting for the runtime'}
         {working.count > 0 ? ` · ${working.count} event${working.count === 1 ? '' : 's'}` : ''}
       </div>
+      <div className="wk-shimmer" />
+    </div>
+  )
+}
+
+/** A root with nothing running of its own, waiting on the members it invoked. */
+export function WaitingCard({ members }: Readonly<{ members: WaitedOn[] }>): ReactElement {
+  return (
+    <div className="wk-working wk-waiting" data-testid="waiting-on-members" role="status" aria-label="waiting on members">
+      <div className="l1">
+        <span>{`Waiting on ${members.length} member${members.length === 1 ? '' : 's'}`}</span>
+      </div>
+      <ul className="l2 wk-wlist">
+        {members.map((m) => (
+          <li key={m.name}>
+            <span className="wk-spin" aria-hidden="true" />
+            <Link className="wk-lnk" to={`/conversations/${encodeURIComponent(m.name)}`}>{m.entry}</Link>
+            <span> · {m.phase.toLowerCase()}</span>
+          </li>
+        ))}
+      </ul>
       <div className="wk-shimmer" />
     </div>
   )

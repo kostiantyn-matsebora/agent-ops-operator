@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
-import { ACTIVITY_GAP, connectStream, noteDerived, useStream } from './stream'
+import { ACTIVITY_GAP, STREAM_BATCH_MS, connectStream, noteDerived, useStream } from './stream'
 import type { ConversationDetail, ConversationPage, InventoryRow } from './types'
 import { FakeEventSource } from '../test-fixtures/fakeEventSource'
 
@@ -99,6 +99,33 @@ describe('what each event does', () => {
     FakeEventSource.instances[0].emit('resync', { reason: 'connected', cursor: '1' })
 
     expect(invalidate).toHaveBeenCalledWith()
+    stop()
+  })
+
+  it('applies a burst together, in order, once its window closes — one render for the burst, not one per event', () => {
+    vi.useFakeTimers()
+    reset()
+    const client = newClient()
+    client.setQueryData(['inventory', 'channels'], [row('slack')])
+    const stop = connectStream(client)
+    const es = FakeEventSource.instances[0]
+    let notified = 0
+    client.getQueryCache().subscribe(() => { notified++ })
+
+    for (let i = 0; i < 200; i++) {
+      es.emitQueued('delta', { type: 'MODIFIED', kind: 'channels', name: 'slack', row: { ...row('slack'), health: `h${i}` } })
+      es.emitQueued('activity', { cursor: String(i + 1).padStart(4, '0'), ts: '2025-06-11T09:00:00Z', kind: 'run.dispatched', runId: `r${i}`, status: 'ok' })
+    }
+    // Nothing applied yet: the window is still open.
+    expect(client.getQueryData<InventoryRow[]>(['inventory', 'channels'])![0].health).not.toBe('h199')
+    expect(useStream.getState().events).toHaveLength(0)
+
+    vi.advanceTimersByTime(STREAM_BATCH_MS)
+    // Applied in arrival order: the LAST write wins, and every activity event is kept.
+    expect(client.getQueryData<InventoryRow[]>(['inventory', 'channels'])![0].health).toBe('h199')
+    expect(useStream.getState().events).toHaveLength(200)
+    expect(useStream.getState().cursor).toBe('0200')
+    expect(notified).toBeLessThan(20)
     stop()
   })
 

@@ -286,3 +286,17 @@ export function invokedByReply(
   }
   return out
 }
+
+/** A member a root is waiting on: who it was invoked as and where it stands. */
+export interface WaitedOn {
+  name: string
+  entry: string
+  phase: string
+}
+
+/** The members of a root still at work — what its answer is waiting for. */
+export function waitingOn(members: { member: ConversationSummary }[]): WaitedOn[] {
+  return members
+    .filter(({ member: m }) => m.phase !== 'Closed' && (m.presence || m.phase === 'Working' || m.phase === 'Pending' || m.phase === 'Queued'))
+    .map(({ member: m }) => ({ name: m.name, entry: m.causedBy?.entry ?? m.name, phase: m.presence ? 'Working' : m.phase ?? 'Working' }))
+}

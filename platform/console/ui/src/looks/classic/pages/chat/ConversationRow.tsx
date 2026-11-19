@@ -24,6 +24,7 @@ type DotState = RowStatus
 
 const DOT_COLOR: Record<DotState, string | undefined> = {
   working: 'var(--ao-brand)',
+  waiting: 'var(--ao-brand)',
   pending: 'var(--ao-warning)',
   failed: 'var(--ao-danger)',
   idle: 'var(--ao-success)',
