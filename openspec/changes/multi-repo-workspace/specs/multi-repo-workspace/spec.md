@@ -124,7 +124,7 @@ workingDir: infra:  agent cwd = /workspace/infra
 
 ### Requirement: An agent file is named by location
 
-`AgentProfile.spec` and `AgentCapability.spec` SHALL accept `agentFile: {repo?, path}`. On a profile it SHALL be mutually exclusive with `agent`, which stays as the name form for the conventional single-repository case and exists only on the profile. A capability's `agentFile` SHALL take precedence over the profile's `agent` for that capability's conversations. The rules SHALL be:
+`AgentProfile.spec` and `AgentCapability.spec` SHALL accept `agentFile: {repo?, path}`. On a profile it SHALL be mutually exclusive with `agent`, which stays as the name form for the conventional single-repository case and exists only on the profile. A capability's `agentFile`, when set, SHALL take precedence over both the profile's `agentFile` and the profile's `agent` for that capability's conversations. The rules SHALL be:
 
 | Field | Rule |
 |---|---|

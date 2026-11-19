@@ -9,7 +9,7 @@ See `proposal.md` for the motivation. The current state that shapes the approach
 
 The requirements live in `specs/multi-repo-workspace` and `specs/workspace-sync`. This document records the choices behind them.
 
-**Dependency.** `agent-definition-adopted-by-runtime` makes the runtime read the definition's body and tools. This change gives that definition an explicit location and does not repeat its requirements.
+**Dependency.** `agent-definition-adopted-by-runtime` makes the runtime append the definition's body to the system message. Reading its tools is the existing `agent-definition-tools` requirement. This change gives that definition an explicit location and does not repeat its requirements.
 
 ## Goals / Non-Goals
 

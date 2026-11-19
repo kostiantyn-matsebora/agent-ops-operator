@@ -66,4 +66,4 @@
 - [ ] 9.2.1 Update `docs/guides/agent-from-a-repository.md`, `docs/guides/agent-profile.md` and `docs/guides/agent-runtime.md`, including the note that a one-repo prompt does not carry to two repos.
 - [ ] 9.2.2 Update `docs/runtimes/claude.md`, `claude-cli.md`, `copilot.md`, `ollama.md` and `pi.md`.
 - [ ] 9.2.3 Update `docs/installation.md` and `docs/configuration.md` for the new image and the upgrade steps, and `docs/getting-started.md` and the landing page where they show a repository.
-- [ ] 9.2.4 Run `python3 .claude/scripts/rules_compliance.py` over the touched pages and `python3 .github/scripts/publication-guard.py --counts`.
+- [ ] 9.2.4 Run `python3 .claude/scripts/rules_compliance.py` over the touched pages `python3 .github/scripts/publication-guard.py --counts` and `python3 .github/scripts/retired-vocabulary-guard.py --counts`.
