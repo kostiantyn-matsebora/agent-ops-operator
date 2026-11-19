@@ -673,6 +673,12 @@ for the rollback caveat before you upgrade a production install.
 The clustered JetStream server the default backend runs on three replicas
 of, from `chart/charts/nats/values.yaml`:
 
+{: .ao-callout}
+> **A production install runs at least three NATS pods.** The chart refuses
+> `nats.replicas` below `3` outside demo mode, and refuses `nats.storageReplicas`
+> above `nats.replicas`. More than three pods is fine, and each stream still
+> keeps `nats.storageReplicas` copies. Only demo mode runs one pod.
+
 | Key | Default | Consequence |
 |---|---|---|
 | `nats.replicas` | `3`, or `1` under demo mode | NATS server pods. Outside demo mode it cannot be less than `3`, and may be more. Scaling the pods never changes how many copies each stream keeps |
