@@ -10,6 +10,10 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+## [22.0.0] — 2026-11-19
+
+Images: manager 0.64.0. Every other image is unchanged.
+
 ### Changed
 
 - **Demo mode runs one manager and one NATS server.** `global.demo.enabled`
@@ -31,6 +35,17 @@ for the source and the reference material beside this file.
 - A one-replica NATS runs standalone, without cluster routes it waits on forever.
 - The manager no longer exits when NATS is not up yet. It retries the connection
   and waits, and the chart's probes decide how long that may last.
+
+### Upgrade
+
+- **Outside demo mode, `nats.replicas` below `3` now fails the render.** Set it to
+  `3` or more. An install that ran one NATS pod on purpose must either move to
+  three or turn demo mode on.
+- **`nats.storageReplicas` is new and defaults to `3`.** It is how many servers
+  keep a copy of each stream. The manager applies it to the streams that exist
+  when it starts, so a changed value takes effect on the next manager start.
+  Raise `nats.replicas` before you raise it, and lower it before you lower
+  `nats.replicas`.
 
 ## [21.0.0] — 2026-11-19
 
@@ -985,24 +1000,11 @@ kubernetes:
    carries `botToken` or `apiBase` — a chart-rendered Secret picks up the new
    shape automatically.
 
-## [14.0.1] — 2026-10-10
-
-- `signal-cron` 0.2.0.
-
-### Fixed
-
-- **The self-heal reaper's `cronAdapter` still pinned `signal-cron:0.0.1-rc3`**,
-  an unreleased candidate rather than a real version — 14.0.0's own fix for
-  `signal-cron:0.2.0` (a version that had never shipped) landed on the closest
-  tag that DID exist instead of actually cutting one. Off by default
-  (`reaper.enabled: false`), so no install pulled it, but an install that turns
-  the reaper on now gets a real release: `signal-cron:0.2.0`, built from the
-  same unchanged source the `rc3` tag already shipped.
-
 ## Older versions
 
 | Archive | Covers |
 |---|---|
+| [CHANGELOG-14.0.1.md](changelog/CHANGELOG-14.0.1.md) | chart 14.0.1 |
 | [CHANGELOG-14.0.0.md](changelog/CHANGELOG-14.0.0.md) | chart 14.0.0 |
 | [CHANGELOG-13.4.0.md](changelog/CHANGELOG-13.4.0.md) | chart 13.4.0 |
 | [CHANGELOG-13.3.0.md](changelog/CHANGELOG-13.3.0.md) | chart 13.3.0 |
