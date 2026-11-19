@@ -98,13 +98,13 @@ fifteen minutes, most of it the install.
    `agent-ops`.
 
    ```sh
-   kubectl -n agent-ops-conversations create secret generic agentops-claude \
-     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+   kubectl -n agent-ops-conversations create secret generic agentops-pi \
+     --from-literal=apiKey=$ANTHROPIC_API_KEY   # the default runtime is pi, on Anthropic
    ```
 
    ```powershell
-   kubectl -n agent-ops-conversations create secret generic agentops-claude `
-     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+   kubectl -n agent-ops-conversations create secret generic agentops-pi `
+     --from-literal=apiKey=$env:ANTHROPIC_API_KEY   # the default runtime is pi, on Anthropic
    ```
 
 ## Ask it something

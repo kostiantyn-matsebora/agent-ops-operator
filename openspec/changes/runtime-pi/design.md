@@ -163,13 +163,21 @@ CONFIRMED live, and fuller than assumed. Pi reports cache WRITE tokens too,
 a field copilot's shape never carried. See Spike findings below for the
 field map.
 
-### D7. One bundle, off by default
+### D7. One bundle, on by default and the default runtime
 
 `chart/charts/pi/` follows `chart/charts/copilot/`: the credential Secret, one
 `AgentRuntime` through the parent's shared renderer, a parent
 `agentops.piRuntimeEntry` helper beside `agentops.copilotRuntimeEntry`, and the
 branch in the declared-runtime list. Provider, model and credential are env.
 The bundle adds no value that is not env, an image or a context path.
+
+The bundle ships `enabled: true` and `default: true`, with `provider: anthropic`
+and `model: claude-sonnet-5` as chart defaults, so an adopter needs only the
+credential. The `claude` bundle stays on and selectable as `runtimeRef: claude`.
+`pi.default=false` hands the default back to the first configured runtime,
+`pi.enabled=false` removes pi, and an empty provider or model still fails the
+render. This changes what a route naming no `runtimeRef` runs on, which is why
+the change is marked breaking.
 
 ### D8. Pin exactly, from a lockfile
 
@@ -561,10 +569,10 @@ deferred.
 
 ## Migration Plan
 
-Nothing migrates. The bundle is off by default and no CRD changes.
+The default runtime changes from claude to pi, so an upgrade needs the `agentops-pi` Secret, or `pi.default=false`. No CRD changes, and open conversations keep the runtime they started on.
 
 1. Release `runtime-pi-v<semver>` by tag, after the image is in the registry.
-2. An adopter enables the `pi` bundle and sets `runtimeRef: pi` on a route.
+2. An adopter creates the `agentops-pi` Secret, or sets `pi.default=false` to stay on claude.
 3. Rollback is `runtimeRef` back to the previous runtime, then disabling the
    bundle. Conversation context is runtime-specific, so a conversation does
    not continue across vendors, which the manager already reports as

@@ -159,8 +159,8 @@ helm install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-opera
   -n agent-ops --create-namespace --set global.demo.enabled=true
 
 # the chart created agent-ops-conversations, where runtime pods resolve the Secret
-kubectl -n agent-ops-conversations create secret generic agentops-claude \
-  --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key, see Getting started
+kubectl -n agent-ops-conversations create secret generic agentops-pi \
+  --from-literal=apiKey=$ANTHROPIC_API_KEY   # the default runtime is pi, see Getting started
 ```
 
 **[Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/)**

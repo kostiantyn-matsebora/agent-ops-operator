@@ -57,7 +57,7 @@ func DefaultValues(tier string) *InstallValues {
 }
 
 // valuesYAML renders the values file. Images are the ones the pack built and
-// imported, tagged :e2e; the reference runtime bundle is OFF and the stub is
+// imported, tagged :e2e; the reference runtime bundles are OFF and the stub is
 // the release's default runtime, so a route naming nothing runs on it.
 func (v *InstallValues) valuesYAML() string {
 	claude := "false"
@@ -89,6 +89,10 @@ global:
 claude:
   enabled: %[2]s
   image: agentops-runtime-claude:e2e
+# pi is ON by default and flagged default, which the stub's own "default: true"
+# below would collide with. The pack runs the stub, so pi is off.
+pi:
+  enabled: false
 runtimes:
   - name: %[3]s
     default: true

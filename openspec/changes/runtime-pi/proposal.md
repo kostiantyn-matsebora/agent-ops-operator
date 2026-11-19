@@ -35,8 +35,9 @@ field, `runtimeRef`. That is the claim every other runtime already makes.
     bounded, and omitted where unknown.
   - **Models.** Provider and credential arrive as env from a Secret, never
     through a new CRD field.
-- Add `chart/charts/pi/`, an optional bundle, OFF by default, rendering one
-  `AgentRuntime` through the parent's shared renderer.
+- Add `chart/charts/pi/`, a bundle ON by default and flagged `default: true`
+  (provider `anthropic`, model `claude-sonnet-5`), rendering one `AgentRuntime`
+  through the parent's shared renderer.
 - Add `docs/runtimes/pi.md` and its nav entry, claiming specification 2.0.2.
 - **Spec edit, explicitly approved by the user for this change.** Add pi's
   definition path to `RT-3.4` in `docs/contracts/runtime.md`. A PATCH
@@ -45,7 +46,9 @@ field, `runtimeRef`. That is the claim every other runtime already makes.
   35-item conformance checklist for pi.
 - Record six spikes against pi's SDK as design tasks, before any code
   depends on them.
-- **BREAKING**: none. The bundle is off by default and no CRD field changes.
+- **BREAKING**: the `default` runtime is now a copy of pi, not claude, so a route
+  naming no `runtimeRef` runs on pi and needs the `agentops-pi` Secret. No CRD
+  field changes. `pi.default=false` or `pi.enabled=false` keeps claude.
 
 ## Capabilities
 

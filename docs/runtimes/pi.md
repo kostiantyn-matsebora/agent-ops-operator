@@ -30,8 +30,8 @@ SDK, in process. Pi runs the loop and the tools, against whichever model
 provider you configured — unlike every other runtime here, pi is not tied to
 one vendor's account.
 
-A route opts in with `runtimeRef: pi`. Every other route keeps running where
-it did.
+**Pi is the default runtime.** A route that names no `runtimeRef` runs on it, and
+a route names `runtimeRef: claude` to run on the other one.
 
 ![The manager hands a work unit to runtime-pi, which resumes a pi SDK session by its own minted id, checks every tool call against a deny-by-default hook, and reaches bound MCP servers through its own pi-mcp client.]({{ '/assets/img/runtimes/pi-light.svg' | relative_url }}){: .ao-diagram}
 
@@ -41,73 +41,77 @@ it did.
 |---|---|
 | **A choice of model provider** | `pi.provider` + `pi.model` pick pi's own provider and model id. One SDK, many backends. |
 | **The same tools** | `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash` are translated into pi's own built-ins, so `agentops-observe`, `agentops-shell` and `agentops-edit` mean the same thing here as on the other runtimes. |
-| **The same MCP servers** | Every `MCPConfig` a Pipeline binds is connected from the same `mcp.json`, through pi's own MCP client, secrets resolved in the pod. |
+| **The same MCP servers** | Every `MCPConfig` a Pipeline binds is connected from the same `mcp.json`, through the vendor's `pi-mcp` package, secrets resolved in the pod. |
 | **Permissions enforced per call** | the route's allowlist is a `tool_call` hook every call passes through, deny by default. |
 | **Conversations that continue** | each context gets its own minted session id, and a follow-up unit resumes the same session from disk. |
-| **A route-by-route choice** | `runtimeRef: pi` on the Pipelines that suit it. The rest stay where they are. |
+| **A route-by-route choice** | `runtimeRef: claude` on the Pipelines that should run on the reference runtime. The rest run here. |
 
 **The vendor's vocabulary never reaches your wiring.** Pi names its built-in
 tools `read`, `write`, `edit`, `bash`, `grep`, `find`. A Pipeline goes on
 binding `Read`, `Bash`, `mcp__<server>__<tool>`. The translation happens
 inside the runtime, once.
 
-## Turn it on
+## It is on by default
 
-**You need a model provider and a credential it accepts.** Those are the
-values with no default.
+**You need a credential, and nothing else.** The provider defaults to
+`anthropic` and the model to `claude-sonnet-5`. Create the Secret the runtime
+reads, `agentops-pi` with the key `apiKey`, in the namespace runtime pods run in:
+
+```sh
+kubectl -n agent-ops-conversations create secret generic agentops-pi \
+  --from-literal=apiKey=$ANTHROPIC_API_KEY
+```
+
+```powershell
+kubectl -n agent-ops-conversations create secret generic agentops-pi `
+  --from-literal=apiKey=$env:ANTHROPIC_API_KEY
+```
+
+**Or supply the token to the chart and it creates the Secret**, release-managed:
+`--set pi.credentialsSecret.token=placeholder-token`. The runtime reads it as
+`PI_API_KEY`, and exits at start naming the variable when it is missing.
+
+Another provider or model is two values:
 
 ```sh
 helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
   -n agent-ops --create-namespace \
-  --set pi.enabled=true \
   --set pi.provider=anthropic \
-  --set pi.model=claude-sonnet-5 \
-  --set pi.credentialsSecret.token=placeholder-token
+  --set pi.model=claude-sonnet-5
 ```
 
 ```powershell
 helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
   -n agent-ops --create-namespace `
-  --set pi.enabled=true `
   --set pi.provider=anthropic `
-  --set pi.model=claude-sonnet-5 `
-  --set pi.credentialsSecret.token=placeholder-token
+  --set pi.model=claude-sonnet-5
 ```
 
-**Supply the token and the bundle creates the Secret**, release-managed. Leave
-it empty to reference a Secret you manage yourself — the runtime reads it as
-`PI_API_KEY`, and exits at start naming the variable when it is missing.
-
-Then a route selects it:
+A route can name the other runtime:
 
 ```yaml
 pipelines:
   - name: release-notes
     profile: k8s-engineer
-    runtimeRef: pi              # this route runs on pi
+    runtimeRef: claude          # this route runs on the reference runtime
     signalSources: [console]
     channels: [console]
     toolsets: [agentops-observe, k8s-observability]
     mcpConfigs: [k8s-api]
 ```
 
-**Nothing else moves.** `default` stays a copy of the first configured
-runtime — the reference one — so every route naming no `runtimeRef` runs where
-it did.
+**To hand the default back**, set `pi.default=false`. Every route naming no
+`runtimeRef` then runs on the first configured runtime, which is claude, and
+pi stays selectable as `runtimeRef: pi`.
 
-**To make pi the default**, flag it: `pi.default=true`. Every route naming no
-`runtimeRef` then runs here, and the reference runtime is still selectable as
-`runtimeRef: claude`.
-
-**Without Claude.** Turn the reference bundle off (`claude.enabled=false`) and
-this is the only runtime — so it is the default without the flag.
+**To turn pi off**, set `pi.enabled=false`, and claude is the only runtime.
 
 ## What it needs
 
 | Value | Is |
 |---|---|
-| `pi.provider` | the model provider, by pi's own provider id (e.g. `anthropic`). REQUIRED once enabled — the render fails naming this key otherwise |
-| `pi.model` | the model, by the chosen provider's own id (e.g. `claude-sonnet-5`). REQUIRED once enabled, for the same reason |
+| `pi.provider` | the model provider, by pi's own provider id. Default `anthropic`. Setting it empty fails the render |
+| `pi.model` | the model, by the chosen provider's own id. Default `claude-sonnet-5`. Setting it empty fails the render |
 | `pi.credentialsSecret.token` | the provider's credential. Set, the Secret is created. Empty, the named Secret is yours to create |
 | `pi.piCode` | `true` by default. Lets pi read a checkout's `.claude/` the way Claude Code does, through the `pi-code` package. `false` turns it off |
 | `pi.env` | further knobs, as env entries — `PI_RUN_TIMEOUT_S` (default 3600), and `PI_PROVIDER_API` / `PI_BASE_URL` for a self-hosted or BYOK endpoint |

@@ -137,7 +137,6 @@ route.
 ```text
 # Always
 AgentRuntime/claude
-AgentRuntime/default
 ```
 
 <!-- /generated -->

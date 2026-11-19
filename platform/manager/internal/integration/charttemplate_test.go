@@ -21,7 +21,21 @@ import (
 // (the reconciler owns them), and that the RBAC it does ship is read-only and
 // scoped to agentops.dev. Skipped when helm is not installed — CI has it.
 
+// The pi runtime is ON by default and the chart's default runtime. Almost every
+// test here pins one other thing -- another bundle, the egress proxy, the
+// runtime guards -- and was written against the reference `claude` bundle alone,
+// so helmTemplate renders with pi OFF unless a test says otherwise (a later
+// `--set pi.enabled=true` wins). A test about the real out-of-the-box render
+// asks for it by name: helmTemplateDefaults.
+var baselineArgs = []string{"--set", "pi.enabled=false"}
+
 func helmTemplate(t *testing.T, args ...string) string {
+	t.Helper()
+	return helmTemplateDefaults(t, append(append([]string{}, baselineArgs...), args...)...)
+}
+
+// helmTemplateDefaults renders with the chart's own defaults and nothing added.
+func helmTemplateDefaults(t *testing.T, args ...string) string {
 	t.Helper()
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm not installed")
@@ -35,8 +49,14 @@ func helmTemplate(t *testing.T, args ...string) string {
 }
 
 // helmTemplateErr renders expecting FAILURE and returns the message. Used for
-// the guards whose whole value is that they fire.
+// the guards whose whole value is that they fire. Same baseline as helmTemplate.
 func helmTemplateErr(t *testing.T, args ...string) string {
+	t.Helper()
+	return helmTemplateDefaultsErr(t, append(append([]string{}, baselineArgs...), args...)...)
+}
+
+// helmTemplateDefaultsErr is helmTemplateErr against the chart's own defaults.
+func helmTemplateDefaultsErr(t *testing.T, args ...string) string {
 	t.Helper()
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm not installed")
@@ -3422,8 +3442,8 @@ func TestPiBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
 	// claude -- never pi -- is still the one `default` copies: the FIRST
 	// configured runtime wins with neither flagged (wiring.md's precedence,
 	// mirrored here against a second real vendor rather than just ollama).
-	if _, src := defaultRuntimeDoc(out); src != "claude" {
-		t.Errorf("with pi on beside the reference runtime and neither flagged, claude must still be default, got %q", src)
+	if _, src := defaultRuntimeDoc(out); src != "pi" {
+		t.Errorf("pi ships flagged default, so with it on beside the reference runtime it is the default, got %q", src)
 	}
 }
 
@@ -3475,8 +3495,8 @@ func TestPiBundleRequiresProviderAndModel(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--set", "pi.enabled=true"}, "pi.provider is required"},
-		{[]string{"--set", "pi.enabled=true", "--set", "pi.provider=anthropic"}, "pi.model is required"},
+		{[]string{"--set", "pi.enabled=true", "--set", "pi.provider="}, "pi.provider is required"},
+		{[]string{"--set", "pi.enabled=true", "--set", "pi.model="}, "pi.model is required"},
 	} {
 		if out := helmTemplateErr(t, tc.args...); !strings.Contains(out, tc.want) {
 			t.Errorf("%v: want %q, got %s", tc.args, tc.want, out)
@@ -3509,24 +3529,53 @@ func TestPiBundleDefaultsAndBecomesDefault(t *testing.T) {
 	}
 }
 
-// The pi bundle is a FIFTH chart dependency and OFF BY DEFAULT: adding it
-// must not move a release that never asked for it. Isolated to the pi
-// bundle's own possible artifacts (an AgentRuntime named pi, its default
-// copy, its credential Secret) rather than the whole rendered output, which
-// carries unrelated per-run randomness (generated tokens/salts on other
-// bundles) that would make a byte-for-byte comparison of everything noise.
-func TestPiBundleOffRendersNoArtifactsAndIsByteIdenticalEitherWayOfSayingOff(t *testing.T) {
-	implicit := piBundleDocs(helmTemplate(t))
-	explicit := piBundleDocs(helmTemplate(t, "--set", "pi.enabled=false"))
-	if implicit != explicit {
-		t.Fatalf("leaving pi.enabled unset must render byte-identically to stating it false:\nunset:\n%s\nexplicit false:\n%s", implicit, explicit)
+// Turning the pi bundle off must leave none of its artifacts, and stating it
+// off must render the same as the test baseline. Isolated to the pi bundle's
+// own possible artifacts (an AgentRuntime named pi, its default copy, its
+// credential Secret) rather than the whole rendered output, which carries
+// unrelated per-run randomness (generated tokens/salts on other bundles) that
+// would make a byte-for-byte comparison of everything noise.
+func TestPiBundleOffRendersNoArtifacts(t *testing.T) {
+	explicit := piBundleDocs(helmTemplateDefaults(t, "--set", "pi.enabled=false"))
+	baseline := piBundleDocs(helmTemplate(t))
+	if explicit != baseline {
+		t.Fatalf("the test baseline must render exactly what pi.enabled=false renders:\n%s\nvs\n%s", baseline, explicit)
 	}
-	if implicit != "" {
-		t.Fatalf("the pi bundle must render no artifact while off:\n%s", implicit)
+	if explicit != "" {
+		t.Fatalf("the pi bundle must render no artifact while off:\n%s", explicit)
 	}
-	base := helmTemplate(t)
-	if n := strings.Count(base, "\nkind: AgentRuntime\n"); n != 2 {
+	if n := strings.Count(helmTemplateDefaults(t, "--set", "pi.enabled=false"), "\nkind: AgentRuntime\n"); n != 2 {
 		t.Fatalf("want exactly the claude runtime and its default copy while pi is off, got %d", n)
+	}
+}
+
+// Out of the box, with no values at all, pi is on and is what `default` copies:
+// provider anthropic, model claude-sonnet-5, the credential referenced by Secret
+// name. The reference runtime stays beside it, selectable by name. Each lever
+// hands the default back.
+func TestPiIsTheDefaultRuntimeOutOfTheBox(t *testing.T) {
+	out := helmTemplateDefaults(t)
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 3 {
+		t.Fatalf("want pi, claude and the default copy, got %d", n)
+	}
+	doc, src := defaultRuntimeDoc(out)
+	if src != "pi" {
+		t.Fatalf("the default runtime must be a copy of pi, got %q", src)
+	}
+	for _, want := range []string{"name: PI_PROVIDER\n      value: anthropic\n", "name: PI_MODEL\n      value: claude-sonnet-5\n", "name: agentops-pi"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("the default runtime lacks %q:\n%s", want, doc)
+		}
+	}
+	if findDocByKindAndMetaName(out, "AgentRuntime", "claude") == "" {
+		t.Error("the claude runtime must still render, selectable with runtimeRef: claude")
+	}
+	if _, src := defaultRuntimeDoc(helmTemplateDefaults(t, "--set", "pi.default=false")); src != "claude" {
+		t.Errorf("pi.default=false must hand the default back to the first configured runtime, got %q", src)
+	}
+	off := helmTemplateDefaults(t, "--set", "pi.enabled=false")
+	if _, src := defaultRuntimeDoc(off); src != "claude" || strings.Count(off, "\nkind: AgentRuntime\n") != 2 {
+		t.Errorf("pi.enabled=false must leave claude as the default alone, got %q", src)
 	}
 }
 

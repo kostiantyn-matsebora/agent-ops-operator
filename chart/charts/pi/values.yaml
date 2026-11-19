@@ -1,8 +1,9 @@
 # The pi agent runtime, as a bundle.
 #
-# OFF BY DEFAULT. The `claude` bundle is what a fresh install executes on; this
-# one is a FOURTH vendor an install turns on beside it and selects per route
-# with `pipelines[].runtimeRef: pi`. Any number run on one install.
+# ON BY DEFAULT, and the runtime a Pipeline naming no `runtimeRef` runs on. The
+# `claude` bundle stays on beside it and a route selects it with
+# `pipelines[].runtimeRef: claude`. Any number run on one install. Turn this one
+# off with `pi.enabled=false`, or hand `default` back with `pi.default=false`.
 #
 # WHAT IS DIFFERENT ABOUT THIS VENDOR, and why none of it reaches a CRD: pi
 # talks to many model providers through its own SDK rather than one vendor's
@@ -16,16 +17,17 @@
 # WHAT IT DOES NOT SHIP, because that IS the substrate and stays the parent's:
 # the runtime DEFAULTS every runtime inherits, the FLOOR ServiceAccount, and the
 # context volume. This bundle declares one runtime and inherits the rest.
-enabled: false
+enabled: true
 
 # The AgentRuntime CR name, what a Pipeline's `runtimeRef` selects.
 name: pi
 
-# Make THIS the runtime a Pipeline naming no `runtimeRef` runs on. The parent
-# renders the CR named `default` as a copy of the flagged runtime — or of the
-# first configured when none is flagged, so with the `claude` bundle off and
-# this one alone it is the default without the flag. Every runtime is optional.
-default: false
+# THE runtime a Pipeline naming no `runtimeRef` runs on. The parent renders the
+# CR named `default` as a copy of the flagged runtime. Flagged here, so it wins
+# over the `claude` bundle, which is first in the declared list. Set false to
+# hand `default` back to the first configured runtime. Every runtime is optional,
+# and two flagged is refused at render.
+default: true
 
 # The runtime image, and the one place its tag is written. NO domain tooling in
 # it: what an agent may reach is wiring — see docs/concepts.md#runtime-images-are-generic.
@@ -53,12 +55,12 @@ credentialsSecret:
 # through one SDK, so unlike Copilot's account-level default there is no
 # provider to fall back on. REQUIRED once the bundle is enabled; the render
 # fails naming this key otherwise, because a runtime with no provider would
-# start fine and fail every run. e.g. anthropic
-provider: ""
+# start fine and fail every run. Setting it empty fails the render.
+provider: anthropic
 
 # WHICH MODEL, by the chosen provider's own id. REQUIRED once the bundle is
-# enabled, for the same reason. e.g. claude-sonnet-5
-model: ""
+# enabled, for the same reason. Setting it empty fails the render.
+model: claude-sonnet-5
 
 # READ A CHECKOUT'S `.claude/` THE WAY CLAUDE CODE DOES. ON by default. The
 # image carries the `pi-code` package, which loads CLAUDE.md and its @imports,

@@ -142,11 +142,12 @@ sections 2 to 4 depends on an answer until its spike is recorded.
   bootstrap env see it. Verify: the existing guard test still passes.
 - [x] 6.3 `chart/Chart.yaml` gains the dependency with `condition:
   pi.enabled`, and `chart/values.yaml` the documented `pi:` section beside
-  `copilot:`. Verify: `helm lint` passes and a default render is
-  byte-identical to the render before this change.
+  `copilot:`. Verify: `helm lint` passes. (Superseded by 6.6: pi is now on by
+  default, so a default render is no longer unchanged.)
 - [x] 6.4 Bump the chart minor. Verify: `docs-generate.py --check` accepts the
   new version once section 10 is done.
 - [x] 6.5 `pi.piCode` (default true) in `chart/charts/pi/values.yaml`; `agentops.piRuntimeEntry` renders it as `PI_CODE_ENABLED` and omits it from the entry, so it is never an AgentRuntime field.
+- [x] 6.6 Make pi the default runtime: `pi.enabled: true`, `default: true`, `provider: anthropic` and `model: claude-sonnet-5` in `chart/charts/pi/values.yaml`, and `enabled: true` in `chart/values.yaml`. `claude` stays on and selectable.
 
 ## 7. The specification — api-architect
 
@@ -248,6 +249,7 @@ acting, and every real finding was fixed on the branch, none dropped.
   (`docs/installation.md` still prints 19.0.1), exactly the gap task 6.4
   already named as owed to section 10, not a new regression.
 - [x] 8.6 pi-code tests: `picode.test.js` (the env parse, off contributing nothing, on approving the workspace, the real package loading without a load error), the live suite's two-extension assertion run with it off and a new one with it on, and `TestPiBundlePiCodeFlagReachesTheRuntimeAsEnv` with the default-on assertion in `assertPiRuntimeShape`.
+- [x] 8.7 `TestPiIsTheDefaultRuntimeOutOfTheBox`: a default render has pi, claude and a `default` copy of pi with the anthropic provider and model, `pi.default=false` returns it to claude, `pi.enabled=false` leaves claude alone, and an empty provider or model fails the render. The other chart tests render with pi off, through the test baseline.
 
 ## 9. System tests — testing-specialist
 
@@ -399,6 +401,7 @@ archive hook checks it.
   background server), so this is recorded as a workstation-only gap per
   `remote-session.md` rather than claimed done.
 - [x] 10.12 `docs/runtimes/pi.md` states `pi.piCode`, what it loads, that it adds no tool, and the hook and approval consequence; `docs/CHANGELOG.md` names it under the pi bundle entry.
+- [x] 10.13 The install pages (`docs/installation.md`, `docs/getting-started.md`, `README.md`) create `agentops-pi`, `docs/runtimes/pi.md` leads with the default, and `docs/CHANGELOG.md` carries an `[Unreleased]` breaking entry with the upgrade step.
 - [x] 10.11 `docs-generate.py --check`, `retired-vocabulary-guard.py` and
   `publication-guard.py` pass. Verify: each exits zero. All three
   independently re-run after every edit above, each exiting 0:

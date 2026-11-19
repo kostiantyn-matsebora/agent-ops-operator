@@ -70,7 +70,8 @@ dependencies:
     repository: ""
     condition: copilot.enabled
   # embedded subchart (chart/charts/pi) — a further vendor runtime, the pi coding
-  # agent. OFF by default; a route selects it with `runtimeRef: pi`.
+  # agent. ON by default and the default runtime; a route selects the other
+  # with `runtimeRef: claude`.
   - name: pi
     version: 0.1.0
     repository: ""

@@ -214,15 +214,19 @@ The image SHALL carry the `pi-code` package at an exact version from the lockfil
 - **THEN** the pod carries `PI_CODE_ENABLED=true` and the package's extensions load beside the runtime's own, with no load error
 
 ### Requirement: The runtime ships as a bundle that declares only its vendor
-The chart SHALL ship the runtime as `chart/charts/pi/`, OFF by default, in the same shape as the other runtime bundles. It is one `AgentRuntime` rendered through the parent's shared runtime renderer.
+The chart SHALL ship the runtime as `chart/charts/pi/`, ON by default, flagged as the default runtime, in the same shape as the other runtime bundles. It is one `AgentRuntime` rendered through the parent's shared runtime renderer.
 
 It SHALL carry only what names this vendor: the image, its credential Secret reference, its `contextSync.paths` and its own env. It SHALL render no defaults, no floor account, no context volume and no identity of its own.
 
 The bundle SHALL be visible to the parent's declared-runtime list, so that the default-runtime guard, the `default` copy and the manager's bootstrap env account for it as for any other runtime. The image SHALL be pinned to an exact vendor version and installed from a lockfile.
 
-#### Scenario: Existing installs render byte-identically
-- **WHEN** the chart is upgraded with no `pi` values set
-- **THEN** nothing of the bundle renders and every other object is unchanged
+#### Scenario: Pi is the default out of the box
+- **WHEN** the chart is rendered with no `pi` values set
+- **THEN** a `pi` runtime renders with provider `anthropic` and model `claude-sonnet-5`, the `default` runtime is a copy of it, and the `claude` runtime still renders
+
+#### Scenario: Pi can hand the default back or be turned off
+- **WHEN** `pi.default` is `false`, or `pi.enabled` is `false`
+- **THEN** the `default` runtime is a copy of `claude`, and with `pi.enabled` false no pi object renders
 
 #### Scenario: A route selects it by name
 - **WHEN** the bundle is enabled and a `Pipeline` states `runtimeRef: pi`

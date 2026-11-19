@@ -110,7 +110,7 @@ DOCUMENTED_PLACEHOLDERS = {
 }
 # A value too generic to prove documentation by bare substring is anchored to
 # the chart text that actually documents it.
-PLACEHOLDER_ANCHORS = {"pipelines": "wiringMode: pipelines", "anthropic": "e.g. anthropic"}
+PLACEHOLDER_ANCHORS = {"pipelines": "wiringMode: pipelines", "anthropic": "provider: anthropic"}
 CREDENTIAL_PLACEHOLDERS = {
     "placeholder-token",
     "placeholder:token",

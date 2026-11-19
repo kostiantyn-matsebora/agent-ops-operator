@@ -762,8 +762,9 @@ fact.
 It is the same whether a conversation started from a Prometheus alert, a cluster
 Event or a person typing on Telegram.
 
-**A BUNDLE MAY SHIP A RUNTIME.** The reference one does: `claude` is a subchart,
-on by default, and an install using another vendor turns it off.
+**A BUNDLE MAY SHIP A RUNTIME.** Two do: `pi` and `claude` are subcharts, both on
+by default, and `pi` is flagged as the default runtime. An install using another
+vendor turns them off, or hands the default back with `pi.default=false`.
 
 What no bundle renders is the DEFAULTS or the FLOOR — defaults differing per
 bundle would be one fact in as many places as there are vendors.
