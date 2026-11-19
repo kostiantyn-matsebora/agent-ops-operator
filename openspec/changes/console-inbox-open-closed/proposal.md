@@ -38,5 +38,6 @@ None.
 - `platform/console/ui/src/looks/classic/pages/chat/` and `platform/console/ui/src/looks/workspace/`: the inbox or navigation panel, the conversations page, the selection bar, the dialogs, the thread banner and the `/close` chip text, in each look.
 - `platform/console/ui/src/api/`: `hooks.ts`, `types.ts`.
 - `platform/console/convapi.go`: `handleConversations`, `accumulateScopeCounts`.
+- `.github/retired-vocabulary.json`: the retired inbox wording, per `retired-vocabulary.md`.
 - `docs/console.md`, and the console screenshots and demo.
 - No manager, CRD, chart or runtime change. No cluster behaviour changes.
