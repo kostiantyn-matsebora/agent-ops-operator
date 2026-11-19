@@ -29,8 +29,8 @@ for the source and the reference material beside this file.
   the chart passes (`NATS_REPLICAS`, `COMMANDBUS_NATS_REPLICAS`), so a one-server
   install works.
 - A one-replica NATS runs standalone, without cluster routes it waits on forever.
-
-## [Unreleased]
+- The manager no longer exits when NATS is not up yet. It retries the connection
+  and waits, and the chart's probes decide how long that may last.
 
 ## [21.0.0] — 2026-11-19
 
