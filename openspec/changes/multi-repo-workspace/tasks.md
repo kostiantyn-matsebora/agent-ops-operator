@@ -2,7 +2,7 @@
 
 - [ ] 1.1 Add `Repositories`, `AgentFile` and `WorkingDir` to `AgentProfileSpec` and `AgentCapabilitySpec` with the entry fields `name`, `url`, `ref`, `auth`, `keepGit`. Verify the CRDs regenerate (`controller-gen object` and `crd`) and `chart/crds/` shows the fields.
 - [ ] 1.2 Mark `AgentProfileSpec.Repository` deprecated and treat it as a one-entry list. Verify with a unit test that `repository` and `repositories` together are refused by CEL.
-- [ ] 1.3 Add the CEL rules: unique and safe repo names, `agent` exclusive with `agentFile`, no `..` or leading `/` in a path, `repo` required when the list has two or more entries. Verify with envtest cases for each refusal.
+- [ ] 1.3 Add the CEL rules: unique and safe repo names, `agent` exclusive with `agentFile`, and no `..` or leading `/` in a path. Verify with envtest cases for each refusal.
 - [ ] 1.4 Add the resolved list, `agentFile` and `workingDir` to the Conversation record and its CRD mapping in both state backends. Verify the conformance suite round-trips them.
 
 ## 2. Resolution, snapshot and readiness — backend-developer

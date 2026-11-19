@@ -189,7 +189,7 @@ CEL on the CRDs SHALL cover what one object can express. No conversation SHALL b
 #### Scenario: A missing repo with many
 
 - **WHEN** two repositories resolve and `agentFile` omits `repo`
-- **THEN** the holder is not Ready and the reason says `repo` is required
+- **THEN** the holder is not Ready and the reason says `repo` is required and names the resolved list
 
 ### Requirement: A conversation's workspace layout never changes
 
