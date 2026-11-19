@@ -32,7 +32,7 @@ const SCOPE_LABEL: Record<Scope['kind'], string> = {
   errored: 'Errored',
   pipeline: '',
   coordinator: '',
-  closed: 'Archive',
+  closed: 'Closed',
   general: 'General feed',
 }
 

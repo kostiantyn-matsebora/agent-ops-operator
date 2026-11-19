@@ -71,7 +71,7 @@ export const TESTID = {
 
 /** Identifiers keyed by the object they belong to. */
 export const testid = {
-  /** An inbox scope, by its visible label ("Open", "Mine", "Archive", a Pipeline's name). */
+  /** An inbox scope, by its visible label ("Open", "Mine", "Closed", a Pipeline's name). */
   scope: (label: string) => `scope-${label}`,
   /** A conversation's secondary view control: `runs`, `graph`, `sequence` or `yaml`. */
   view: (id: string) => `view-${id}`,

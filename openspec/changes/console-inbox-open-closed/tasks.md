@@ -28,9 +28,9 @@
 
 ## 4. One word for the state — frontend-developer
 
-- [ ] 4.1 Rename Archive to Closed in the scope title (`SCOPE_LABEL` in the workspace `Conversations.tsx`) and the classic and workspace thread banners, and verify the `Thread` and `ThreadPane` tests
-- [ ] 4.2 Change the close dialog text in both looks and the `/close` chip text in `QuickChips.tsx` and the workspace `Composer.tsx`, and verify their tests
-- [ ] 4.3 Add the retired inbox wording ("Show closed", the Archive row, the All scope) to `.github/retired-vocabulary.json` with Open and Closed as replacements, and verify `retired-vocabulary-guard.py` is clean
+- [x] 4.1 Rename Archive to Closed in the scope title (`SCOPE_LABEL` in the workspace `Conversations.tsx`) and the classic and workspace thread banners, and verify the `Thread` and `ThreadPane` tests
+- [x] 4.2 Change the close dialog text in both looks and the `/close` chip text in `QuickChips.tsx` and the workspace `Composer.tsx`, and verify their tests
+- [x] 4.3 Add the retired inbox wording ("Show closed", the Archive row, the All scope) to `.github/retired-vocabulary.json` with Open and Closed as replacements, and verify `retired-vocabulary-guard.py` is clean
 
 ## 5. Visual check — frontend-developer
 

@@ -100,7 +100,7 @@ export function CloseSelectedModal({
             <p>
               {names.length} conversation(s) will be closed. Each is sent{' '}
               <code>/close</code> on its console thread: the agent says goodbye and the threads
-              are archived. The conversation itself stays — its answers and its workspace are kept
+              are closed. The conversation itself stays — its answers and its workspace are kept
               — and <b>it can be reopened</b>.
             </p>
             {memberCount > 0 && (

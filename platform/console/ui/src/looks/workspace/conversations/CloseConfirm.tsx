@@ -24,7 +24,7 @@ export function CloseConfirm({ onConfirm, onCancel }: Readonly<{ onConfirm: (don
       }
     >
       <p>
-        The agent says goodbye and the thread is archived. The conversation itself stays: its answers and its
+        The agent says goodbye and the thread is closed. The conversation itself stays: its answers and its
         workspace are kept, and it can be reopened.
       </p>
       <label className="wk-check">

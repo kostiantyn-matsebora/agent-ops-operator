@@ -502,7 +502,7 @@ function ConversationThread({
       )}
       {detail.archived && (
         <div style={{ padding: '8px 24px' }}>
-          <Alert variant="info" isInline title="This thread was archived">
+          <Alert variant="info" isInline title="This thread was closed">
             The conversation was closed. The transcript stays readable.
           </Alert>
         </div>
@@ -591,7 +591,7 @@ function CloseConfirmModal({
       <ModalHeader title="Close this conversation?" />
       <ModalBody>
         <p>
-          The agent says goodbye and the thread is archived. The conversation itself stays — its
+          The agent says goodbye and the thread is closed. The conversation itself stays — its
           answers and its workspace are kept — and it can be reopened.
         </p>
         <Checkbox

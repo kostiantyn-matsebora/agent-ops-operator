@@ -79,7 +79,7 @@ export function CloseBatchDialog({
       }
     >
       <p>
-        Each agent says goodbye and its thread is archived. The conversations stay: their answers and workspaces are
+        Each agent says goodbye and its thread is closed. The conversations stay: their answers and workspaces are
         kept, and they can be reopened.
       </p>
       {memberCount > 0 && (
