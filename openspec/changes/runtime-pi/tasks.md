@@ -294,7 +294,9 @@ acting, and every real finding was fixed on the branch, none dropped.
   server double built here, since that would duplicate rather than add
   coverage.
 - [x] 9.6 Run the pack. Dispatched as the system-smoke workflow on
-  `change/runtime-pi`: all five pi lanes pass.
+  `change/runtime-pi`: all five pi lanes pass. This is the run 9.1-9.5's
+  "not run" refers to — they were written in a remote session with no
+  cluster, and the dispatched run is what exercised them.
 
 ## 10. Documentation
 
