@@ -6,7 +6,7 @@ The workspace is populated before the agent starts, by an init container in its 
 
 ### Requirement: An init container clones every repository before the runtime starts
 
-The manager SHALL add an init container to a runtime pod whose resolved repository list is non-empty. The container SHALL run the image of the `platform/workspace-sync` component, published as `agentops-workspace-sync` and built for `linux/amd64` and `linux/arm64`. It SHALL mount the workspace at `/workspace`, clone each entry per the layout in `multi-repo-workspace`, and exit before the agent container starts. The list SHALL reach it as one JSON manifest in a single environment variable. Each entry SHALL carry its `name`, `url`, `ref`, `keepGit` and the names of the environment variables holding its credential.
+The manager SHALL add an init container to a runtime pod whose resolved repository list is non-empty. The container SHALL run the image of the `platform/workspace-sync` component, published as `agentops-workspace-sync` and built for `linux/amd64` and `linux/arm64`. It SHALL mount the workspace at `/workspace`, clone each entry per the layout in `multi-repo-workspace`, and exit before the agent container starts. The list SHALL reach it as one JSON array in the environment variable `WORKSPACE_REPOS`. Each entry SHALL carry its `name`, `url`, `ref`, `keepGit` and `credentialEnv`, the name of the environment variable holding its credential. A credential variable is named `REPO_CRED_<n>`, where `<n>` is the entry's zero-based position in the list, because a repository name may hold characters an environment variable name cannot. For example, the second entry's token or ssh key arrives as `REPO_CRED_1`.
 
 #### Scenario: Two repositories are ready before the agent starts
 

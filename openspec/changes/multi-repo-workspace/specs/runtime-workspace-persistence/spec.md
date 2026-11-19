@@ -67,7 +67,7 @@ question is asked.
 The workspace volume SHALL be declared where the context volume is — on the
 `Pipeline` — and `AgentRuntime` SHALL declare neither. When a route binds one,
 its runtime pods SHALL mount `/workspace` from that claim, one
-subdirectory per conversation; when none resolves, the workspace SHALL
+subdirectory per conversation. When none resolves, the workspace SHALL
 remain ephemeral.
 
 The workspace path SHALL stay `/workspace` — claude-code keys its stored

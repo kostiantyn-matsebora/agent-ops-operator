@@ -192,7 +192,7 @@ CEL on the CRDs SHALL cover what one object can express. No conversation SHALL b
 
 ### Requirement: A conversation's workspace layout never changes
 
-A conversation's repositories, agent file and working directory SHALL NOT change after creation. The one to many layout change SHALL therefore never happen to a running conversation. Conversation identity and the workspace `subPath` belong to `conversation-identity` and are not specified here.
+A conversation's repositories, agent file and working directory SHALL NOT change after creation. The one to many layout change SHALL therefore never happen to a running conversation. Conversation identity and the workspace `subPath` belong to a separate openspec change, `conversation-identity`, and are not specified here.
 
 #### Scenario: Changing the layout needs a new conversation
 

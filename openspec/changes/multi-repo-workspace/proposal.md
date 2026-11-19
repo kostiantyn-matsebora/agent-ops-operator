@@ -37,7 +37,7 @@ Not in scope:
 - `workspace-clone-init`: the init container that clones, its credential handling, its idempotent re-run and `keepGit`.
 
 ### Modified Capabilities
-- `runtime-contract`: the runtime no longer clones. It receives a populated `/workspace`, a start directory and a resolved agent file path.
+- `runtime-contract`: the runtime no longer clones. It covers `claude`, `claude-cli` and `pi`, which have no capability spec of their own. It receives a populated `/workspace`, a start directory and a resolved agent file path.
 - `runtime-workspace-persistence`: the mount path is `/workspace`.
 - `profile-is-identity`: a profile declares repositories and an agent file location.
 - `agent-capability-model`: a capability may declare repositories and replaces the profile's list.

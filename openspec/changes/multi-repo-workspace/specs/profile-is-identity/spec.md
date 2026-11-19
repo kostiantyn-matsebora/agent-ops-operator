@@ -89,7 +89,7 @@ names a tool grants nothing.
 #### Scenario: A profile with two repositories and a file in the second
 
 - **WHEN** a profile lists `app` and `infra` and sets `agentFile: {repo: infra, path: agents/ops.md}`
-- **THEN** the agent definition is read from `infra`, and the profile grants no tool or identity by saying so
+- **THEN** the agent definition is read from `infra`, and the profile grants no tool or capability by saying so
 
 #### Scenario: The identity fields carry no capability
 
