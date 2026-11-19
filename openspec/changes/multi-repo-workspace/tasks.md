@@ -38,7 +38,7 @@
 
 - [ ] 6.1 Add the `workspace-sync` image to the chart values and the manager's configuration, and move the runtime bundles to the new tags. Verify the chart render tests pass and `helm template` shows the init image.
 - [ ] 6.2 Bump the chart major version and the image tags consistently. Verify `python3 .github/scripts/docs-generate.py --check` and the release-docs hook agree.
-- [ ] 6.3 Add the retired-vocabulary entries named in the design. Verify `python3 .github/scripts/retired-vocabulary-guard.py` passes.
+- [ ] 6.3 Add the retired-vocabulary entries named in the design, including the `REPO_URL`, `REPO_REF` and `GIT_*` variables, and update the `says` text of the existing data-home-path term that still states `/data/workspace` never moves. Verify `python3 .github/scripts/retired-vocabulary-guard.py` passes.
 
 ## 7. Unit tests
 

@@ -21,12 +21,6 @@ the mount path, so the same volume mounted elsewhere shows the same bytes, and
 the stored transcript directory is named for the WORKING DIRECTORY rather than
 for `$HOME`.
 
-The workspace path moves to `/workspace` in the same release that retires
-`/data/workspace`. The stored transcript directory is named for the working
-directory, so the move strands every context stored under the old path. No
-migration is provided, and an operator SHALL delete conversations before
-upgrading. The path SHALL then stay at `/workspace`.
-
 Turning persistence off SHALL NOT be silent at the moment it costs something. A
 run whose context is gone SHALL FAIL with an explicit reason rather than
 answering without context, and that reason SHALL reach both the thread, for the
@@ -70,7 +64,11 @@ its runtime pods SHALL mount `/workspace` from that claim, one
 subdirectory per conversation. When none resolves, the workspace SHALL
 remain ephemeral.
 
-The workspace path SHALL stay `/workspace` — claude-code keys its stored
+The workspace path moves to `/workspace` in the same release that retires
+`/data/workspace`. The stored transcript directory is named for the working
+directory, so the move strands every context stored under the old path. No
+migration is provided, and an operator SHALL delete conversations before
+upgrading. The path SHALL then stay `/workspace` — claude-code keys its stored
 transcripts by working directory, and relocating it breaks resume. When the
 workspace survives a restart, the init container leaves a completed clone
 untouched, as `workspace-sync` specifies.
