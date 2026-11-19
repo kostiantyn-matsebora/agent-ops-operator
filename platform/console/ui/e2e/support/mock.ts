@@ -106,6 +106,8 @@ export function answer(path: string, query: URLSearchParams, extra: Extra = {}):
 
 export interface Harness {
   url: string
+  /** Writes one server-sent event to every open stream. */
+  push(event: string, data: unknown): void
   stop(): Promise<void>
 }
 
@@ -144,6 +146,9 @@ export async function startHarness(extra: { rows?: object[]; vocabulary?: object
   const { port } = server.address() as AddressInfo
   return {
     url: `http://127.0.0.1:${port}`,
+    push(event, data) {
+      for (const res of live) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    },
     async stop() {
       for (const res of live) res.end()
       live.clear()
