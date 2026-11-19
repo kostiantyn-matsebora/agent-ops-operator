@@ -34,7 +34,7 @@ When a work unit names an agent, or carries the resolved `agentFile` path, and t
 
 ### Requirement: An agent file path is absolute, inside the workspace and chosen by the manager
 
-When a profile or capability declares `agentFile`, the manager SHALL resolve it against the resolved repository list and place the absolute path in the work unit's `agentFile`. The work unit SHALL carry `agent` or `agentFile`, never both. A runtime SHALL refuse a value that is not absolute, contains `..`, or resolves outside the workspace, and SHALL report the refusal as a failed run naming the path. Each runtime SHALL decide how to apply the file. This requirement builds on `agent-definition-adopted-by-runtime`, which makes the runtime read the definition's body and tools, and does not restate it.
+When a profile or capability declares `agentFile`, the manager SHALL resolve it against the resolved repository list and place the absolute path in the work unit's `agentFile`. The work unit SHALL carry `agent` or `agentFile`, never both. A runtime SHALL refuse a value that is not absolute, contains `..`, or resolves outside the workspace, and SHALL report the refusal as a failed run naming the path. Each runtime SHALL decide how to apply the file. What a runtime does with the file's frontmatter is the requirement "The agent definition's declared tools are honoured" above, and what it does with the body belongs to the separate change `agent-definition-adopted-by-runtime`. This requirement states only where the file is.
 
 #### Scenario: A traversal is refused
 
