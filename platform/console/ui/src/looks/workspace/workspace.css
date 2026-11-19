@@ -1520,6 +1520,7 @@ html[data-look='workspace'] #root {
 /* A run in flight: ONE card of a fixed size, whatever arrives. */
 .wk-working {
   align-self: flex-start;
+  flex: none;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2362,6 +2363,8 @@ html[data-look='workspace'] #root {
 /* A root waiting on its members: the same working look, with the members listed. */
 .wk-waiting {
   width: min(92%, 420px);
+  /* Never squeezed by a long thread: the card is as tall as its members. */
+  flex: none;
 }
 
 .wk-wlist {
@@ -2372,6 +2375,8 @@ html[data-look='workspace'] #root {
   flex-direction: column;
   gap: 4px;
   white-space: normal;
+  overflow: visible;
+  flex: none;
   font-family: var(--wk-font);
   font-size: 13px;
 }

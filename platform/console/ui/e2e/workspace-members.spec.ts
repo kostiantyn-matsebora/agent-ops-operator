@@ -78,6 +78,26 @@ test('the thread says it is waiting, with the members as links, and clears when 
   await expect(page.getByTestId(testid.row(ROOT.name))).toHaveAttribute('data-status', 'idle')
 })
 
+test('every member waited on is listed, none clipped, when the thread overflows its pane', async ({ page }) => {
+  // The mock's incident root has a real transcript; three more members are at work under it.
+  for (const [n, e] of [['a', 'k8s-ops'], ['b', 'k8s-ops'], ['c', 'k8s-ops']]) {
+    rows.push({ ...member(`incident-root-${n}`, e), causedBy: { parent: 'incident-root', entry: e } })
+  }
+  await page.setViewportSize({ width: 1400, height: 460 })
+  await open(page, '/conversations/incident-root')
+  const card = page.getByTestId('waiting-on-members')
+  await card.scrollIntoViewIfNeeded()
+  await expect(card).toContainText('Waiting on 3 members')
+  const items = card.locator('li')
+  await expect(items).toHaveCount(3)
+  const box = (await card.boundingBox())!
+  for (let i = 0; i < 3; i++) {
+    const b = (await items.nth(i).boundingBox())!
+    expect(b.height, `member ${i} has no room`).toBeGreaterThan(12)
+    expect(b.y + b.height, `member ${i} spills out of the card`).toBeLessThanOrEqual(box.y + box.height + 1)
+  }
+})
+
 test('a member invoked while the coordinator is open appears nested and starts the wait', async ({ page }) => {
   rows.splice(1, 2) // nothing invoked yet
   await open(page, `/conversations/${ROOT.name}`)

@@ -62,12 +62,12 @@ func TestConversationListPagesByRootsKeepingEveryMember(t *testing.T) {
 
 	// The next page continues by trees, not rows.
 	names, _ = get("limit=2&offset=2")
-	if len(names) != 8 || !contains(names, "root1") || !contains(names, "root0-m2") {
+	if len(names) != 8 || !hasName(names, "root1") || !hasName(names, "root0-m2") {
 		t.Fatalf("second page wrong: %v", names)
 	}
 }
 
-func contains(xs []string, x string) bool {
+func hasName(xs []string, x string) bool {
 	for _, v := range xs {
 		if v == x {
 			return true
