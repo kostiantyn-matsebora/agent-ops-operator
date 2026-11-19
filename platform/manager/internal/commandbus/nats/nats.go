@@ -93,8 +93,7 @@ func Connect(cfg Config) (*Conn, error) {
 		nats.Name("agentops-manager-commandbus"),
 		nats.MaxReconnects(-1),
 		nats.ReconnectWait(time.Second),
-		// A server that is not up yet is not a failure: connect in the
-		// background and let the callers wait, the probes decide the rest.
+		// The bus server may start after the manager: retry, never fail.
 		nats.RetryOnFailedConnect(true),
 	}
 	if cfg.ConnectTimeout > 0 {
