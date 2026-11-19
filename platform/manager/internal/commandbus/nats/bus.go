@@ -187,7 +187,7 @@ func Open(ctx context.Context, conn *Conn, scope string, opts ...Option) (*Bus, 
 	cfg := newBusConfig(opts)
 	replicas := cfg.replicas
 	if replicas <= 0 {
-		replicas = conn.cfg.replicas()
+		replicas = conn.cfg.Replicas
 	}
 	subj := newSubjects(scope)
 

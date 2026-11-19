@@ -91,18 +91,23 @@ spec:
             - "4222"
             - -m
             - "8222"
+            {{- /* One replica runs standalone: a lone server in cluster mode waits forever for routes that never come. */}}
+            {{- if gt (int ($v.replicas | default 3)) 1 }}
             - --cluster
             - nats://0.0.0.0:6222
             - --cluster_name
             - agentops-nats
+            {{- end }}
             # A JetStream cluster refuses to start without a server name,
             # and each replica needs its OWN: the pod name, which the
             # StatefulSet keeps stable across restarts (a changed name is a
             # different peer to the Raft group).
             - --server_name
             - $(POD_NAME)
+            {{- if gt (int ($v.replicas | default 3)) 1 }}
             - --routes
             - {{ include "nats.routes" . | quote }}
+            {{- end }}
             # Kubernetes expands $(VAR) against THIS container's own env —
             # a kubelet mechanism, not nats-server's — so the password
             # never appears as a literal in the pod spec the API server

@@ -21,7 +21,7 @@ spec:
   # never-populated queue. A crashed leader's in-flight claim recovers through
   # the SAME Lease failover that already gates every reconciler — no new
   # heartbeat mechanism.
-  replicas: {{ .Values.replicas }}
+  replicas: {{ include "agentops.managerReplicas" . }}
   selector:
     matchLabels:
       app.kubernetes.io/name: agentops-manager
@@ -35,6 +35,9 @@ spec:
       # defeats the point of a second replica (the node is still a single
       # point of failure), and the leader-elected reconcile loop means a
       # pod that cannot schedule simply waits rather than losing work.
+      # Only with a second replica to keep apart: at one replica the rule
+      # would stall every same-node rollout on its own surge pod.
+      {{- if gt (int (include "agentops.managerReplicas" .)) 1 }}
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -42,6 +45,7 @@ spec:
                 matchLabels:
                   app.kubernetes.io/name: agentops-manager
               topologyKey: kubernetes.io/hostname
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
 {{ toYaml . | indent 8 }}
@@ -78,7 +82,7 @@ spec:
             - name: NATS_URL
               value: {{ printf "nats://agentops-nats-client.%s.svc:4222" .Release.Namespace | quote }}
             - name: NATS_REPLICAS
-              value: {{ .Values.nats.replicas | quote }}
+              value: {{ include "agentops.natsStorageReplicas" . | quote }}
             - name: NATS_USER
               valueFrom:
                 secretKeyRef:
@@ -104,6 +108,10 @@ spec:
             # unless commandBus.nats.enabled or .url says otherwise.
             - name: COMMANDBUS_NATS_URL
               value: {{ include "agentops.commandBusNatsURL" . | quote }}
+            {{- with include "agentops.commandBusReplicas" . }}
+            - name: COMMANDBUS_NATS_REPLICAS
+              value: {{ . | quote }}
+            {{- end }}
             - name: COMMANDBUS_NATS_USER
               valueFrom:
                 secretKeyRef:
@@ -141,7 +149,7 @@ spec:
             # Deployment's own spec.replicas, never a second,
             # independently-settable number.
             - name: MANAGER_REPLICAS
-              value: {{ .Values.replicas | quote }}
+              value: {{ include "agentops.managerReplicas" . | quote }}
             - name: MAX_ACTIVE_CONVERSATIONS
               value: {{ .Values.maxActiveConversations | quote }}
             - name: MAX_QUEUED_CONVERSATIONS

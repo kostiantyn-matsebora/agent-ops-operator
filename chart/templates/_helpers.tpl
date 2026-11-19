@@ -356,6 +356,16 @@ IT READS NO CLUSTER, so it protects a GitOps render exactly as it protects an
 interactive one. */ -}}
 {{- define "agentops.stateStoreGuard" -}}
 {{- $backend := include "agentops.stateBackend" . -}}
+{{- if eq $backend "nats" -}}
+{{- $pods := int (include "agentops.natsReplicas" .) -}}
+{{- $copies := int (include "agentops.natsStorageReplicas" .) -}}
+{{- if and (lt $pods 3) (not .Values.global.demo.enabled) -}}
+{{- fail (printf "nats.replicas=%d is refused: outside demo mode the NATS server needs at least 3 pods. Set nats.replicas to 3 or more." $pods) -}}
+{{- end -}}
+{{- if gt $copies $pods -}}
+{{- fail (printf "nats.storageReplicas=%d exceeds nats.replicas=%d: a stream cannot keep more copies than there are servers." $copies $pods) -}}
+{{- end -}}
+{{- end -}}
 {{- $known := fromYamlArray (include "agentops.stateStoreBackends" .) -}}
 {{- if and (ne $backend "kube") (not (has $backend $known)) -}}
 {{- fail (printf "stateStore.backend=%q is not a known state backend (known: %s)" $backend (join ", " (concat (list "kube") $known))) -}}
@@ -485,7 +495,7 @@ an interactive one — same posture as `agentops.stateStoreGuard` above. */ -}}
 {{- fail (printf "commandBus.backend=%q is not a known command bus backend (known: memory, nats)" $backend) -}}
 {{- end -}}
 {{- if eq $backend "memory" -}}
-{{- $replicas := int (.Values.replicas | default 1) -}}
+{{- $replicas := int (include "agentops.managerReplicas" .) -}}
 {{- if gt $replicas 1 -}}
 {{- fail (printf "commandBus.backend=memory is refused with replicas=%d: the memory backend keeps its tasks in one process's heap, invisible to every other replica. Set commandBus.backend to nats for a multi-replica install, or replicas to 1." $replicas) -}}
 {{- end -}}
@@ -1029,6 +1039,55 @@ Call with the volume's values block plus the root.
 - ReadWriteOnce
 {{- else -}}
 - ReadWriteMany
+{{- end -}}
+{{- end -}}
+
+{{- /* THE MANAGER'S REPLICA COUNT. An explicit `replicas` wins, else 1 under
+`global.demo.enabled` (a demo is one node and the second replica's required
+anti-affinity would sit Pending), else 2. */ -}}
+{{- define "agentops.managerReplicas" -}}
+{{- if not (kindIs "invalid" .Values.replicas) -}}
+{{- int .Values.replicas -}}
+{{- else if .Values.global.demo.enabled -}}
+1
+{{- else -}}
+2
+{{- end -}}
+{{- end -}}
+
+{{- /* THE STATE-STORE NATS SERVER'S REPLICA COUNT, same rule: explicit wins,
+else 1 under demo mode, else 3. */ -}}
+{{- define "agentops.natsReplicas" -}}
+{{- if not (kindIs "invalid" .Values.nats.replicas) -}}
+{{- int .Values.nats.replicas -}}
+{{- else if .Values.global.demo.enabled -}}
+1
+{{- else -}}
+3
+{{- end -}}
+{{- end -}}
+
+{{- /* HOW MANY SERVERS KEEP A COPY OF EACH STREAM, the state store's and, on the
+shared server, the command bus's. Independent of the pod count: explicit wins,
+else 1 under demo mode, else 3. */ -}}
+{{- define "agentops.natsStorageReplicas" -}}
+{{- if not (kindIs "invalid" .Values.nats.storageReplicas) -}}
+{{- int .Values.nats.storageReplicas -}}
+{{- else if .Values.global.demo.enabled -}}
+1
+{{- else -}}
+3
+{{- end -}}
+{{- end -}}
+
+{{- /* THE REPLICA COUNT THE COMMAND BUS'S BUCKETS ARE CREATED WITH — that of
+the server it connects to. Empty for an external `commandBus.nats.url`, where
+the chart cannot know and the manager keeps its own default. */ -}}
+{{- define "agentops.commandBusReplicas" -}}
+{{- if eq (include "agentops.commandBusNatsShared" .) "true" -}}
+{{- include "agentops.natsStorageReplicas" . -}}
+{{- else if eq (include "agentops.commandBusNatsBundleEnabled" .) "true" -}}
+{{- int (((.Values.commandBus | default dict).nats | default dict).replicas | default 3) -}}
 {{- end -}}
 {{- end -}}
 

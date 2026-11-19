@@ -37,3 +37,33 @@ func TestClaimStalenessSecondsRendersAndIsOverridable(t *testing.T) {
 		t.Fatalf("claimStalenessSeconds must be overridable: %s", out)
 	}
 }
+
+// Demo mode is one node. A second manager would sit Pending behind its own
+// required anti-affinity, and three NATS servers are one failure domain, so
+// demo mode defaults both to one. An explicit value still wins.
+func TestDemoModeDefaultsToOneManagerAndOneNats(t *testing.T) {
+	out := helmTemplate(t, "--set", "global.demo.enabled=true")
+	for _, want := range []string{
+		"name: MANAGER_REPLICAS\n              value: \"1\"",
+		"name: NATS_REPLICAS\n              value: \"1\"",
+		"name: COMMANDBUS_NATS_REPLICAS\n              value: \"1\"",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("demo mode must render %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "requiredDuringSchedulingIgnoredDuringExecution") {
+		t.Fatalf("one manager replica must carry no required anti-affinity")
+	}
+
+	out = helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "replicas=2", "--set", "nats.replicas=3", "--set", "nats.storageReplicas=3")
+	for _, want := range []string{
+		"name: MANAGER_REPLICAS\n              value: \"2\"",
+		"name: NATS_REPLICAS\n              value: \"3\"",
+		"name: COMMANDBUS_NATS_REPLICAS\n              value: \"3\"",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("an explicit value must win under demo mode, want %q", want)
+		}
+	}
+}

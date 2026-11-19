@@ -164,11 +164,12 @@ func TestNewNatsCommandBusRequiresTheURL(t *testing.T) {
 	}
 }
 
-func TestNewNatsCommandBusRefusesAnUnreachableServer(t *testing.T) {
+func TestNewNatsCommandBusKeepsWaitingForAnUnreachableServer(t *testing.T) {
 	t.Setenv(commandBusNatsURLEnv, "nats://127.0.0.1:1")
-	if _, err := newNatsCommandBus(testManager(t), "agent-ops"); err == nil {
-		t.Fatal("want an error connecting to a closed port")
-	}
+	requireKeepsWaiting(t, func() error {
+		_, err := newNatsCommandBus(testManager(t), "agent-ops")
+		return err
+	})
 }
 
 func TestNewNatsCommandBusFailsWhenTheBucketsCannotBePlaced(t *testing.T) {

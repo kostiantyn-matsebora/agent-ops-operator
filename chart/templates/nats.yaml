@@ -16,13 +16,14 @@ so there is no second place "is nats selected" can answer differently.
 */ -}}
 {{- include "agentops.stateStoreGuard" . }}
 {{- if eq (include "agentops.stateBackend" .) "nats" }}
-{{ include "nats.statefulset" (dict "root" $ "nats" .Values.nats) }}
+{{- $nats := set (deepCopy .Values.nats) "replicas" (int (include "agentops.natsReplicas" .)) }}
+{{ include "nats.statefulset" (dict "root" $ "nats" $nats) }}
 ---
-{{ include "nats.services" (dict "root" $ "nats" .Values.nats) }}
+{{ include "nats.services" (dict "root" $ "nats" $nats) }}
 ---
-{{ include "nats.pdb" (dict "root" $ "nats" .Values.nats) }}
+{{ include "nats.pdb" (dict "root" $ "nats" $nats) }}
 ---
-{{ include "nats.credential" (dict "root" $ "nats" .Values.nats) }}
+{{ include "nats.credential" (dict "root" $ "nats" $nats) }}
 ---
-{{ include "nats.networkpolicy" (dict "root" $ "nats" .Values.nats) }}
+{{ include "nats.networkpolicy" (dict "root" $ "nats" $nats) }}
 {{- end }}

@@ -673,9 +673,16 @@ for the rollback caveat before you upgrade a production install.
 The clustered JetStream server the default backend runs on three replicas
 of, from `chart/charts/nats/values.yaml`:
 
+{: .ao-callout}
+> **A production install runs at least three NATS pods.** The chart refuses
+> `nats.replicas` below `3` outside demo mode, and refuses `nats.storageReplicas`
+> above `nats.replicas`. More than three pods is fine, and each stream still
+> keeps `nats.storageReplicas` copies. Only demo mode runs one pod.
+
 | Key | Default | Consequence |
 |---|---|---|
-| `nats.replicas` | `3` | servers in the cluster. `1` is a conscious single point of failure, and the chart notes say so. Set at install: buckets that exist keep their count and the manager logs the difference. A different count needs a fresh install on new volumes, which starts with empty buckets and carries no live state over |
+| `nats.replicas` | `3`, or `1` under demo mode | NATS server pods. Outside demo mode it cannot be less than `3`, and may be more. Scaling the pods never changes how many copies each stream keeps |
+| `nats.storageReplicas` | `3`, or `1` under demo mode | how many servers keep a copy of each stream, for the state store and for the command bus on the same servers. It cannot exceed `nats.replicas`. The manager passes it through and has no default of its own. Streams that exist are brought to the new value on the manager's next start |
 | `nats.persistence.size` | `10Gi` | each server's own store directory |
 | `nats.persistence.storageClassName` | `""` | the cluster's default provisioner — same convention as `persistence.context` above |
 | `nats.auth.user` | `""` | an explicit username. Left empty, it is the literal `nats`, never generated |
@@ -732,7 +739,7 @@ The dedicated bundle comes from `chart/charts/commandbus/values.yaml` — not a 
 |---|---|---|
 | `commandBus.nats.enabled` | `null` | unset shares the state store's NATS. `true` renders a dedicated bundle |
 | `commandBus.nats.url` | `""` | an external server instead of the shared or dedicated one. Mutually exclusive with a dedicated bundle |
-| `commandBus.nats.replicas` | `3` | servers in the cluster. Chart-time only — the manager always opens every bucket at its own compiled-in replica count, regardless of this value |
+| `commandBus.nats.replicas` | `3` | servers in the dedicated command bus bundle, and the copies each of its streams keeps. On the shared state servers the bus follows `nats.storageReplicas` instead. Behind an external `commandBus.nats.url` the manager sends no count |
 | `commandBus.nats.persistence.size` | `10Gi` | each server's own store directory |
 | `commandBus.nats.persistence.storageClassName` | `""` | the cluster's default provisioner |
 | `commandBus.nats.auth.user` | `""` | an explicit username |
@@ -763,7 +770,7 @@ Every value here, and the rest the dependency takes, is in
 | `maxActiveConversations` | `5` | how many agents hold a pod at once. Over-cap work waits in `Pending` with no pod and no thread |
 | `maxQueuedConversations` | `50` | the backlog bound. `0` queues nothing. Past it, a chat message is declined and the sender is told. A machine signal stays `Pending` and routes when the backlog drains |
 | `global.agentops.runtimeDefaults.idleTtlMinutes` | `1` | how long a finished agent keeps its pod. Raise it for expensive startup |
-| `replicas` | `2` | how many manager pods run. Safe above 1: every channel op is bus-backed and visible to every replica, never served from an in-memory queue only the leader populated |
+| `replicas` | `2`, or `1` under demo mode | how many manager pods run. Demo mode is one node, where a second pod would sit Pending behind its own anti-affinity, so it defaults to one and drops that rule. A value you type wins in both modes. Safe above 1: every channel op is bus-backed and visible to every replica, never served from an in-memory queue only the leader populated |
 | `signalConsumerConcurrency` | `4` | how many consumers route stored signals at once on the leader. Messages of one `(source, initiationId)` still run one at a time, in arrival order |
 | `signalRetryDeadline` | `1h` | how long a claimant may sit `Routing` before the leader marks it `Failed`, measured from the signal's first attempt |
 | `maxSignalsPerSource` | `200` | the cap on non-terminal `Signal`s per source. Over it the leader evicts the oldest |

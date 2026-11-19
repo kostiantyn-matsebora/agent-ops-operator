@@ -52,8 +52,8 @@ fifteen minutes, most of it the install.
    [the Kubernetes integration]({{ '/integrations/kubernetes/' | relative_url }}),
    wired to the console. The token is just to sign in — pick a real one outside
    a laptop. To have the chart create the model credential for you, add
-   `--set claude.credentialsSecret.token=<token>` here: it creates the Secret
-   in `agent-ops-conversations`, and step 4 is then already done.
+   `--set pi.credentialsSecret.token=<token>` here: it creates the `agentops-pi`
+   Secret in `agent-ops-conversations`, and step 4 is then already done.
 
    ```sh
    helm install agent-ops \
@@ -139,6 +139,10 @@ fifteen minutes, most of it the install.
 
 ## What you just installed
 
+Demo mode runs **one manager and one state server**, so it fits a one-node
+cluster. A real install runs two managers and at least three state servers, see
+[Installation]({{ '/installation/' | relative_url }}).
+
 That answer came from objects the chart created:
 
 | Object | What it is |
@@ -148,7 +152,7 @@ That answer came from objects the chart created:
 | `AgentCapability/k8s-observe` | the coordinator-mode wiring: those sources, that profile, a read-only toolset, gathered under the `Coordinator`'s own `agents[]` |
 | `Pipeline/k8s-observe-pipeline` | the SAME route rendered a second time, as a plain `Pipeline` — demo mode's showcase of the simpler primitive |
 | `Coordinator/agentops-coordinator` | the orchestrator every enabled bundle's capability is gathered under |
-| `AgentRuntime/default` | the image it runs in, and the credential it uses. It comes from the `claude` bundle, which is on by default |
+| `AgentRuntime/default` | the image it runs in, and the credential it uses. It comes from the `pi` bundle, which is on by default |
 
 Neither route has permissions of its own — both read your cluster through the
 bundle's read-only MCP server.

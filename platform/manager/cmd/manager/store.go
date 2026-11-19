@@ -96,8 +96,10 @@ func newKubeStores(mgr ctrl.Manager, namespaces namespace.Namespaces) (state.Sto
 // Lease, repeating while an old-version replica's pod may still be writing
 // (design D-10).
 // natsOpenTimeout bounds how long startup waits for the state server to accept
-// its buckets. A variable so a test need not wait it out.
-var natsOpenTimeout = 2 * time.Minute
+// its buckets. Zero, the default, waits until it does: whether the manager has
+// waited too long is the startup probe's decision, never the manager's. A
+// variable so a test can bound it.
+var natsOpenTimeout time.Duration
 
 func newNatsStores(mgr ctrl.Manager, namespaces namespace.Namespaces) (state.Stores, error) {
 	cfg, err := natsstate.ConfigFromEnv()
@@ -110,8 +112,8 @@ func newNatsStores(mgr ctrl.Manager, namespaces namespace.Namespaces) (state.Sto
 	}
 
 	// A cluster still forming its quorum cannot place a replicated bucket yet.
-	// Wait for it, bounded, instead of exiting into a crash loop.
-	openCtx, cancelOpen := context.WithTimeout(context.Background(), natsOpenTimeout)
+	// Wait for it instead of exiting into a crash loop.
+	openCtx, cancelOpen := openWaitContext(natsOpenTimeout)
 	defer cancelOpen()
 	// Under nats a conversation is a record, not a CR (design D-1 of
 	// split-conversation-namespace): the split moves no CR here, only
@@ -283,4 +285,13 @@ func podVersion(pod corev1.Pod) string {
 		}
 	}
 	return ""
+}
+
+// openWaitContext is the context a start-up wait for a dependency runs under:
+// bounded by timeout when one is set, otherwise until the process is stopped.
+func openWaitContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+	return context.WithCancel(context.Background())
 }
