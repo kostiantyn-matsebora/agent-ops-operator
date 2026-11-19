@@ -123,7 +123,7 @@ sections 2 to 4 depends on an answer until its spike is recorded.
   CRITICAL and HIGH findings, pinning as copilot does. Verify: the scan
   reports none. Run against the `linux/amd64` build above, via the same
   Trivy invocation `.github/actions/trivy-scan` uses — zero CRITICAL/HIGH.
-- [ ] 5.3 Publish by tag from the merged tree,
+- [x] 5.3 Publish by tag from the merged tree,
   `runtime-pi-v0.1.0`. Verify: check the registry for both architectures,
   not the tag, and flip the package's Actions access and visibility once.
 
