@@ -326,7 +326,10 @@ async function record(page: Page, harness: Harness, theme: string): Promise<Segm
       // exactly as the reply beat's is. Taking it here as well is what made
       // this beat twice its stated length.
       await page.locator('[data-testid="start-conversation"]').click()
-      await page.getByText('is answering', { exact: false }).first().waitFor({ timeout: 30_000 })
+      // Look-neutral: the classic look announces "is answering", the workspace
+      // look just returns to the list. Both leave the composer, so that is what
+      // the beat waits for.
+      await page.locator('[data-testid="start-conversation"]').waitFor({ state: 'detached', timeout: 30_000 })
     }
 
     if (beat.act === 'reply') {
@@ -557,6 +560,15 @@ test('records the landing page demo in both themes', async ({ browser }) => {
       })
       const page = await context.newPage()
       await page.clock.setFixedTime(NOW)
+      // The site shows the console's workspace look. The build's own default is
+      // `classic` (an install names its default through `console.defaultLook`),
+      // so the capture states the viewer's choice the way the switcher stores it.
+      await page.addInitScript(() => {
+        localStorage.setItem(
+          'agentops-console-look',
+          JSON.stringify({ state: { choice: 'workspace' }, version: 1 }),
+        )
+      })
       await page.addInitScript(() => {
         const css = '*,*::before,*::after{transition:none!important;animation:none!important}'
         const apply = () => {

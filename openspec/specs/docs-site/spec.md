@@ -9,8 +9,8 @@ each page owes a reader.
   Gemfile and no plugin outside the Pages set — which is what makes every
   generated asset a committed file with a CI check behind it.
 - **Looks like** the console, deliberately: the same `--ao-*` tokens, the same
-  mark, the same masthead-over-sidebar shell, the same Red Hat families,
-  self-hosted, with a three-state theme control.
+  mark, the same masthead-over-sidebar shell, the same type stack as the
+  console's workspace look, with a three-state theme control.
 - **Owes** — one requirement per page, stating the reader it is for and the
   order it answers them in: landing, Introduction, Getting started, Installation,
   the Console page and the guides.
@@ -141,8 +141,9 @@ it SHALL reproduce:
 - **The shell**: a fixed masthead carrying the mark and the product word, over a
   left navigation sidebar and a content column — the console's arrangement, not
   a centred blog column.
-- **The type**: Red Hat Display for headings, Red Hat Text for body, Red Hat
-  Mono for code — the same families PatternFly gives the console.
+- **The type**: the console workspace look's stack — Inter, then the system UI
+  face, for headings and body, and the system monospace for code. No font file is
+  loaded for it.
 
 The site SHALL NOT load PatternFly's component CSS or JavaScript. Identity is
 carried by tokens, mark, shell and type; a prose site needs none of the
@@ -163,11 +164,15 @@ component library.
 
 ### Requirement: Fonts are self-hosted with no third-party requests
 
-The Red Hat variable fonts SHALL be vendored into the repository under
-`docs/assets/fonts/` and declared with `@font-face` rules served from the site's
-own origin. The site SHALL make NO request to any third-party host at
-runtime — no font CDN, no analytics, no external stylesheet or script — and
-SHALL render identically with no network access beyond its own origin.
+The Red Hat variable fonts SHALL stay vendored under `docs/assets/fonts/` and
+declared with `@font-face` rules served from the site's own origin.
+
+They are for the inlined domain-model figure, whose text names them. The page's
+own type is the console's stack and loads no font file.
+
+The site SHALL make NO request to any third-party host at runtime — no font
+CDN, no analytics, no external stylesheet or script — and SHALL render
+identically with no network access beyond its own origin.
 
 The fonts' SIL OFL-1.1 licence text SHALL be committed alongside them, and
 `font-display: swap` SHALL be set so text is readable before the font loads.
@@ -176,7 +181,7 @@ The fonts' SIL OFL-1.1 licence text SHALL be committed alongside them, and
 
 - **WHEN** a visitor loads the site with all origins except the site's own
   blocked
-- **THEN** the page renders with the Red Hat families, the full palette and
+- **THEN** the page renders with the console's type stack, the full palette and
   working navigation
 
 #### Scenario: The font licence is checked
