@@ -43,3 +43,24 @@ to report before the code is written.
 - **THEN** the ollama runtime finds `/workspace` already populated and performs no clone
 - **AND** its built-in file tools are scoped to `/workspace`
 
+
+### Requirement: The image stays generic
+
+The runtime image SHALL carry what it needs to run a shell, ordinary shell utilities, and SHALL carry NO domain
+tooling: no `kubectl`, no cloud CLI, no bundled MCP server. It does not need `git` or `openssh-client` to clone, since the init container owns cloning. Either MAY be present so an agent can run git, and neither is required by the contract. What an agent may
+reach is wiring, expressed by `MCPConfig` and `MCPToolset` on a Pipeline.
+
+An adopter needing a CLI in the sandbox SHALL derive an image and point
+`AgentRuntime.spec.image` at it. The image SHALL NOT hold any channel
+credential or git credential and SHALL post to no transport — agent output reaches chat through
+the manager and its adapters.
+
+#### Scenario: Cluster access is wanted
+
+- **WHEN** an adopter wants the agent to reach Kubernetes
+- **THEN** it is bound as MCP tooling on the Pipeline, not baked into this image
+
+#### Scenario: The image is inspected
+
+- **WHEN** the built image is inspected
+- **THEN** it contains no cluster or cloud CLI, no channel credential and no git credential

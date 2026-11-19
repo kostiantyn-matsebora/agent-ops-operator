@@ -173,6 +173,8 @@ The `Ready` condition on `Pipeline` and `Coordinator`, the two holders of a reso
 | `agentFile.repo` is missing with two or more repositories | the list |
 | two entries share a name (a list assembled across objects) | the name |
 
+An `AgentCapability` has no `Ready` condition for these causes. It reaches a conversation only through a holder, and an unwired capability is inert.
+
 CEL on the CRDs SHALL cover what one object can express. No conversation SHALL be created from a holder that is not Ready for these causes, and the failure SHALL NOT be left to surface at pod start.
 
 #### Scenario: A dangling working directory
