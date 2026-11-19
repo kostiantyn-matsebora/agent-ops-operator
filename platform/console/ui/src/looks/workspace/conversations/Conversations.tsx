@@ -278,7 +278,7 @@ function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; co
           // (console-conversation-tree: "A member SHALL NOT be selectable in
           // this view") — neither the box nor the modifier-click that starts
           // a selection from a row it did not already carry one on.
-          const isMember = t.depth > 0 || Boolean(t.row.causedBy)
+          const isMember = Boolean(t.row.causedBy)
           return (
             <Row
               key={t.row.name}
