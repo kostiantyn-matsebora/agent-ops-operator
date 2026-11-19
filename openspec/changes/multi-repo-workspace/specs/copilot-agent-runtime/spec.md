@@ -5,7 +5,7 @@ The project SHALL ship a third reference `AgentRuntime` image, `runtime-copilot`
 
 No CRD field, manager behaviour, `Pipeline`, `AgentProfile` or `MCPToolset` SHALL need to change for a conversation to run on it. `Pipeline.spec.runtimeRef` SHALL be the entire switch between vendors.
 
-The image SHALL stay generic by construction — git and generic shell utilities for the agent's own use, with no clone routine and no git credential, and no domain tooling. What an agent may reach is wiring.
+The image SHALL stay generic by construction — generic shell utilities, and git only as the agent's own tool and never required by the contract, with no clone routine and no git credential, and no domain tooling. What an agent may reach is wiring.
 
 #### Scenario: The same wiring runs on any vendor
 - **WHEN** a `Pipeline`'s `runtimeRef` is pointed from a claude or ollama runtime at the copilot runtime, changing nothing else

@@ -9,7 +9,7 @@
 
 - [ ] 2.1 Resolve the list in `dispatch.ResolveCapability`: the capability's list replaces the profile's, `repository` counts as one entry, both empty means no checkout. Verify with table tests for every precedence case.
 - [ ] 2.2 Snapshot the resolved list at conversation creation next to `SnapshotFor`, and make `runtimepod.Build` read the snapshot instead of the live profile for repositories. Verify a profile edit after creation changes nothing for a rebuilt pod, and a reopen reuses the snapshot.
-- [ ] 2.3 Report a dangling `agentFile.repo` or prompt qualifier, a `workingDir` naming an unknown repo, a `workingDir` with fewer than two repos, a missing `agentFile.repo` with two or more repos and duplicate names as a `Ready` condition on `Pipeline` and `Coordinator`. Verify each cause in the envtest suite with its reason string.
+- [ ] 2.3 Report a dangling `agentFile.repo` or prompt qualifier, a `workingDir` naming an unknown repo, a `workingDir` with fewer than two repos, and a missing `agentFile.repo` with two or more repos as a `Ready` condition on `Pipeline` and `Coordinator`. Verify each cause in the envtest suite with its reason string.
 
 ## 3. The workspace-sync component — backend-developer
 

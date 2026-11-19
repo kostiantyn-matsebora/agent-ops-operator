@@ -124,7 +124,7 @@ workingDir: infra:  agent cwd = /workspace/infra
 
 ### Requirement: An agent file is named by location
 
-`AgentProfile.spec` and `AgentCapability.spec` SHALL accept `agentFile: {repo?, path}`. It SHALL be mutually exclusive with `agent`, which stays as the name form for the conventional single-repository case. The rules SHALL be:
+`AgentProfile.spec` and `AgentCapability.spec` SHALL accept `agentFile: {repo?, path}`. On a profile it SHALL be mutually exclusive with `agent`, which stays as the name form for the conventional single-repository case and exists only on the profile. A capability's `agentFile` SHALL take precedence over the profile's `agent` for that capability's conversations. The rules SHALL be:
 
 | Field | Rule |
 |---|---|
@@ -171,7 +171,6 @@ The `Ready` condition on `Pipeline` and `Coordinator`, the two holders of a reso
 | `workingDir` names a repository not in the resolved list | the repo and the list |
 | `workingDir` is set with fewer than two repositories | the count |
 | `agentFile.repo` is missing with two or more repositories | the list |
-| two entries share a name (a list assembled across objects) | the name |
 
 An `AgentCapability` has no `Ready` condition for these causes. It reaches a conversation only through a holder, and an unwired capability is inert.
 
