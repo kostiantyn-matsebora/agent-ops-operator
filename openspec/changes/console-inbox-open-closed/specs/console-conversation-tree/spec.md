@@ -5,9 +5,11 @@ The manager cascades a close through every live descendant. The confirmation for
 
 Where the selected roots have descendants, the confirmation SHALL state in a separate line how many descendants close with them, at every depth, and how many of those are working.
 
-A member SHALL NOT be selectable in this view and SHALL NOT be closable on its
-own. The row menu SHALL NOT offer close for a member row. The select-all
-control SHALL select root conversations only, and SHALL skip a root already closing or being deleted.
+A member SHALL NOT be selectable in this view and SHALL NOT be closable on its own.
+
+The row menu SHALL NOT offer close for a member row.
+
+The select-all control SHALL select root conversations only, and SHALL skip a root already closing or being deleted.
 
 The server SHALL NOT trust the view. A close request that names a member directly SHALL report that name skipped, with a reason that it is a member and naming its parent, and SHALL NOT act on it.
 
