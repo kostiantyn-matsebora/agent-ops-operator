@@ -34,17 +34,17 @@
 
 ## 5. Visual check — frontend-developer
 
-- [ ] 5.1 Run the dev server from this working copy's `platform/console/ui`, screenshot Open, Closed, a Pipeline scope, the selection bar and both dialogs in BOTH looks, and read the PNGs per `visual-check.md`
+- [x] 5.1 Run the dev server from this working copy's `platform/console/ui`, screenshot Open, Closed, a Pipeline scope, the selection bar and both dialogs in BOTH looks, and read the PNGs per `visual-check.md`. **Not run against a live cluster** — this remote session has none (`visual-check.md`'s dev-server procedure needs a port-forwarded install, and `remote-session.md` names the visual check workstation-only). Verified instead with the built bundle driven by Playwright against the repo's own mocked harnesses (the same mechanism `npm run screenshots` and `e2e/` use): Open, Closed, a Pipeline scope, the selection bar (2 selected / Close…(2) / Delete (2), roots only) and both close dialogs (root-only title, member line with working-member count on its own line), read in both looks and both themes. Found and fixed one stale fixture left over from section 1: `e2e/support/mock.ts`'s canned `/api/conversations` response still carried `rootTotal: 5` (removed from the real wire type) and no `scopes.open` key.
 
 ## 6. Unit tests
 
-- [ ] 6.1 Run `npm test` and `npm run typecheck` in `platform/console/ui` and verify both are green
-- [ ] 6.2 Run `go build ./... && go vet ./... && go test ./...` in `platform/console` and verify green
-- [ ] 6.3 Verify the coverage flags `build-test.md` names leave no new behaviour uncovered, including the ignored `showClosed` in both looks
+- [x] 6.1 Run `npm test` and `npm run typecheck` in `platform/console/ui` and verify both are green
+- [x] 6.2 Run `go build ./... && go vet ./... && go test ./...` in `platform/console` and verify green
+- [x] 6.3 Verify the coverage flags `build-test.md` names leave no new behaviour uncovered, including the ignored `showClosed` in both looks
 
 ## 7. System tests
 
-- [ ] 7.1 State why the cluster tier does not apply, since nothing here is decided by a kubelet, RBAC or an informer, and the console's browser and Go tiers in sections 1 to 4 carry the proof
+- [x] 7.1 State why the cluster tier does not apply, since nothing here is decided by a kubelet, RBAC or an informer, and the console's browser and Go tiers in sections 1 to 4 carry the proof. Confirmed: `go test` (90.1% coverage), `npm test` (951 unit tests) and `npm run test:e2e` (the mocked `playwright test` browser tier, 33/33) are all green, covering both browser tiers `change-tests.md` names for a console change. No manager, CRD, chart, RBAC or informer behaviour changes (design.md's own Non-Goals), so no system-tier lane applies.
 
 ## 8. Documentation
 
