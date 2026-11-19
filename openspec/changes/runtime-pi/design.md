@@ -324,8 +324,8 @@ The hook did not fire in the second run for a clean reason. The tool was
 never declared, so the model never attempted the call. The hook itself
 never failed.
 
-D2's rejection of a per-call narrowing hook stands on its own YAGNI ground
-(below), not on the hook's absence.
+D2's rejection of a per-call narrowing hook stands on its own ground (nothing
+needs it yet, see D2), not on the hook's absence.
 
 ### 1.3 S2 — system prompt: append or replace, and resume
 
