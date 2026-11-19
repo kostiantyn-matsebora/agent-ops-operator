@@ -187,7 +187,7 @@ describe('useConversationList', () => {
 
 describe('useInboxScopes', () => {
   it('counts All by every conversation and every other scope by unread', () => {
-    counts = { rootTotal: 14, scopes: { working: 2, mine: 0, errored: 1, closed: 3, 'k8s-observe': 2 } }
+    counts = { scopes: { open: 14, working: 2, mine: 0, errored: 1, closed: 3, 'k8s-observe': 2 } }
     vocabulary = [
       { kind: 'pipeline', name: 'k8s-observe', position: 'general', icon: 'aops:k8s' },
       { kind: 'coordinator', name: 'incident-response', position: 'general' },

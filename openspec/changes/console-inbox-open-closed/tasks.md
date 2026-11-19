@@ -1,12 +1,12 @@
 ## 1. Server counts — backend-developer
 
-- [ ] 1.1 Drop the `closedVisible` argument from `accumulateScopeCounts` in `platform/console/convapi.go` so every scope but `closed` counts only `phase≠Closed` unread roots, and verify `go test ./...` in `platform/console` covers each scope row of the design table
-- [ ] 1.2 Count `closed` as unread roots with `phase=Closed`, and verify a Go test where two of six closed roots are unread yields 2
-- [ ] 1.3 Add `scopes.open` and keep `unreadTotal` equal to it, delete `rootTotal`, and verify a Go test that a member and a closed root are in neither
-- [ ] 1.4 Stop reading `showClosed` in `parseShowClosed` and remove the function, and verify a Go test that a request carrying `showClosed=true` returns the same counts as one without it
-- [ ] 1.5 Make `closeOne` and `deleteOne` in `platform/console/convapi.go` skip a name whose conversation has `causedBy.parent`, with a reason naming that parent and no action taken, and verify Go tests for a close and a delete naming a member
-- [ ] 1.6 Keep the count-only form (`count=1`) returning the navigation count, the per-scope counts and the total with no rows, and verify a Go test of the response shape after `rootTotal` is gone
-- [ ] 1.7 Remove `rootTotal` from `platform/console/ui/src/api/types.ts` and `useInboxCounts`'s `showClosed` key in `hooks.ts`, and verify `npm run typecheck` is clean
+- [x] 1.1 Drop the `closedVisible` argument from `accumulateScopeCounts` in `platform/console/convapi.go` so every scope but `closed` counts only `phase≠Closed` unread roots, and verify `go test ./...` in `platform/console` covers each scope row of the design table
+- [x] 1.2 Count `closed` as unread roots with `phase=Closed`, and verify a Go test where two of six closed roots are unread yields 2
+- [x] 1.3 Add `scopes.open` and keep `unreadTotal` equal to it, delete `rootTotal`, and verify a Go test that a member and a closed root are in neither
+- [x] 1.4 Stop reading `showClosed` in `parseShowClosed` and remove the function, and verify a Go test that a request carrying `showClosed=true` returns the same counts as one without it
+- [x] 1.5 Make `closeOne` and `deleteOne` in `platform/console/convapi.go` skip a name whose conversation has `causedBy.parent`, with a reason naming that parent and no action taken, and verify Go tests for a close and a delete naming a member
+- [x] 1.6 Keep the count-only form (`count=1`) returning the navigation count, the per-scope counts and the total with no rows, and verify a Go test of the response shape after `rootTotal` is gone
+- [x] 1.7 Remove `rootTotal` from `platform/console/ui/src/api/types.ts` and `useInboxCounts`'s `showClosed` key in `hooks.ts`, and verify `npm run typecheck` is clean
 
 ## 2. Open scope and one closed rule, shared model — frontend-developer
 

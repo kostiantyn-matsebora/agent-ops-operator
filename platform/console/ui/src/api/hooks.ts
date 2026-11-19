@@ -138,17 +138,21 @@ export function useMarkUnread() {
 /**
  * The inbox's per-scope counts — the SAME count-only request the navigation
  * badge already fetches (`useUnreadCount`, below), which also carries
- * `rootTotal` and `scopes` (console-unread: "the count per scope SHALL be
- * available for the inbox"). One query, one cache entry, one `apply.ts`
- * invalidation rule for both readers.
+ * `scopes` (console-unread: "the count per scope SHALL be available for the
+ * inbox").
  *
- * `showClosed` rides in the query key: the server excludes a closed
- * conversation from `rootTotal` and every unread-gated scope when it is
- * false, so toggling the list's own "Show closed" checkbox must refetch
- * rather than reuse a cached answer computed the other way.
+ * Its own query now, no longer delegating to `useUnreadCount`: the server
+ * dropped `showClosed` entirely (console-unread: "no request parameter
+ * changes which conversations a count includes"), so there is nothing left
+ * for this one to key or refetch by. The parameter stays, unused, for its
+ * one caller (`useInboxScopes`) until that caller's own showClosed plumbing
+ * is removed.
  */
-export function useInboxCounts(showClosed: boolean) {
-  return useUnreadCount(showClosed)
+export function useInboxCounts(_showClosed: boolean) {
+  return useQuery({
+    queryKey: ['conversationCount'],
+    queryFn: () => api.conversations(new URLSearchParams({ count: '1' })),
+  })
 }
 
 /**
@@ -157,13 +161,17 @@ export function useInboxCounts(showClosed: boolean) {
  * count=1 asks for the totals only — the badge wants a number, and a page of
  * conversations it would throw away is the wrong thing to fetch on every
  * route. `unreadTotal` is what the navigation rail itself reads, a plain
- * notification count. The Inbox's "All" row reads `rootTotal` instead — every
- * conversation, NOT gated on read state, the one count here that isn't.
- * Every other scope (`working`, `mine`, `errored`, `closed`, each
- * per-Pipeline/Coordinator entry in `scopes`) is unread, ANDed with its own
- * predicate. `showClosed=false` excludes a closed conversation from all of
- * these, Closed's own included, so a badge never promises a row the list is
- * hiding.
+ * notification count, and equals `scopes.open`. Every other scope (`open`,
+ * `working`, `mine`, `errored`, `closed`, each per-Pipeline/Coordinator
+ * entry in `scopes`) is unread, ANDed with its own predicate — `open` and
+ * everything but `closed` also require phase≠Closed, `closed` requires
+ * phase=Closed.
+ *
+ * `showClosed` still rides here for this hook's own caller (App.tsx's
+ * navigation badge, still reading the list's display preference, and still
+ * sent on the wire) but the server no longer reads the parameter at all —
+ * removing it from THIS hook, and from the request it still sends, is
+ * section 4's job once that caller's own showClosed plumbing goes.
  */
 export function useUnreadCount(showClosed: boolean) {
   return useQuery({

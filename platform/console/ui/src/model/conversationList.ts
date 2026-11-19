@@ -273,16 +273,17 @@ export interface ScopeEntry {
 /**
  * The inbox's scopes and their counts.
  *
- * All reads `rootTotal` — every conversation a person can open, read or not.
- * Every OTHER count is UNREAD, ANDed with its own scope's predicate, and each
- * matches its own list exactly (TREE_PREDICATE above).
+ * Every count, All included, is now UNREAD, ANDed with its own scope's
+ * predicate, and each matches its own list exactly (TREE_PREDICATE above).
+ * All reads `scopes.open` — the server's rename of this same number is
+ * section 2's own job (console-inbox-open-closed), not reached for here.
  */
 export function useInboxScopes(showClosed: boolean) {
   const counts = useInboxCounts(showClosed)
   const vocabulary = useVocabulary()
   const scopes = counts.data?.scopes ?? {}
   const fixed: ScopeEntry[] = [
-    { scope: { kind: 'all' }, label: 'All', count: counts.data?.rootTotal },
+    { scope: { kind: 'all' }, label: 'All', count: scopes.open },
     { scope: { kind: 'working' }, label: 'Working', count: scopes.working },
     { scope: { kind: 'mine' }, label: 'Mine', count: scopes.mine },
     { scope: { kind: 'errored' }, label: 'Errored', count: scopes.errored },
