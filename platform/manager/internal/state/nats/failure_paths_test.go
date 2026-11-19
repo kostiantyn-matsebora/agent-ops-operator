@@ -168,10 +168,16 @@ func TestOpeningTheBackendOnADeadConnectionFails(t *testing.T) {
 	}
 }
 
-func TestConnectRefusesAnUnreachableServerAndHonoursTheTimeout(t *testing.T) {
-	_, err := Connect(Config{URL: "nats://127.0.0.1:1", ConnectTimeout: 200 * time.Millisecond})
-	if err == nil || !strings.Contains(err.Error(), "connect") {
-		t.Fatalf("Connect = %v, want a connect failure", err)
+// A server that is not up is not a failure: Connect returns at once and keeps
+// retrying in the background, so the caller can wait instead of exiting.
+func TestConnectToAnUnreachableServerKeepsRetrying(t *testing.T) {
+	conn, err := Connect(Config{URL: "nats://127.0.0.1:1", ConnectTimeout: 200 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("Connect = %v, want a connection that keeps retrying", err)
+	}
+	defer conn.Close()
+	if conn.nc.IsConnected() {
+		t.Fatal("nothing listens on the port, the connection cannot be up")
 	}
 }
 

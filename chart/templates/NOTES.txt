@@ -25,16 +25,14 @@ Ask an agent:  a task is an ordinary signal — post it to a SignalSource a Read
     -d '{"source":"<signalsource>","signals":[{"initiationId":"ask-1","kind":"task","payload":"..."}]}'
 
 {{- if eq (include "agentops.stateBackend" .) "nats" }}
-{{- if eq (int .Values.nats.replicas) 1 }}
+{{- if and (eq (int (include "agentops.natsStorageReplicas" .)) 1) (not .Values.global.demo.enabled) }}
 
-NATS IS RUNNING WITH ONE REPLICA — the state store has a SINGLE POINT OF
+NATS KEEPS ONE COPY OF EACH STREAM — the state store has a SINGLE POINT OF
 FAILURE. Losing this pod holds every conversation until it restarts, and a
 lost PersistentVolumeClaim loses state that was never replicated.
 
-This is a conscious choice on a cluster that cannot place three replicas
-usefully (a single node shares one failure domain either way). Raise it
-where it matters:
-  --set nats.replicas=3
+This is a conscious choice. Raise it where it matters:
+  --set nats.storageReplicas=3
 {{- end }}
 {{- end }}
 

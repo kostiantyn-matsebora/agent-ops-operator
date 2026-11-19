@@ -13,7 +13,17 @@
 #                 # choice and have the guard catch a mismatch; absent, no
 #                 # check runs and the selector alone decides.
 
-replicas: 3
+# The number of server pods. NULLABLE: left unset it is 3, or 1 under
+# `global.demo.enabled`. OUTSIDE DEMO MODE IT CANNOT BE LESS THAN 3, and may be
+# more: the copies per stream stay `storageReplicas` however many pods run
+# (`agentops.natsReplicas` in the parent chart).
+replicas: null
+
+# How many servers keep a copy of each stream — the stream replication
+# factor. INDEPENDENT of `replicas`: scaling the pods never changes it. NULLABLE:
+# left unset it is 3, or 1 under `global.demo.enabled`. It cannot exceed
+# `replicas` (`agentops.stateStoreGuard`). A value you type wins in both modes.
+storageReplicas: null
 
 image:
   repository: nats

@@ -10,6 +10,28 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Demo mode runs one manager and one NATS server.** `global.demo.enabled`
+  defaults `replicas`, `nats.replicas` and `nats.storageReplicas` to `1`, so the
+  demo schedules on a single node. The manager's required anti-affinity is
+  rendered only above one replica. A value you type still wins in both modes.
+- **`nats.storageReplicas` is new** and sets how many servers keep a copy of each
+  stream, apart from the pod count. It defaults to `3`. Scaling the pods no longer
+  changes it.
+- **Breaking:** outside demo mode `nats.replicas` below `3` is refused, and so is
+  `nats.storageReplicas` above `nats.replicas`.
+
+### Fixed
+
+- The manager no longer carries a replica count of its own. The command bus's
+  hardcoded `3` and the state store's drift check are gone. Both take the count
+  the chart passes (`NATS_REPLICAS`, `COMMANDBUS_NATS_REPLICAS`), so a one-server
+  install works.
+- A one-replica NATS runs standalone, without cluster routes it waits on forever.
+
+## [Unreleased]
+
 ## [21.0.0] — 2026-11-19
 
 Images: manager 0.63.0, console 0.43.0, signal-k8s-events 0.7.0, runtime-pi

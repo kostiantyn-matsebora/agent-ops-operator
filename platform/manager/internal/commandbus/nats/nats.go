@@ -54,11 +54,6 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// DefaultReplicas mirrors internal/state/nats's own default: a
-// three-server cluster with no single point of failure, applied to every
-// bucket Open bootstraps.
-const DefaultReplicas = 3
-
 // Config is everything Connect needs. Reading it from the environment
 // (COMMANDBUS_NATS_URL and friends, design D-1) is the chart-wiring
 // change's job (task 8), not this one — this package takes a Config value
@@ -71,19 +66,15 @@ type Config struct {
 	User     string
 	Password string
 	// Replicas is the replica count every bucket is created with. Zero
-	// means DefaultReplicas.
+	// means the manager sends nothing and the server decides.
 	Replicas int
 	// ConnectTimeout bounds Connect's own dial. Zero means nats.go's own
 	// default.
 	ConnectTimeout time.Duration
 }
 
-func (c Config) replicas() int {
-	if c.Replicas > 0 {
-		return c.Replicas
-	}
-	return DefaultReplicas
-}
+// replicas is the configured replica count, passed through as given.
+func (c Config) replicas() int { return c.Replicas }
 
 // Conn is a live connection to the server, the one handle Open bootstraps
 // every bucket from.
@@ -102,6 +93,9 @@ func Connect(cfg Config) (*Conn, error) {
 		nats.Name("agentops-manager-commandbus"),
 		nats.MaxReconnects(-1),
 		nats.ReconnectWait(time.Second),
+		// A server that is not up yet is not a failure: connect in the
+		// background and let the callers wait, the probes decide the rest.
+		nats.RetryOnFailedConnect(true),
 	}
 	if cfg.ConnectTimeout > 0 {
 		opts = append(opts, nats.Timeout(cfg.ConnectTimeout))

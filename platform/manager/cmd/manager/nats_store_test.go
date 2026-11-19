@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -40,10 +41,19 @@ func TestNewNatsStoresWiresTheBackend(t *testing.T) {
 	}
 }
 
-func TestNewNatsStoresRefusesAnUnreachableServer(t *testing.T) {
+// An unreachable server is not a reason to exit: the manager keeps waiting and
+// the probes, not the process, decide how long that may last.
+func TestNewNatsStoresKeepsWaitingForAnUnreachableServer(t *testing.T) {
 	t.Setenv("NATS_URL", "nats://127.0.0.1:1")
-	if _, err := newNatsStores(testManager(t), testNamespaces); err == nil {
-		t.Fatal("want an error connecting to a closed port")
+	done := make(chan error, 1)
+	go func() {
+		_, err := newNatsStores(testManager(t), testNamespaces)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("returned (%v) while the server was unreachable, want it to keep waiting", err)
+	case <-time.After(2 * time.Second):
 	}
 }
 
