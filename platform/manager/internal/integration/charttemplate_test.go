@@ -21,7 +21,21 @@ import (
 // (the reconciler owns them), and that the RBAC it does ship is read-only and
 // scoped to agentops.dev. Skipped when helm is not installed — CI has it.
 
+// The pi runtime is ON by default and the chart's default runtime. Almost every
+// test here pins one other thing -- another bundle, the egress proxy, the
+// runtime guards -- and was written against the reference `claude` bundle alone,
+// so helmTemplate renders with pi OFF unless a test says otherwise (a later
+// `--set pi.enabled=true` wins). A test about the real out-of-the-box render
+// asks for it by name: helmTemplateDefaults.
+var baselineArgs = []string{"--set", "pi.enabled=false"}
+
 func helmTemplate(t *testing.T, args ...string) string {
+	t.Helper()
+	return helmTemplateDefaults(t, append(append([]string{}, baselineArgs...), args...)...)
+}
+
+// helmTemplateDefaults renders with the chart's own defaults and nothing added.
+func helmTemplateDefaults(t *testing.T, args ...string) string {
 	t.Helper()
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm not installed")
@@ -35,8 +49,14 @@ func helmTemplate(t *testing.T, args ...string) string {
 }
 
 // helmTemplateErr renders expecting FAILURE and returns the message. Used for
-// the guards whose whole value is that they fire.
+// the guards whose whole value is that they fire. Same baseline as helmTemplate.
 func helmTemplateErr(t *testing.T, args ...string) string {
+	t.Helper()
+	return helmTemplateDefaultsErr(t, append(append([]string{}, baselineArgs...), args...)...)
+}
+
+// helmTemplateDefaultsErr is helmTemplateErr against the chart's own defaults.
+func helmTemplateDefaultsErr(t *testing.T, args ...string) string {
 	t.Helper()
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm not installed")
@@ -3389,6 +3409,209 @@ func defaultRuntimeDoc(out string) (string, string) {
 		}
 	}
 	return "", ""
+}
+
+// The pi bundle is the FOURTH vendor runtime (fifth AgentRuntime overall),
+// model-agnostic rather than one vendor's account: `provider`+`model`+the
+// credential become env the shared renderer composes, through
+// `agentops.piRuntimeEntry` (chart/templates/_helpers.tpl), in the ollama/
+// copilot bundles' own exact shape — off by default, one AgentRuntime through
+// the parent's renderer, no substrate.
+func TestPiBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
+	out := helmTemplate(t, "--set", "pi.enabled=true",
+		"--set", "pi.provider=anthropic",
+		"--set", "pi.model=claude-sonnet-5",
+		"--set", "pi.credentialsSecret.token=sk-placeholder")
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 3 {
+		t.Fatalf("want claude, pi and the default copy, got %d", n)
+	}
+	rt := findDocByKindAndMetaName(out, "AgentRuntime", "pi")
+	if rt == "" {
+		t.Fatal("no AgentRuntime named pi rendered")
+	}
+	assertPiRuntimeShape(t, rt)
+	secret := findDocByKindAndMetaName(out, "Secret", "agentops-pi")
+	if secret == "" || !strings.Contains(secret, "apiKey: \"sk-placeholder\"") {
+		t.Errorf("a supplied token must render the credential Secret:\n%s", secret)
+	}
+	// no substrate: the ServiceAccount count is unchanged from the default render
+	if got, want := strings.Count(out, "kind: ServiceAccount\n"), strings.Count(helmTemplate(t), "kind: ServiceAccount\n"); got != want {
+		t.Errorf("the bundle must render no ServiceAccount: %d vs %d", got, want)
+	}
+	// the claude bundle stays on here too (no --set claude.enabled=false), so
+	// claude -- never pi -- is still the one `default` copies: the FIRST
+	// configured runtime wins with neither flagged (wiring.md's precedence,
+	// mirrored here against a second real vendor rather than just ollama).
+	if _, src := defaultRuntimeDoc(out); src != "pi" {
+		t.Errorf("pi ships flagged default, so with it on beside the reference runtime it is the default, got %q", src)
+	}
+}
+
+// `pi.piCode` is the one boolean that turns the pi-code package off. It reaches
+// the runtime as PI_CODE_ENABLED, and is not a field the AgentRuntime carries.
+func TestPiBundlePiCodeFlagReachesTheRuntimeAsEnv(t *testing.T) {
+	base := []string{"--set", "pi.enabled=true", "--set", "pi.provider=anthropic", "--set", "pi.model=claude-sonnet-5"}
+	off := findDocByKindAndMetaName(helmTemplate(t, append(base, "--set", "pi.piCode=false")...), "AgentRuntime", "pi")
+	if !strings.Contains(off, "name: PI_CODE_ENABLED\n      value: \"false\"\n") {
+		t.Errorf("pi.piCode=false must render PI_CODE_ENABLED=false:\n%s", off)
+	}
+	on := findDocByKindAndMetaName(helmTemplate(t, base...), "AgentRuntime", "pi")
+	if !strings.Contains(on, "name: PI_CODE_ENABLED\n      value: \"true\"\n") {
+		t.Errorf("pi-code must be on when the key is not set:\n%s", on)
+	}
+	if strings.Contains(on, "piCode") {
+		t.Errorf("piCode is a chart value, never an AgentRuntime field:\n%s", on)
+	}
+}
+
+// `pi.env` is laid OVER the generated entries. A name it states replaces the
+// generated one, so no name appears twice: a duplicate in the env list breaks
+// server-side apply, which keys the list on the name.
+func TestPiEnvOverlaysReplaceGeneratedNamesWithoutDuplicates(t *testing.T) {
+	rt := findDocByKindAndMetaName(helmTemplateDefaults(t,
+		"--set", "pi.env[0].name=PI_MODEL", "--set", "pi.env[0].value=other-model",
+		"--set", "pi.env[1].name=PI_RUN_TIMEOUT_S", "--set-string", "pi.env[1].value=60"), "AgentRuntime", "pi")
+	if rt == "" {
+		t.Fatal("no AgentRuntime named pi rendered")
+	}
+	if n := strings.Count(rt, "name: PI_MODEL\n"); n != 1 {
+		t.Errorf("PI_MODEL must appear exactly once, got %d:\n%s", n, rt)
+	}
+	for _, want := range []string{"name: PI_MODEL\n      value: other-model\n", "name: PI_RUN_TIMEOUT_S\n      value: \"60\"\n", "name: PI_PROVIDER\n      value: anthropic\n"} {
+		if !strings.Contains(rt, want) {
+			t.Errorf("pi runtime lacks %q:\n%s", want, rt)
+		}
+	}
+}
+
+func assertPiRuntimeShape(t *testing.T, rt string) {
+	t.Helper()
+	for _, want := range []string{
+		`image: "ghcr.io/kostiantyn-matsebora/agentops-runtime-pi:`,
+		"serviceAccountName: agentops-runtime\n", // the floor, inherited
+		"contextStorage: volume\n",
+		"idleTtlMinutes: 1\n", // the release default, not the CRD's 10
+		"- .pi/agent/sessions/**\n",
+		"name: PI_PROVIDER\n      value: anthropic\n",
+		"name: PI_MODEL\n      value: claude-sonnet-5\n",
+		"name: PI_API_KEY\n      valueFrom:\n        secretKeyRef:\n          key: apiKey\n          name: agentops-pi",
+		"name: PI_CODE_ENABLED\n      value: \"true\"\n", // on by default
+	} {
+		if !strings.Contains(rt, want) {
+			t.Errorf("pi runtime lacks %q:\n%s", want, rt)
+		}
+	}
+	if strings.Contains(rt, ".claude/projects") {
+		t.Error("the pi runtime must not inherit claude-code's sync paths")
+	}
+}
+
+// Enabled with neither required key set, the render FAILS naming the first
+// one it reaches (provider) -- pi talks to many model providers through one
+// SDK and has none to fall back on, unlike copilot's account-level default.
+// Enabled with a provider but no model, it fails naming the second.
+func TestPiBundleRequiresProviderAndModel(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--set", "pi.enabled=true", "--set", "pi.provider="}, "pi.provider is required"},
+		{[]string{"--set", "pi.enabled=true", "--set", "pi.model="}, "pi.model is required"},
+	} {
+		if out := helmTemplateErr(t, tc.args...); !strings.Contains(out, tc.want) {
+			t.Errorf("%v: want %q, got %s", tc.args, tc.want, out)
+		}
+	}
+}
+
+// Without a token the runtime still references the Secret by name (the
+// shared renderer's `credentialsSecret.name` default) and creates nothing;
+// the reference bundle off and this one on makes it the default with no
+// rename, same as every other vendor runtime.
+func TestPiBundleDefaultsAndBecomesDefault(t *testing.T) {
+	out := helmTemplate(t, "--set", "pi.enabled=true",
+		"--set", "pi.provider=anthropic", "--set", "pi.model=claude-sonnet-5")
+	if strings.Contains(out, "kind: Secret\nmetadata:\n  name: agentops-pi\n") {
+		t.Error("no token supplied, so no Secret may render")
+	}
+	rt := findDocByKindAndMetaName(out, "AgentRuntime", "pi")
+	if rt == "" || !strings.Contains(rt, "name: agentops-pi") {
+		t.Errorf("the runtime must still reference the credential Secret by name:\n%s", rt)
+	}
+	alone := helmTemplate(t, "--set", "pi.enabled=true",
+		"--set", "pi.provider=anthropic", "--set", "pi.model=claude-sonnet-5",
+		"--set", "claude.enabled=false")
+	if doc, src := defaultRuntimeDoc(alone); src != "pi" || !strings.Contains(doc, "PI_PROVIDER") {
+		t.Errorf("pi alone must be copied as default with its env, got source %q", src)
+	}
+	if strings.Count(alone, "\nkind: AgentRuntime\n") != 2 {
+		t.Error("pi alone renders exactly pi and default")
+	}
+}
+
+// Turning the pi bundle off must leave none of its artifacts, and stating it
+// off must render the same as the test baseline. Isolated to the pi bundle's
+// own possible artifacts (an AgentRuntime named pi, its default copy, its
+// credential Secret) rather than the whole rendered output, which carries
+// unrelated per-run randomness (generated tokens/salts on other bundles) that
+// would make a byte-for-byte comparison of everything noise.
+func TestPiBundleOffRendersNoArtifacts(t *testing.T) {
+	explicit := piBundleDocs(helmTemplateDefaults(t, "--set", "pi.enabled=false"))
+	baseline := piBundleDocs(helmTemplate(t))
+	if explicit != baseline {
+		t.Fatalf("the test baseline must render exactly what pi.enabled=false renders:\n%s\nvs\n%s", baseline, explicit)
+	}
+	if explicit != "" {
+		t.Fatalf("the pi bundle must render no artifact while off:\n%s", explicit)
+	}
+	if n := strings.Count(helmTemplateDefaults(t, "--set", "pi.enabled=false"), "\nkind: AgentRuntime\n"); n != 2 {
+		t.Fatalf("want exactly the claude runtime and its default copy while pi is off, got %d", n)
+	}
+}
+
+// Out of the box, with no values at all, pi is on and is what `default` copies:
+// provider anthropic, model claude-sonnet-5, the credential referenced by Secret
+// name. The reference runtime stays beside it, selectable by name. Each lever
+// hands the default back.
+func TestPiIsTheDefaultRuntimeOutOfTheBox(t *testing.T) {
+	out := helmTemplateDefaults(t)
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 3 {
+		t.Fatalf("want pi, claude and the default copy, got %d", n)
+	}
+	doc, src := defaultRuntimeDoc(out)
+	if src != "pi" {
+		t.Fatalf("the default runtime must be a copy of pi, got %q", src)
+	}
+	for _, want := range []string{"name: PI_PROVIDER\n      value: anthropic\n", "name: PI_MODEL\n      value: claude-sonnet-5\n", "name: agentops-pi"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("the default runtime lacks %q:\n%s", want, doc)
+		}
+	}
+	if findDocByKindAndMetaName(out, "AgentRuntime", "claude") == "" {
+		t.Error("the claude runtime must still render, selectable with runtimeRef: claude")
+	}
+	if _, src := defaultRuntimeDoc(helmTemplateDefaults(t, "--set", "pi.default=false")); src != "claude" {
+		t.Errorf("pi.default=false must hand the default back to the first configured runtime, got %q", src)
+	}
+	off := helmTemplateDefaults(t, "--set", "pi.enabled=false")
+	if _, src := defaultRuntimeDoc(off); src != "claude" || strings.Count(off, "\nkind: AgentRuntime\n") != 2 {
+		t.Errorf("pi.enabled=false must leave claude as the default alone, got %q", src)
+	}
+}
+
+// piBundleDocs isolates every rendered doc the pi bundle itself could have
+// produced -- an AgentRuntime/Secret named for it, or a `default` copy
+// sourced from it -- the same isolation telegramBundleDocs uses, for the same
+// reason: the rest of a render carries randomness this bundle never touches.
+func piBundleDocs(rendered string) string {
+	var b strings.Builder
+	for _, doc := range splitDocs(rendered) {
+		if strings.Contains(doc, "\n  name: pi\n") || strings.Contains(doc, "agentops-pi") || strings.Contains(doc, `agentops.dev/default-of: "pi"`) {
+			b.WriteString(doc)
+			b.WriteString("\n---\n")
+		}
+	}
+	return b.String()
 }
 
 // call-auth.yaml's gatewayToken is generated the same way adapterAuth.token

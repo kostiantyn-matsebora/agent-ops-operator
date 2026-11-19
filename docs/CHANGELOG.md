@@ -8,6 +8,53 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [Unreleased]
+
+**BREAKING. The default runtime is now pi, not claude.** A route that names no
+`runtimeRef` runs on `agentops-runtime-pi` 0.1.0, on provider `anthropic` with
+model `claude-sonnet-5`. The `claude` runtime stays on and a route selects it
+with `runtimeRef: claude`. Read [Upgrade](#upgrade) before upgrading.
+
+### Added
+
+- **A fifth runtime: `agentops-runtime-pi` 0.1.0, shipped as the `pi`
+  bundle.** ON by default and flagged `default: true`, so the `default`
+  `AgentRuntime` is a copy of it. `pi.provider` (default `anthropic`) and
+  `pi.model` (default `claude-sonnet-5`) select the model, and the credential
+  is the Secret `agentops-pi` with the key `apiKey`, or
+  `pi.credentialsSecret.token` to have the chart create it. A route selects
+  the runtime with `pipelines[].runtimeRef: pi`. Pi reads
+  `.claude/agents/<agent>.md`, the same path and composition rules as the
+  reference runtime, and reaches bound MCP servers through the vendor's
+  `pi-mcp` package. State lives under `.pi/agent/sessions/**`, declared to
+  `context-sync` by the bundle.
+- `pi.piCode` (default `true`) lets pi read a checkout's `.claude/` the way
+  Claude Code does, through the `pi-code` package. It adds no tool, and the
+  allowlist still gates every tool call. A hook in the repository's
+  `.claude/settings.json` runs as a shell command in the pod, and the
+  allowlist does not apply to it. Set `pi.piCode: false` to turn this off.
+  See [Residual risk](security.md#residual-risk).
+
+### Upgrade
+
+Create the credential before you upgrade, in the namespace runtime pods run in:
+
+```sh
+kubectl -n agent-ops-conversations create secret generic agentops-pi \
+  --from-literal=apiKey=$ANTHROPIC_API_KEY
+```
+
+```powershell
+kubectl -n agent-ops-conversations create secret generic agentops-pi `
+  --from-literal=apiKey=$env:ANTHROPIC_API_KEY
+```
+
+Without it a runtime pod exits at start naming `PI_API_KEY`.
+
+**To keep running on claude**, set `pi.default=false`, and the `default`
+runtime is a copy of claude again. Set `pi.enabled=false` to render no pi
+runtime at all. Open conversations keep the runtime they started on.
+
 ## [20.0.0] — 2026-11-17
 
 Images: manager 0.63.0, console 0.42.0, signal-k8s-events 0.7.0. Bundle

@@ -25,16 +25,21 @@ read-only demo on your cluster in fifteen minutes.
    ```sh
    kubectl create namespace agent-ops
 
-   kubectl -n agent-ops create secret generic agentops-claude \
-     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+   kubectl -n agent-ops create secret generic agentops-pi \
+     --from-literal=apiKey=$ANTHROPIC_API_KEY   # the default runtime is pi, on Anthropic
    ```
 
    ```powershell
    kubectl create namespace agent-ops
 
-   kubectl -n agent-ops create secret generic agentops-claude `
-     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+   kubectl -n agent-ops create secret generic agentops-pi `
+     --from-literal=apiKey=$env:ANTHROPIC_API_KEY   # the default runtime is pi, on Anthropic
    ```
+
+   The default runtime is [pi]({{ '/runtimes/pi/' | relative_url }}), on
+   `anthropic` with model `claude-sonnet-5`. A route that names
+   `runtimeRef: claude` needs the `agentops-claude` Secret instead, and
+   `pi.default=false` hands the default back to claude.
 
 2. **Install the chart** from the registry. There is no repo to add and no
    checkout to clone.

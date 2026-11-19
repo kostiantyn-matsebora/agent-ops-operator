@@ -383,6 +383,23 @@ ollama:
 copilot:
   enabled: false
 
+# The runtime a Pipeline naming no `runtimeRef` runs on: a model-agnostic coding
+# harness over pi's SDK (chart/charts/pi/values.yaml). ON by default, flagged
+# `default: true`, with provider `anthropic` and model `claude-sonnet-5`. It
+# needs a credential, the Secret `agentops-pi` (key `apiKey`), which you create
+# or let the chart create from `pi.credentialsSecret.token`. The `claude` bundle
+# stays on beside it; a route selects it with `pipelines[].runtimeRef: claude`.
+# `pi.default: false` hands `default` back to the first configured runtime, and
+# `pi.enabled: false` turns this one off.
+#
+#   pi:
+#     credentialsSecret:
+#       token: sk-placeholder
+#     provider: anthropic
+#     model: claude-sonnet-5
+pi:
+  enabled: true
+
 # THE RUNTIMES THIS INSTALL DECLARES — the second of the two runtime blocks.
 #
 # THE RULE SEPARATING THEM, in one line each:

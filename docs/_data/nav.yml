@@ -66,6 +66,8 @@ groups:
       - title: GitHub Copilot
         url: /runtimes/copilot/
         icon: /assets/img/logos/github-light.svg
+      - title: pi
+        url: /runtimes/pi/
   - title: Guides
     entries:
       - title: "Put an agent to work"

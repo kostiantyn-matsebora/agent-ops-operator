@@ -57,7 +57,7 @@ func DefaultValues(tier string) *InstallValues {
 }
 
 // valuesYAML renders the values file. Images are the ones the pack built and
-// imported, tagged :e2e; the reference runtime bundle is OFF and the stub is
+// imported, tagged :e2e; the reference runtime bundles are OFF and the stub is
 // the release's default runtime, so a route naming nothing runs on it.
 func (v *InstallValues) valuesYAML() string {
 	claude := "false"
@@ -89,6 +89,14 @@ global:
 claude:
   enabled: %[2]s
   image: agentops-runtime-claude:e2e
+# pi is ON by default and flagged default, which the stub's own "default: true"
+# below would collide with, so it is not the default here. It stays ON: the
+# manager only gets CONTEXT_SYNC_IMAGE when a chart-declared runtime declares
+# contextSync paths, and the pi bundle is the one that does. Without it the pi
+# lanes' runtimes get no context-sync sidecar. No pod ever runs this runtime.
+pi:
+  enabled: true
+  default: false
 runtimes:
   - name: %[3]s
     default: true

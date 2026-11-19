@@ -69,6 +69,13 @@ dependencies:
     version: 0.1.0
     repository: ""
     condition: copilot.enabled
+  # embedded subchart (chart/charts/pi) — a further vendor runtime, the pi coding
+  # agent. ON by default and the default runtime; a route selects the other
+  # with `runtimeRef: claude`.
+  - name: pi
+    version: 0.1.0
+    repository: ""
+    condition: pi.enabled
   # embedded subchart (chart/charts/claude-cli) — today's spawn-per-unit
   # claude-code runtime, kept running once `claude` moves to the SDK. OFF by
   # default; a route selects it with `runtimeRef: claude-cli`.

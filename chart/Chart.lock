@@ -23,6 +23,9 @@ dependencies:
 - name: copilot
   repository: ""
   version: 0.1.0
+- name: pi
+  repository: ""
+  version: 0.1.0
 - name: claude-cli
   repository: ""
   version: 0.1.0
@@ -32,5 +35,5 @@ dependencies:
 - name: commandbus
   repository: ""
   version: 0.1.0
-digest: sha256:a47be76d51f1eaa9b2c2f6015b716a09dd34770aaa9b70393935d5269ef8d24a
-generated: "2026-11-17T19:37:55.246725761+02:00"
+digest: sha256:b05439166704be5202886877d65c4f32a0693a6a421c4c3a3a763ad06148dab4
+generated: "2026-11-18T01:03:23.331441263+02:00"

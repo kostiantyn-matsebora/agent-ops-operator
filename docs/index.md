@@ -82,8 +82,8 @@ already in it.
 - Any model you can run
   {: .ao-icon-runtime}
 
-  Claude Code, Ollama and GitHub Copilot ship with it. Point it at your own
-  image and the work contract is unchanged.
+  Claude Code, Ollama, GitHub Copilot and pi ship with it. Point it at your
+  own image and the work contract is unchanged.
 
 - A pod per conversation, in the conversations namespace
   {: .ao-icon-conversation}

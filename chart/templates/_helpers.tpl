@@ -243,6 +243,35 @@ CR and for the parent's `default` copy, so both carry identical env. */ -}}
 {{- toYaml $entry -}}
 {{- end -}}
 
+{{- /* THE PI BUNDLE'S ENTRY. `provider` and `model` become the env the runtime
+reads, and the credential rides in `env` too — as the valueFrom reference the
+shared renderer would otherwise write from `credentialsSecret`. The renderer
+refuses an entry stating both `env` and `credentialsSecret`, and this vendor
+needs env for its provider and model, so the bundle's own template renders
+the Secret and this helper writes the reference. Same helper for the bundle's
+own CR and for the parent's `default` copy, so both carry identical env. */ -}}
+{{- define "agentops.piRuntimeEntry" -}}
+{{- $v := . -}}
+{{- $provider := $v.provider | required "pi.provider is required when the bundle is enabled — pi talks to many model providers through one SDK and has none to fall back on" -}}
+{{- $model := $v.model | required "pi.model is required when the bundle is enabled — the chosen provider's own model id" -}}
+{{- $generated := list
+  (dict "name" "PI_PROVIDER" "value" ($provider | toString))
+  (dict "name" "PI_MODEL" "value" ($model | toString))
+  (dict "name" "PI_CODE_ENABLED" "value" ((ternary $v.piCode true (hasKey $v "piCode")) | toString)) -}}
+{{- $cred := $v.credentialsSecret | default dict -}}
+{{- if $cred.name }}{{ $generated = append $generated (dict "name" ($cred.envName | default "PI_API_KEY") "valueFrom" (dict "secretKeyRef" (dict "name" $cred.name "key" ($cred.key | default "apiKey")))) }}{{ end -}}
+{{- /* `pi.env` is laid OVER the generated entries: a name it states REPLACES the generated one, so the list never carries a name twice (a duplicate breaks server-side apply). */ -}}
+{{- $user := $v.env | default list -}}
+{{- $userNames := list -}}
+{{- range $user }}{{ $userNames = append $userNames .name }}{{ end -}}
+{{- $env := list -}}
+{{- range $g := $generated }}{{ if not (has $g.name $userNames) }}{{ $env = append $env $g }}{{ end }}{{ end -}}
+{{- range $user }}{{ $env = append $env . }}{{ end -}}
+{{- $entry := omit $v "enabled" "global" "provider" "model" "env" "credentialsSecret" "piCode" -}}
+{{- $_ := set $entry "env" $env -}}
+{{- toYaml $entry -}}
+{{- end -}}
+
 {{- define "agentops.declaredRuntimes" -}}
 {{- $root := . -}}
 {{- $out := list -}}
@@ -254,12 +283,13 @@ discover them: a bundle whose runtime this list missed would render a CR the
 default-runtime guard could not see, and the manager's bootstrap env would miss
 the sidecar and proxy images that runtime asked for. `ollama` proved the point:
 its first render passed every test but this guard, which reported "(none)". */ -}}
-{{- range $key := list "claude" "ollama" "copilot" "claude-cli" -}}
+{{- range $key := list "claude" "ollama" "copilot" "claude-cli" "pi" -}}
 {{- $bv := index $root.Values $key -}}
 {{- if and $bv $bv.enabled -}}
 {{- $entry := omit $bv "enabled" "global" -}}
 {{- if eq $key "ollama" -}}{{- $entry = fromYaml (include "agentops.ollamaRuntimeEntry" $bv) -}}{{- end -}}
 {{- if eq $key "copilot" -}}{{- $entry = fromYaml (include "agentops.copilotRuntimeEntry" $bv) -}}{{- end -}}
+{{- if eq $key "pi" -}}{{- $entry = fromYaml (include "agentops.piRuntimeEntry" $bv) -}}{{- end -}}
 {{- $out = append $out (fromYaml (include "agentops.mergedRuntime" (dict "root" $root "entry" $entry))) -}}
 {{- end -}}
 {{- end -}}
