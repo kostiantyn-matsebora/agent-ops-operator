@@ -144,7 +144,7 @@ sections 2 to 4 depends on an answer until its spike is recorded.
   default, so a default render is no longer unchanged.)
 - [x] 6.4 Bump the chart minor. Verify: `docs-generate.py --check` accepts the
   new version once section 10 is done.
-- [x] 6.5 `pi.piCode` (default true) in `chart/charts/pi/values.yaml`; `agentops.piRuntimeEntry` renders it as `PI_CODE_ENABLED` and omits it from the entry, so it is never an AgentRuntime field.
+- [x] 6.5 `pi.piCode` (default true) in `chart/charts/pi/values.yaml`. `agentops.piRuntimeEntry` renders it as `PI_CODE_ENABLED` and omits it from the entry, so it is never an AgentRuntime field.
 - [x] 6.6 Make pi the default runtime: `pi.enabled: true`, `default: true`, `provider: anthropic` and `model: claude-sonnet-5` in `chart/charts/pi/values.yaml`, and `enabled: true` in `chart/values.yaml`. `claude` stays on and selectable.
 
 ## 7. The specification — api-architect

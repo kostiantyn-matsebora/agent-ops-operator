@@ -79,8 +79,8 @@ Rejected for now.
 - It would make this runtime the second one able to narrow a shell.
 - S1 found pi DOES expose a per-call hook (`pi.on('tool_call', ...)`,
   confirmed live). This alternative is technically available if a later
-  change wants it. Rejected here on the YAGNI ground below, not for lack of
-  a hook.
+  change wants it. Rejected here because nothing needs it yet, not for lack
+  of a hook.
 - Enablement is availability-level and needs nothing beyond selecting tools.
 
 ### D3. The MCP extension is ours, small, and a client of `mcp.json`
