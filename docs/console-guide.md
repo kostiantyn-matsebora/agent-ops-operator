@@ -88,7 +88,7 @@ Five views, one question each.
   its member count, turn and deadline. Flatten it for the plain newest-first
   order instead.
 
-  ![The Conversations view with nothing open: the inbox rail with its scopes and counts, and a coordination tree — a two-level incident nested under its root, a closed root marked "nobody notified", a pending alert and a working chat conversation.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
+  ![The Conversations view with nothing open: the inbox rail with its Open, Working, Mine, Errored, Pipelines & Coordinators and Closed scopes, their counts, and a coordination tree — a two-level incident collapsed under its root, a pending alert and a working chat conversation.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
 
   Opening a row switches the thread pane in place — the URL changes, the
   list does not move.
