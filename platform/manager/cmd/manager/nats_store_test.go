@@ -41,15 +41,21 @@ func TestNewNatsStoresWiresTheBackend(t *testing.T) {
 	}
 }
 
-// An unreachable server is not a reason to exit: the manager keeps waiting and
-// the probes, not the process, decide how long that may last.
 func TestNewNatsStoresKeepsWaitingForAnUnreachableServer(t *testing.T) {
 	t.Setenv("NATS_URL", "nats://127.0.0.1:1")
-	done := make(chan error, 1)
-	go func() {
+	requireKeepsWaiting(t, func() error {
 		_, err := newNatsStores(testManager(t), testNamespaces)
-		done <- err
-	}()
+		return err
+	})
+}
+
+// requireKeepsWaiting fails when start returns while the server is unreachable.
+// An unreachable server is not a reason to exit: the manager keeps waiting and
+// the probes, not the process, decide how long that may last.
+func requireKeepsWaiting(t *testing.T, start func() error) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- start() }()
 	select {
 	case err := <-done:
 		t.Fatalf("returned (%v) while the server was unreachable, want it to keep waiting", err)

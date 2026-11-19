@@ -164,20 +164,12 @@ func TestNewNatsCommandBusRequiresTheURL(t *testing.T) {
 	}
 }
 
-// An unreachable server is not a reason to exit: the manager keeps waiting and
-// the probes, not the process, decide how long that may last.
 func TestNewNatsCommandBusKeepsWaitingForAnUnreachableServer(t *testing.T) {
 	t.Setenv(commandBusNatsURLEnv, "nats://127.0.0.1:1")
-	done := make(chan error, 1)
-	go func() {
+	requireKeepsWaiting(t, func() error {
 		_, err := newNatsCommandBus(testManager(t), "agent-ops")
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		t.Fatalf("returned (%v) while the server was unreachable, want it to keep waiting", err)
-	case <-time.After(2 * time.Second):
-	}
+		return err
+	})
 }
 
 func TestNewNatsCommandBusFailsWhenTheBucketsCannotBePlaced(t *testing.T) {
