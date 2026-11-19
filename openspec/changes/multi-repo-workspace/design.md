@@ -62,7 +62,7 @@ A new component `platform/workspace-sync`. Its path is its published name, `agen
 | Choice | Decision | Why |
 |---|---|---|
 | Where | init container, not a sidecar | it must finish before the agent can start, and nothing needs it afterwards |
-| Input | `WORKSPACE_REPOS` plus one `REPO_CRED_<n>` per credentialed repo | the manager reads no secret, so each `secretRef` becomes `valueFrom` on the init container only |
+| Input | `WORKSPACE_REPOS` plus one `REPO_CRED_<n>` per credentialed repo, `<n>` being its zero-based position in the full list | the manager reads no secret, so each `secretRef` becomes `valueFrom` on the init container only |
 | Credential in the agent container | none | the agent can run arbitrary commands and a credential in its environment is one `env` away |
 | Component | its own image | one clone routine instead of five, and git is not needed in a runtime image for cloning |
 

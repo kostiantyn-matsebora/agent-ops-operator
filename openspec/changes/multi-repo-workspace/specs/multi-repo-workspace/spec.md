@@ -16,7 +16,7 @@ An agent works from one repository or from several. This capability is the repos
 | `auth` | `{type: ssh\|https, secretRef}` | optional, the shape `AgentProfile.spec.repository.auth` has today |
 | `keepGit` | keep the `.git` directory after the clone | default `true` |
 
-`AgentProfile.spec.repository` SHALL remain, DEPRECATED, as shorthand for a one-entry list. When both `repository` and `repositories` are set on one profile, the CRD SHALL refuse the object. The `name` of a one-entry list made from `repository` is inert.
+`AgentProfile.spec.repository` SHALL remain, DEPRECATED, as shorthand for a one-entry list. When both `repository` and `repositories` are set on one profile, the CRD SHALL refuse the object. The one-entry list made from `repository` SHALL carry the name `default`, which is inert for a single repository.
 
 ```yaml
 repositories:
