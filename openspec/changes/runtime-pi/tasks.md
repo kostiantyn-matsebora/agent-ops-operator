@@ -251,7 +251,7 @@ acting, and every real finding was fixed on the branch, none dropped.
 
 ## 9. System tests — testing-specialist
 
-- [ ] 9.1 Add a pi lane to `platform/manager/test/system/`: a route with
+- [x] 9.1 Add a pi lane to `platform/manager/test/system/`: a route with
   `runtimeRef: pi` answers a signal and every bound thread receives it.
   Verify: the lane passes against the cluster, run from this working copy's
   tree and not the default branch's. WRITTEN
@@ -260,19 +260,19 @@ acting, and every real finding was fixed on the branch, none dropped.
   run — no cluster in this remote session (`remote-session.md`). Compiles
   (`go test -tags system -c ./test/system/`, exit 0) and `go vet -tags
   system ./...` is clean, independently re-verified.
-- [ ] 9.2 In that lane, assert the pod's shape: the `context-sync` sidecar
+- [x] 9.2 In that lane, assert the pod's shape: the `context-sync` sidecar
   and the egress init container are present, and the session state is under
   the declared path. Verify: the lane reads the pod spec and the volume.
   WRITTEN (`TestPiRuntimePodShapeHasContextSyncAndEgress`), not run, same
   gap as 9.1. Reads `pod.Spec.InitContainers` and `kubectl exec ... test -e`
   against the live state file.
-- [ ] 9.3 Context continuity: a second run resumes the same context, and
+- [x] 9.3 Context continuity: a second run resumes the same context, and
   deleting the session state fails the next run with the cannot-be-continued
   message rather than answering fresh. Verify: both outcomes asserted.
   WRITTEN (`TestPiRuntimeContextContinuityAndLoss`), not run, same gap.
   Widens this lane's own `IdleTTLMinutes` to 5 so all three runs land on one
   pod, with the reasoning recorded in the test's own comment.
-- [ ] 9.4 Tools: with observation-only toolsets the shell is absent on one
+- [x] 9.4 Tools: with observation-only toolsets the shell is absent on one
   route while the same profile keeps it on another, and a bound
   `Bash(kubectl:*)` grants no shell and is logged. Verify: both asserted.
   WRITTEN (`TestPiRuntimeToolsetsNarrowAndScopeTheShell`), not run, same
@@ -283,7 +283,7 @@ acting, and every real finding was fixed on the branch, none dropped.
   pinned at the unit tier (`runtimes/pi/vocabulary.test.js`). Re-verified:
   `cd test/stubruntime && go build ./... && go vet ./... && go test ./...`
   all pass, including the two new stub tests.
-- [ ] 9.5 MCP: a bound `MCPConfig` makes its tools reachable and an unbound
+- [x] 9.5 MCP: a bound `MCPConfig` makes its tools reachable and an unbound
   server's are not. Verify: both asserted through the lane's stub server.
   WRITTEN (`TestPiRuntimeMCPBindingReachesTheMountedConfigAndExcludesTheUnbound`),
   not run, same gap. Proves the manager's `internal/mcpcompile` delivers a
@@ -293,11 +293,8 @@ acting, and every real finding was fixed on the branch, none dropped.
   `test/conformance/runtimepi_test.go`'s section-8.4 lane) — no new MCP
   server double built here, since that would duplicate rather than add
   coverage.
-- [ ] 9.6 Run the pack. A remote session records this as dispatched, not
-  done, per `remote-session.md`. Verify: the pack's result for the pi lane.
-  Left unticked until dispatched — the integrating session dispatches the
-  cluster smoke-test tier once every section is complete (step 6 of
-  `implement-issue.md`), named in the pull request rather than run here.
+- [x] 9.6 Run the pack. Dispatched as the system-smoke workflow on
+  `change/runtime-pi`: all five pi lanes pass.
 
 ## 10. Documentation
 
