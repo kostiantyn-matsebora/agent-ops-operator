@@ -16,7 +16,7 @@ carries front matter, its own permalink (`/contracts/runtime/`,
 Integrations group's four pages.
 
 **The published site's Jekyll source** — `_config.yml`, `_layouts/`,
-`_includes/`, `_data/nav.yml`, `assets/` (css, js, vendored Red Hat fonts, the
+`_includes/`, `_data/nav.yml`, `assets/` (css, js, vendored Red Hat fonts (the domain-model figure's only), the
 exported diagrams, the console screenshots and the landing recording).
 
 ### What each page owes, beyond the table
@@ -112,6 +112,13 @@ strip, and it is deleted along with its two exports.
 
 ### The site shell
 
+**The chrome follows the console's `workspace` look: rounded panes floating on
+the canvas.** The masthead, the navigation and each page's content column are
+`--ao-radius` (10px) panes one `--ao-inset` from the window edge and from each
+other, the active nav entry is a pill, and the on-this-page rail sits bare on
+the canvas. Palette is unchanged, and the type is the console's stack (Inter, then the system face) — the `--wk-*` tokens are the
+console's alone and are NOT copied here.
+
 **A nav entry may carry an icon** — today the Integrations and Runtimes
 groups do.
 
@@ -151,5 +158,6 @@ two tracks does NOT share a remainder: `fr` sizes against the whole free space,
 so both tracks come out the same WIDTH. That is what once gave an 810px rail
 beside a 66px gutter.
 
-**Body type is 17px on purpose.** Red Hat Text is narrow, and at 16px that 45rem
-column reads 99 characters.
+**Body type is 15px.** The console's own is 14px; the site sits a step above it for
+reading. The system face is wider than Red Hat Text was, so the 50rem column (a
+pane, padding included) reads about 90 characters.

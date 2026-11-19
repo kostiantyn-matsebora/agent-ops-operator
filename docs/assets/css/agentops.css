@@ -76,13 +76,19 @@
 
 /* --- non-colour tokens ---------------------------------------------------- */
 :root {
-  --ao-font-display: 'Red Hat Display', 'Red Hat Text', system-ui, -apple-system,
-    'Segoe UI', sans-serif;
-  --ao-font-text: 'Red Hat Text', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --ao-font-mono: 'Red Hat Mono', ui-monospace, 'SFMono-Regular', 'Cascadia Mono',
-    Consolas, monospace;
+  /* The console's workspace look: Inter, falling through to the system UI face.
+     Like the console, the site loads no file for it. The vendored Red Hat files
+     below remain only for the inlined domain-model figure, which names them. */
+  --ao-font-text: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ao-font-display: var(--ao-font-text);
+  --ao-font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 
-  --ao-masthead-h: 3.5rem;
+  /* The workspace look's geometry: chrome is a set of rounded panes floating on
+     the canvas, one inset from the window edge and from each other. */
+  --ao-inset: 0.75rem;
+  --ao-chrome-h: 3rem;
+  --ao-masthead-h: calc(var(--ao-chrome-h) + 2 * var(--ao-inset));
+  --ao-pane-pad: 2.25rem;
   /* Read off the reference's own stylesheet rather than guessed from a
      screenshot: BOTH rails are one width and the text column is fixed, and the
      leftover is split evenly between the gutter and the right container. */
@@ -92,13 +98,13 @@
      so the text is not pinned to the navigation's edge — it is a token because
      the shell's middle column is sized from it, and a padding the grid did not
      know about would push the content past its track. */
-  --ao-main-pad-x: 2.5rem;
-  --ao-main-pad-l: 1.5rem;
+  --ao-main-pad-x: 0.75rem;
+  --ao-main-pad-l: 0.75rem;
   /* The content column, and the line length with it: 720px at 17px type is
      about 85 characters. Nothing on the page is wider — a narrow-prose-inside-a-
      wide-box scheme leaves dead space between the last word and the rail, which
      reads as an inflated right column. Cards and the diagram ARE the column. */
-  --ao-measure: 45rem;
+  --ao-measure: 50rem;
   /* THE COLUMN IS SIZED FROM WHICH RAILS THE PAGE CARRIES, and that is the
      reference's own ladder rather than a preference: 45rem beside an
      on-this-page rail, 58rem without one, 67.5rem with no navigation either.
@@ -107,8 +113,9 @@
      We had only the first rung, so a page declining the rail kept the narrow
      measure AND lost the track that justified it — a 720px column pinned to
      the navigation with 380px of nothing to its right, measured at 1440. */
-  --ao-measure-wide: 58rem;
-  --ao-radius: 6px;
+  --ao-measure-wide: 63rem;
+  --ao-radius: 10px;
+  --ao-radius-sm: 6px;
 }
 
 /* --- type: self-hosted, no third-party request ---------------------------- */
@@ -162,8 +169,8 @@ body {
      720px runs to ~99 characters; a step up puts the same width at ~85, which
      is where the reference layout sits. The type carries the line length here,
      not the column. */
-  font-size: 1.0625rem;
-  line-height: 1.65;
+  font-size: 0.9375rem;
+  line-height: 1.6;
   /* The page body never scrolls sideways; wide content scrolls in its own
      frame instead (see the overflow rules below). */
   overflow-x: hidden;
@@ -210,7 +217,7 @@ a:hover {
   background: var(--ao-surface);
   color: var(--ao-text);
   border: 1px solid var(--ao-border-strong);
-  border-radius: var(--ao-radius);
+  border-radius: var(--ao-radius-sm);
   font-weight: 500;
   transition: top 0.15s ease;
 }
@@ -222,15 +229,16 @@ a:hover {
 /* --- masthead ------------------------------------------------------------- */
 .ao-masthead {
   position: fixed;
-  inset: 0 0 auto 0;
+  inset: var(--ao-inset) var(--ao-inset) auto var(--ao-inset);
   z-index: 30;
-  height: var(--ao-masthead-h);
+  height: var(--ao-chrome-h);
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0 1rem;
+  padding: 0 0.75rem;
   background: var(--ao-surface);
-  border-bottom: 1px solid var(--ao-border);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
 }
 
 .ao-brand {
@@ -238,9 +246,9 @@ a:hover {
   align-items: center;
   gap: 0.55rem;
   font-family: var(--ao-font-display);
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   color: var(--ao-text);
   text-decoration: none;
 }
@@ -278,7 +286,7 @@ a:hover {
   width: 2.25rem;
   height: 2.25rem;
   border: 1px solid var(--ao-border);
-  border-radius: var(--ao-radius);
+  border-radius: var(--ao-radius-sm);
   color: var(--ao-text);
   cursor: pointer;
 }
@@ -309,7 +317,7 @@ a:hover {
   gap: 2px;
   background: var(--ao-surface-alt);
   border: 1px solid var(--ao-border);
-  border-radius: var(--ao-radius);
+  border-radius: var(--ao-radius-sm);
 }
 
 .ao-theme-btn {
@@ -444,10 +452,9 @@ a:hover {
   /* Its OWN width at the left of a track that may be wider — the surplus is
      space past the rail, never a fatter rail. */
   width: var(--ao-toc-w);
-  height: calc(100vh - var(--ao-masthead-h));
+  height: calc(100vh - var(--ao-masthead-h) - var(--ao-inset));
   overflow-y: auto;
-  padding: 2rem 1.5rem 2rem 1.5rem;
-  border-left: 1px solid var(--ao-border);
+  padding: 1.25rem 1.25rem 1rem 1.5rem;
   /* A column, so the what-next card can be pushed to the foot of the rail. */
   display: flex;
   flex-direction: column;
@@ -514,7 +521,7 @@ a:hover {
   padding: 0.9rem 1rem 1rem;
   border: 1px solid var(--ao-border);
   border-radius: var(--ao-radius);
-  background: var(--ao-surface-alt);
+  background: var(--ao-surface);
   color: inherit;
   text-decoration: none;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -522,7 +529,7 @@ a:hover {
 
 .ao-toc-next:hover {
   border-color: var(--ao-brand);
-  background: var(--ao-surface);
+  background: var(--ao-surface-alt);
 }
 
 .ao-toc-next-eyebrow {
@@ -567,11 +574,13 @@ a:hover {
   position: sticky;
   top: var(--ao-masthead-h);
   align-self: start;
-  height: calc(100vh - var(--ao-masthead-h));
+  height: calc(100vh - var(--ao-masthead-h) - var(--ao-inset));
+  margin-left: var(--ao-inset);
   overflow-y: auto;
-  padding: 1.25rem 0.75rem 2rem;
-  background: var(--ao-surface-alt);
-  border-right: 1px solid var(--ao-border);
+  padding: 0.75rem 0.5rem 1.5rem;
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
 }
 
 /* Nav groups — each sidebar group is a <details> rendered open (the
@@ -591,7 +600,7 @@ a:hover {
   gap: 0.4rem;
   margin: 0;
   padding: 0.45rem 0.6rem;
-  border-radius: var(--ao-radius);
+  border-radius: var(--ao-radius-sm);
   cursor: pointer;
   list-style: none;
   font-family: var(--ao-font-display);
@@ -607,7 +616,7 @@ a:hover {
 }
 
 .ao-nav-title:hover {
-  background: var(--ao-surface);
+  background: var(--ao-surface-alt);
 }
 
 /* A real element carrying aria-hidden, not a pseudo-element on <summary> --
@@ -642,11 +651,10 @@ a:hover {
   align-items: center;
   gap: 0.45em;
   padding: 0.35rem 0.6rem 0.35rem 1.4rem;
-  border-radius: var(--ao-radius);
-  border-left: 2px solid transparent;
+  border-radius: var(--ao-radius-sm);
   color: var(--ao-text);
   text-decoration: none;
-  font-size: 0.94rem;
+  font-size: 0.9rem;
 }
 
 /* The mark an entry may carry (nav.yml names the file). Sized like a glyph so
@@ -658,15 +666,14 @@ a:hover {
 }
 
 .ao-nav-link:hover {
-  background: var(--ao-surface);
+  background: var(--ao-surface-alt);
   color: var(--ao-text);
 }
 
 .ao-nav-link[aria-current='page'] {
   background: var(--ao-brand-soft);
-  border-left-color: var(--ao-brand);
   color: var(--ao-brand-strong);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .ao-nav-external::after {
@@ -678,7 +685,7 @@ a:hover {
 
 .ao-main {
   min-width: 0;
-  padding: 2rem var(--ao-main-pad-x) 4rem var(--ao-main-pad-l);
+  padding: 0 var(--ao-inset) var(--ao-inset) var(--ao-main-pad-l);
   /* The skip link targets this element, and the masthead is fixed: without a
      scroll margin, skipping to the content parks the first heading underneath
      it. Headings carry the same margin for in-page anchors. */
@@ -695,6 +702,11 @@ a:hover {
 .ao-content {
   max-width: var(--ao-measure-wide);
   margin-inline: auto;
+  /* The page is a pane on the canvas, like the console's conversation pane. */
+  padding: 1.5rem var(--ao-pane-pad) 2rem;
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
 }
 
 /* With a rail the column is the narrow measure and sits flush against it, so
@@ -1780,8 +1792,7 @@ a:hover {
     display: none;
     position: static;
     height: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--ao-border);
+    margin: 0 var(--ao-inset) var(--ao-inset);
   }
 
   /* The toggle lives in the masthead and the sidebar is later in the DOM, so
@@ -1791,7 +1802,11 @@ a:hover {
   }
 
   .ao-main {
-    padding: 1.5rem 1rem 3rem;
+    padding: 0 var(--ao-inset) var(--ao-inset);
+  }
+
+  .ao-content {
+    padding: 1.25rem 1.1rem 1.5rem;
   }
 
   .ao-content h1 {
