@@ -5,6 +5,8 @@ The list SHALL offer an unread-only filter evaluated server-side by the
 counting rule alongside the existing filters, so pagination and the total
 match count stay correct.
 
+The badge counts conversations, not messages. This replaces the earlier rule that summed unread messages.
+
 The response SHALL carry the number of unread ROOT conversations that are not closed, computed over ALL conversations BEFORE any filter is applied, so the badge never moves because a filter hid something.
 
 A member conversation SHALL NOT be counted, and a closed conversation SHALL NOT be counted toward it.

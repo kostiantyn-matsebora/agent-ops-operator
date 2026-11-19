@@ -10,7 +10,7 @@ Three things in the Conversations inbox read inconsistently:
 
 - **All becomes Open.** It lists root conversations with `phase != Closed` and is the default scope.
 - **"Show closed" is removed everywhere.** The layout preference, the checkbox and the conversations endpoint's `showClosed` parameter go away. Every scope except Closed excludes closed rows. Closed lists only closed rows.
-- **Every inbox badge counts unread roots.** Open and Closed join Working, Mine, Errored and the Pipeline and Coordinator scopes. A member never counts. The navigation badge equals Open's.
+- **Every inbox badge counts unread roots.** Open and Closed join Working, Mine, Errored and the Pipeline and Coordinator scopes. A member never counts. The navigation badge equals Open's. **This redefines the badge** from a sum of unread messages, as the `console-unread` spec said, to a count of unread conversations, as the code already computes it.
 - **"Archive" becomes "Closed"** in every user-visible string: the inbox row, the thread banner, the close dialog, the `/close` chip and the docs.
 - **Selection counts roots.** "N selected", the button suffixes, the dialog titles, the Working warning and the result banner count selected roots. Members cannot be selected. "Select all" picks roots only. The dialogs keep one informational line naming how many members the cascade reaches.
 - **The local member-skip outcome disappears.** A member is never in a request, so "member of P — act on P instead" can no longer occur.
@@ -39,5 +39,5 @@ None.
 - `platform/console/ui/src/api/`: `hooks.ts`, `types.ts`.
 - `platform/console/convapi.go`: `handleConversations`, `accumulateScopeCounts`.
 - `.github/retired-vocabulary.json`: the retired inbox wording, per `retired-vocabulary.md`.
-- `docs/console.md`, and the console screenshots and demo.
+- `docs/console.md`, `docs/console-guide.md`, `docs/CHANGELOG.md` and the console screenshots and demo.
 - No manager, CRD, chart or runtime change. No cluster behaviour changes.

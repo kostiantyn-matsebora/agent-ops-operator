@@ -5,7 +5,8 @@
 - [ ] 1.3 Add `scopes.open` and keep `unreadTotal` equal to it, delete `rootTotal`, and verify a Go test that a member and a closed root are in neither
 - [ ] 1.4 Stop reading `showClosed` in `parseShowClosed` and remove the function, and verify a Go test that a request carrying `showClosed=true` returns the same counts as one without it
 - [ ] 1.5 Make `closeOne` and `deleteOne` in `platform/console/convapi.go` skip a name whose conversation has `causedBy.parent`, with a reason naming that parent and no action taken, and verify Go tests for a close and a delete naming a member
-- [ ] 1.6 Remove `rootTotal` from `platform/console/ui/src/api/types.ts` and `useInboxCounts`'s `showClosed` key in `hooks.ts`, and verify `npm run typecheck` is clean
+- [ ] 1.6 Keep the count-only form (`count=1`) returning the navigation count, the per-scope counts and the total with no rows, and verify a Go test of the response shape after `rootTotal` is gone
+- [ ] 1.7 Remove `rootTotal` from `platform/console/ui/src/api/types.ts` and `useInboxCounts`'s `showClosed` key in `hooks.ts`, and verify `npm run typecheck` is clean
 
 ## 2. Open scope and one closed rule, shared model — frontend-developer
 
