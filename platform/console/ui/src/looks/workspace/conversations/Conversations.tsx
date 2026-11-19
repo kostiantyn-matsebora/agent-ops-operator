@@ -26,7 +26,7 @@ import { GeneralFeedPane, ThreadPane } from './Thread'
 // time, with a way back from the thread.
 
 const SCOPE_LABEL: Record<Scope['kind'], string> = {
-  all: 'All conversations',
+  open: 'Open conversations',
   working: 'Working',
   mine: 'Mine',
   errored: 'Errored',
@@ -73,8 +73,8 @@ function rowActions(row: ConversationSummary, d: RowActionDeps): RowAction[] {
 }
 
 /** The scope chips shown in the list's head where the navigation panel is a drawer. */
-function ScopeChips({ scope, showClosed, onPick }: Readonly<{ scope: Scope; showClosed: boolean; onPick: (s: Scope) => void }>) {
-  const { fixed, closed } = useInboxScopes(showClosed)
+function ScopeChips({ scope, onPick }: Readonly<{ scope: Scope; onPick: (s: Scope) => void }>) {
+  const { fixed, closed } = useInboxScopes()
   return (
     <div className="wk-scopes" role="group" aria-label="Conversation scopes">
       {[...fixed, closed].map((e) => (
@@ -95,7 +95,7 @@ function ScopeChips({ scope, showClosed, onPick }: Readonly<{ scope: Scope; show
 function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; collapsed: boolean; draft?: Draft }>) {
   const scope = useWorkspaceScope((s) => s.scope)
   const setScope = useWorkspaceScope((s) => s.setScope)
-  const { showClosed, flatten, update } = useWorkspaceLayout()
+  const { flatten, update } = useWorkspaceLayout()
   const [search, setSearch] = useState('')
   const [folded, setFolded] = useState<Set<string>>(new Set())
   const seen = useRef<Set<string>>(new Set())
@@ -123,7 +123,7 @@ function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; co
     setSelected(new Set())
   }
 
-  const list = useConversationList({ scope, search, showClosed, flatten, collapsedRoots: folded })
+  const list = useConversationList({ scope, search, flatten, collapsedRoots: folded })
   const { newNames, clear } = useArrivals(list.data, scopeKey(scope))
 
   // A root with members starts folded, as it is first seen — a later arrival
@@ -197,7 +197,7 @@ function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; co
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
-      <ScopeChips scope={scope} showClosed={showClosed} onPick={setScope} />
+      <ScopeChips scope={scope} onPick={setScope} />
       <div className="wk-tools">
         <button type="button" className="wk-btn link" onClick={() => update({ flatten: !flatten })}>
           {flatten ? 'nest' : 'flatten'}
@@ -230,15 +230,6 @@ function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; co
             {allSelected ? 'Clear all' : 'Select all'}
           </button>
         )}
-        <label>
-          <input
-            type="checkbox"
-            data-testid={TESTID.showClosed}
-            checked={showClosed}
-            onChange={(e) => update({ showClosed: e.target.checked })}
-          />{' '}
-          Show closed
-        </label>
       </div>
       {selecting && !collapsed && (
         <SelectionBar
@@ -278,11 +269,7 @@ function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; co
         {list.data && list.rows.length === 0 && (
           <li className="wk-empty">
             <h2>No conversations match</h2>
-            {list.data.total === 0
-              ? 'Nothing has started a conversation yet.'
-              : showClosed
-                ? 'Every conversation was filtered out.'
-                : 'Every conversation here is closed, and closed ones are hidden: turn on Show closed.'}
+            {list.data.total === 0 ? 'Nothing has started a conversation yet.' : 'Every conversation was filtered out.'}
           </li>
         )}
         {draft && !collapsed && <DraftRow draft={draft} current />}

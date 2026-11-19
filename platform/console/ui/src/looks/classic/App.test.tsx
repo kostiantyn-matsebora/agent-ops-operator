@@ -12,7 +12,7 @@ import { TESTID } from '../../model/testids'
 vi.mock('../../api/hooks', () => ({
   useSession: () => ({ isLoading: false, data: { authenticated: true, configured: true }, refetch: () => {} }),
   useLiveStream: () => true,
-  useUnreadCount: () => ({ data: { unreadTotal: 3 } }),
+  useInboxCounts: () => ({ data: { unreadTotal: 3 } }),
 }))
 vi.mock('../../api/client', () => ({ api: {} }))
 vi.mock('./components/ThemeSwitcher', () => ({ ThemeSwitcher: () => null }))

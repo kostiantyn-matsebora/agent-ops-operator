@@ -10,7 +10,7 @@ import { testid } from '../src/model/testids'
 
 test('#24 hovering the "All" badge explains why it does not match the visible rows', async ({ page }) => {
   await page.goto('/conversations')
-  const allRow = page.getByTestId(testid.scope('All'))
+  const allRow = page.getByTestId(testid.scope('Open'))
   await expect(allRow).toBeVisible()
 
   const badge = allRow.getByText(/^\d+$/)

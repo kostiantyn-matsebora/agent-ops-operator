@@ -136,47 +136,25 @@ export function useMarkUnread() {
 }
 
 /**
- * The inbox's per-scope counts — the SAME count-only request the navigation
- * badge already fetches (`useUnreadCount`, below), which also carries
- * `scopes` (console-unread: "the count per scope SHALL be available for the
- * inbox").
+ * The inbox's per-scope counts — count=1 asks for the totals only, so a page
+ * of conversations a caller would throw away is never fetched on every
+ * route. Carries `scopes` (console-unread: "the count per scope SHALL be
+ * available for the inbox") and `unreadTotal`, which is what the navigation
+ * rail itself reads (App.tsx) and equals `scopes.open`.
  *
- * Its own query now, no longer delegating to `useUnreadCount`: the server
- * dropped `showClosed` entirely (console-unread: "no request parameter
- * changes which conversations a count includes"), so there is nothing left
- * for this one to key or refetch by. The parameter stays, unused, for its
- * one caller (`useInboxScopes`) until that caller's own showClosed plumbing
- * is removed.
+ * No argument any more: the server reads no `showClosed` parameter at all
+ * (console-unread: "no request parameter changes which conversations a
+ * count includes"), so there is nothing left for this hook to key or
+ * refetch by, and no caller has a preference left to pass down. Every scope
+ * (`open`, `working`, `mine`, `errored`, `closed`, each per-Pipeline/
+ * Coordinator entry in `scopes`) is unread, ANDed with its own predicate —
+ * `open` and everything but `closed` also require phase≠Closed, `closed`
+ * requires phase=Closed.
  */
-export function useInboxCounts(_showClosed: boolean) {
+export function useInboxCounts() {
   return useQuery({
     queryKey: ['conversationCount'],
     queryFn: () => api.conversations(new URLSearchParams({ count: '1' })),
-  })
-}
-
-/**
- * The unread count for the navigation, without the rows.
- *
- * count=1 asks for the totals only — the badge wants a number, and a page of
- * conversations it would throw away is the wrong thing to fetch on every
- * route. `unreadTotal` is what the navigation rail itself reads, a plain
- * notification count, and equals `scopes.open`. Every other scope (`open`,
- * `working`, `mine`, `errored`, `closed`, each per-Pipeline/Coordinator
- * entry in `scopes`) is unread, ANDed with its own predicate — `open` and
- * everything but `closed` also require phase≠Closed, `closed` requires
- * phase=Closed.
- *
- * `showClosed` still rides here for this hook's own caller (App.tsx's
- * navigation badge, still reading the list's display preference, and still
- * sent on the wire) but the server no longer reads the parameter at all —
- * removing it from THIS hook, and from the request it still sends, is
- * section 4's job once that caller's own showClosed plumbing goes.
- */
-export function useUnreadCount(showClosed: boolean) {
-  return useQuery({
-    queryKey: ['conversationCount', showClosed],
-    queryFn: () => api.conversations(new URLSearchParams({ count: '1', showClosed: String(showClosed) })),
   })
 }
 

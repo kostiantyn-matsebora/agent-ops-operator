@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Button, Checkbox, SearchInput } from '@patternfly/react-core'
+import { Button, SearchInput } from '@patternfly/react-core'
 import { BarsIcon } from '@patternfly/react-icons'
 import {
   useMarkRead, useMarkUnread, usePipelineIcon, useReopenConversation, useSession,
@@ -135,7 +135,7 @@ export function ChatView() {
   const navigate = useNavigate()
   const narrow = useNarrow()
   const [layout, updateLayout] = useLayout()
-  const [scope, setScope] = useState<Scope>({ kind: 'all' })
+  const [scope, setScope] = useState<Scope>({ kind: 'open' })
   // The Inbox panel is its own fixed-width column ALWAYS, which fits beside a
   // narrowed list down to the 900px breakpoint but not below it: at an actual
   // phone width the Inbox and the list cannot both fit, and rendering both
@@ -147,10 +147,6 @@ export function ChatView() {
   const [mobileInboxOpen, setMobileInboxOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [flatten, setFlatten] = useState(false)
-  // Persisted in `layout.ts`, same as the pane widths and the inbox's
-  // collapsed state — a viewer preference, never conversation state.
-  const showClosed = layout.showClosed
-  const setShowClosed = (v: boolean) => updateLayout({ showClosed: v })
   const [selectionMode, setSelectionMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [highlighted, setHighlighted] = useState<string | undefined>()
@@ -162,7 +158,7 @@ export function ChatView() {
   const seededRootsRef = useRef<Set<string>>(new Set())
 
   const { data, isLoading, error, items, rows, collapsibleNames } = useConversationList({
-    scope, search, showClosed, flatten, collapsedRoots,
+    scope, search, flatten, collapsedRoots,
   })
   const session = useSession()
   const iconFor = usePipelineIcon()
@@ -306,7 +302,6 @@ export function ChatView() {
             }}
             collapsed={false}
             onToggleCollapsed={() => undefined}
-            showClosed={showClosed}
           />
         </div>
       )}
@@ -320,7 +315,6 @@ export function ChatView() {
                   onSelectScope={selectScope}
                   collapsed={layout.inboxCollapsed}
                   onToggleCollapsed={() => updateLayout({ inboxCollapsed: !layout.inboxCollapsed })}
-                  showClosed={showClosed}
                 />
               </div>
               {!narrow && (
@@ -346,7 +340,7 @@ export function ChatView() {
                   <BarsIcon />
                 </Button>
               )}
-              <strong>{sameScope(scope, { kind: 'all' }) ? 'All conversations' : 'Conversations'}</strong>
+              <strong>{sameScope(scope, { kind: 'open' }) ? 'Open conversations' : 'Conversations'}</strong>
               <SearchInput
                 aria-label="search conversations"
                 placeholder="name or title"
@@ -390,15 +384,6 @@ export function ChatView() {
                 >
                   {allSelected ? 'Clear all' : 'Select all'}
                 </Button>
-              )}
-              {scope.kind !== 'closed' && (
-                <Checkbox
-                  id="show-closed"
-                  data-testid={TESTID.showClosed}
-                  label="Show closed"
-                  isChecked={showClosed}
-                  onChange={(_e, checked) => setShowClosed(checked)}
-                />
               )}
             </div>
             {selectionMode && (

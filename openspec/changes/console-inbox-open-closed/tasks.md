@@ -10,12 +10,12 @@
 
 ## 2. Open scope and one closed rule, shared model — frontend-developer
 
-- [ ] 2.1 In `ui/src/model/conversationList.ts` replace `{ kind: 'all' }` with `{ kind: 'open' }`, drop the `showClosed` argument of `visibleItems`, `useConversationList` and `useInboxScopes`, and verify `conversationList.test.ts` shows a closed conversation listed only under Closed
-- [ ] 2.2 In `useInboxScopes` label the first scope Open with `scopes.open`, label the last Closed with `scopes.closed`, and verify a test of the order Open, Working, Mine, Errored, Pipelines and Coordinators, Closed
-- [ ] 2.3 Delete `showClosed` and its checkbox from the classic look (`looks/classic/pages/chat/layout.ts`, `ChatView.tsx`, `Inbox.tsx`) and make `open` its default scope, and verify its `ChatView` and `Inbox` tests
-- [ ] 2.4 Delete `showClosed` and its checkbox from the workspace look (`looks/workspace/layout.ts`, `Conversations.tsx`, `NavPanel.tsx`) and make `open` its default in `useWorkspaceScope`, and verify its `Conversations` and `Shell` tests, including the empty-list hint that mentions Show closed
-- [ ] 2.5 Verify a test in each look that a stored `showClosed` value is ignored and `readLayout` still never throws
-- [ ] 2.6 Show the Open and Closed badges in each look's expanded and collapsed inbox, and verify a badge test for both
+- [x] 2.1 In `ui/src/model/conversationList.ts` replace `{ kind: 'all' }` with `{ kind: 'open' }`, drop the `showClosed` argument of `visibleItems`, `useConversationList` and `useInboxScopes`, and verify `conversationList.test.ts` shows a closed conversation listed only under Closed
+- [x] 2.2 In `useInboxScopes` label the first scope Open with `scopes.open`, label the last Closed with `scopes.closed`, and verify a test of the order Open, Working, Mine, Errored, Pipelines and Coordinators, Closed
+- [x] 2.3 Delete `showClosed` and its checkbox from the classic look (`looks/classic/pages/chat/layout.ts`, `ChatView.tsx`, `Inbox.tsx`) and make `open` its default scope, and verify its `ChatView` and `Inbox` tests
+- [x] 2.4 Delete `showClosed` and its checkbox from the workspace look (`looks/workspace/layout.ts`, `Conversations.tsx`, `NavPanel.tsx`) and make `open` its default in `useWorkspaceScope`, and verify its `Conversations` and `Shell` tests, including the empty-list hint that mentions Show closed
+- [x] 2.5 Verify a test in each look that a stored `showClosed` value is ignored and `readLayout` still never throws
+- [x] 2.6 Show the Open and Closed badges in each look's expanded and collapsed inbox, and verify a badge test for both
 
 ## 3. Selection over roots — frontend-developer
 

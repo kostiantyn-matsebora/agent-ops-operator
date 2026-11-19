@@ -29,7 +29,6 @@ export interface WorkspaceLayout {
   /** The navigation panel put away altogether, from the header's menu button, on a wide window. */
   navHidden: boolean
   listCollapsed: boolean
-  showClosed: boolean
   /** Every row its own line, instead of members under their root. */
   flatten: boolean
 }
@@ -40,7 +39,6 @@ export const DEFAULT_WORKSPACE_LAYOUT: WorkspaceLayout = {
   navCollapsed: false,
   navHidden: false,
   listCollapsed: false,
-  showClosed: false,
   flatten: false,
 }
 
@@ -91,7 +89,12 @@ export const useWorkspaceLayout = create<LayoutStore>()(
       version: 1,
       storage: safeStorage,
       partialize: ({ update: _update, ...layout }) => layout,
-      // A stored value of the wrong type is dropped, never trusted.
+      // A stored value of the wrong type is dropped, never trusted. A
+      // `showClosed` an earlier version wrote under this same key is
+      // likewise never restored: it is no longer a key of
+      // `DEFAULT_WORKSPACE_LAYOUT`, so the loop below never looks at it
+      // (console-inbox-open-closed: "a value left by an earlier version
+      // SHALL be ignored").
       merge: (stored, current) => {
         const s = (stored ?? {}) as Record<string, unknown>
         const out = { ...current }
@@ -111,7 +114,7 @@ export const useWorkspaceLayout = create<LayoutStore>()(
  * looking now.
  */
 export const useWorkspaceScope = create<{ scope: Scope; setScope: (s: Scope) => void }>((set) => ({
-  scope: { kind: 'all' },
+  scope: { kind: 'open' },
   setScope: (scope) => set({ scope }),
 }))
 

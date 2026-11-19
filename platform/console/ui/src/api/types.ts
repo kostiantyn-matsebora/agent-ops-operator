@@ -709,7 +709,7 @@ export interface ConversationPage {
    * Unread, non-member, non-Closed roots, counted BEFORE any filter — a
    * count that moved because the view narrowed to one named scope would let
    * a filter hide a backlog without saying so. What the navigation rail's
-   * badge reads (`useUnreadCount` in App.tsx), and exactly `scopes.open`
+   * badge reads (`useInboxCounts` in App.tsx), and exactly `scopes.open`
    * below — there is no longer a second, read-gated-differently number for
    * the Inbox's own Open row to read instead.
    *

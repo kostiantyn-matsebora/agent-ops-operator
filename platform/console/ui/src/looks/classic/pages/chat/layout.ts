@@ -1,10 +1,14 @@
 import { useCallback, useState } from 'react'
 
 // The ONE thing the console persists in a browser (design D-B). Pane widths,
-// the inbox's collapsed state, the "show closed" toggle and the tree's
-// default fold are a per-viewer convenience, never conversation state — the
-// "nothing is persisted" rule documented in `docs/console.md` is restated
-// there to say so, not lifted.
+// the inbox's collapsed state and the tree's default fold are a per-viewer
+// convenience, never conversation state — the "nothing is persisted" rule
+// documented in `docs/console.md` is restated there to say so, not lifted.
+//
+// `showClosed` is GONE (console-inbox-open-closed): no scope offers a "show
+// closed" control any more, so there is nothing left to persist. A value an
+// earlier version stored under this same key is simply never read back —
+// `readLayout` below only ever looks at the fields still in `Layout`.
 //
 // Guarded on BOTH sides: a private-browsing tab or a quota failure must
 // still render the view, at the defaults, with no error reaching the
@@ -16,7 +20,6 @@ export interface Layout {
   inboxWidth: number
   listWidth: number
   inboxCollapsed: boolean
-  showClosed: boolean
   /** Whether a root with members starts folded — true for a first-time
    * viewer with nothing stored yet, and from there whatever "Collapse all" /
    * "Expand all" was last clicked to. Applies to every root as it is first
@@ -28,7 +31,7 @@ export interface Layout {
 // Defaults and the collapsed strip width are the prototype's
 // (`prototype/C-rail.html`, `C-collapsed.html`) — read nowhere else.
 export const DEFAULT_LAYOUT: Layout = {
-  inboxWidth: 240, listWidth: 340, inboxCollapsed: false, showClosed: false, treeCollapsedByDefault: true,
+  inboxWidth: 240, listWidth: 340, inboxCollapsed: false, treeCollapsedByDefault: true,
 }
 export const INBOX_COLLAPSED_WIDTH = 56
 
@@ -53,7 +56,6 @@ export function readLayout(): Layout {
       listWidth: typeof parsed.listWidth === 'number' ? parsed.listWidth : DEFAULT_LAYOUT.listWidth,
       inboxCollapsed:
         typeof parsed.inboxCollapsed === 'boolean' ? parsed.inboxCollapsed : DEFAULT_LAYOUT.inboxCollapsed,
-      showClosed: typeof parsed.showClosed === 'boolean' ? parsed.showClosed : DEFAULT_LAYOUT.showClosed,
       treeCollapsedByDefault:
         typeof parsed.treeCollapsedByDefault === 'boolean'
           ? parsed.treeCollapsedByDefault
