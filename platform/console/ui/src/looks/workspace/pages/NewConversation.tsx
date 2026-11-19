@@ -1,12 +1,14 @@
-import { type KeyboardEvent, type ReactElement, useEffect, useId, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { type KeyboardEvent, type ReactElement, useId, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Chevron, Icon } from '../icons'
 import type { VocabularyEntry } from '../../../api/types'
 import { resolveIcon } from '../../../model/icon'
 import { filterEntries, useNewConversation } from '../../../model/newConversation'
 import { TESTID, testid } from '../../../model/testids'
 import './NewConversation.css'
 
-// "New conversation", as a dialog over the workspace.
+// "New conversation", as the mockup composes it: a Draft row at the top of the
+// list and, in the thread pane, the destinations as chips over a task box. No modal.
 //
 // Same facts as the classic look, drawn the workspace way: every Ready
 // pipeline and coordinator is a destination card, visible the moment the
@@ -88,40 +90,58 @@ function Unavailable({
   )
 }
 
-export function NewConversationDialog({ open, onClose }: Readonly<{ open: boolean; onClose: () => void }>): ReactElement {
-  const ref = useRef<HTMLDialogElement>(null)
+export interface Draft {
+  task: string
+  selected: string | null
+}
+
+export const EMPTY_DRAFT: Draft = { task: '', selected: null }
+
+/** The list's Draft row: shown while a new conversation is being composed. */
+export function DraftRow({ draft, current }: Readonly<{ draft: Draft; current: boolean }>): ReactElement {
+  return (
+    <li className={`wk-row wk-draft${current ? ' current' : ''}`} data-testid="draft-row" aria-current={current ? 'true' : undefined}>
+      <Link className="open" to="/conversations?new=1" aria-label="New conversation, draft" />
+      <span aria-hidden="true" />
+      <span className="wk-av" aria-hidden="true">
+        <Icon name="bot" />
+      </span>
+      <div className="txt">
+        <span className="name"><i>New conversation</i></span>
+        <span className="l2">{draft.task.trim() || 'Choose a destination and describe the task'}</span>
+      </div>
+      <div className="st">
+        <span className="wk-pill">Draft</span>
+      </div>
+    </li>
+  )
+}
+
+/** The thread pane while composing a new conversation. */
+export function NewConversationPane({
+  draft, onDraft, onBack,
+}: Readonly<{ draft: Draft; onDraft: (d: Draft) => void; onBack?: () => void }>): ReactElement {
   const taskRef = useRef<HTMLTextAreaElement>(null)
-  const cardsRef = useRef<HTMLDivElement>(null)
+  const chipsRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const navigate = useNavigate()
   const nc = useNewConversation()
-  const [task, setTask] = useState('')
-  const [selected, setSelected] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [error, setError] = useState<string>()
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    if (open && !el.open) {
-      setError(undefined)
-      el.showModal?.()
-      taskRef.current?.focus()
-    }
-    if (!open && el.open) el.close?.()
-  }, [open])
+  const { task, selected } = draft
 
   const filtered = filterEntries(nc.startable, filter)
 
-  function onCardKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+  function onChipKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
     e.preventDefault()
     if (filtered.length === 0) return
+    const forward = e.key === 'ArrowDown' || e.key === 'ArrowRight'
     const current = Math.max(0, filtered.findIndex((x) => x.name === selected))
-    const next = e.key === 'ArrowDown' ? (current + 1) % filtered.length : (current - 1 + filtered.length) % filtered.length
-    setSelected(filtered[next].name)
+    const next = forward ? (current + 1) % filtered.length : (current - 1 + filtered.length) % filtered.length
+    onDraft({ ...draft, selected: filtered[next].name })
     requestAnimationFrame(() => {
-      cardsRef.current?.querySelectorAll<HTMLButtonElement>('button[role="radio"]')[next]?.focus()
+      chipsRef.current?.querySelectorAll<HTMLButtonElement>('button[role="radio"]')[next]?.focus()
     })
   }
 
@@ -133,10 +153,7 @@ export function NewConversationDialog({ open, onClose }: Readonly<{ open: boolea
       setError(outcome.error)
       return
     }
-    setTask('')
-    setSelected(null)
-    setFilter('')
-    onClose()
+    onDraft(EMPTY_DRAFT)
     // The response names the source, not the conversation — it does not exist
     // until the manager opens it — so land on the list, where it appears first.
     navigate('/conversations')
@@ -151,107 +168,62 @@ export function NewConversationDialog({ open, onClose }: Readonly<{ open: boolea
   }
 
   const ready = nc.availability === 'ready'
+  const chosen = nc.startable.find((x) => x.name === selected)
 
   return (
-    <dialog
-      ref={ref}
-      className="wk-nc"
-      aria-labelledby={titleId}
-      onClose={onClose}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-      
-    >
-      <div className="wk-nc-head">
-        <h2 id={titleId}>Start a conversation</h2>
-        <button type="button" className="wk-btn wk-nc-x" aria-label="Close" onClick={onClose}>
-          ✕
-        </button>
+    <>
+      <div className="wk-th">
+        {onBack && (
+          <button type="button" className="wk-icon-btn back" aria-label="Back to the list" onClick={onBack}>
+            <Chevron dir="left" />
+          </button>
+        )}
+        <h2 id={titleId}>New conversation</h2>
       </div>
-      {!ready && (
-        <>
-          <Unavailable availability={nc.availability} externalAuthenticator={nc.externalAuthenticator} unwired={nc.unwired} />
-          <div className="wk-nc-foot">
-            <button type="button" className="wk-btn" onClick={onClose}>
-              Close
-            </button>
-          </div>
-        </>
-      )}
+      {!ready && <Unavailable availability={nc.availability} externalAuthenticator={nc.externalAuthenticator} unwired={nc.unwired} />}
       {ready && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            void start()
-          }}
-        >
-          <div className="wk-nc-body">
-            <section className="wk-nc-fg" aria-label="Answered by">
-              <b>Answered by</b>
-              {nc.wired.map((s) => (
-                <div key={s.name}>
-                  <span className="wk-nc-chip">{s.name}</span> → pipeline <b>{s.pipeline}</b>
-                  {s.profile && (
-                    <>
-                      , profile <b>{s.profile}</b>
-                    </>
+        <>
+          <section className="wk-nc-dest" aria-label="Destination">
+            {nc.vocabularyLoading && <small className="wk-nc-note">Loading what can be addressed…</small>}
+            {!nc.vocabularyLoading && nc.startable.length === 0 && (
+              <small className="wk-nc-note" data-testid="destination-empty">
+                Nothing is directly addressable yet — the task below is sent unaddressed.
+              </small>
+            )}
+            {!nc.vocabularyLoading && nc.startable.length > 0 && (
+              <>
+                <div ref={chipsRef} className="wk-dchips" role="radiogroup" aria-label="Pick a destination" data-testid={TESTID.destinationCards}>
+                  {filtered.map((entry, i) => {
+                    const isSelected = selected === entry.name
+                    return (
+                      <button
+                        key={entry.name}
+                        type="button"
+                        role="radio"
+                        className="wk-dchip"
+                        aria-checked={isSelected}
+                        tabIndex={(selected ? isSelected : i === 0) ? 0 : -1}
+                        data-testid={testid.destination(entry.name)}
+                        data-destination={entry.name}
+                        title={entry.description || undefined}
+                        onClick={() => onDraft({ ...draft, selected: entry.name })}
+                        onKeyDown={onChipKeyDown}
+                      >
+                        <DestinationIcon entry={entry} />
+                        <span className="wk-nc-t">
+                          <b>{entry.name}</b>
+                          <span>{entry.kind}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                  {filtered.length === 0 && (
+                    <small className="wk-nc-note" data-testid="destination-no-matches">
+                      No match for “{filter}”.
+                    </small>
                   )}
                 </div>
-              ))}
-              <small className="wk-nc-note">
-                {nc.ambiguous
-                  ? 'Several Pipelines serve this source — pick a destination below. An unaddressed task is refused rather than guessed.'
-                  : 'The Pipeline serving this source answers — the console cannot reach a pipeline no wiring points at.'}
-              </small>
-            </section>
-            <section className="wk-nc-fg" aria-label="Destination">
-              <b>Destination</b>
-              {nc.vocabularyLoading && <small className="wk-nc-note">Loading what can be addressed…</small>}
-              {!nc.vocabularyLoading && nc.startable.length === 0 && (
-                <small className="wk-nc-note" data-testid="destination-empty">
-                  Nothing is directly addressable yet — the task below is sent unaddressed.
-                </small>
-              )}
-              {!nc.vocabularyLoading && nc.startable.length > 0 && (
-                <>
-                  <div
-                    ref={cardsRef}
-                    className="wk-nc-cards"
-                    role="radiogroup"
-                    aria-label="Pick a destination"
-                    data-testid={TESTID.destinationCards}
-                  >
-                    {filtered.map((entry, i) => {
-                      const isSelected = selected === entry.name
-                      return (
-                        <button
-                          key={entry.name}
-                          type="button"
-                          role="radio"
-                          className="wk-nc-card"
-                          aria-checked={isSelected}
-                          tabIndex={(selected ? isSelected : i === 0) ? 0 : -1}
-                          data-testid={testid.destination(entry.name)}
-                          data-destination={entry.name}
-                          onClick={() => setSelected(entry.name)}
-                          onKeyDown={onCardKeyDown}
-                        >
-                          <DestinationIcon entry={entry} />
-                          <span className="wk-nc-t">
-                            <b>{entry.name}</b>
-                            {(entry.description || entry.profile) && <span>{entry.description || entry.profile}</span>}
-                          </span>
-                          <span className={`wk-nc-tag ${entry.kind === 'coordinator' ? 'co' : ''}`}>{entry.kind}</span>
-                        </button>
-                      )
-                    })}
-                    {filtered.length === 0 && (
-                      <small className="wk-nc-note" data-testid="destination-no-matches">
-                        No match for “{filter}”.
-                      </small>
-                    )}
-                  </div>
+                {(
                   <input
                     type="text"
                     className="wk-nc-input"
@@ -261,45 +233,62 @@ export function NewConversationDialog({ open, onClose }: Readonly<{ open: boolea
                     onChange={(e) => setFilter(e.target.value)}
                     data-testid={TESTID.destinationFilter}
                   />
-                </>
-              )}
-            </section>
-            <section className="wk-nc-fg">
-              <label htmlFor={`${titleId}-task`}>
-                <b>Task</b> <span className="wk-nc-req" aria-hidden="true">*</span>
-              </label>
-              <textarea
-                ref={taskRef}
-                id={`${titleId}-task`}
-                className="wk-nc-input"
-                rows={5}
-                required
-                aria-label="task"
-                placeholder="What should the agent do?"
-                value={task}
-                onChange={(e) => setTask(e.target.value)}
-                onKeyDown={onTaskKeyDown}
-              />
+                )}
+              </>
+            )}
+            <div className="wk-nc-meta" aria-label="Answered by">
+              <span>
+                Answered by{' '}
+                {nc.wired.length === 0 ? <b>the wired pipeline</b> : nc.wired.map((s, i) => (
+                  <span key={s.name}>
+                    {i > 0 && '; '}
+                    <b>{s.name}</b> → pipeline <b>{s.pipeline}</b>
+                    {s.profile && <>, profile <b>{s.profile}</b></>}
+                  </span>
+                ))}
+              </span>
               <small className="wk-nc-note">
-                <kbd>Shift</kbd> + <kbd>Enter</kbd> send
+                {nc.ambiguous
+                  ? 'Several Pipelines serve this source — pick a destination above. An unaddressed task is refused rather than guessed.'
+                  : 'The Pipeline serving this source answers — the console cannot reach a pipeline no wiring points at.'}
               </small>
-            </section>
+            </div>
+          </section>
+          <div className="wk-nc-stage">
+            <h3>{chosen ? `Start a conversation with ${chosen.name}` : 'Start a conversation'}</h3>
+            <p>{chosen ? 'Describe the task below.' : 'Pick a destination above, then describe the task below.'}</p>
             {error && (
-              <div className="wk-nc-error" role="alert">
+              <div className="wk-alert danger" role="alert">
                 {error}
               </div>
             )}
           </div>
-          <div className="wk-nc-foot">
+          <form
+            className="wk-compose"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void start()
+            }}
+          >
+            <div className="wk-compose-wrap">
+              <textarea
+                ref={taskRef}
+                aria-label="task"
+                placeholder="What should the agent do?"
+                value={task}
+                onChange={(e) => onDraft({ ...draft, task: e.target.value })}
+                onKeyDown={onTaskKeyDown}
+              />
+            </div>
+            <span className="h">
+              <span><kbd>Shift</kbd> + <kbd>Enter</kbd> send</span>
+            </span>
             <button type="submit" className="wk-btn primary" disabled={nc.busy || !task.trim()} data-testid={TESTID.startConversation}>
-              {nc.busy ? 'Starting…' : selected ? `Start with ${selected}` : 'Start'}
+              {nc.busy ? 'Starting…' : chosen ? `Start with ${chosen.name}` : 'Start'}
             </button>
-            <button type="button" className="wk-btn" onClick={onClose}>
-              Cancel
-            </button>
-          </div>
-        </form>
+          </form>
+        </>
       )}
-    </dialog>
+    </>
   )
 }

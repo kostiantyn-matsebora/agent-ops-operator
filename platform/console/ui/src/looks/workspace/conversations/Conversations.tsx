@@ -1,5 +1,6 @@
 import { type CSSProperties, type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { DraftRow, EMPTY_DRAFT, NewConversationPane, type Draft } from '../pages/NewConversation'
 import type { ConversationSummary } from '../../../api/types'
 import {
   listKeyAction, neighbourName, rowUnread, sameScope, scopeKey, selectionState, useArrivals, useConversationList, useInboxScopes, type Scope,
@@ -91,7 +92,7 @@ function ScopeChips({ scope, showClosed, onPick }: Readonly<{ scope: Scope; show
   )
 }
 
-function ListPane({ current, collapsed }: Readonly<{ current?: string; collapsed: boolean }>) {
+function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; collapsed: boolean; draft?: Draft }>) {
   const scope = useWorkspaceScope((s) => s.scope)
   const setScope = useWorkspaceScope((s) => s.setScope)
   const { showClosed, flatten, update } = useWorkspaceLayout()
@@ -284,6 +285,7 @@ function ListPane({ current, collapsed }: Readonly<{ current?: string; collapsed
                 : 'Every conversation here is closed, and closed ones are hidden: turn on Show closed.'}
           </li>
         )}
+        {draft && !collapsed && <DraftRow draft={draft} current />}
         {list.rows.map((t) => (
           <Row
             key={t.row.name}
@@ -318,6 +320,9 @@ export function ConversationsPage(): ReactElement {
   const navigate = useNavigate()
   const arrangement = useArrangement()
   const { listWidth, listCollapsed, update } = useWorkspaceLayout()
+  const [params] = useSearchParams()
+  const composing = params.get('new') === '1' && !name
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT)
   const single = arrangement === 'single'
   const collapsed = listCollapsed && !single
   const back = single ? () => void navigate('/conversations') : undefined
@@ -328,7 +333,8 @@ export function ConversationsPage(): ReactElement {
   )
 
   let thread: ReactElement
-  if (name === GENERAL_FEED_NAME) thread = <GeneralFeedPane onBack={back} />
+  if (composing) thread = <NewConversationPane draft={draft} onDraft={setDraft} onBack={back} />
+  else if (name === GENERAL_FEED_NAME) thread = <GeneralFeedPane onBack={back} />
   else if (name) thread = <ThreadPane name={name} onBack={back} />
   else {
     thread = (
@@ -340,8 +346,8 @@ export function ConversationsPage(): ReactElement {
   }
 
   return (
-    <div className="wk-conv" data-testid={TESTID.chatView} data-view={name ? 'thread' : 'list'} style={style}>
-      <ListPane current={name} collapsed={collapsed} />
+    <div className="wk-conv" data-testid={TESTID.chatView} data-view={name || composing ? 'thread' : 'list'} style={style}>
+      <ListPane current={name} collapsed={collapsed} draft={composing ? draft : undefined} />
       <Splitter
         label="Resize the conversation list"
         width={listWidth}

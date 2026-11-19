@@ -1,5 +1,5 @@
 import { Component, type CSSProperties, type ReactElement, type ReactNode, useEffect, useRef, useState } from 'react'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import type { Session } from '../../api/types'
 import { useCommands } from '../../model/commands'
 import { signOut, useConsoleSession, useLiveStream } from '../../model/session'
@@ -12,7 +12,6 @@ import {
 import { NavPanel } from './NavPanel'
 import { LoginPage } from './pages/Login'
 import { ConfigDetailPage, ConfigKindPage, ConfigPage } from './pages/config'
-import { NewConversationDialog } from './pages/NewConversation'
 import { OverviewPage } from './pages/Overview'
 import { QueuesPage } from './pages/Queues'
 import { TopologyPage } from './pages/topology'
@@ -60,8 +59,8 @@ function Workspace({ session }: Readonly<{ session: Session }>): ReactElement {
   const layout = useWorkspaceLayout()
   const sessionQuery = useConsoleSession()
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [newOpen, setNewOpen] = useState(false)
   const drawer = arrangement !== 'full'
   const navRef = useRef<HTMLElement>(null)
 
@@ -88,7 +87,7 @@ function Workspace({ session }: Readonly<{ session: Session }>): ReactElement {
         navOpen={navShown}
         compact={arrangement === 'single'}
         onMenu={() => (drawer ? setDrawerOpen((v) => !v) : layout.update({ navHidden: !layout.navHidden }))}
-        onNew={session.canOriginate ? () => setNewOpen(true) : undefined}
+        onNew={session.canOriginate ? () => navigate('/conversations?new=1') : undefined}
         onSignOut={session.authMode !== 'external' ? () => void signOut().then(() => sessionQuery.refetch()) : undefined}
       />
       <div
@@ -151,7 +150,6 @@ function Workspace({ session }: Readonly<{ session: Session }>): ReactElement {
       {drawer && drawerOpen && (
         <button type="button" className="wk-scrim" aria-label="Close the navigation" onClick={() => setDrawerOpen(false)} />
       )}
-      <NewConversationDialog open={newOpen} onClose={() => setNewOpen(false)} />
     </>
   )
 }

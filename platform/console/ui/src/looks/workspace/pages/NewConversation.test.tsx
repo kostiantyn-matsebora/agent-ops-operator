@@ -1,7 +1,8 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
-import { NewConversationDialog } from './NewConversation'
+import { DraftRow, EMPTY_DRAFT, NewConversationPane, type Draft } from './NewConversation'
 import { TESTID, testid } from '../../../model/testids'
 
 type Hook = ReturnType<typeof import('../../../model/newConversation').useNewConversation>
@@ -24,21 +25,25 @@ vi.mock('../../../model/newConversation', async (orig) => ({
   useNewConversation: () => state,
 }))
 
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) { this.setAttribute('open', '') }
-  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) { this.removeAttribute('open') }
-})
 afterEach(() => start.mockReset())
 
 const Where = () => <div data-testid="where">{useLocation().pathname}</div>
-function show(over: Partial<Hook> = {}, onClose = vi.fn()) {
+function Harness() {
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT)
+  return (
+    <>
+      <ul><DraftRow draft={draft} current /></ul>
+      <NewConversationPane draft={draft} onDraft={setDraft} />
+    </>
+  )
+}
+function show(over: Partial<Hook> = {}) {
   state = hook(over)
-  render(<MemoryRouter><NewConversationDialog open onClose={onClose} /><Where /></MemoryRouter>)
-  return onClose
+  render(<MemoryRouter initialEntries={['/conversations?new=1']}><Harness /><Where /></MemoryRouter>)
 }
 const task = () => screen.getByLabelText('task', { selector: 'textarea' })
 
-describe('NewConversationDialog', () => {
+describe('the new-conversation draft', () => {
   it('lists every destination with its kind and filters by substring', () => {
     show()
     expect(screen.getByTestId(testid.destination('k8s-ops'))).toBeInTheDocument()
@@ -86,12 +91,11 @@ describe('NewConversationDialog', () => {
 
   it('disables Start until there is a task, and Shift+Enter sends, then navigates', async () => {
     start.mockResolvedValue({ ok: true, answering: 'k8s-ops' })
-    const onClose = show()
+    show()
     expect(screen.getByTestId(TESTID.startConversation)).toBeDisabled()
     fireEvent.change(task(), { target: { value: 'go' } })
     fireEvent.keyDown(task(), { key: 'Enter', shiftKey: true })
     await waitFor(() => expect(start).toHaveBeenCalledWith('go', null))
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(screen.getByTestId('where')).toHaveTextContent('/conversations')
   })
 
@@ -104,11 +108,19 @@ describe('NewConversationDialog', () => {
 
   it('shows the server error and stays open on failure', async () => {
     start.mockResolvedValue({ ok: false, error: 'no Ready Pipeline serves it' })
-    const onClose = show()
+    show()
     fireEvent.change(task(), { target: { value: 'go' } })
     fireEvent.click(screen.getByTestId(TESTID.startConversation))
     expect(await screen.findByRole('alert')).toHaveTextContent('no Ready Pipeline serves it')
-    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByTestId('where')).toHaveTextContent('/conversations')
+  })
+
+  it('mirrors the task into the list\u2019s Draft row', () => {
+    show()
+    expect(screen.getByTestId('draft-row')).toHaveTextContent('Choose a destination and describe the task')
+    fireEvent.change(task(), { target: { value: 'check the nodes' } })
+    expect(screen.getByTestId('draft-row')).toHaveTextContent('check the nodes')
+    expect(screen.getByTestId('draft-row')).toHaveTextContent('Draft')
   })
 
   it('disables Start while the command is pending', () => {
