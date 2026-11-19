@@ -241,10 +241,10 @@ export function graphContract(Graph: ComponentType<GraphProps>) {
       fireEvent.click(within(screen.getByLabelText('live or replay')).getByText('Replay'))
       fireEvent.click(within(screen.getByLabelText('replay speed')).getByText('fast'))
       fireEvent.click(screen.getByText('▶ Play'))
-      for (let i = 0; i < 3; i++) act(() => vi.advanceTimersByTime(1000))
+      for (let i = 0; i < 3; i++) act(() => { vi.advanceTimersByTime(1000) })
       expect(screen.getByTestId('replay-time')).toHaveTextContent('[3/30]')
       fireEvent.click(screen.getByText('❚❚ Pause'))
-      act(() => vi.advanceTimersByTime(5000))
+      act(() => { vi.advanceTimersByTime(5000) })
       expect(screen.getByTestId('replay-time')).toHaveTextContent('[3/30]')
     })
 

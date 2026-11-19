@@ -156,7 +156,7 @@ export function NewConversationPane({
     onDraft(EMPTY_DRAFT)
     // The response names the source, not the conversation — it does not exist
     // until the manager opens it — so land on the list, where it appears first.
-    navigate('/conversations')
+    void navigate('/conversations')
   }
 
   function onTaskKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
