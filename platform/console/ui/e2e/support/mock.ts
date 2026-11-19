@@ -100,7 +100,10 @@ export function answer(path: string, query: URLSearchParams, extra: Extra = {}):
   if (path === `/api/conversations/${ROOT.name}`) return DETAIL
   const m = /^\/api\/conversations\/([^/]+)$/.exec(path)
   const row = m && rows.find((r) => r.name === m[1])
-  if (row) return { ...DETAIL, conversation: row, transcript: [], events: [] }
+  if (row) {
+    const hint = (row as { joinHint?: object }).joinHint
+    return { ...DETAIL, conversation: row, transcript: [], events: [], ...(hint ? { joinHint: hint } : {}) }
+  }
   return {}
 }
 

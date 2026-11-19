@@ -2313,7 +2313,13 @@ html[data-look='workspace'] #root {
 }
 
 .wk-fix .wk-cp {
-  position: static;
+  /* In flow beside the command, and its own anchor: a static copy button left
+     its ::before hit area positioned against the PAGE, an invisible layer over
+     every control on screen. */
+  position: relative;
+  bottom: auto;
+  right: auto;
+  flex: none;
   opacity: 1;
 }
 
