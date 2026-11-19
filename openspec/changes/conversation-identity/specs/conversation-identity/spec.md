@@ -42,7 +42,7 @@ Wherever the system, not a person, refers to a conversation, it SHALL use the `I
 |---|---|
 | the workspace subdirectory (`runtime-workspace-persistence`) | the `ID` |
 | the runtime's `CONVO_ID` (`runtime-contract`) | the `ID` |
-| an operation id and a thread id the manager derives | the `ID` |
+| an operation id the manager derives, and the thread id of a receipt-only channel (`ReceiptThreadID`) | the `ID` |
 | a stored cross-reference, `causedBy.parent` and any other conversation named by a record | the `ID` of the conversation it names |
 | an operation on the adapter wire (`channel-adapter-contract`) | `conversationId` carries the `ID`, beside the display name in `conversation` |
 | the runtime pod | the label `agentops.dev/conversation-id` |

@@ -17,7 +17,7 @@ The system needs one identifier that is unique for the life of one conversation 
 - **`ID` is the system identity.** It replaces `Name` wherever the system, not a person, refers to a conversation:
   - the workspace `subPath`
   - `CONVO_ID` in the runtime environment
-  - op ids and thread ids
+  - op ids and the thread id of a receipt-only channel
   - stored cross-references such as `causedBy`
   - the identifier on the adapter wire contract, beside the display name
 - **`Name` is display.** It stays the store key and the pod name (`agentops-conv-<name>`), and it is what a person sees and types.

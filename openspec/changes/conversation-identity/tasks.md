@@ -15,7 +15,7 @@
 
 - [ ] 3.1 Name the workspace subdirectory by `ID` in `runtimepod`, and set `CONVO_ID` to the `ID`. Verify pod-spec tests for both.
 - [ ] 3.2 Add the `agentops.dev/conversation-id` label to the runtime pod and reconcile from it. Verify a test with a pod whose name matches a different conversation resolves by the label.
-- [ ] 3.3 Derive op ids and thread ids from the `ID` and store the `ID` in cross-references such as `causedBy`. Verify the ops and coordination tests, including a recreated name that no longer collides with its predecessor's op.
+- [ ] 3.3 Derive op ids, and the thread id of a receipt-only channel, from the `ID` and store the `ID` in cross-references such as `causedBy`. Verify the ops and coordination tests, including a recreated name that no longer collides with its predecessor's op.
 - [ ] 3.4 Resolve `/work?convo=` strictly by `ID`, refusing an unknown `ID` and a record with no `ID` with the documented reason. Verify with tests for an unknown, a stale and a missing `ID`.
 - [ ] 3.5 Resolve every person-typed name through the live-match rule. Verify per verb class: read, reopen, delete, exit, close, escalate and add-input, each with a Closed match.
 - [ ] 3.6 Match orphan workspace directories to conversations by `ID` in housekeeping. Verify a recreated name does not protect a deleted conversation's directory.
@@ -50,7 +50,7 @@
 - [ ] 8.1.1 Update `docs/contracts/channel-adapter.md` and `docs/contracts/signal-adapter.md` for the rename, the new wire field and the version, and `docs/contracts/runtime.md` and `docs/contracts.md` for `CONVO_ID` and the `ID`.
 - [ ] 8.1.2 Update `docs/concepts.md`, `docs/crds/conversation.md` through its markers, `docs/gotchas.md` and `docs/CHANGELOG.md` with the breaking change and the delete-before-upgrade step.
 - [ ] 8.1.3 Update `.claude/rules/terminology.md` and `.claude/rules/invariants.md` for the three identifiers.
-- [ ] 8.1.4 Re-run `python3 .github/scripts/docs-generate.py` and commit the generated blocks and `docs/cr-reference.md`.
+- [ ] 8.1.4 Re-run `python3 .github/scripts/docs-generate.py` and commit the generated blocks.
 
 ### 8.2 Adopter site
 
