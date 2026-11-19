@@ -41,8 +41,8 @@ Role: `frontend-developer`. PORT from `mockup/console.html`: composition, spacin
 
 Role: `frontend-developer`. Restyle only. Each page keeps the sections, order and fields it has in `classic`.
 
-- [ ] 4.1 Overview, and verify a test that both looks render the same cards in the same order
-- [ ] 4.2 Queues, with the same check
+- [x] 4.1 Overview, and verify a test that both looks render the same cards in the same order
+- [x] 4.2 Queues, with the same check
 - [ ] 4.3 Configuration with its kind index, kind tables, object pages and the Overview and YAML tabs, with the same check
 - [ ] 4.4 Topology with its real graph, filters and panels, and verify the `e2e/topology.spec.ts` assertions pass in both looks
 - [ ] 4.5 Show a sign-out control only where authentication offers one, and verify a test under a shared token
@@ -73,15 +73,15 @@ Role: `backend-developer` for the service, `deployment-engineer` for the chart.
 
 - [x] 7.1 Return `defaultLook` in `Session` and read it from the channel config, and verify a Go test that an unknown value is dropped
 - [x] 7.2 Add `console.defaultLook` to the chart with values schema and `configSchema` entry, and verify a render test for the default and for a value that is neither look failing with both named
-- [ ] 7.3 Wire it into the browser's resolution order, and verify a unit test that a viewer's stored choice wins
+- [x] 7.3 Wire it into the browser's resolution order, and verify a unit test that a viewer's stored choice wins
 - [ ] 7.4 Flip the build default to `workspace` and verify the first-visit test
 
 ## 8. Unit tests
 
 Role: `testing-specialist`.
 
-- [ ] 8.1 Run `npm test` and `npm run typecheck` in `platform/console/ui` and verify both are green
-- [ ] 8.2 Run `go build ./... && go vet ./... && go test ./...` in `platform/console` and verify green
+- [x] 8.1 Run `npm test` and `npm run typecheck` in `platform/console/ui` and verify both are green
+- [x] 8.2 Run `go build ./... && go vet ./... && go test ./...` in `platform/console` and verify green
 - [ ] 8.3 Run the chart render tests and verify green
 - [ ] 8.4 Verify coverage with the flags `build-test.md` names has no uncovered new behaviour
 - [ ] 8.5 Run the mocked browser tier (`npm run test:e2e`, the `console-e2e` gate) for every look, including the viewport matrix from 6.2, and verify green
