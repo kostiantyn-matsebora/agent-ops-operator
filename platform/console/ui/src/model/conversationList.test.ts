@@ -97,6 +97,30 @@ describe('which conversations a scope shows, in the server’s order', () => {
   })
 })
 
+describe('selectionState picks roots only', () => {
+  // console-conversation-tree: "A member SHALL NOT be selectable in this
+  // view" — true whether the list is grouped by incident (the default) or
+  // flattened, since both arrangements draw from the same snapshot.
+  const conv = (name: string, over: Partial<ConversationSummary> = {}): ConversationSummary => ({
+    name, runCount: 0, queued: 0, joined: true, errored: false, unread: false,
+    ageSeconds: 1, deleting: false, ...over,
+  })
+  const root1 = conv('root-1', { coordinator: 'root-1' })
+  const member1 = conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } })
+  const root2 = conv('root-2', { coordinator: 'root-2', deleting: true })
+  const raw = [root1, member1, root2]
+
+  it('grouped — the member nests under its root, and neither it nor a closing root is selectable', () => {
+    const grouped = buildTree(raw, true).map((t) => t.row)
+    expect(selectionState(grouped, new Set())).toEqual({ selectableRows: ['root-1'], allSelected: false })
+  })
+
+  it('flattened — every row is its own line, and the rule is unchanged', () => {
+    const flat = buildTree(raw, false).map((t) => t.row)
+    expect(selectionState(flat, new Set())).toEqual({ selectableRows: ['root-1'], allSelected: false })
+  })
+})
+
 describe('ordering and folding', () => {
   it('nests each member depth-first under its own root', () => {
     const tree = buildTree(visibleItems(page.items, { kind: 'open' }), true)

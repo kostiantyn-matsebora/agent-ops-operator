@@ -152,9 +152,15 @@ export function visibleRows(tree: TreeRow[], items: ConversationSummary[], colla
   })
 }
 
-/** The rows a bulk action may touch, and whether every one is selected. */
+/**
+ * The ROOT rows a bulk action may touch, and whether every one is selected.
+ * A member carries no selection control (console-conversation-tree: "A
+ * member SHALL NOT be selectable in this view"), so select-all and the
+ * selection bar's own counts never include one, and a root already closing
+ * or being deleted is skipped the same way `selectableNames` skips it.
+ */
 export function selectionState(items: ConversationSummary[], selected: Set<string>) {
-  const selectableRows = items.filter((c) => !c.deleting).map((c) => c.name)
+  const selectableRows = items.filter((c) => !c.deleting && !c.causedBy).map((c) => c.name)
   const allSelected = selectableRows.length > 0 && selectableRows.every((n) => selected.has(n))
   return { selectableRows, allSelected }
 }

@@ -96,97 +96,133 @@ describe('mark unread', () => {
   })
 })
 
+describe('the selection label and buttons count roots', () => {
+  it('two roots with five members between them read 2', () => {
+    // console-bulk-close: "The selection label counts roots" scenario.
+    const items = [
+      conv('root-1', { coordinator: 'root-1' }),
+      conv('root-1-a', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
+      conv('root-1-b', { causedBy: { parent: 'root-1', entry: 'logs' } }),
+      conv('root-1-c', { causedBy: { parent: 'root-1', entry: 'metrics' } }),
+      conv('root-2', { coordinator: 'root-2' }),
+      conv('root-2-a', { causedBy: { parent: 'root-2', entry: 'diagnose' } }),
+      conv('root-2-b', { causedBy: { parent: 'root-2', entry: 'logs' } }),
+    ]
+    renderBar(items, new Set(['root-1', 'root-2']))
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    expect(screen.getByTestId('close-selected')).toHaveTextContent('Close… (2)')
+    expect(screen.getByTestId('delete-selected')).toHaveTextContent('Delete (2)')
+  })
+})
+
 describe('a root in the selection', () => {
   const items = [
     conv('root-1', { coordinator: 'root-1', phase: 'Working' }),
     conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
-    conv('member-2', { causedBy: { parent: 'root-1', entry: 'logs' } }),
+    conv('member-2', { causedBy: { parent: 'root-1', entry: 'logs' }, phase: 'Working' }),
   ]
 
-  it('counts its two members in the close confirmation', async () => {
+  it('the title and body count the root alone, and the member line is separate', async () => {
     renderBar(items, new Set(['root-1']))
     await userEvent.click(screen.getByTestId('close-selected'))
-    expect(screen.getByText(/3 conversation\(s\) will be closed/)).toBeInTheDocument()
+    expect(screen.getByText('Close 1 conversation(s)?')).toBeInTheDocument()
+    expect(screen.getByText(/1 conversation\(s\) will be closed/)).toBeInTheDocument()
     expect(screen.getByTestId('close-member-count')).toHaveTextContent('1 selected, reaching 2 member')
   })
 
-  it('counts its two members in the delete confirmation', async () => {
+  it('the member line also names how many of the members are working', async () => {
+    // console-inbox-open-closed design: "The member line separately names
+    // how many of the cascade's members are working" — member-2 is, root-1
+    // itself is counted by the separate Working warning below.
+    renderBar(items, new Set(['root-1']))
+    await userEvent.click(screen.getByTestId('close-selected'))
+    expect(screen.getByTestId('close-member-count')).toHaveTextContent('1 selected, reaching 2 member conversation(s) the manager\'s cascade closes too, 1 of them working')
+  })
+
+  it('the delete title counts the root alone too', async () => {
     const closedItems = items.map((c) => ({ ...c, phase: 'Closed' }))
     renderBar(closedItems, new Set(['root-1']))
     await userEvent.click(screen.getByTestId('delete-selected'))
-    expect(screen.getByText(/3 conversation\(s\)\?/)).toBeInTheDocument()
+    expect(screen.getByText('Delete 1 conversation(s)?')).toBeInTheDocument()
     expect(screen.getByTestId('delete-member-count')).toHaveTextContent('1 selected, reaching 2')
   })
 })
 
-describe('a member reached directly, with no ancestor also selected', () => {
-  const items = [
-    conv('root-1', { coordinator: 'root-1', phase: 'Closed' }),
-    conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' }, phase: 'Closed' }),
-  ]
-
-  it('close has nothing left to send, and never reaches the server', async () => {
-    renderBar(items, new Set(['member-1']))
+describe('dismissing a dialog resets its mutation', () => {
+  it('Cancel on the close dialog', async () => {
+    const items = [conv('a')]
+    renderBar(items, new Set(['a']))
     await userEvent.click(screen.getByTestId('close-selected'))
-    expect(screen.getByTestId('close-confirm')).toBeDisabled()
-    expect(closeMutate).not.toHaveBeenCalled()
-  })
-
-  it('delete is refused outright — the selection offers nothing to act on', () => {
-    renderBar(items, new Set(['member-1']))
-    expect(screen.getByTestId('delete-selected')).toBeDisabled()
-    expect(deleteMutate).not.toHaveBeenCalled()
-  })
-
-  it('a selected root still reaches the server normally, the member dropped from the request', async () => {
-    renderBar(items, new Set(['root-1', 'member-1']))
-    await userEvent.click(screen.getByTestId('close-selected'))
-    await userEvent.click(screen.getByTestId('close-confirm'))
-    expect(closeMutate).toHaveBeenCalledWith({ names: ['root-1'], includeWorking: false }, expect.anything())
-  })
-})
-
-describe('the merged result folds a skipped member in beside what the server reported', () => {
-  // member-1's own root is NOT selected (unlike the "dropped silently" case
-  // above) — only an unrelated root-2 is, alongside the member — so member-1
-  // gets an actual "skipped" row rather than being dropped with no trace,
-  // and root-2 gives the batch something to actually send.
-  const items = [
-    conv('root-1', { coordinator: 'root-1' }),
-    conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
-    conv('root-2', { coordinator: 'root-2' }),
-  ]
-
-  it('close: a member with no ancestor sent gets its own "skipped" row, and Done dismisses it', async () => {
-    // The mutation "succeeds" synchronously from the test's point of view —
-    // there is no real network here, only the re-render `runClose`'s own
-    // `setCloseSkipped` already triggers, which is what lets a freshly
-    // evaluated `useCloseConversations()` see the updated data below.
-    closeMutate.mockImplementation(() => {
-      closeState = { data: { results: [{ name: 'root-2', outcome: 'closed' }], closed: 1, skipped: 0, failed: 0 } }
-    })
-    renderBar(items, new Set(['member-1', 'root-2']))
-    await userEvent.click(screen.getByTestId('close-selected'))
-    await userEvent.click(screen.getByTestId('close-confirm'))
-    expect(screen.getByText('Close finished')).toBeInTheDocument()
-    expect(screen.getByText(/member of root-1 — act on root-1 instead/)).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(closeReset).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId('close-modal')).toBeNull()
   })
 
-  it('delete: the same fold, and Done dismisses it', async () => {
-    const closedItems = items.map((c) => ({ ...c, phase: 'Closed' }))
-    deleteMutate.mockImplementation(() => {
-      deleteState = { data: { results: [{ name: 'root-2', outcome: 'deleted' }], deleted: 1, skipped: 0, failed: 0 } }
-    })
-    renderBar(closedItems, new Set(['member-1', 'root-2']))
+  it('Cancel on the delete dialog', async () => {
+    const items = [conv('a', { phase: 'Closed' })]
+    renderBar(items, new Set(['a']))
     await userEvent.click(screen.getByTestId('delete-selected'))
-    await userEvent.click(screen.getByTestId('delete-confirm'))
-    expect(screen.getByText('Delete finished')).toBeInTheDocument()
-    expect(screen.getByText(/member of root-1 — act on root-1 instead/)).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(deleteReset).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId('delete-modal')).toBeNull()
+  })
+})
+
+describe('the result banner reports the server’s per-root outcomes only', () => {
+  // console-inbox-open-closed design: "The result banner reports the
+  // server's per-root outcomes. The manager reports a close as accepted and
+  // does not report cascaded members individually, so the banner does not
+  // claim a member outcome." There is no local skip to fold in any more —
+  // whatever the server returned is shown exactly as it came.
+  const items = [
+    conv('root-1', { coordinator: 'root-1' }),
+    conv('root-2', { coordinator: 'root-2' }),
+    conv('root-3', { coordinator: 'root-3' }),
+  ]
+
+  it('close: two closed and one server-skipped root, nothing added locally', async () => {
+    // Preset as "already finished" — the batch itself is exercised by
+    // 'ordinary close and delete' above; this is about what the banner
+    // shows once the server has answered, with no local fold-in.
+    closeState = {
+      data: {
+        results: [
+          { name: 'root-1', outcome: 'closed' },
+          { name: 'root-2', outcome: 'closed' },
+          { name: 'root-3', outcome: 'skipped', reason: 'already closing' },
+        ],
+        closed: 2,
+        skipped: 1,
+        failed: 0,
+      },
+    }
+    renderBar(items, new Set(['root-1', 'root-2', 'root-3']))
+    await userEvent.click(screen.getByTestId('close-selected'))
+    expect(screen.getByText('2 closed, 1 skipped, 0 failed')).toBeInTheDocument()
+    expect(screen.getByTestId('close-reasons')).toHaveTextContent('root-3')
+    expect(screen.getByTestId('close-reasons')).toHaveTextContent('already closing')
+    // No "member of ..." reason ever appears: a member is never sent, so the
+    // server never reports one back.
+    expect(screen.queryByText(/member of/)).toBeNull()
+  })
+
+  it('delete: the same rule', async () => {
+    const closedItems = items.map((c) => ({ ...c, phase: 'Closed' }))
+    deleteState = {
+      data: {
+        results: [
+          { name: 'root-1', outcome: 'deleted' },
+          { name: 'root-2', outcome: 'deleted' },
+          { name: 'root-3', outcome: 'skipped', reason: 'already being deleted' },
+        ],
+        deleted: 2,
+        skipped: 1,
+        failed: 0,
+      },
+    }
+    renderBar(closedItems, new Set(['root-1', 'root-2', 'root-3']))
+    await userEvent.click(screen.getByTestId('delete-selected'))
+    expect(screen.getByText('2 deleted, 1 skipped, 0 failed')).toBeInTheDocument()
+    expect(screen.queryByText(/member of/)).toBeNull()
   })
 })

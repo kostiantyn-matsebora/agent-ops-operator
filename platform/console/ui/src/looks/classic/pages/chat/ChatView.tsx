@@ -215,8 +215,11 @@ export function ChatView() {
     setScope(s)
   }
 
-  function openRow(rowName: string, e?: React.MouseEvent) {
-    if (isMultiSelectClick(e)) {
+  // A member carries no selection control (console-conversation-tree: "A
+  // member SHALL NOT be selectable in this view") — a modifier-click on one
+  // opens it normally instead of starting or joining a selection.
+  function openRow(rowName: string, isMember: boolean, e?: React.MouseEvent) {
+    if (isMultiSelectClick(e) && !isMember) {
       setSelectionMode(true)
       toggleSelect(rowName, !selected.has(rowName))
       return
@@ -264,7 +267,8 @@ export function ChatView() {
       setSelected(new Set())
       setSelectionMode(false)
     } else if (action === 'open') {
-      openRow(highlighted as string)
+      // Enter carries no modifier key, so `isMember` never matters here.
+      openRow(highlighted as string, false)
     } else if (action === 'down' || action === 'up') {
       e.preventDefault()
       const nextName = neighbourName(
@@ -412,7 +416,7 @@ export function ChatView() {
                       selected={selected.has(row.name)}
                       highlighted={highlighted === row.name || name === row.name}
                       onSelect={(checked) => toggleSelect(row.name, checked)}
-                      onOpen={(e) => openRow(row.name, e)}
+                      onOpen={(e) => openRow(row.name, Boolean(row.causedBy), e)}
                       pipelineIcon={iconFor(row.pipeline)}
                       canWrite={canWrite}
                       hasReader={hasReader}

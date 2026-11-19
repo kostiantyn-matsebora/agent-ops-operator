@@ -1,12 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@patternfly/react-core'
 import { useCloseConversations, useDeleteConversations, useMarkRead, useMarkUnread } from '../../../../api/hooks'
 import { errorMessage } from '../../../../model/commands'
 import { TESTID } from '../../../../model/testids'
-import { CloseSelectedModal, workingCount } from '../CloseConversations'
+import { CloseSelectedModal, workingCount, workingMemberCount } from '../CloseConversations'
 import { DeleteSelectedModal, deletableNames } from '../DeleteConversations'
 import { descendantsOf, partitionSelection } from '../../../../model/tree'
-import type { CloseResponse, ConversationSummary, DeleteResponse } from '../../../../api/types'
+import type { ConversationSummary } from '../../../../api/types'
 
 // `console-chat-layout` D-I and `console-quick-actions`: the SAME actions
 // and rules the old toolbar carried, now in the selection bar. The two
@@ -24,14 +24,6 @@ export interface SelectionBarProps {
   onDone: () => void
 }
 
-function skippedResults(skipped: { name: string; parentName: string }[]) {
-  return skipped.map((s) => ({
-    name: s.name,
-    outcome: 'skipped' as const,
-    reason: `member of ${s.parentName} — act on ${s.parentName} instead`,
-  }))
-}
-
 function countSuffix(n: number): string {
   return n > 0 ? ` (${n})` : ''
 }
@@ -43,52 +35,25 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
   const markUnread = useMarkUnread()
   const [closeOpen, setCloseOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [closeSkipped, setCloseSkipped] = useState<{ name: string; parentName: string }[]>([])
-  const [deleteSkipped, setDeleteSkipped] = useState<{ name: string; parentName: string }[]>([])
 
   const names = [...selected]
   const deletable = deletableNames(items)
-  const { send: closeSend, skipped: closeWillSkip } = partitionSelection(items, selected)
-  const { send: deleteSend, skipped: deleteWillSkip } = partitionSelection(items, selected)
+  // Every count below is over ROOTS: the selection never holds a member
+  // (console-conversation-tree: "A member SHALL NOT be selectable in this
+  // view"), so `partitionSelection` is now the selection itself, unchanged.
+  const send = partitionSelection(selected)
   // The root's own cascade reaches every descendant whether or not it was
   // selected (console-conversation-tree), so the confirmation counts them
   // from the snapshot rather than from the selection.
-  const closeMemberCount = closeSend.reduce((n, name) => n + descendantsOf(items, name).length, 0)
-  const deleteMemberCount = deleteSend.reduce((n, name) => n + descendantsOf(items, name).length, 0)
-  // A member skipped entirely never needs to be CLOSED first — it is not
-  // being deleted, its root's own closedness is what matters.
-  const selectedAllClosed = deleteSend.length > 0 && deleteSend.every((n) => deletable.includes(n))
-
-  const mergedCloseResult: CloseResponse | undefined = useMemo(() => {
-    if (!close.data) return undefined
-    const extra = skippedResults(closeSkipped)
-    return {
-      results: [...close.data.results, ...extra],
-      closed: close.data.closed,
-      skipped: close.data.skipped + extra.length,
-      failed: close.data.failed,
-    }
-  }, [close.data, closeSkipped])
-
-  const mergedDeleteResult: DeleteResponse | undefined = useMemo(() => {
-    if (!del.data) return undefined
-    const extra = skippedResults(deleteSkipped)
-    return {
-      results: [...del.data.results, ...extra],
-      deleted: del.data.deleted,
-      skipped: del.data.skipped + extra.length,
-      failed: del.data.failed,
-    }
-  }, [del.data, deleteSkipped])
+  const memberCount = send.reduce((n, name) => n + descendantsOf(items, name).length, 0)
+  const selectedAllClosed = send.length > 0 && send.every((n) => deletable.includes(n))
 
   function runClose(includeWorking: boolean) {
-    setCloseSkipped(closeWillSkip)
-    close.mutate({ names: closeSend, includeWorking }, { onSuccess: onDone })
+    close.mutate({ names: send, includeWorking }, { onSuccess: onDone })
   }
 
   function runDelete() {
-    setDeleteSkipped(deleteWillSkip)
-    del.mutate({ names: deleteSend }, { onSuccess: onDone })
+    del.mutate({ names: send }, { onSuccess: onDone })
   }
 
   function dismissClose() {
@@ -171,10 +136,11 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
       {closeOpen && (
         <CloseSelectedModal
           isOpen
-          names={closeSend}
-          memberCount={closeMemberCount}
-          working={workingCount(items, new Set(closeSend))}
-          result={mergedCloseResult}
+          names={send}
+          memberCount={memberCount}
+          working={workingCount(items, new Set(send))}
+          workingMembers={workingMemberCount(items, send)}
+          result={close.data}
           error={close.error ? errorMessage(close.error) : undefined}
           busy={close.isPending}
           onConfirm={runClose}
@@ -184,9 +150,9 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
       {deleteOpen && (
         <DeleteSelectedModal
           isOpen
-          names={deleteSend}
-          memberCount={deleteMemberCount}
-          result={mergedDeleteResult}
+          names={send}
+          memberCount={memberCount}
+          result={del.data}
           error={del.error ? errorMessage(del.error) : undefined}
           busy={del.isPending}
           onConfirm={runDelete}

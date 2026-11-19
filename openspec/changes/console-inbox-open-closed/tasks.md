@@ -19,12 +19,12 @@
 
 ## 3. Selection over roots — frontend-developer
 
-- [ ] 3.1 Make `selectableNames` and `selectionState` in `ui/src/model` pick roots only and skip a root already closing or being deleted, hide the member row's selection control in both looks, and verify tests for a grouped and a flattened list
-- [ ] 3.2 Remove the skip branch from `partitionSelection` in `ui/src/model/tree.ts` and the `skippedResults` merge from both looks' `SelectionBar`, and verify `tree.test.ts` and both `SelectionBar` tests have no member-skip case left
-- [ ] 3.3 Make "N selected" and the `Close (n)` and `Delete (n)` suffixes count selected roots, and verify a test of two roots with five members reading 2
-- [ ] 3.4 Make the close and delete dialog titles count roots only and keep `memberCount` on its own line, in `CloseConversations`, `DeleteConversations` and the workspace `BatchDialogs`, and verify the dialog tests
-- [ ] 3.5 Add the working-member count to the member line, and verify a test of three members with one working
-- [ ] 3.6 Make the result banners report per-root outcomes only, and verify the close and delete result tests
+- [x] 3.1 Make `selectableNames` and `selectionState` in `ui/src/model` pick roots only and skip a root already closing or being deleted, hide the member row's selection control in both looks, and verify tests for a grouped and a flattened list
+- [x] 3.2 Remove the skip branch from `partitionSelection` in `ui/src/model/tree.ts` and the `skippedResults` merge from both looks' `SelectionBar`, and verify `tree.test.ts` and both `SelectionBar` tests have no member-skip case left
+- [x] 3.3 Make "N selected" and the `Close (n)` and `Delete (n)` suffixes count selected roots, and verify a test of two roots with five members reading 2
+- [x] 3.4 Make the close and delete dialog titles count roots only and keep `memberCount` on its own line, in `CloseConversations`, `DeleteConversations` and the workspace `BatchDialogs`, and verify the dialog tests
+- [x] 3.5 Add the working-member count to the member line, and verify a test of three members with one working
+- [x] 3.6 Make the result banners report per-root outcomes only, and verify the close and delete result tests
 
 ## 4. One word for the state — frontend-developer
 

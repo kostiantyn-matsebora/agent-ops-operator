@@ -457,6 +457,18 @@ describe('a modifier-click toggles selection instead of opening (design D-A)', (
     fireEvent.click(screen.getByTestId('open-a'), { ctrlKey: true })
     expect(screen.getByLabelText('select a')).not.toBeChecked()
   })
+
+  it('a ctrl-click on a member opens it instead — a member carries no selection control (console-conversation-tree)', async () => {
+    items = [
+      conv('root-1', { coordinator: 'root-1' }),
+      conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
+    ]
+    renderAt('/conversations')
+    await userEvent.click(screen.getByText('Expand all'))
+    fireEvent.click(screen.getByTestId('open-member-1'), { ctrlKey: true })
+    expect(screen.getByTestId('thread-pane')).toHaveTextContent('member-1')
+    expect(screen.queryByText('Done selecting')).toBeNull()
+  })
 })
 
 describe('opening a row clears its own "new" tag', () => {

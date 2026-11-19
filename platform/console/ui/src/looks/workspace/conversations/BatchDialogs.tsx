@@ -24,12 +24,15 @@ function Reasons({ testid, rows }: Readonly<{ testid: string; rows: { name: stri
 }
 
 export function CloseBatchDialog({
-  names, memberCount, working, result, error, busy, onConfirm, onClose,
+  names, memberCount, working, workingMembers = 0, result, error, busy, onConfirm, onClose,
 }: Readonly<{
+  /** The selected ROOTS — a member is never in here (console-conversation-tree). */
   names: string[]
   /** Live descendants the manager's cascade also closes. */
   memberCount: number
   working: number
+  /** How many of the cascade's MEMBERS, not the roots above, are working. */
+  workingMembers?: number
   result?: CloseResponse
   error?: string
   busy: boolean
@@ -56,7 +59,7 @@ export function CloseBatchDialog({
   }
   return (
     <Dialog
-      title={`Close ${names.length + memberCount} conversation(s)?`}
+      title={`Close ${names.length} conversation(s)?`}
       label="Close conversations"
       testid="close-modal"
       onClose={onClose}
@@ -81,7 +84,8 @@ export function CloseBatchDialog({
       </p>
       {memberCount > 0 && (
         <p data-testid="close-member-count">
-          {`${names.length} selected, reaching ${memberCount} live member conversation(s) the manager's cascade closes too.`}
+          {`${names.length} selected, reaching ${memberCount} live member conversation(s) the manager's cascade closes too`}
+          {workingMembers > 0 ? `, ${workingMembers} of them working` : ''}.
         </p>
       )}
       {working > 0 && (
@@ -124,7 +128,7 @@ export function DeleteBatchDialog({
   }
   return (
     <Dialog
-      title={`Delete ${names.length + memberCount} conversation(s)?`}
+      title={`Delete ${names.length} conversation(s)?`}
       label="Delete conversations"
       testid="delete-modal"
       onClose={onClose}
@@ -144,7 +148,7 @@ export function DeleteBatchDialog({
       }
     >
       <p data-testid="delete-consequences">
-        {`${names.length + memberCount} closed conversation(s) will be deleted. This removes `}
+        {`${names.length} closed conversation(s) will be deleted. This removes `}
         <b>the recorded answers</b>, the only durable copy of what the agent said, and <b>the workspace on disk</b>.{' '}
         <b>This cannot be undone.</b>
       </p>

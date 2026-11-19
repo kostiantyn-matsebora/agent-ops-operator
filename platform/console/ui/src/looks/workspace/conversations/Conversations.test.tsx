@@ -163,6 +163,24 @@ describe('the conversations page', () => {
     }
   })
 
+  it('a member carries no selection control, even while selecting', async () => {
+    // console-conversation-tree: "A member SHALL NOT be selectable in this
+    // view" — neither the box nor a modifier-click reaches it.
+    ITEMS.push(conv('root-3', { coordinator: 'root-3' }), conv('member-3', { causedBy: { parent: 'root-3', entry: 'diagnose' } }))
+    try {
+      mount('/conversations')
+      await userEvent.click(screen.getByRole('button', { name: 'Select' }))
+      expect(screen.getByTestId(testid.select('root-3'))).toBeInTheDocument()
+      expect(screen.queryByTestId(testid.select('member-3'))).toBeNull()
+      expect(screen.getByTestId(TESTID.selectionBar)).toHaveTextContent('0 selected')
+      fireEvent.click(screen.getByTestId(testid.open('member-3')), { ctrlKey: true })
+      expect(screen.getByTestId(TESTID.selectionBar)).toHaveTextContent('0 selected')
+    } finally {
+      ITEMS.pop()
+      ITEMS.pop()
+    }
+  })
+
   it('selects rows without opening them, and offers the bulk actions on the selection', async () => {
     mount('/conversations')
     await userEvent.click(screen.getByRole('button', { name: 'Select' }))
