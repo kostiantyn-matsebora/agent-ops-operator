@@ -27,6 +27,7 @@ A `Coordinator` wires a composition of agents, each invoked on demand through it
 An `AgentCapability` is inert until referenced. Declare once, reference from `agents[]`:
 
 ```yaml
+apiVersion: agentops.dev/v1alpha1
 kind: AgentCapability
 metadata:
   name: log-analyzer
@@ -39,6 +40,7 @@ spec:
 ## Write the Coordinator
 
 ```yaml
+apiVersion: agentops.dev/v1alpha1
 kind: Coordinator
 metadata:
   name: k8s-triage
@@ -63,7 +65,7 @@ spec:
 
 ## Nest a composition
 
-Use `coordinatorRef` instead of `capabilityRef` to nest another Coordinator. No depth limit; cycles refused at `Ready` and invoke:
+Use `coordinatorRef` instead of `capabilityRef` to nest another Coordinator. No depth limit. Cycles refused at `Ready` and invoke:
 
 ```yaml
   agents:

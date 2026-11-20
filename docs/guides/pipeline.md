@@ -127,7 +127,7 @@ spec:
 | Field | Means |
 |---|---|
 | `claimName` | an existing `PersistentVolumeClaim`, in the conversations namespace |
-| `volumeName` | a `PersistentVolume`; the manager renders the claim `agentops-<route>-<volume>` |
+| `volumeName` | a `PersistentVolume`, and the manager renders the claim `agentops-<route>-<volume>` |
 
 `workspace` takes the same two fields. The claim outlives the route, so deleting
 a Pipeline never deletes the context it accumulated.

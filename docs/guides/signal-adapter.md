@@ -117,10 +117,10 @@ spec:
 `cooldownHours` = repeated `initiationId` as re-send vs re-notification (default 6). `attributeFilters` narrows routing. List on Pipeline's `signalSourceRefs` or signals drop.
 
 ```sh
-kubectl -n agent-ops get signalsource my-source; kubectl logs -l agentops.dev/signal-adapter=my-signals -f
+kubectl -n agent-ops get signalsource my-source; kubectl -n agent-ops logs -l agentops.dev/signal-adapter=my-signals -f
 ```
 ```powershell
-kubectl -n agent-ops get signalsource my-source; kubectl logs -l agentops.dev/signal-adapter=my-signals -f
+kubectl -n agent-ops get signalsource my-source; kubectl -n agent-ops logs -l agentops.dev/signal-adapter=my-signals -f
 ```
 
 ## Verify

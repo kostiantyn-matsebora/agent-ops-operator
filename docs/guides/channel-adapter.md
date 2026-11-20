@@ -25,7 +25,7 @@ Write one for conversations on a surface nothing here serves. Review [the specif
 
 ## 1. Read an operation, then acknowledge it
 
-Long-poll [GET /channel/ops]({{ '/contracts/channel-adapter/' | relative_url }}#get-channelops) with `contract=2` (`204` = nothing queued, `200` = [operation envelope]({{ '/contracts/channel-adapter/' | relative_url }}#the-operation-envelope)). **Acknowledge before you act** (`OPS-18`); retry `204`/`503` at once (`OPS-1`, `OPS-2`).
+Long-poll [GET /channel/ops]({{ '/contracts/channel-adapter/' | relative_url }}#get-channelops) with `contract=2` (`204` = nothing queued, `200` = [operation envelope]({{ '/contracts/channel-adapter/' | relative_url }}#the-operation-envelope)). **Acknowledge before you act** (`OPS-18`). Retry `204`/`503` at once (`OPS-1`, `OPS-2`).
 
 ```sh
 curl -H "Authorization: Bearer $ADAPTER_TOKEN" \
@@ -44,11 +44,11 @@ curl -X POST -H "Authorization: Bearer $ADAPTER_TOKEN" \
 
 ## 2. Deliver it and report the outcome
 
-[POST /channel/ops/{id}/done]({{ '/contracts/channel-adapter/' | relative_url }}#post-channelopsiddone). `ensure-topic` returns `{"threadId":"…"}`; others return `{}`. Report `{"error":"…"}` only for terminal failures (`ADA-3`).
+[POST /channel/ops/{id}/done]({{ '/contracts/channel-adapter/' | relative_url }}#post-channelopsiddone). `ensure-topic` returns `{"threadId":"…"}`. Others return `{}`. Report `{"error":"…"}` only for terminal failures (`ADA-3`).
 
 ## 3. Render the message
 
-`send` carries [typed message]({{ '/contracts/channel-adapter/' | relative_url }}#the-typed-message) (`signal`, `answer`, `relay`, `notice`), never rendered text. Prose is [markdown]({{ '/contracts/channel-adapter/' | relative_url }}#prose-fields-are-markdown); `answer`/`notice` may carry [BLOCK GRAMMAR]({{ '/contracts/channel-adapter/' | relative_url }}#the-body-grammar) if `outputFormat: blocks`.
+`send` carries [typed message]({{ '/contracts/channel-adapter/' | relative_url }}#the-typed-message) (`signal`, `answer`, `relay`, `notice`), never rendered text. Prose is [markdown]({{ '/contracts/channel-adapter/' | relative_url }}#prose-fields-are-markdown). `answer` and `notice` may carry [BLOCK GRAMMAR]({{ '/contracts/channel-adapter/' | relative_url }}#the-body-grammar) if `outputFormat: blocks`.
 
 {: .ao-callout}
 > **Never drop `choices`** (`ADA-8`).
@@ -94,7 +94,9 @@ spec:
 ```
 <!-- /generated -->
 
-**`echoesOwnMessages`**: `true` = transport shows what person typed; `false` = viewer renders only what it's sent. **`externals`**: systems adapter talks to (metadata).
+**`echoesOwnMessages`**: `true` = transport shows what person typed; `false` = viewer renders only what it's sent.
+
+**`externals`**: systems adapter talks to (metadata).
 
 ## 6. Declare a Channel
 
@@ -128,10 +130,10 @@ kubectl -n agent-ops logs deploy/agentops-adapter-my-adapter -f
 
 ## Verify
 
-1. **Long-poll**: `204` when idle, `200` with op when conversation starts; read twice without ack → same op returns
-2. **Thread lifecycle**: `ensure-topic` → Conversation records thread ID; no `threadId`/`error` → fails (`OPS-6`)
-3. **Rendering**: `answer` with tags → handled; no tags → plain prose (`ADA-12`)
-4. **Inbound**: unknown thread → dropped; real thread → reaches other surfaces, not origin
+1. **Long-poll**: `204` when idle, `200` with op when conversation starts. Read twice without ack → same op returns
+2. **Thread lifecycle**: `ensure-topic` → Conversation records thread ID. No `threadId`/`error` → fails (`OPS-6`)
+3. **Rendering**: `answer` with tags → handled. No tags → plain prose (`ADA-12`)
+4. **Inbound**: unknown thread → dropped. Real thread → reaches other surfaces, not origin
 
 ## What comes next
 
