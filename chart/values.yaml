@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
-  tag: 0.63.0
+  tag: 0.64.0
 
 # How many manager pods run at once. Safe above 1 now (durable-chat-ops-broker):
 # the Conversation reconciler claims an ensure-topic op on the Conversation CR
