@@ -12,8 +12,14 @@ describe('readLayout', () => {
   })
 
   it('reads back what was written', () => {
-    writeLayout({ inboxWidth: 300, listWidth: 400, inboxCollapsed: true, showClosed: true, treeCollapsedByDefault: false })
-    expect(readLayout()).toEqual({ inboxWidth: 300, listWidth: 400, inboxCollapsed: true, showClosed: true, treeCollapsedByDefault: false })
+    writeLayout({ inboxWidth: 300, listWidth: 400, inboxCollapsed: true, treeCollapsedByDefault: false })
+    expect(readLayout()).toEqual({ inboxWidth: 300, listWidth: 400, inboxCollapsed: true, treeCollapsedByDefault: false })
+  })
+
+  it('ignores a stored showClosed value from an earlier version, and never throws', () => {
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({ ...DEFAULT_LAYOUT, showClosed: true }))
+    expect(() => readLayout()).not.toThrow()
+    expect(readLayout()).toEqual(DEFAULT_LAYOUT)
   })
 
   it('fills a partial or malformed record with the defaults rather than failing', () => {

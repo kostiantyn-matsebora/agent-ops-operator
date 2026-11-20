@@ -26,13 +26,13 @@ import { GeneralFeedPane, ThreadPane } from './Thread'
 // time, with a way back from the thread.
 
 const SCOPE_LABEL: Record<Scope['kind'], string> = {
-  all: 'All conversations',
+  open: 'Open conversations',
   working: 'Working',
   mine: 'Mine',
   errored: 'Errored',
   pipeline: '',
   coordinator: '',
-  closed: 'Archive',
+  closed: 'Closed',
   general: 'General feed',
 }
 
@@ -73,8 +73,8 @@ function rowActions(row: ConversationSummary, d: RowActionDeps): RowAction[] {
 }
 
 /** The scope chips shown in the list's head where the navigation panel is a drawer. */
-function ScopeChips({ scope, showClosed, onPick }: Readonly<{ scope: Scope; showClosed: boolean; onPick: (s: Scope) => void }>) {
-  const { fixed, closed } = useInboxScopes(showClosed)
+function ScopeChips({ scope, onPick }: Readonly<{ scope: Scope; onPick: (s: Scope) => void }>) {
+  const { fixed, closed } = useInboxScopes()
   return (
     <div className="wk-scopes" role="group" aria-label="Conversation scopes">
       {[...fixed, closed].map((e) => (
@@ -95,7 +95,7 @@ function ScopeChips({ scope, showClosed, onPick }: Readonly<{ scope: Scope; show
 function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; collapsed: boolean; draft?: Draft }>) {
   const scope = useWorkspaceScope((s) => s.scope)
   const setScope = useWorkspaceScope((s) => s.setScope)
-  const { showClosed, flatten, update } = useWorkspaceLayout()
+  const { flatten, update } = useWorkspaceLayout()
   const [search, setSearch] = useState('')
   const [folded, setFolded] = useState<Set<string>>(new Set())
   const seen = useRef<Set<string>>(new Set())
@@ -123,7 +123,7 @@ function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; co
     setSelected(new Set())
   }
 
-  const list = useConversationList({ scope, search, showClosed, flatten, collapsedRoots: folded })
+  const list = useConversationList({ scope, search, flatten, collapsedRoots: folded })
   const { newNames, clear } = useArrivals(list.data, scopeKey(scope))
 
   // A root with members starts folded, as it is first seen — a later arrival
@@ -197,7 +197,7 @@ function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; co
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
-      <ScopeChips scope={scope} showClosed={showClosed} onPick={setScope} />
+      <ScopeChips scope={scope} onPick={setScope} />
       <div className="wk-tools">
         <button type="button" className="wk-btn link" onClick={() => update({ flatten: !flatten })}>
           {flatten ? 'nest' : 'flatten'}
@@ -230,15 +230,6 @@ function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; co
             {allSelected ? 'Clear all' : 'Select all'}
           </button>
         )}
-        <label>
-          <input
-            type="checkbox"
-            data-testid={TESTID.showClosed}
-            checked={showClosed}
-            onChange={(e) => update({ showClosed: e.target.checked })}
-          />{' '}
-          Show closed
-        </label>
       </div>
       {selecting && !collapsed && (
         <SelectionBar
@@ -278,38 +269,41 @@ function ListPane({ current, collapsed, draft }: Readonly<{ current?: string; co
         {list.data && list.rows.length === 0 && (
           <li className="wk-empty">
             <h2>No conversations match</h2>
-            {list.data.total === 0
-              ? 'Nothing has started a conversation yet.'
-              : showClosed
-                ? 'Every conversation was filtered out.'
-                : 'Every conversation here is closed, and closed ones are hidden: turn on Show closed.'}
+            {list.data.total === 0 ? 'Nothing has started a conversation yet.' : 'Every conversation was filtered out.'}
           </li>
         )}
         {draft && !collapsed && <DraftRow draft={draft} current />}
-        {list.rows.map((t) => (
-          <Row
-            key={t.row.name}
-            tree={t}
-            current={t.row.name === current}
-            arrived={newNames.has(t.row.name)}
-            folded={!flatten && t.memberCount > 0 ? folded.has(t.row.name) && t.membersActive === 0 : undefined}
-            onToggleFold={() => toggle(t.row.name)}
-            actions={rowActions(t.row, deps)}
-            iconOnly={collapsed}
-            command={rowCommand(commands.latest(t.row.name))}
-            onRetry={() => {
-              const c = commands.latest(t.row.name)
-              if (c) void commands.retry(c.id)
-            }}
-            onDismissCommand={() => {
-              const c = commands.latest(t.row.name)
-              if (c) commands.dismiss(c.id)
-            }}
-            onMultiSelect={collapsed ? undefined : () => deps.select(t.row.name)}
-            selection={selecting && !collapsed ? { selected: selected.has(t.row.name), onToggle: () => toggleSelected(t.row.name) } : undefined}
-            pipelineIcon={pipelineIconFor(t.row.pipeline)}
-          />
-        ))}
+        {list.rows.map((t) => {
+          // A member carries no selection control at all
+          // (console-conversation-tree: "A member SHALL NOT be selectable in
+          // this view") — neither the box nor the modifier-click that starts
+          // a selection from a row it did not already carry one on.
+          const isMember = Boolean(t.row.causedBy)
+          return (
+            <Row
+              key={t.row.name}
+              tree={t}
+              current={t.row.name === current}
+              arrived={newNames.has(t.row.name)}
+              folded={!flatten && t.memberCount > 0 ? folded.has(t.row.name) && t.membersActive === 0 : undefined}
+              onToggleFold={() => toggle(t.row.name)}
+              actions={rowActions(t.row, deps)}
+              iconOnly={collapsed}
+              command={rowCommand(commands.latest(t.row.name))}
+              onRetry={() => {
+                const c = commands.latest(t.row.name)
+                if (c) void commands.retry(c.id)
+              }}
+              onDismissCommand={() => {
+                const c = commands.latest(t.row.name)
+                if (c) commands.dismiss(c.id)
+              }}
+              onMultiSelect={collapsed || isMember ? undefined : () => deps.select(t.row.name)}
+              selection={selecting && !collapsed && !isMember ? { selected: selected.has(t.row.name), onToggle: () => toggleSelected(t.row.name) } : undefined}
+              pipelineIcon={pipelineIconFor(t.row.pipeline)}
+            />
+          )
+        })}
       </ul>
     </section>
   )

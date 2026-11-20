@@ -703,31 +703,33 @@ export interface ConversationPage {
   items: ConversationSummary[]
   /** Every conversation, root or invoked member — what `items`/pagination
    * count against, since the tree is rebuilt client-side from the full flat
-   * page. Never what a badge should read; see `rootTotal` and `unreadTotal`. */
+   * page. Never what a badge should read; see `unreadTotal` and `scopes`. */
   total: number
-  /** Every conversation a person can open, root only (no invoked member),
-   * respecting `showClosed` — NOT gated on read state. What the Inbox's "All"
-   * row (`Scope` kind `'all'` — no further predicate) reads. The navigation
-   * rail's own badge (outside the Inbox) reads `unreadTotal` instead, below —
-   * that one IS a notification count, this one is a plain total. */
-  rootTotal: number
-  /** Unread, non-member roots, counted BEFORE any filter except `showClosed`
-   * — a count that moved because the view narrowed to one named scope would
-   * let a filter hide a backlog, but `showClosed=false` means "and don't
-   * count what I can't currently reach either." What the navigation rail's
-   * badge reads (`useUnreadCount` in App.tsx) — the Inbox's own "All" row
-   * reads `rootTotal` above instead. */
+  /**
+   * Unread, non-member, non-Closed roots, counted BEFORE any filter — a
+   * count that moved because the view narrowed to one named scope would let
+   * a filter hide a backlog without saying so. What the navigation rail's
+   * badge reads (`useInboxCounts` in App.tsx), and exactly `scopes.open`
+   * below — there is no longer a second, read-gated-differently number for
+   * the Inbox's own Open row to read instead.
+   *
+   * The server no longer reads a `showClosed` request parameter at all: a
+   * badge always promises exactly the rows its own list shows, and there is
+   * no server-side knob left that could move this number out from under it.
+   */
   unreadTotal: number
   offset: number
   limit: number
   facets: Record<string, string[]>
   /**
    * Present on the count-only form alone: the UNREAD count within every
-   * fixed inbox scope but All (`working`, `mine`, `errored`, `closed`), plus
+   * fixed inbox scope (`open`, `working`, `mine`, `errored`, `closed`), plus
    * one entry keyed by name for every pipeline and coordinator a row
-   * attributes to, also unread-gated. What the inbox's per-scope badges
-   * read. There is no `incidents` scope: that concept was removed from the
-   * inbox outright.
+   * attributes to. `open` is unread roots with phase≠Closed — `unreadTotal`
+   * above is that same number. `closed` is unread roots with phase=Closed —
+   * a READ closed row belongs in the Closed list (the archive) but no
+   * longer inflates this badge. There is no `incidents` scope: that concept
+   * was removed from the inbox outright.
    */
   scopes?: Record<string, number>
 }

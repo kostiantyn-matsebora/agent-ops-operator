@@ -3,6 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import type { ConversationSummary } from '../../../api/types'
+import { useConversationList } from '../../../model/conversationList'
 import { TESTID, testid } from '../../../model/testids'
 import { buildTree } from '../../../model/tree'
 import { DEFAULT_WORKSPACE_LAYOUT, useWorkspaceLayout } from '../layout'
@@ -25,12 +26,12 @@ const mutation = (kind: string) => ({ mutate: (arg: unknown, opts?: { onSuccess?
 
 vi.mock('../../../model/conversationList', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../model/conversationList')>()),
-  useConversationList: () => {
+  useConversationList: vi.fn(() => {
     const tree = buildTree(ITEMS, true)
     return { data: { items: ITEMS, total: 2 }, isLoading: false, error: null, items: ITEMS, tree, rows: tree, collapsibleNames: [] }
-  },
+  }),
   useArrivals: () => ({ newNames: new Set(), clear: () => undefined }),
-  useInboxScopes: () => ({ general: { scope: { kind: 'general' }, label: 'General feed' }, fixed: [], targets: [], closed: { scope: { kind: 'closed' }, label: 'Archive' } }),
+  useInboxScopes: () => ({ general: { scope: { kind: 'general' }, label: 'General feed' }, fixed: [], targets: [], closed: { scope: { kind: 'closed' }, label: 'Closed' } }),
 }))
 vi.mock('../../../model/session', () => ({
   GENERAL_FEED_NAME: 'channel:general',
@@ -162,6 +163,24 @@ describe('the conversations page', () => {
     }
   })
 
+  it('a member carries no selection control, even while selecting', async () => {
+    // console-conversation-tree: "A member SHALL NOT be selectable in this
+    // view" — neither the box nor a modifier-click reaches it.
+    ITEMS.push(conv('root-3', { coordinator: 'root-3' }), conv('member-3', { causedBy: { parent: 'root-3', entry: 'diagnose' } }))
+    try {
+      mount('/conversations')
+      await userEvent.click(screen.getByRole('button', { name: 'Select' }))
+      expect(screen.getByTestId(testid.select('root-3'))).toBeInTheDocument()
+      expect(screen.queryByTestId(testid.select('member-3'))).toBeNull()
+      expect(screen.getByTestId(TESTID.selectionBar)).toHaveTextContent('0 selected')
+      fireEvent.click(screen.getByTestId(testid.open('member-3')), { ctrlKey: true })
+      expect(screen.getByTestId(TESTID.selectionBar)).toHaveTextContent('0 selected')
+    } finally {
+      ITEMS.pop()
+      ITEMS.pop()
+    }
+  })
+
   it('selects rows without opening them, and offers the bulk actions on the selection', async () => {
     mount('/conversations')
     await userEvent.click(screen.getByRole('button', { name: 'Select' }))
@@ -246,10 +265,19 @@ describe('the conversations page', () => {
     expect(screen.queryByTestId(TESTID.selectionBar)).toBeNull()
   })
 
-  it('remembers the show-closed choice', async () => {
+  it('offers no "Show closed" control anywhere', () => {
     mount('/conversations')
-    await userEvent.click(screen.getByTestId(TESTID.showClosed))
-    expect(useWorkspaceLayout.getState().showClosed).toBe(true)
+    expect(screen.queryByLabelText(/show closed/i)).toBeNull()
+    expect(screen.queryByText(/show closed/i)).toBeNull()
+  })
+
+  it('hints every conversation was filtered out, naming no "Show closed" control, once the list is empty but the total is not', () => {
+    vi.mocked(useConversationList).mockReturnValueOnce({
+      data: { items: [], total: 2 }, isLoading: false, error: null, items: [], tree: [], rows: [], collapsibleNames: [],
+    } as never)
+    mount('/conversations')
+    expect(screen.getByText('Every conversation was filtered out.')).toBeInTheDocument()
+    expect(screen.queryByText(/show closed/i)).toBeNull()
   })
 
   it('asks for a conversation where none is open', () => {

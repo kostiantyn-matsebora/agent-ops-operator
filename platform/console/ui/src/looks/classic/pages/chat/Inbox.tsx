@@ -21,11 +21,6 @@ interface InboxProps {
   onSelectScope: (s: Scope) => void
   collapsed: boolean
   onToggleCollapsed: () => void
-  /** The list's own "Show closed" preference (ChatView.tsx's layout.ts) —
-   * threaded through so the All/per-Pipeline/Coordinator badges can match
-   * what the list below actually shows instead of promising a closed-but-
-   * unread row a reader cannot reach without checking that box first. */
-  showClosed: boolean
 }
 
 function Section({ title, children }: Readonly<{ title: string; children: ReactNode }>) {
@@ -81,10 +76,10 @@ function Row({
   )
 }
 
-export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed, showClosed }: Readonly<InboxProps>) {
-  const { general, fixed: fixedScopes, targets, closed } = useInboxScopes(showClosed)
+export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed }: Readonly<InboxProps>) {
+  const { general, fixed: fixedScopes, targets, closed } = useInboxScopes()
   const FIXED_ICONS: Record<string, ReactNode> = {
-    all: <ListIcon />, working: <InProgressIcon />, mine: <UserIcon />, errored: <ExclamationCircleIcon />,
+    open: <ListIcon />, working: <InProgressIcon />, mine: <UserIcon />, errored: <ExclamationCircleIcon />,
   }
   const fixed = fixedScopes.map((f) => ({ ...f, icon: FIXED_ICONS[f.scope.kind] }))
 
@@ -130,10 +125,11 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
           </Tooltip>
         ))}
         <Divider />
-        <Tooltip content="Closed">
+        <Tooltip content={closed.count ? `Closed · ${closed.count}` : 'Closed'}>
           <IconButton
             active={sameScope(activeScope, closed.scope)}
             onClick={() => onSelectScope(closed.scope)}
+            badge={closed.count}
           >
             <ArchiveIcon />
           </IconButton>
@@ -209,7 +205,7 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
           borderTop: '1px solid var(--ao-canvas)', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}
       >
-        <span>Counts are unread messages, not rows that changed.</span>
+        <span>Counts are unread conversations, not rows that changed.</span>
         <button
           type="button"
           aria-label="collapse the inbox"

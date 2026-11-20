@@ -55,7 +55,7 @@ export function DeleteSelectedModal({
       data-testid="delete-modal"
     >
       <ModalHeader
-        title={result ? 'Delete finished' : `Delete ${names.length + memberCount} conversation(s)?`}
+        title={result ? 'Delete finished' : `Delete ${names.length} conversation(s)?`}
       />
       <ModalBody>
         {result ? (
@@ -83,7 +83,7 @@ export function DeleteSelectedModal({
         ) : (
           <>
             <p data-testid="delete-consequences">
-              {names.length + memberCount} closed conversation(s) will be deleted. This removes{' '}
+              {names.length} closed conversation(s) will be deleted. This removes{' '}
               <b>the recorded answers</b> — the only durable copy of what the agent said — and{' '}
               <b>the workspace on disk</b>. <b>This cannot be undone.</b>
             </p>

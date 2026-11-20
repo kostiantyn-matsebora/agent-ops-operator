@@ -33,7 +33,7 @@ test('#30 switching from a narrow scope to a wider one does not tag every row as
   await expect(page.getByTestId(ANY_ROW).filter({ hasText: marker })).toHaveCount(0)
 
   // Widen back out. The task existed the whole time — it did not just arrive.
-  await page.getByTestId(testid.scope('All')).click()
+  await page.getByTestId(testid.scope('Open')).click()
   await expect(page.getByTestId(ANY_ROW).filter({ hasText: marker })).toBeVisible()
   await expect(page.getByTestId(ANY_ROW).filter({ hasText: marker }).getByText('new', { exact: true })).toHaveCount(0)
   await page.screenshot({ path: 'e2e-live/proofs/30-no-spurious-new-on-widen.png', fullPage: true })

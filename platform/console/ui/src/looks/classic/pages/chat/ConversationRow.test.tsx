@@ -124,6 +124,15 @@ describe('selection and navigation', () => {
     screen.getByTestId('open-a').click()
     expect(onOpen).toHaveBeenCalled()
   })
+
+  it('a member carries no selection control, even in selection mode', () => {
+    // console-conversation-tree: "A member SHALL NOT be selectable in this
+    // view" — the space is still reserved (no layout shift), but there is no
+    // checkbox to find.
+    const row = conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } })
+    renderRow(row, { selectionMode: true, depth: 1 })
+    expect(screen.queryByLabelText(`select ${row.title || row.name}`)).toBeNull()
+  })
 })
 
 describe('arrival (console-thread-live-cues)', () => {

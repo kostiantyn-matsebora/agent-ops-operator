@@ -27,6 +27,16 @@ describe('selection', () => {
     expect(selectableNames(page)).toEqual(['a', 'b'])
   })
 
+  it('cannot select a member — only its root', () => {
+    // console-conversation-tree: "A member SHALL NOT be selectable in this
+    // view" — the manager's own cascade off the root already reaches it.
+    const page = [
+      conv('root-1', { coordinator: 'root-1' }),
+      conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
+    ]
+    expect(selectableNames(page)).toEqual(['root-1'])
+  })
+
   it('counts the working conversations in the selection', () => {
     const page = [conv('a', { phase: 'Working' }), conv('b', { phase: 'Idle' }), conv('c', { phase: 'Working' })]
     expect(workingCount(page, new Set(['a', 'b']))).toBe(1)

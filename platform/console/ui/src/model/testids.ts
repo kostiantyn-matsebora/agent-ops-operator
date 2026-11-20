@@ -28,8 +28,6 @@ export const TESTID = {
   inbox: 'inbox',
   inboxCollapsed: 'inbox-collapsed',
   mobileInboxDrawer: 'mobile-inbox-drawer',
-  /** The list's "show closed conversations" toggle — the control itself, checkable. */
-  showClosed: 'show-closed',
   selectionBar: 'selection-bar',
   markRead: 'mark-read',
   markUnread: 'mark-unread',
@@ -73,7 +71,7 @@ export const TESTID = {
 
 /** Identifiers keyed by the object they belong to. */
 export const testid = {
-  /** An inbox scope, by its visible label ("All", "Mine", "Archive", a Pipeline's name). */
+  /** An inbox scope, by its visible label ("Open", "Mine", "Closed", a Pipeline's name). */
   scope: (label: string) => `scope-${label}`,
   /** A conversation's secondary view control: `runs`, `graph`, `sequence` or `yaml`. */
   view: (id: string) => `view-${id}`,

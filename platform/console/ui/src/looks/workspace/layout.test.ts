@@ -18,14 +18,21 @@ describe('the workspace layout', () => {
   })
 
   it('survives a reload: pane sizes and collapsed states come back', async () => {
-    useWorkspaceLayout.getState().update({ navWidth: 300, listWidth: 420, navCollapsed: true, listCollapsed: true, showClosed: true })
+    useWorkspaceLayout.getState().update({ navWidth: 300, listWidth: 420, navCollapsed: true, listCollapsed: true })
     // A reload: the in-memory state is gone, the stored copy is read again.
     const stored = localStorage.getItem(WORKSPACE_LAYOUT_KEY)!
     useWorkspaceLayout.setState(DEFAULT_WORKSPACE_LAYOUT)
     expect(useWorkspaceLayout.getState().navWidth).toBe(DEFAULT_WORKSPACE_LAYOUT.navWidth)
     localStorage.setItem(WORKSPACE_LAYOUT_KEY, stored)
     await useWorkspaceLayout.persist.rehydrate()
-    expect(useWorkspaceLayout.getState()).toMatchObject({ navWidth: 300, listWidth: 420, navCollapsed: true, listCollapsed: true, showClosed: true })
+    expect(useWorkspaceLayout.getState()).toMatchObject({ navWidth: 300, listWidth: 420, navCollapsed: true, listCollapsed: true })
+  })
+
+  it('ignores a stored showClosed value from an earlier version, and never throws', async () => {
+    localStorage.setItem(WORKSPACE_LAYOUT_KEY, JSON.stringify({ state: { listWidth: 400, showClosed: true }, version: 1 }))
+    await useWorkspaceLayout.persist.rehydrate()
+    expect(useWorkspaceLayout.getState()).toMatchObject({ listWidth: 400 })
+    expect(useWorkspaceLayout.getState()).not.toHaveProperty('showClosed')
   })
 
   it('drops a stored value of the wrong type rather than trusting it', async () => {

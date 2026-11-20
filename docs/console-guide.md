@@ -55,7 +55,7 @@ Five views, one question each. Every field and control is in
 
   An inbox, the list and the open thread side by side, where you can also reply or start a new one.
 
-  ![The Conversations view with nothing open: the inbox rail with its scopes and counts, and a coordination tree — a two-level incident nested under its root, a closed root marked "nobody notified", a pending alert and a working chat conversation.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
+  ![The Conversations view with nothing open: the inbox rail with its Open, Working, Mine, Errored, Pipelines & Coordinators and Closed scopes, their counts, and a coordination tree — a two-level incident collapsed under its root, a pending alert and a working chat conversation.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
 
 - **Queues** — What is waiting, and what is stuck?
 

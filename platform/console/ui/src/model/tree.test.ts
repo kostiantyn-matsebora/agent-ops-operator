@@ -91,28 +91,20 @@ describe('rootNameOf', () => {
 })
 
 describe('partitionSelection', () => {
-  const items = [
-    conv('root-1', { coordinator: 'root-1' }),
-    conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
-    conv('plain'),
-  ]
-
-  it('sends an ordinary conversation straight through', () => {
-    const { send, skipped } = partitionSelection(items, new Set(['plain']))
-    expect(send).toEqual(['plain'])
-    expect(skipped).toEqual([])
+  // A member is never in the selection to begin with
+  // (console-conversation-tree: "A member SHALL NOT be selectable in this
+  // view"), so there is no longer a local skip case to cover — `send` is
+  // simply the selection, roots and all.
+  it('sends the selection straight through, unchanged', () => {
+    expect(partitionSelection(new Set(['plain']))).toEqual(['plain'])
   })
 
-  it('skips a member reached directly, naming its parent', () => {
-    const { send, skipped } = partitionSelection(items, new Set(['member-1']))
-    expect(send).toEqual([])
-    expect(skipped).toEqual([{ name: 'member-1', parentName: 'root-1' }])
+  it('sends every selected root, in no particular order of its own', () => {
+    expect(partitionSelection(new Set(['root-1', 'root-2']))).toEqual(['root-1', 'root-2'])
   })
 
-  it('drops a member silently when its root is also selected — the cascade already reaches it', () => {
-    const { send, skipped } = partitionSelection(items, new Set(['root-1', 'member-1']))
-    expect(send).toEqual(['root-1'])
-    expect(skipped).toEqual([])
+  it('sends nothing with nothing selected', () => {
+    expect(partitionSelection(new Set())).toEqual([])
   })
 })
 

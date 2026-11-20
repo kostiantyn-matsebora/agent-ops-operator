@@ -4,7 +4,7 @@ import { loadFixtures } from './support/fixtures'
 import { kubectl, listConversations, portForward, waitFor } from './support/kube'
 
 // nats-state-store-default — the console's streams must survive the manager
-// restarting under them. A page sits on the Archive scope and is NEVER
+// restarting under them. A page sits on the Closed scope and is NEVER
 // reloaded. The manager is rolled. A conversation is then closed from a second
 // page, and the first page must list it without a reload: if its stream had
 // dropped and not recovered, it would show a frozen view.
@@ -15,7 +15,7 @@ function rowNameByTitle(substring: string): string | undefined {
   return listConversations().find((c) => (c.spec.title ?? '').includes(substring))?.metadata.name
 }
 
-test('a conversation closed after a manager restart appears in an open Archive view without a reload', async ({ browser }) => {
+test('a conversation closed after a manager restart appears in an open Closed view without a reload', async ({ browser }) => {
   test.setTimeout(240_000)
   // This spec rolls the manager, which kills any port-forward bound to a
   // manager pod, including the one global-setup opened. Use its own, so the
@@ -54,10 +54,10 @@ async function run(browser: import('@playwright/test').Browser) {
     return threads.some((t) => t.channel === 'console' && t.threadId) ? true : undefined
   }, 60_000)
 
-  // The watcher goes to the Archive scope and stays there.
+  // The watcher goes to the Closed scope and stays there.
   await watcher.goto('/conversations')
   await expect(watcher.getByTestId(TESTID.inbox)).toBeVisible()
-  await watcher.getByTestId(testid.scope('Archive')).click()
+  await watcher.getByTestId(testid.scope('Closed')).click()
   await expect(watcher.getByTestId(testid.row(name))).toBeHidden()
 
   // Roll the manager under both pages.
@@ -121,9 +121,9 @@ async function run(browser: import('@playwright/test').Browser) {
       return hit ? JSON.stringify(hit).slice(0, 200) : 'absent'
     }, name)
     await watcher.reload()
-    await watcher.getByTestId(testid.scope('Archive')).click()
+    await watcher.getByTestId(testid.scope('Closed')).click()
     const afterReload = await watcher.getByTestId(testid.row(name)).isVisible({ timeout: 10_000 }).catch(() => false)
-    throw new Error(`row-${name} never appeared in the open Archive view. Rows present: ${JSON.stringify(ids)}. Console says: ${consolePhase}. Visible after a reload: ${afterReload}\n${(e as Error).message}`)
+    throw new Error(`row-${name} never appeared in the open Closed view. Rows present: ${JSON.stringify(ids)}. Console says: ${consolePhase}. Visible after a reload: ${afterReload}\n${(e as Error).message}`)
   }
   await watcher.screenshot({ path: 'e2e-live/proofs/34-stream-survives-manager-restart.png', fullPage: true })
   await ctx.close()

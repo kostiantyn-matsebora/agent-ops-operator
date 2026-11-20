@@ -9,7 +9,7 @@ import { TESTID } from '../../../model/testids'
 
 const CHIP_HINT: Record<string, string> = {
   exit: 'Release this conversation’s runtime, keep the conversation',
-  close: 'End this conversation and archive its thread',
+  close: 'End this conversation and close its thread',
 }
 
 export function Composer({

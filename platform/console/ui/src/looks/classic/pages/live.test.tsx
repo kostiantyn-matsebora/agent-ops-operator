@@ -53,9 +53,7 @@ vi.mock('../../../api/client', () => ({
 
 vi.stubGlobal('EventSource', FakeEventSource)
 
-// unread defaults true: the default scope (`{kind: 'all'}`) is now an UNREAD
-// filter (ChatView.tsx's TREE_PREDICATE), and nothing here is testing
-// read/unread specifically.
+// unread defaults true: nothing here is testing read/unread specifically.
 const summary = (over: Record<string, unknown> = {}) => ({
   name: 'conv-1', title: 'disk pressure on node-3', phase: 'Running', profile: 'k8s-engineer',
   pipeline: 'k8s-ops', runCount: 1, queued: 0, joined: true, consoleThread: 'th-1',
@@ -293,12 +291,7 @@ describe('the Conversations list', () => {
       '/conversations',
     )
     await screen.findByText('disk pressure on node-3')
-    const before = calls.conversations
-
-    // Closed conversations are hidden by default now (item 8) — this test is
-    // about live delta application, not that toggle, so switch it on up
-    // front and keep testing the phase transition in place.
-    await userEvent.click(screen.getByLabelText('Show closed'))
+    const afterInitialLoad = calls.conversations
 
     // APPEARING: newest first, no filter — its place is unambiguous.
     emit('delta', {
@@ -307,27 +300,28 @@ describe('the Conversations list', () => {
     })
     await screen.findByText('certificate expiring')
     expect(loading()).toBeNull()
+    expect(calls.conversations).toBe(afterInitialLoad) // the delta applied in place, no refetch
 
-    // CHANGING PHASE. The row no longer carries a snippet line (every row is
-    // title+time, then chips+menu) and the "closed" tag is UNREACHABLE here —
-    // `rowTag` checks `isNew` first, and this row is still inside its arrival
-    // window, so its tag reads "new" rather than "closed". The row menu is
-    // phase-aware independent of that window, so "Reopen" is the reliable
-    // signal that the delta actually applied.
+    // CHANGING PHASE. Open excludes closed rows always now (console-chat-
+    // layout: "Closed conversations are reached through Closed only"), so
+    // the row leaves Open's list the moment the delta turns it Closed — in
+    // place, with no spinner and no refetch. (Following it into the Closed
+    // scope would be a second, independently-keyed query this fixture's
+    // static mock backend cannot answer, so that reach stays the live e2e
+    // spec's job, not this cache-focused unit test's.)
     emit('delta', {
       type: 'MODIFIED', kind: 'conversations', name: 'conv-2',
       conversationRow: summary({ name: 'conv-2', title: 'certificate expiring', phase: 'Closed', runs: undefined }),
     })
-    await userEvent.click(screen.getByLabelText('actions for certificate expiring'))
-    await screen.findByText('Reopen')
-    expect(loading()).toBeNull()
-
-    // BEING DELETED.
-    emit('delta', { type: 'DELETED', kind: 'conversations', name: 'conv-2' })
     await waitFor(() => expect(screen.queryByText('certificate expiring')).toBeNull())
     expect(loading()).toBeNull()
-    expect(screen.getByText('disk pressure on node-3')).toBeInTheDocument()
-    expect(calls.conversations).toBe(before)
+    expect(calls.conversations).toBe(afterInitialLoad) // still no refetch — the delta itself fetched nothing
+
+    // BEING DELETED: the original row, removed in place.
+    emit('delta', { type: 'DELETED', kind: 'conversations', name: 'conv-1' })
+    await waitFor(() => expect(screen.queryByText('disk pressure on node-3')).toBeNull())
+    expect(loading()).toBeNull()
+    expect(calls.conversations).toBe(afterInitialLoad) // the delete applied in place, no refetch
     stop()
   })
 })

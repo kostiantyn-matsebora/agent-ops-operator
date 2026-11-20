@@ -293,3 +293,25 @@ func TestBulkCloseSkipsAThreadNotYetEstablished(t *testing.T) {
 		t.Fatal("nothing may be posted for a thread with no id yet")
 	}
 }
+
+// 3.10: the server SHALL NOT trust the view. A close naming a member
+// directly — rather than its root — is skipped with a reason naming the
+// parent, and nothing is posted: a member binds no console thread of its
+// own, so there is nothing here to close even if the client thinks there is.
+func TestBulkCloseSkipsAMemberNamedDirectly(t *testing.T) {
+	member := withCausedBy(joinedConversation("a-member"), "its-root", "k8s-observe")
+	api, f, _, _ := apiWithOptions(t, "tok", true, member, joinedConversation("a"))
+	h := api.Handler(http.NotFoundHandler())
+
+	_, out := postClose(t, h, `{"names":["a-member","a"]}`)
+	if out.Closed != 1 || out.Skipped != 1 || out.Failed != 0 {
+		t.Fatalf("a member must not fail the batch, and its neighbour must still close: %+v", out)
+	}
+	res := outcomes(out.Results)
+	if res["a-member"].Outcome != closeOutcomeSkipped || !strings.Contains(res["a-member"].Reason, "its-root") {
+		t.Fatalf("the skip must name the parent: %+v", res["a-member"])
+	}
+	if got := closes(f); len(got) != 1 {
+		t.Fatalf("nothing may be posted for the member: %v", got)
+	}
+}

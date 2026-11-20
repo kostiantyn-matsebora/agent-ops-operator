@@ -93,50 +93,18 @@ export function descendantsOf(items: ConversationSummary[], name: string): Conve
   return out
 }
 
-export interface SkippedMember {
-  name: string
-  parentName: string
-}
-
 /**
- * Splits a selection into what a bulk action actually SENDS and what it
- * skips LOCALLY, never touching the server for the second half.
- *
- * A member reached DIRECTLY — no ancestor of it also selected — is skipped
- * and names its parent (console-conversation-tree: "a member cannot be
- * closed/deleted directly"). A member whose root IS also selected is simply
- * left out of the request: the manager's own cascade off that root already
- * reaches it, and sending it again would ask the server to act on a
- * conversation with no channel binding of its own.
+ * What a bulk action SENDS, over roots only. A member is never IN the
+ * selection to begin with — `selectableNames`/`selectionState` keep it out,
+ * and no row renders a selection control for one
+ * (console-conversation-tree: "A member SHALL NOT be selectable in this
+ * view") — so there is no longer a local skip to compute here: what the view
+ * selected is exactly what gets sent. The server's own `causedBy.parent`
+ * guard is what refuses a member named some other way (the manager no
+ * longer trusts the view either).
  */
-export function partitionSelection(
-  items: ConversationSummary[],
-  selected: Set<string>,
-): { send: string[]; skipped: SkippedMember[] } {
-  const names = byName(items)
-  const send: string[] = []
-  const skipped: SkippedMember[] = []
-  for (const name of selected) {
-    const row = names.get(name)
-    if (!row?.causedBy) {
-      send.push(name)
-      continue
-    }
-    let cur = row
-    let ancestorSelected = false
-    const seen = new Set<string>()
-    while (cur.causedBy && names.has(cur.causedBy.parent) && !seen.has(cur.name)) {
-      seen.add(cur.name)
-      const parent = names.get(cur.causedBy.parent)!
-      if (selected.has(parent.name)) {
-        ancestorSelected = true
-        break
-      }
-      cur = parent
-    }
-    if (!ancestorSelected) skipped.push({ name, parentName: row.causedBy.parent })
-  }
-  return { send, skipped }
+export function partitionSelection(selected: Set<string>): string[] {
+  return [...selected]
 }
 
 /**

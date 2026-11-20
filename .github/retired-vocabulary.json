@@ -1390,6 +1390,60 @@
         "is now",
         "withdrawn"
       ]
+    },
+    {
+      "id": "console-inbox-show-closed",
+      "pattern": "\\bshow[- ]closed\\b",
+      "says": "the console shows Open and Closed as their own scopes; there is no showClosed preference or checkbox toggling closed rows into another scope",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "renamed",
+        "gone"
+      ]
+    },
+    {
+      "id": "console-inbox-archive-label",
+      "pattern": "\\bArchive (scope|row|tab|badge)\\b|\\(Archive\\)",
+      "says": "the scope and its row are named Closed; Archive was the retired label for the same scope",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "renamed",
+        "gone"
+      ]
+    },
+    {
+      "id": "console-inbox-all-scope",
+      "pattern": "kind:\\s*'all'|\\bAll,\\s*Working,\\s*Mine,\\s*Errored\\b",
+      "says": "the first scope is Open (scope kind 'open'); the All scope (kind 'all') was retired",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "renamed",
+        "gone"
+      ]
     }
   ]
 }

@@ -458,7 +458,7 @@ export function ThreadView(p: Readonly<ThreadViewProps>): ReactElement {
           )}
           {p.archived && (
             <div className="wk-alert" data-testid="archived">
-              <b>This thread was archived</b>
+              <b>This thread was closed</b>
               <div>The conversation was closed. The transcript stays readable.</div>
             </div>
           )}

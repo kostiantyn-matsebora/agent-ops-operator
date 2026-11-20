@@ -128,6 +128,11 @@ func getList(t *testing.T, h http.Handler, path string) listResponse {
 
 // The filter narrows server-side; the COUNT is computed before it, so
 // narrowing the view never moves the badge.
+//
+// unreadTotal is scopes["open"] — unread AND phase≠Closed — so the
+// closed-but-unread fixture here contributes to the `unread=true` FILTER
+// (which looks only at s.Unread, independent of phase) but never to the
+// COUNT, which is the Closed scope's own unread total instead.
 func TestUnreadFilterAndPreFilterCount(t *testing.T) {
 	closed := convWithRuns("closed-unread", tEarly, [2]string{"result", tLate})
 	closed.Status = json.RawMessage(strings.Replace(string(closed.Status), `"phase":"Idle"`, `"phase":"Closed"`, 1))
@@ -140,7 +145,7 @@ func TestUnreadFilterAndPreFilterCount(t *testing.T) {
 	h := api.Handler(http.NotFoundHandler())
 
 	all := getList(t, h, "/api/conversations")
-	if all.Total != 4 || all.UnreadTotal != 3 {
+	if all.Total != 4 || all.UnreadTotal != 2 {
 		t.Fatalf("unfiltered: total=%d unread=%d", all.Total, all.UnreadTotal)
 	}
 	unread := getList(t, h, "/api/conversations?unread=true")
@@ -152,14 +157,14 @@ func TestUnreadFilterAndPreFilterCount(t *testing.T) {
 			t.Fatalf("%s is not unread but was returned by the filter", it.Name)
 		}
 	}
-	// a filter that hides two of the three unread rows must not move the count
+	// a filter that hides the two unread Idle rows must not move the count
 	narrowed := getList(t, h, "/api/conversations?phase=Closed")
-	if narrowed.Total != 1 || narrowed.UnreadTotal != 3 {
+	if narrowed.Total != 1 || narrowed.UnreadTotal != 2 {
 		t.Fatalf("the count moved when the view narrowed: total=%d unread=%d", narrowed.Total, narrowed.UnreadTotal)
 	}
 	// count-only: the numbers with no rows
 	only := getList(t, h, "/api/conversations?count=1")
-	if len(only.Items) != 0 || only.UnreadTotal != 3 || only.Total != 4 {
+	if len(only.Items) != 0 || only.UnreadTotal != 2 || only.Total != 4 {
 		t.Fatalf("count-only form: %+v", only)
 	}
 }

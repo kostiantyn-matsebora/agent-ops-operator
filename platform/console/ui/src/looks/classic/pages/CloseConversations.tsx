@@ -27,12 +27,13 @@ import type { CloseResponse } from '../../../api/types'
 
 // The selection rules are the model's (model/bulk.ts), shared by every look;
 // re-exported so this look's callers keep one import.
-export { notClosed, selectableNames, workingCount } from '../../../model/bulk'
+export { notClosed, selectableNames, workingCount, workingMemberCount } from '../../../model/bulk'
 
 export function CloseSelectedModal({
   isOpen,
   names,
   working,
+  workingMembers = 0,
   result,
   error,
   busy,
@@ -41,8 +42,11 @@ export function CloseSelectedModal({
   memberCount = 0,
 }: {
   isOpen: boolean
+  /** The selected ROOTS — a member is never in here (console-conversation-tree). */
   names: string[]
   working: number
+  /** How many of the cascade's MEMBERS, not the roots above, are working. */
+  workingMembers?: number
   result?: CloseResponse
   error?: string
   busy: boolean
@@ -64,11 +68,7 @@ export function CloseSelectedModal({
       data-testid="close-modal"
     >
       <ModalHeader
-        title={
-          result
-            ? 'Close finished'
-            : `Close ${names.length + memberCount} conversation(s)?`
-        }
+        title={result ? 'Close finished' : `Close ${names.length} conversation(s)?`}
       />
       <ModalBody>
         {result ? (
@@ -98,15 +98,16 @@ export function CloseSelectedModal({
         ) : (
           <>
             <p>
-              {names.length + memberCount} conversation(s) will be closed. Each is sent{' '}
+              {names.length} conversation(s) will be closed. Each is sent{' '}
               <code>/close</code> on its console thread: the agent says goodbye and the threads
-              are archived. The conversation itself stays — its answers and its workspace are kept
+              are closed. The conversation itself stays — its answers and its workspace are kept
               — and <b>it can be reopened</b>.
             </p>
             {memberCount > 0 && (
               <p data-testid="close-member-count">
                 {names.length} selected, reaching {memberCount} member conversation(s) the
-                manager's cascade closes too.
+                manager's cascade closes too
+                {workingMembers > 0 ? `, ${workingMembers} of them working` : ''}.
               </p>
             )}
             {working > 0 && (
