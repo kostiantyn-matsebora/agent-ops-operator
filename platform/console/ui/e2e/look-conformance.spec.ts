@@ -61,11 +61,10 @@ async function exposed(page: Page, look: string): Promise<Record<string, boolean
     ['mark read', TESTID.markRead], ['close selected', TESTID.closeSelected], ['delete selected', TESTID.deleteSelected],
   ] as const) found[`bulk: ${name}`] = await visible(page, id)
 
-  // A closed row's menu offers reopen and delete.
+  // A closed row's menu offers reopen and delete — reached through the
+  // Closed scope, the only place a closed row shows.
   await open(page, look, '/conversations')
-  const showClosed = page.getByTestId(TESTID.showClosed)
-  await expect(showClosed).toBeVisible({ timeout: 15_000 })
-  await showClosed.check()
+  await page.getByTestId(testid.scope('Closed')).click()
   const row = page.getByTestId(testid.row(CLOSED.name))
   await expect(row).toBeVisible()
   await row.getByRole('button', { name: /actions for/i }).click()

@@ -127,8 +127,8 @@ test.describe('a busy install', () => {
         await expect(page).toHaveURL(/tree-02-m1/)
         await expect(page.locator('section.tp .wk-th h2')).toContainText('member 1 of 2')
       }],
-      ['show closed off', async () => { await page.getByTestId(TESTID.showClosed).uncheck() }],
-      ['show closed on', async () => { await page.getByTestId(TESTID.showClosed).check() }],
+      ['Closed scope', async () => { await page.getByTestId(testid.scope('Closed')).click() }],
+      ['back to Open scope', async () => { await page.getByTestId(testid.scope('Open')).click() }],
       ['search', async () => { await page.getByRole('searchbox', { name: 'Search conversations' }).fill('Incident 1') }],
       ['clear search', async () => { await page.getByRole('searchbox', { name: 'Search conversations' }).fill('') }],
       ['new conversation', async () => { await page.getByTestId(TESTID.newConversation).click() }],

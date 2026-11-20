@@ -52,13 +52,13 @@ vi.mock('../../model/conversationList', async (importOriginal) => ({
   useInboxScopes: () => ({
     general: { scope: { kind: 'general' }, label: 'General feed' },
     fixed: [
-      { scope: { kind: 'all' }, label: 'All', count: 7 },
+      { scope: { kind: 'open' }, label: 'Open', count: 7 },
       { scope: { kind: 'working' }, label: 'Working', count: 2 },
       { scope: { kind: 'mine' }, label: 'Mine', count: 0 },
       { scope: { kind: 'errored' }, label: 'Errored', count: 1 },
     ],
     targets: [{ scope: { kind: 'pipeline', name: 'k8s-observe' }, label: 'k8s-observe', count: 3 }],
-    closed: { scope: { kind: 'closed' }, label: 'Archive', count: 4 },
+    closed: { scope: { kind: 'closed' }, label: 'Closed', count: 4 },
   }),
 }))
 
@@ -142,15 +142,15 @@ describe('the workspace header', () => {
 })
 
 describe('the navigation panel', () => {
-  it('carries the pages, the channel, the scopes with their counts, the pipelines and the archive', () => {
+  it('carries the pages, the channel, the scopes with their counts, the pipelines and Closed', () => {
     mount()
     const nav = screen.getByTestId(TESTID.appNav)
     for (const page of ['Overview', 'Queues', 'Configuration', 'Topology']) expect(within(nav).getByRole('link', { name: page })).toBeInTheDocument()
     expect(within(nav).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page')
     expect(within(nav).getByTestId(testid.scope('General feed'))).toBeInTheDocument()
-    expect(within(nav).getByTestId(testid.scope('All'))).toHaveTextContent('7')
+    expect(within(nav).getByTestId(testid.scope('Open'))).toHaveTextContent('7')
     expect(within(nav).getByTestId(testid.scope('k8s-observe'))).toHaveTextContent('3')
-    expect(within(nav).getByTestId(testid.scope('Archive'))).toHaveTextContent('4')
+    expect(within(nav).getByTestId(testid.scope('Closed'))).toHaveTextContent('4')
   })
 
   it('folds to icons and keeps every count as a badge, and the fold is remembered', async () => {
@@ -159,9 +159,10 @@ describe('the navigation panel', () => {
     const nav = screen.getByTestId(TESTID.appNav)
     expect(nav).toHaveClass('collapsed')
     expect(within(nav).queryByText('Pages')).toBeNull()
-    expect(within(nav).getByTestId(testid.scope('All'))).toHaveTextContent('7')
+    expect(within(nav).getByTestId(testid.scope('Open'))).toHaveTextContent('7')
     expect(within(nav).getByTestId(testid.scope('Working'))).toHaveAccessibleName('Working, 2')
     expect(within(nav).getByTestId(testid.scope('k8s-observe'))).toHaveTextContent('3')
+    expect(within(nav).getByTestId(testid.scope('Closed'))).toHaveTextContent('4')
     expect(useWorkspaceLayout.getState().navCollapsed).toBe(true)
   })
 

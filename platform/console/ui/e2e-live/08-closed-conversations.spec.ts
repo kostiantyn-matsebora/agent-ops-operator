@@ -2,29 +2,24 @@ import { expect, test } from '@playwright/test'
 import { TESTID, testid } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 
-// Table item #8 — "show closed" defaults off, hides a REAL closed
-// conversation from the ordinary list, and the dedicated Closed/Archive
-// scope always shows it regardless.
+// Table item #8 — Open excludes a REAL closed conversation always, with no
+// "show closed" control anywhere to reveal it in place, and the dedicated
+// Closed scope is the only place it shows.
 
 const f = loadFixtures()
 
-test('#8 "show closed" is off by default, reveals closed rows when toggled, and the Closed scope always shows them', async ({ page }) => {
+test('#8 Open always excludes a closed row, with no toggle to reveal it, and Closed always shows it', async ({ page }) => {
   const { closedTask } = f.conversations
   await page.goto('/conversations')
   await expect(page.getByTestId(TESTID.inbox)).toBeVisible()
 
-  const checkbox = page.getByTestId(TESTID.showClosed)
-  await expect(checkbox).not.toBeChecked()
   await expect(page.getByTestId(testid.row(closedTask))).toBeHidden()
+  await expect(page.getByLabelText(/show closed/i)).toHaveCount(0)
 
-  await checkbox.check()
+  await page.getByTestId(testid.scope('Closed')).click()
   await expect(page.getByTestId(testid.row(closedTask))).toBeVisible({ timeout: 10_000 })
-  await page.screenshot({ path: 'e2e-live/proofs/08-show-closed-toggle.png', fullPage: true })
+  await page.screenshot({ path: 'e2e-live/proofs/08-closed-scope.png', fullPage: true })
 
-  await checkbox.uncheck()
+  await page.getByTestId(testid.scope('Open')).click()
   await expect(page.getByTestId(testid.row(closedTask))).toBeHidden()
-
-  // The dedicated Closed/Archive scope shows it regardless of the toggle.
-  await page.getByTestId(testid.scope('Archive')).click()
-  await expect(page.getByTestId(testid.row(closedTask))).toBeVisible({ timeout: 10_000 })
 })

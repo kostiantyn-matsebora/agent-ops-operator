@@ -131,6 +131,32 @@ func TestBulkDeleteReportsPerItemAndNeverAborts(t *testing.T) {
 	}
 }
 
+// The server SHALL NOT trust the view. A delete naming a member directly —
+// rather than its root — is skipped with a reason naming the parent, and the
+// manager is never called: deleting a member's recorded answers out from
+// under its still-live root is exactly what the two-step (close, then
+// delete) exists to prevent, and a member cannot even be closed on its own
+// to get there.
+func TestBulkDeleteSkipsAMemberNamedDirectly(t *testing.T) {
+	member := withCausedBy(closedConversation("a-member"), "its-root", "k8s-observe")
+	api, f, _, _ := apiWithOptions(t, "tok", true, member, closedConversation("a"))
+	h := api.Handler(http.NotFoundHandler())
+
+	_, out := postDelete(t, h, `{"names":["a-member","a"]}`)
+	if out.Deleted != 1 || out.Skipped != 1 || out.Failed != 0 {
+		t.Fatalf("a member must not fail the batch, and its neighbour must still delete: %+v", out)
+	}
+	res := outcomes(out.Results)
+	if res["a-member"].Outcome != closeOutcomeSkipped || !strings.Contains(res["a-member"].Reason, "its-root") {
+		t.Fatalf("the skip must name the parent: %+v", res["a-member"])
+	}
+	for _, v := range f.calledVerbs() {
+		if strings.HasSuffix(v, ":a-member") {
+			t.Fatalf("nothing may be called for the member: %v", f.calledVerbs())
+		}
+	}
+}
+
 // Reopen is per conversation, and only for a closed one.
 func TestReopenOnlyAppliesToAClosedConversation(t *testing.T) {
 	api, f, _, _ := apiWithOptions(t, "tok", true,

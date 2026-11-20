@@ -22,7 +22,7 @@ import { TESTID } from '../../../../model/testids'
 
 const COMMAND_HINT: Record<string, string> = {
   exit: 'release this conversation’s runtime, keep the conversation',
-  close: 'end this conversation and archive its thread',
+  close: 'end this conversation and close its thread',
 }
 
 const COMMAND_ICON: Record<string, ReactNode> = {

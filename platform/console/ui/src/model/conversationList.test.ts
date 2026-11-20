@@ -34,7 +34,7 @@ const TREE = [ROOT, `${ROOT}-triage`, `${ROOT}-mitigate`, `${ROOT}-mitigate-drai
 
 describe('a scope', () => {
   it('asks the server only what the server can answer per tree', () => {
-    expect(scopeParams({ kind: 'all' }, '').toString()).toBe('limit=100')
+    expect(scopeParams({ kind: 'open' }, '').toString()).toBe('limit=100')
     expect(scopeParams({ kind: 'closed' }, '').toString()).toBe('phase=Closed&limit=100')
     expect(scopeParams({ kind: 'pipeline', name: 'k8s-observe' }, 'oom').toString())
       .toBe('pipeline=k8s-observe&unread=true&q=oom&limit=100')
@@ -46,7 +46,7 @@ describe('a scope', () => {
   })
 
   it('is keyed by kind and name', () => {
-    expect(scopeKey({ kind: 'all' })).toBe('all')
+    expect(scopeKey({ kind: 'open' })).toBe('open')
     expect(scopeKey({ kind: 'coordinator', name: 'x' })).toBe('coordinator:x')
     expect(sameScope({ kind: 'pipeline', name: 'x' }, { kind: 'pipeline', name: 'x' })).toBe(true)
     expect(sameScope({ kind: 'pipeline', name: 'x' }, { kind: 'coordinator', name: 'x' })).toBe(false)
@@ -54,50 +54,76 @@ describe('a scope', () => {
 })
 
 describe('which conversations a scope shows, in the server’s order', () => {
-  it('All is every open conversation, read or not', () => {
-    expect(names(visibleItems(page.items, { kind: 'all' }, false))).toEqual([
+  it('Open is every open conversation, read or not, and never a closed one', () => {
+    expect(names(visibleItems(page.items, { kind: 'open' }))).toEqual([
       'cluster-events-7c1d4e', 'console-3f9a2b', 'prometheus-alerts-91b7fd', 'console-b48e10', 'nightly-2f60c8',
       'console-5a81cc', ...TREE,
     ])
   })
 
-  it('Show closed adds the closed ones in place', () => {
-    expect(names(visibleItems(page.items, { kind: 'all' }, true))).toEqual([
-      'cluster-events-7c1d4e', 'console-3f9a2b', 'prometheus-alerts-91b7fd', 'console-b48e10', 'nightly-2f60c8',
-      'cluster-events-d902a3', 'console-5a81cc', 'node-pressure-c81b4f', ROOT, `${ROOT}-triage`,
-      `${ROOT}-mitigate`, `${ROOT}-notify`, `${ROOT}-mitigate-drain`, `${ROOT}-mitigate-verify`,
-    ])
+  it('a closed conversation is listed only under Closed — there is no "show closed" to add it in place', () => {
+    const closedNames = ['cluster-events-d902a3', 'node-pressure-c81b4f', `${ROOT}-notify`]
+    const open = names(visibleItems(page.items, { kind: 'open' }))
+    const closed = names(visibleItems(page.items, { kind: 'closed' }))
+    for (const n of closedNames) {
+      expect(open).not.toContain(n)
+      expect(closed).toContain(n)
+    }
   })
 
   it('Working keeps every tree with an unread working row, whole — and not a read working one', () => {
-    const rows = names(visibleItems(page.items, { kind: 'working' }, false))
+    const rows = names(visibleItems(page.items, { kind: 'working' }))
     expect(rows).toEqual(['cluster-events-7c1d4e', 'console-3f9a2b', ...TREE])
     // console-5a81cc is working but read: Working is unread AND working.
     expect(rows).not.toContain('console-5a81cc')
   })
 
   it('a Coordinator scope is its root and every member, at any depth', () => {
-    expect(names(visibleItems(page.items, { kind: 'coordinator', name: 'incident-response' }, false))).toEqual(TREE)
+    expect(names(visibleItems(page.items, { kind: 'coordinator', name: 'incident-response' }))).toEqual(TREE)
   })
 
   it('Mine and Errored are empty on an install where nothing qualifies — an empty list, not an error', () => {
-    expect(visibleItems(page.items, { kind: 'mine' }, true)).toEqual([])
-    expect(visibleItems(page.items, { kind: 'errored' }, true)).toEqual([])
+    expect(visibleItems(page.items, { kind: 'mine' })).toEqual([])
+    expect(visibleItems(page.items, { kind: 'errored' })).toEqual([])
   })
 
-  it('Closed shows what the server narrowed, closed rows included regardless of the toggle', () => {
-    expect(visibleItems(page.items, { kind: 'closed' }, false)).toHaveLength(page.items.length)
+  it('Closed shows what the server narrowed, every closed row', () => {
+    expect(visibleItems(page.items, { kind: 'closed' })).toHaveLength(page.items.length)
   })
 
   it('a sparse install shows nothing, and says nothing is selectable', () => {
-    expect(visibleItems([], { kind: 'all' }, false)).toEqual([])
+    expect(visibleItems([], { kind: 'open' })).toEqual([])
     expect(selectionState([], new Set())).toEqual({ selectableRows: [], allSelected: false })
+  })
+})
+
+describe('selectionState picks roots only', () => {
+  // console-conversation-tree: "A member SHALL NOT be selectable in this
+  // view" — true whether the list is grouped by incident (the default) or
+  // flattened, since both arrangements draw from the same snapshot.
+  const conv = (name: string, over: Partial<ConversationSummary> = {}): ConversationSummary => ({
+    name, runCount: 0, queued: 0, joined: true, errored: false, unread: false,
+    ageSeconds: 1, deleting: false, ...over,
+  })
+  const root1 = conv('root-1', { coordinator: 'root-1' })
+  const member1 = conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } })
+  const root2 = conv('root-2', { coordinator: 'root-2', deleting: true })
+  const raw = [root1, member1, root2]
+
+  it('grouped — the member nests under its root, and neither it nor a closing root is selectable', () => {
+    const grouped = buildTree(raw, true).map((t) => t.row)
+    expect(selectionState(grouped, new Set())).toEqual({ selectableRows: ['root-1'], allSelected: false })
+  })
+
+  it('flattened — every row is its own line, and the rule is unchanged', () => {
+    const flat = buildTree(raw, false).map((t) => t.row)
+    expect(selectionState(flat, new Set())).toEqual({ selectableRows: ['root-1'], allSelected: false })
   })
 })
 
 describe('ordering and folding', () => {
   it('nests each member depth-first under its own root', () => {
-    const tree = buildTree(visibleItems(page.items, { kind: 'all' }, false), true)
+    const tree = buildTree(visibleItems(page.items, { kind: 'open' }), true)
     expect(tree.map((r) => [r.row.name, r.depth, r.memberCount])).toEqual([
       ['cluster-events-7c1d4e', 0, 0],
       ['console-3f9a2b', 0, 0],
@@ -114,7 +140,7 @@ describe('ordering and folding', () => {
   })
 
   it('a folded root hides every descendant, the nested root’s own members included', () => {
-    const items = visibleItems(page.items, { kind: 'all' }, false)
+    const items = visibleItems(page.items, { kind: 'open' })
     const rows = visibleRows(buildTree(items, true), items, new Set([ROOT]))
     expect(rows.map((r) => r.row.name)).not.toContain(`${ROOT}-mitigate-drain`)
     expect(rows.map((r) => r.row.name)).toContain(ROOT)
@@ -162,23 +188,23 @@ describe('what each row says about itself', () => {
 })
 
 describe('useConversationList', () => {
-  const base = { search: '', showClosed: false, flatten: false, collapsedRoots: new Set<string>() }
+  const base = { search: '', flatten: false, collapsedRoots: new Set<string>() }
 
   it('returns the scope’s items, its tree and the roots that fold', () => {
-    const { result } = renderHook(() => useConversationList({ ...base, scope: { kind: 'all' } }))
+    const { result } = renderHook(() => useConversationList({ ...base, scope: { kind: 'open' } }))
     expect(result.current.rows).toHaveLength(11)
     expect(result.current.collapsibleNames).toEqual([ROOT, `${ROOT}-mitigate`])
   })
 
   it('flattened, every row is its own line in the server’s order', () => {
-    const { result } = renderHook(() => useConversationList({ ...base, flatten: true, scope: { kind: 'all' } }))
+    const { result } = renderHook(() => useConversationList({ ...base, flatten: true, scope: { kind: 'open' } }))
     expect(result.current.rows.every((r) => r.depth === 0)).toBe(true)
-    expect(result.current.rows.map((r) => r.row.name)).toEqual(names(visibleItems(page.items, { kind: 'all' }, false)))
+    expect(result.current.rows.map((r) => r.row.name)).toEqual(names(visibleItems(page.items, { kind: 'open' })))
   })
 
   it('while loading, it is empty and says so — never a stale or invented row', () => {
     served = undefined
-    const { result } = renderHook(() => useConversationList({ ...base, scope: { kind: 'all' } }))
+    const { result } = renderHook(() => useConversationList({ ...base, scope: { kind: 'open' } }))
     expect(result.current.isLoading).toBe(true)
     expect(result.current.items).toEqual([])
     expect(result.current.rows).toEqual([])
@@ -186,27 +212,27 @@ describe('useConversationList', () => {
 })
 
 describe('useInboxScopes', () => {
-  it('counts All by every conversation and every other scope by unread', () => {
-    counts = { rootTotal: 14, scopes: { working: 2, mine: 0, errored: 1, closed: 3, 'k8s-observe': 2 } }
+  it('lists Open, Working, Mine, Errored, then every Pipeline/Coordinator, then Closed, each its own unread count', () => {
+    counts = { scopes: { open: 14, working: 2, mine: 0, errored: 1, closed: 3, 'k8s-observe': 2 } }
     vocabulary = [
       { kind: 'pipeline', name: 'k8s-observe', position: 'general', icon: 'aops:k8s' },
       { kind: 'coordinator', name: 'incident-response', position: 'general' },
       { kind: 'builtin', name: 'exit', position: 'thread' },
     ]
-    const { result } = renderHook(() => useInboxScopes(false))
+    const { result } = renderHook(() => useInboxScopes())
     expect(result.current.fixed.map((f) => [f.label, f.count])).toEqual([
-      ['All', 14], ['Working', 2], ['Mine', 0], ['Errored', 1],
+      ['Open', 14], ['Working', 2], ['Mine', 0], ['Errored', 1],
     ])
     expect(result.current.targets).toEqual([
       { scope: { kind: 'pipeline', name: 'k8s-observe' }, label: 'k8s-observe', count: 2, icon: 'aops:k8s' },
       { scope: { kind: 'coordinator', name: 'incident-response' }, label: 'incident-response', count: undefined, icon: undefined },
     ])
-    expect(result.current.closed).toEqual({ scope: { kind: 'closed' }, label: 'Archive', count: 3 })
+    expect(result.current.closed).toEqual({ scope: { kind: 'closed' }, label: 'Closed', count: 3 })
     expect(result.current.general.scope).toEqual({ kind: 'general' })
   })
 
   it('before the counts arrive, every scope is listed with no count', () => {
-    const { result } = renderHook(() => useInboxScopes(true))
+    const { result } = renderHook(() => useInboxScopes())
     expect(result.current.fixed.map((f) => f.count)).toEqual([undefined, undefined, undefined, undefined])
     expect(result.current.targets).toEqual([])
   })

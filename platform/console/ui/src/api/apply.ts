@@ -232,7 +232,7 @@ function writeConversation(
     }
     const params = String(key[1] ?? '')
     // A change to a row this page does not hold can still move it onto the
-    // page: closing a conversation puts it under the Archive filter. On the
+    // page: closing a conversation puts it under the Closed scope. On the
     // unfiltered first page a modified row that is absent is simply older than
     // the page, so only an addition belongs there.
     if (type !== 'ADDED' && unfilteredFirstPage(params)) continue

@@ -18,10 +18,16 @@ import { preview } from './text'
 // Errored), each Pipeline/Coordinator, and Closed an unread count
 // (TREE_PREDICATE below) — which made the dedicated "Unread" scope redundant
 // (every category already had its own unread count one level down) and it was
-// removed. All itself did NOT change: it is still every conversation a person
-// can open, read or not.
+// removed.
+//
+// `all` is GONE too (console-inbox-open-closed): a scope that excluded
+// closed rows behind a "Show closed" checkbox had a name that lied about
+// what it listed. `open` replaces it — every conversation with
+// `phase≠Closed`, read or not — and is the scope the view lands on. Closed
+// rows are excluded from every scope but `closed` by the ONE rule in
+// `visibleItems` below, never by a per-look preference.
 export type Scope =
-  | { kind: 'all' }
+  | { kind: 'open' }
   | { kind: 'working' }
   | { kind: 'mine' }
   | { kind: 'errored' }
@@ -69,7 +75,7 @@ export function scopeParams(scope: Scope, search: string): URLSearchParams {
   return p
 }
 
-// Every scope but All and Closed is unread, ANDed with its own predicate.
+// Every scope but Open and Closed is unread, ANDed with its own predicate.
 const TREE_PREDICATE: Partial<Record<Scope['kind'], (c: ConversationSummary) => boolean>> = {
   working: (c) => c.phase === 'Working' && Boolean(c.unread),
   errored: (c) => Boolean(c.errored) && Boolean(c.unread),
@@ -105,8 +111,16 @@ export function withTreeContext(
   return raw.filter((c) => qualifyingRoots.has(rootOf(c)))
 }
 
-/** The rows a scope shows, narrowed client-side from the server's snapshot. */
-export function visibleItems(all: ConversationSummary[], scope: Scope, showClosed: boolean): ConversationSummary[] {
+/**
+ * The rows a scope shows, narrowed client-side from the server's snapshot.
+ *
+ * ONE rule excludes closed rows: every scope but `closed` drops `phase ===
+ * 'Closed'`, always — no preference, no toggle, no argument to turn it off
+ * (console-chat-layout: "Closed conversations are reached through Closed
+ * only"). Closed carries no predicate of its own: the server already
+ * narrowed `raw` to `phase=Closed` (scopeParams above).
+ */
+export function visibleItems(all: ConversationSummary[], scope: Scope): ConversationSummary[] {
   let raw = all
   if (scope.kind === 'coordinator') {
     // `c.causedBy` truthy alone admits a member of ANY coordinator. A member
@@ -116,16 +130,12 @@ export function visibleItems(all: ConversationSummary[], scope: Scope, showClose
     const byName = new Map(raw.map((c) => [c.name, c]))
     raw = raw.filter((c) => byName.get(rootNameOf(all, c))?.coordinator === scope.name)
   }
-  // All is NOT an unread filter — it is every conversation a person can open,
-  // narrowed only by the generic "hide closed" rule below. Closed carries no
-  // predicate at all — it is the archive; the server already narrowed `raw`
-  // to phase=Closed (scopeParams above).
+  // Open is NOT an unread filter — it is every conversation a person can
+  // open that is not closed. Working, Mine, Errored and each
+  // Pipeline/Coordinator narrow further by their own tree predicate.
   const predicate = TREE_PREDICATE[scope.kind]
   if (predicate) raw = withTreeContext(raw, predicate)
-  // Closed conversations are hidden by default everywhere except the
-  // dedicated Closed scope — narrowed CLIENT-SIDE, since there is no
-  // server-side "exclude closed" param.
-  if (!showClosed && scope.kind !== 'closed') raw = raw.filter((c) => c.phase !== 'Closed')
+  if (scope.kind !== 'closed') raw = raw.filter((c) => c.phase !== 'Closed')
   return raw
 }
 
@@ -142,9 +152,15 @@ export function visibleRows(tree: TreeRow[], items: ConversationSummary[], colla
   })
 }
 
-/** The rows a bulk action may touch, and whether every one is selected. */
+/**
+ * The ROOT rows a bulk action may touch, and whether every one is selected.
+ * A member carries no selection control (console-conversation-tree: "A
+ * member SHALL NOT be selectable in this view"), so select-all and the
+ * selection bar's own counts never include one, and a root already closing
+ * or being deleted is skipped the same way `selectableNames` skips it.
+ */
 export function selectionState(items: ConversationSummary[], selected: Set<string>) {
-  const selectableRows = items.filter((c) => !c.deleting).map((c) => c.name)
+  const selectableRows = items.filter((c) => !c.deleting && !c.causedBy).map((c) => c.name)
   const allSelected = selectableRows.length > 0 && selectableRows.every((n) => selected.has(n))
   return { selectableRows, allSelected }
 }
@@ -235,7 +251,6 @@ export function waitingSnippet(entries: string[], count: number): string {
 export interface ListOptions {
   scope: Scope
   search: string
-  showClosed: boolean
   /** Every row its own line, in the server's order, instead of grouped under its root. */
   flatten: boolean
   collapsedRoots: Set<string>
@@ -245,10 +260,10 @@ export interface ListOptions {
  * The list a scope shows. Ordering is the server's — newest activity first —
  * with each member nested depth-first under its own root unless flattened.
  */
-export function useConversationList({ scope, search, showClosed, flatten, collapsedRoots }: ListOptions) {
+export function useConversationList({ scope, search, flatten, collapsedRoots }: ListOptions) {
   const params = useMemo(() => scopeParams(scope, search), [scope, search])
   const { data, isLoading, error } = useConversations(params)
-  const items = useMemo(() => visibleItems(data?.items ?? [], scope, showClosed), [data, scope, showClosed])
+  const items = useMemo(() => visibleItems(data?.items ?? [], scope), [data, scope])
   const tree = useMemo(() => buildTree(items, !flatten), [items, flatten])
   // A root waiting on a member is never folded: the work is the news, and the
   // member that is doing it must be in view (an explicit fold returns once the wait ends).
@@ -271,18 +286,23 @@ export interface ScopeEntry {
 }
 
 /**
- * The inbox's scopes and their counts.
+ * The inbox's scopes and their counts, in spec order: Open, Working, Mine,
+ * Errored, then every Ready Pipeline/Coordinator, then Closed
+ * (console-chat-layout: "The inbox column lists scopes, each with its
+ * count").
  *
- * All reads `rootTotal` — every conversation a person can open, read or not.
- * Every OTHER count is UNREAD, ANDed with its own scope's predicate, and each
- * matches its own list exactly (TREE_PREDICATE above).
+ * Every count is UNREAD, ANDed with its own scope's predicate, and each
+ * matches its own list exactly (TREE_PREDICATE above): Open and every scope
+ * but Closed exclude closed rows, Closed counts closed rows only. No
+ * argument changes which conversations a count includes — the server
+ * computes every one with the same rule (console-unread).
  */
-export function useInboxScopes(showClosed: boolean) {
-  const counts = useInboxCounts(showClosed)
+export function useInboxScopes() {
+  const counts = useInboxCounts()
   const vocabulary = useVocabulary()
   const scopes = counts.data?.scopes ?? {}
   const fixed: ScopeEntry[] = [
-    { scope: { kind: 'all' }, label: 'All', count: counts.data?.rootTotal },
+    { scope: { kind: 'open' }, label: 'Open', count: scopes.open },
     { scope: { kind: 'working' }, label: 'Working', count: scopes.working },
     { scope: { kind: 'mine' }, label: 'Mine', count: scopes.mine },
     { scope: { kind: 'errored' }, label: 'Errored', count: scopes.errored },
@@ -296,7 +316,7 @@ export function useInboxScopes(showClosed: boolean) {
       icon: e.icon,
     }))
   const general: ScopeEntry = { scope: { kind: 'general' }, label: 'General feed' }
-  const closed: ScopeEntry = { scope: { kind: 'closed' }, label: 'Archive', count: scopes.closed }
+  const closed: ScopeEntry = { scope: { kind: 'closed' }, label: 'Closed', count: scopes.closed }
   return { general, fixed, targets, closed }
 }
 

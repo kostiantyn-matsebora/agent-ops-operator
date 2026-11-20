@@ -121,14 +121,15 @@ Three exceptions, each a per-browser preference and neither a fact about any
 conversation:
 
 - The navigation's fold state (`shell.ts`).
-- The Conversations view's pane widths, inbox collapse, "show closed" toggle
-  and the tree's default fold, under `agentops.console.layout`. A root with
-  members starts folded for a first-time viewer, and from there follows
-  whatever "Collapse all" / "Expand all" was last clicked — applied to every
-  root as it is first seen, present at mount or arriving later, so a reload
-  and a live arrival land on the same preference. Reads and writes are
-  guarded in `try`/`catch`, so a private window or a cleared store falls back
-  to the view's defaults rather than breaking it.
+- The Conversations view's pane widths, inbox collapse and the tree's default
+  fold, under `agentops.console.layout`. A root with members starts folded
+  for a first-time viewer, and from there follows whatever "Collapse all" /
+  "Expand all" was last clicked — applied to every root as it is first seen,
+  present at mount or arriving later, so a reload and a live arrival land on
+  the same preference. Reads and writes are guarded in `try`/`catch`, so a
+  private window or a cleared store falls back to the view's defaults rather
+  than breaking it. A stored `showClosed` key from an earlier version is
+  read but no longer applied — there is no preference left for it to drive.
 - The `/close` confirm dialog's "don't ask again" opt-out, under
   `agentops.console.skipCloseConfirm`. Guarded the same way, so a private
   window or a cleared store simply asks again.
@@ -590,7 +591,7 @@ thread pane in place — there is no navigation away from the list.
 | Column | Shows |
 |---|---|
 | Icon rail | the app's own sidebar, collapsed to icons on this view |
-| Inbox | scopes, in this order: All, Working, Mine, Errored, then every Ready Pipeline and Coordinator, then Closed — each with a count matching what opening it lists |
+| Inbox | scopes, in this order: Open, Working, Mine, Errored, then every Ready Pipeline and Coordinator, then Closed — every badge an unread-root count, see [Unread](#unread) |
 | List | the rows in the active scope, as a coordination tree by default |
 | Thread pane | the open conversation |
 
@@ -629,6 +630,10 @@ level with a marker, never dropped.
 **A member carries no conversation-level actions of its own** — mark
 read/unread, reopen, close, delete — because it holds no channel binding. Its
 row menu offers only *Open in new tab*, *Copy link* and *Open incident*.
+
+**A member also carries no selection control.** Only a root renders a
+checkbox, "Select all" picks roots only, and every count the selection bar
+or a dialog shows is a count of selected roots.
 
 Opened directly, its thread pane shows its own run history read-only, with a
 link back to the incident.
@@ -722,52 +727,37 @@ console thread and so no count of its own.
 
 Its result arrives on its root as an input, and is counted there instead.
 
-**All is a total, not an unread count.** It is every conversation a person
-can open, read or not — unchanged from what it always meant.
+**Open replaced All.** It is the default scope and lists every non-closed
+root, read or not — its own list is bigger than its own badge, since opening
+it shows the inbox, not only what is unread.
 
-Every OTHER fixed scope but Closed (Working, Mine, Errored), each Pipeline or
-Coordinator, is an unread count instead.
+**Every badge is an unread-root count**, Open's and Closed's included:
+
+| Scope | Counted when |
+|---|---|
+| Open, and the navigation rail's badge (`unreadTotal`) | `unread ∧ phase≠Closed` |
+| Working, Mine, Errored, each Pipeline or Coordinator | its own predicate `∧ unread ∧ phase≠Closed` |
+| Closed | `unread ∧ phase=Closed` |
 
 That is what made the dedicated Unread scope redundant: every category
-already carried its own unread count one level down. It was removed. All
-was not, and is not an unread count either.
+already carries its own unread count one level down. The [counter
+reference](#counter-reference) has the full table, this row included.
 
 An invoked member never counts, on any scope. It binds no console thread and
 no action of its own — the tree under its root is the only way to reach it.
 
-| Scope | Counts |
-|---|---|
-| All (`kind: 'all'`) | every root, read or not, excluding a closed root while "Show closed" is off |
-| Closed (Archive) | every closed root, read or not — the archive holds everything it ever closed |
-| Working, Mine, Errored, each Pipeline or Coordinator | unread roots its own filter admits |
-
 A Coordinator's own root conversations are reached through ITS scope, same as
 any pipeline's. There is no separate "Incidents" scope.
 
-**"Show closed" moves every count except Closed's own.** Switching scopes
-never moves a count that belongs to a different one, computed before that
-filter applies.
+**One rule excludes a closed row, with no preference that moves it.** Every
+list but Closed's own drops a `phase=Closed` row. Closed's own list is the
+mirror image, showing only `phase=Closed` rows.
 
-Every list but Closed's own hides a closed row while the toggle is off —
-All included — so a badge for one of those lists excludes that row too.
+The same rule bounds the badges. A scope's count is never inflated by a row
+its own list would not show.
 
-Closed's own list is exempt from that one filter — it IS the closed view —
-so its count ignores the toggle too.
-
-**Unread is the separate axis Closed and All both sit outside of.** A read
-closed conversation still belongs to the archive, the same way a read
-email still belongs in "All Mail".
-
-So Closed's count, like All's, is never gated on unread either. There is
-no "show closed" checkbox on this scope — the whole point of it is to show
-everything, unfiltered.
-
-**The navigation rail's own badge, outside the Inbox, is a plain unread
-count** — `unreadTotal`, every unread root, no further filter, the same
-number the removed Unread scope used to show.
-
-It answers "is there anything to read", a different question from what All
-answers now.
+**The navigation rail's badge is Open's own count, read twice.**
+`unreadTotal` and `scopes.open` are the same number, computed once.
 
 Opening a conversation reports it read, at `max(the newest counted message's
 time, status.lastActivity)` — the second term keeps the report monotone
@@ -844,9 +834,9 @@ the list is therefore quiet, and fills as new activity arrives.
 
 ### Closing a batch
 
-Select rows and press **Close selected**. The confirmation names the count, how
-many of them are working, and that the conversation stays and **can be
-reopened** — closing is reversible.
+Select rows and press **Close selected**. The confirmation names the count of
+selected roots, how many of them are working, and that the conversation stays
+and **can be reopened** — closing is reversible.
 
 **It is `/close`, fanned out.** Each selected conversation is sent the literal
 text `/close` on its own console thread, exactly as a person typing it would.
@@ -891,13 +881,17 @@ What that costs, and why each cost is the right one:
 
 **Closing cascades to every live descendant.** `/close` on a root closes
 every conversation it caused, recursively, in the manager — not a second
-request the console makes. The confirmation names the member count the
-cascade will also reach.
+request the console makes.
 
-**A member selected directly is skipped, naming its parent.** It holds no
-channel binding, so there is nothing to send `/close` to — selecting its
-root reaches it instead. The row menu agrees: a member's menu offers no
-close action at all.
+The confirmation names the member count the cascade will also reach, and how
+many of those members are working, on its own line — never folded into the
+title or the root count.
+
+**A member cannot be selected, so this view never names one directly.** No
+row renders a checkbox for one, and its own row menu offers no close action.
+
+The manager's own `causedBy.parent` guard refuses a member named any other
+way — the same refusal the UI already prevents by never offering one.
 
 ### Reopening one
 
@@ -933,6 +927,9 @@ of the lifecycle, and the confirmation says what goes: **the recorded answers**,
 which are the only durable copy of what the agent said, and **the workspace on
 disk**.
 
+The title counts selected roots, same as closing. A member the cascade also
+reaches is named on its own line, separate from that count.
+
 - **Only `Closed` conversations are candidates.** A live one named in a batch
   anyway comes back `skipped` with *close it first* — never closed on the way
   through. One call doing the irreversible thing to a conversation that was
@@ -947,9 +944,9 @@ disk**.
 closing does, and for the same reason: a member holds no channel of its
 own, so the console has no way to reach it directly.
 
-A member selected directly is skipped and names its parent, exactly as for
-closing. Every descendant is already `Closed` by the time its root is, so
-none is ever turned away as not-yet-closed.
+A member cannot be selected, exactly as for closing, so this view never
+names one directly. Every descendant is already `Closed` by the time its
+root is, so none is ever turned away as not-yet-closed.
 
 **Delete and reopen are manager verbs the console calls**, not Kubernetes
 writes — the console still has no write path to the API.
@@ -966,6 +963,60 @@ Disk is **not** reclaimed by deleting. The conversation's workspace directory
 and session transcripts become orphans, and the opt-in housekeeping CronJob
 removes them on its next run — see
 [concepts](concepts.md#what-reclaims-what-and-why-the-manager-cannot).
+
+## Counter reference
+
+Every counter the console shows for conversations, in one table. **root** is
+a conversation with `causedBy.parent = ""`. **unread** is `unreadCount > 0`.
+
+| Counter | Where shown | Formula |
+|---|---|---|
+| Row unread badge (`unreadCount`) | Conversation row | Messages with `kind ∈ {signal, agent, relay}`, not `InternalRound`, `at > readAt`. Console thread only, 0 if not joined. |
+| Open | Inbox | Roots with `phase≠Closed ∧ unread`. |
+| Nav-rail badge (`unreadTotal`) | Navigation | Roots with `phase≠Closed ∧ unread` — the same number as Open. |
+| Working | Inbox | Roots with `phase=Working ∧ unread`. |
+| Mine | Inbox | Roots with `mine ∧ phase≠Closed ∧ unread`. |
+| Errored | Inbox | Roots with `lastRun.status≠succeeded ∧ phase≠Closed ∧ unread`. |
+| Pipeline / Coordinator | Inbox | Roots with `(pipeline=X ∨ coordinator=X) ∧ phase≠Closed ∧ unread`. |
+| Closed | Inbox | Roots with `phase=Closed ∧ unread`. |
+| Run count | Closed row snippet | `len(status.runs)` |
+| Age | Row | `now − (lastActivity ∥ created)`, floored at 0. |
+| Member count | Tree row | `len(descendantsOf(items, name))` |
+| N selected | Selection bar | `count(selected roots)`. A member is never selectable. |
+| Close (n) / Delete (n) | Selection bar buttons | `n = count(selected roots)` |
+| Close dialog title | Close dialog | `count(selected roots)` |
+| Delete dialog title | Delete dialog | `count(selected roots)` |
+| Member line | Close and delete dialogs | `Σ over selected roots of len(descendantsOf(items, root))`. Its own line, never folded into the title. |
+| Working warning | Close dialog | `count(selected roots with phase=Working)`. The member line also names working members. |
+| N closed / skipped / failed | Close result | Per-root server outcomes. |
+| N deleted / skipped / failed | Delete result | Per-root server outcomes. |
+| Select all | List header | Every root on the page not already closing or being deleted. |
+| Mark read / unread: marked / skipped / failed | Result of mark read or unread | Count of per-root outcomes. |
+| Mark read sets | Read watermark | `max(newestCounted.at, lastActivity)` → `unreadCount=0` |
+| Mark unread sets | Read watermark | `newestCounted.at − 1ns` → `unreadCount=1` |
+| "New messages" divider | Thread | Placed before the first counted message with `at > readAt`. |
+| "↓ N new messages" | Thread | +1 each time the body-message count grows while scrolled up and no divider is shown. |
+| Body message count | Thread | `count(messages where kind ≠ ack)` |
+| "N events" | Run event group | `group.events.length` (shown if greater than 1). |
+| "new" tag | List row | Name not in the previous snapshot for the same scope. Clears after 4s. |
+| Agents invoked | Coordinator budget | `agentsInvoked of maxAgents` (or just `agentsInvoked` if no max). |
+| Turns (budget) | Coordinator budget | `turns of maxTurns` (or just `turns` if no max). |
+| Turns table title | Run detail | `len(turns)` model calls. |
+| Tool calls table title | Run detail | `len(toolCalls)` |
+| Fresh tokens | Run turn | `tokensIn − cacheRead − cacheCreation`, shown as "—" if `tokensIn` is absent. |
+| Work row queued | Queues | `len(spec.inputs)` |
+| Inflight age | Queues | `now − inflight.dispatchedAt`, stuck if > 15 min. |
+| Capacity in use / max / waiting | Queues | From the manager's `/status` `runtimeSlots`. |
+| Delivery queued / claimed | Queues | Per adapter, from `/status`. |
+| Delivery stuck | Queues | `adapter-wedged` if `claimed>0 ∧ oldestClaimed>2m`. Otherwise `nothing-claiming` if `queued>0 ∧ oldestQueued>2m`. |
+| Edge Events | Topology | Count of hops on the edge within the window. |
+| Edge Errors | Topology | Count of those hops with `status=error`. |
+| Edge Rate/min | Topology | `Events / window.minutes` |
+| Edge p50 | Topology | `sorted(latencies)[len/2]`, using only hops with latency > 0. |
+| Edge max | Topology | `max(latencies)` |
+| Problems (N) | Overview | Non-True conditions across all kinds, plus pod failures and console-derived findings. |
+| Workload restarts | Overview | `Σ restartCount` over containers of pods named `<deployment>-*`. |
+| Adapter "serves" | Overview | Count of Channels or SignalSources whose `spec.adapter` equals this adapter's name. |
 
 ## Starting a conversation
 

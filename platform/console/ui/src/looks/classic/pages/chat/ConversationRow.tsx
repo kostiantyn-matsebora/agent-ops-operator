@@ -201,6 +201,11 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
   ref,
 ) {
   const isRoot = Boolean(row.coordinator)
+  // A member carries no selection control (console-conversation-tree: "A
+  // member SHALL NOT be selectable in this view") — the space is still
+  // reserved, so a member's content lines up under its root's exactly as it
+  // does with the box present.
+  const isMember = Boolean(row.causedBy)
   const title = rowTitle(row)
   const unread = rowUnread(row)
   const dot = phaseDot(row)
@@ -264,14 +269,16 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
         // scan straight down. `alignSelf: 'start'` still anchors it to the
         // title line, matching the toggle.
         <span style={{ flex: 'none', paddingLeft: 12, paddingRight: 10, paddingTop: 13, alignSelf: 'start' }}>
-          <Checkbox
-            id={`select-${row.name}`}
-            data-testid={testid.select(row.name)}
-            aria-label={`select ${title}`}
-            isChecked={selected}
-            isDisabled={row.deleting}
-            onChange={(_e, checked) => onSelect(checked)}
-          />
+          {!isMember && (
+            <Checkbox
+              id={`select-${row.name}`}
+              data-testid={testid.select(row.name)}
+              aria-label={`select ${title}`}
+              isChecked={selected}
+              isDisabled={row.deleting}
+              onChange={(_e, checked) => onSelect(checked)}
+            />
+          )}
         </span>
       )}
       {guides}

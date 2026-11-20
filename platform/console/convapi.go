@@ -119,25 +119,9 @@ func parsePaging(q url.Values) (limit, offset int) {
 	return limit, offset
 }
 
-// parseShowClosed mirrors the list's own display preference (ChatView.tsx's
-// layout.ts, default false) for the SAME reason the list itself hides a
-// closed row by default: a count the reader cannot reach without first
-// flipping that switch is not a count of anything they can act on.
-// Absent entirely — an older client — behaves as true, the behaviour
-// before this parameter existed.
-func parseShowClosed(q url.Values) bool {
-	v := q.Get("showClosed")
-	if v == "" {
-		return true
-	}
-	b, _ := strconv.ParseBool(v)
-	return b
-}
-
 func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	filter := parseFilter(r)
 	limit, offset := parsePaging(r.URL.Query())
-	showClosed := parseShowClosed(r.URL.Query())
 
 	pipelines := a.cache.List("pipelines")
 	coordinators := a.cache.List("coordinators")
@@ -148,8 +132,6 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	reader := a.adapter.ReaderKey(Identity(r))
 	var all []ConversationSummary
 	parents := map[string]string{}
-	unreadTotal := 0
-	rootTotal := 0
 	scopes := map[string]int{}
 	for _, o := range a.cache.List("conversations") {
 		s := summarize(o, pipelines, coordinators, consoleChannel, reader, a.transcripts)
@@ -157,27 +139,9 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		// Run history is DROPPED from list rows: a result is a whole agent
 		// message, and thousands of them do not belong in a listing.
 		s.Runs = nil
-		// closedVisible mirrors ChatView.tsx's own generic rule — every scope's
-		// list except the dedicated Closed one hides a closed row unless
-		// showClosed is on — so a badge for one of those scopes counts the
-		// same rows its list actually shows.
-		closedVisible := showClosed || !strings.EqualFold(s.Phase, "Closed")
 		// Counted BEFORE the filter, always: a count that moved because the
 		// view narrowed would let a filter hide a backlog without saying so.
-		accumulateScopeCounts(scopes, s, closedVisible)
-		// rootTotal is the Inbox's "All" badge — every conversation a person
-		// can open on its own, respecting showClosed like every scope but
-		// Closed, but NOT gated on read state: "All" means all of them, not
-		// "all unread". A member never counts, same reason as everywhere else.
-		if !isMember(s) && closedVisible {
-			rootTotal++
-		}
-		// A member is never Joined — it binds no console thread of its own
-		// (invariants.md) — so s.Unread is already always false for one; the
-		// explicit guard here is belt-and-braces, not load-bearing.
-		if s.Unread && !isMember(s) && closedVisible {
-			unreadTotal++
-		}
+		accumulateScopeCounts(scopes, s)
 		if s.CausedBy != nil {
 			parents[s.Name] = s.CausedBy.Parent
 		}
@@ -189,14 +153,16 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(all, func(i, j int) bool { return all[i].sortKey() > all[j].sortKey() })
 
 	total := len(all)
+	// unreadTotal IS scopes["open"] — the navigation rail's badge and the
+	// Inbox's own Open row read the same number, computed once.
+	unreadTotal := scopes["open"]
 	// count-only: the navigation badge wants the number, not a page of rows it
 	// would immediately throw away. The inbox's per-scope badges ride along —
-	// same reasoning as rootTotal/unreadTotal: computed over every
-	// conversation, never narrowed by the filter this same request may also
-	// carry.
+	// same reasoning as unreadTotal: computed over every conversation, never
+	// narrowed by the filter this same request may also carry.
 	if ok, _ := strconv.ParseBool(r.URL.Query().Get("count")); ok {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"items": []ConversationSummary{}, "total": total, "rootTotal": rootTotal,
+			"items": []ConversationSummary{}, "total": total,
 			"unreadTotal": unreadTotal,
 			"offset":      0, "limit": 0, "scopes": scopes,
 		})
@@ -204,7 +170,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	}
 	page := pageByTree(all, parents, offset, limit)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": page, "total": total, "rootTotal": rootTotal, "offset": offset, "limit": limit,
+		"items": page, "total": total, "offset": offset, "limit": limit,
 		"unreadTotal": unreadTotal,
 		// facets let the UI build filter dropdowns from what EXISTS rather than
 		// from a hardcoded list that drifts from the cluster
@@ -223,33 +189,42 @@ func isMember(s ConversationSummary) bool {
 	return s.CausedBy != nil && s.CausedBy.Parent != ""
 }
 
-// accumulateScopeCounts folds every row into the inbox's Working, Mine,
-// Errored, Closed and per-Pipeline/Coordinator badges.
+// memberParent reads obj's own spec.causedBy.parent directly off cached CR
+// state, never off the client — the server SHALL NOT trust the view. Returns
+// "" for a root. closeOne and deleteOne use this to refuse a close/delete
+// named directly against a member: it binds no console thread and no
+// conversation-level action of its own (isMember's reasoning above), so the
+// only correct target for either verb is the root it names.
+func memberParent(obj *Object) string {
+	if causedBy := conversationView(obj).Spec.CausedBy; causedBy != nil {
+		return causedBy.Parent
+	}
+	return ""
+}
+
+// accumulateScopeCounts folds every row into the inbox's Open, Working,
+// Mine, Errored, Closed and per-Pipeline/Coordinator badges.
 //
-// Every scope but Closed is an UNREAD count, ANDed with its own predicate —
-// phase, ownership, error state or wiring — matching ChatView.tsx's
-// TREE_PREDICATE exactly. A read conversation never inflates one of those.
+// Every scope is an UNREAD count. Open and every scope but Closed also
+// require phase≠Closed, ANDed with their own further predicate — ownership,
+// error state or wiring — matching ChatView.tsx's TREE_PREDICATE exactly.
+// Closed is the mirror image: unread roots with phase=Closed. A read
+// conversation never inflates any of them, including Closed — the archive
+// badge promises exactly the unread rows its own list highlights, same as
+// every other scope.
 //
-// Closed is the one exception, on both axes: it counts every closed root
-// regardless of read state, and regardless of showClosed. It is the
-// archive — a read entry still belongs in it, the same way a read email
-// still belongs in "All Mail" — so gating it on Unread would promise fewer
-// rows than the Archive list (which carries no predicate of its own either,
-// ChatView.tsx's TREE_PREDICATE) actually holds.
-//
-// closedVisible mirrors the ONE further filter every scope's list but
-// Closed's applies: ChatView.tsx hides a closed row there unless showClosed
-// is on.
-func accumulateScopeCounts(scopes map[string]int, s ConversationSummary, closedVisible bool) {
-	if isMember(s) {
+// A member never counts, in any scope — isMember's own reasoning (it binds
+// no console thread of its own, so a sidebar count describing "something to
+// look at" can never be about one).
+func accumulateScopeCounts(scopes map[string]int, s ConversationSummary) {
+	if isMember(s) || !s.Unread {
 		return
 	}
 	if strings.EqualFold(s.Phase, "Closed") {
 		scopes["closed"]++
-	}
-	if !s.Unread || !closedVisible {
 		return
 	}
+	scopes["open"]++
 	if strings.EqualFold(s.Phase, "Working") {
 		scopes["working"]++
 	}
@@ -875,6 +850,10 @@ func (a *API) closeOne(r *http.Request, name string, includeWorking bool, identi
 		return CloseResult{Name: name, Outcome: closeOutcomeFailed,
 			Reason: "no such conversation — it may already have been closed"}
 	}
+	if parent := memberParent(obj); parent != "" {
+		return CloseResult{Name: name, Outcome: closeOutcomeSkipped,
+			Reason: "this is a member invoked by " + parent + " — close " + parent + " instead"}
+	}
 	if obj.Metadata.DeletionTimestamp != "" {
 		return CloseResult{Name: name, Outcome: closeOutcomeSkipped,
 			Reason: "already closing"}
@@ -1214,6 +1193,10 @@ func (a *API) deleteOne(r *http.Request, name, identity string) CloseResult {
 	if obj == nil {
 		return CloseResult{Name: name, Outcome: closeOutcomeFailed,
 			Reason: "no such conversation — it may already have been deleted"}
+	}
+	if parent := memberParent(obj); parent != "" {
+		return CloseResult{Name: name, Outcome: closeOutcomeSkipped,
+			Reason: "this is a member invoked by " + parent + " — delete " + parent + " instead"}
 	}
 	if obj.Metadata.DeletionTimestamp != "" {
 		return CloseResult{Name: name, Outcome: closeOutcomeSkipped, Reason: "already deleting"}

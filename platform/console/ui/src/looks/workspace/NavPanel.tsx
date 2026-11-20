@@ -4,7 +4,7 @@ import { sameScope, scopeKey, useInboxScopes, type Scope, type ScopeEntry } from
 import { GENERAL_FEED_NAME } from '../../model/session'
 import { testid } from '../../model/testids'
 import { Chevron, Icon, type IconName } from './icons'
-import { useWorkspaceLayout, useWorkspaceScope } from './layout'
+import { useWorkspaceScope } from './layout'
 
 // THE NAVIGATION PANEL: the pages, the channel, the conversation scopes with
 // their counts, the pipelines and coordinators, and the archive
@@ -19,7 +19,7 @@ const PAGES: { to: string; label: string; icon: IconName }[] = [
 ]
 
 const SCOPE_ICON: Record<Scope['kind'], IconName> = {
-  all: 'all',
+  open: 'all',
   working: 'working',
   mine: 'mine',
   errored: 'errored',
@@ -51,8 +51,7 @@ export function NavPanel({
   const navigate = useNavigate()
   const scope = useWorkspaceScope((s) => s.scope)
   const setScope = useWorkspaceScope((s) => s.setScope)
-  const showClosed = useWorkspaceLayout((s) => s.showClosed)
-  const { general, fixed, targets, closed } = useInboxScopes(showClosed)
+  const { general, fixed, targets, closed } = useInboxScopes()
   const folded = collapsed && !drawer
   const onConversations = pathname.startsWith('/conversations')
   const onFeed = pathname === `/conversations/${GENERAL_FEED_NAME}` || pathname === `/conversations/${encodeURIComponent(GENERAL_FEED_NAME)}`
@@ -120,7 +119,7 @@ export function NavPanel({
       </div>
       {!drawer && (
         <div className="wk-sidefoot">
-          {!folded && <span>All counts conversations. The rest count unread.</span>}
+          {!folded && <span>Counts are unread conversations, not rows that changed.</span>}
           <button
             type="button"
             className="wk-icon-btn"
