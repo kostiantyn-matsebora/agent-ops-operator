@@ -1350,11 +1350,13 @@ a:hover {
 }
 
 .ao-content :not(pre) > code {
-  padding: 0.12em 0.35em;
-  background: var(--ao-code-bg);
-  border: 1px solid var(--ao-border);
-  border-radius: 4px;
-  color: var(--ao-text);
+  padding: 0.08em 0.15em;
+  /* A quiet tint of the text colour, no border: inline code should read as
+     part of the sentence, not as a chip competing with it. */
+  background: color-mix(in srgb, var(--ao-text) 3%, transparent);
+  border: 0;
+  border-radius: 3px;
+  color: inherit;
   word-break: break-word;
 }
 
