@@ -30,11 +30,11 @@ Seven flows cross a trust boundary. Six carry a control. One does not.
 
 | # | Crossing | Control | Catch |
 |---|---|---|---|
-| 1 | any pod → operator namespace | NetworkPolicy per component ([who may reach what](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#who-may-reach-what)). Default: **off** | applies silently where no CNI enforces it |
-| 2 | agent → MCP server | proxy inside the runtime pod ([enforcing the toolset](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#enforcing-the-toolset)). Default: on | needs a privileged init container. Misses child-process MCP servers, `https` and tool arguments |
-| 3 | agent → Kubernetes API | least privilege: a route naming no identity is bound to nothing ([the agent's power](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#the-agents-power)). Default: on | roles you declare at cluster scope are cluster-wide |
-| 4 | agent → Secrets | pod execution disabled. Default: on | see below |
-| 5 | agent → context volume | agent container has no mount of it, a sidecar snapshots. Default: on | needs a runtime that declares context paths, or the whole volume is mounted |
+| 1 | any pod → operator namespace | NetworkPolicy per component ([who may reach what](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#who-may-reach-what)) | applies silently where no CNI enforces it |
+| 2 | agent → MCP server | proxy inside the runtime pod ([enforcing the toolset](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#enforcing-the-toolset)) | needs a privileged init container. Misses child-process MCP servers, `https` and tool arguments |
+| 3 | agent → Kubernetes API | least privilege: a route naming no identity is bound to nothing ([the agent's power](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#the-agents-power)) | roles you declare at cluster scope are cluster-wide |
+| 4 | agent → Secrets | pod execution disabled | see below |
+| 5 | agent → context volume | agent container has no mount of it, a sidecar snapshots | needs a runtime that declares context paths, or the whole volume is mounted |
 | 6 | agent → pod logs | none | anyone with `pods/log` reads conversations |
 | 7 | any pod → state or bus server | chart-managed credential, plus network policy. Default: credential on, policy **off** | one shared credential |
 

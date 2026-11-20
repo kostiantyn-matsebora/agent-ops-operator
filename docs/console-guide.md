@@ -36,7 +36,7 @@ truth** — every view is the cluster, rendered.
 ## The tour
 
 Five views, one question each. Every field and control is in
-[the console reference](console.md).
+[the console reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/console.md).
 
 {: .ao-tabs #console}
 - **Overview** — Is anything wrong right now?
@@ -166,7 +166,7 @@ Writes can also be turned off outright, for everyone, with
 refuse, so it is a boundary rather than a preference.
 
 For the ingress annotations, the read-only Role and the full values list, see
-[the console reference](console.md).
+[the console reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/console.md).
 
 ## What it cannot do
 

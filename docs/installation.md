@@ -102,8 +102,8 @@ own.
 
 Runtime pods, their volume claims and accounts run in a second namespace,
 `global.agentops.conversationNamespace` (default `agent-ops-conversations`,
-created by the chart. Set `createConversationNamespace: false` to create it yourself
-yourself). Set it to the release namespace for a single-namespace layout.
+created by the chart).
+Set `createConversationNamespace: false` to create it yourself. Set it to the release namespace for a single-namespace layout.
 Changing it later is a manual migration, so pick it before you install — see
 [Concepts]({{ '/concepts/#where-things-run-the-control-and-conversations-namespaces' | relative_url }}).
 
@@ -117,7 +117,7 @@ you install. Everything else is a `helm upgrade` away — every value is in the
 - **`ReadWriteOnce`** works too, and pins every agent pod to one node. Without
   an RWX provisioner, add `--set persistence.context.accessModes[0]=ReadWriteOnce`.
 
-The state servers need at least three pods (`nats.replicas`), and only the demo runs one. Two more keys are fixed once their claims exist: `persistence.context.storageClassName`
+The state servers need at least three pods (`nats.replicas`). Only the demo runs one. Two more keys are fixed once their claims exist: `persistence.context.storageClassName`
 and `nats.persistence.storageClassName`. Empty uses the cluster's default
 provisioner.
 
