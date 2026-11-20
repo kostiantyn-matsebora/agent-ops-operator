@@ -10,6 +10,27 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+**BREAKING (console only). `GET /api/conversations` drops `showClosed` and
+`rootTotal`.** A browser's stored `showClosed` preference is harmless and
+ignored.
+
+### Changed
+
+- **The console's Open scope replaces All**, and is the default. It lists
+  root conversations with `phase≠Closed`. Closed rows no longer show behind
+  a "Show closed" toggle on any other scope — the toggle and its stored
+  preference are gone, and Open excludes them the same way Working, Mine and
+  Errored already did.
+- **Every inbox badge, Open's and Closed's included, counts unread roots.**
+  The Closed badge used to count every closed root, read or not — it now
+  matches every other scope and counts only the unread ones.
+- **"Archive" reads "Closed"** in every user-visible string: the inbox row,
+  the thread banner, the close dialog and the `/close` chip.
+- **Selection counts roots.** "N selected", the button suffixes and the
+  dialog titles count selected roots. A member carries no selection control
+  and cannot be selected. The dialogs still name the member count the
+  cascade reaches, on its own line.
+
 ## [22.0.0] — 2026-11-19
 
 Images: manager 0.64.0. Every other image is unchanged.
@@ -46,27 +67,6 @@ Images: manager 0.64.0. Every other image is unchanged.
   when it starts, so a changed value takes effect on the next manager start.
   Raise `nats.replicas` before you raise it, and lower it before you lower
   `nats.replicas`.
-
-**BREAKING (console only). `GET /api/conversations` drops `showClosed` and
-`rootTotal`.** A browser's stored `showClosed` preference is harmless and
-ignored.
-
-### Changed
-
-- **The console's Open scope replaces All**, and is the default. It lists
-  root conversations with `phase≠Closed`. Closed rows no longer show behind
-  a "Show closed" toggle on any other scope — the toggle and its stored
-  preference are gone, and Open excludes them the same way Working, Mine and
-  Errored already did.
-- **Every inbox badge, Open's and Closed's included, counts unread roots.**
-  The Closed badge used to count every closed root, read or not — it now
-  matches every other scope and counts only the unread ones.
-- **"Archive" reads "Closed"** in every user-visible string: the inbox row,
-  the thread banner, the close dialog and the `/close` chip.
-- **Selection counts roots.** "N selected", the button suffixes and the
-  dialog titles count selected roots. A member carries no selection control
-  and cannot be selected. The dialogs still name the member count the
-  cascade reaches, on its own line.
 
 ## [21.0.0] — 2026-11-19
 
