@@ -30,15 +30,15 @@ func TestConfigFromEnv(t *testing.T) {
 			t.Fatalf("unexpected config %+v", cfg)
 		}
 	})
-	t.Run("replicas default when unset", func(t *testing.T) {
+	t.Run("replicas stay unset when unset", func(t *testing.T) {
 		t.Setenv("NATS_URL", "nats://x:4222")
 		t.Setenv("NATS_REPLICAS", "")
 		cfg, err := ConfigFromEnv()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.Replicas != 0 || cfg.replicas() != DefaultReplicas {
-			t.Fatalf("unset replicas must resolve to the default, got %+v", cfg)
+		if cfg.Replicas != 0 || cfg.replicas() != 0 {
+			t.Fatalf("unset replicas must stay zero, got %+v", cfg)
 		}
 	})
 	for _, bad := range []string{"abc", "0", "-2"} {

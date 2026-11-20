@@ -4070,16 +4070,23 @@ func TestNatsBundleRendersByDefault(t *testing.T) {
 	}
 }
 
-// nats.replicas is the one explicit alternative to the 3-replica default
-// (design D-8); the PodDisruptionBudget still renders, a no-op at one.
+// nats.replicas is the pod count and may exceed three, while the copies per
+// stream stay at nats.storageReplicas. Outside demo mode fewer than three pods
+// is refused, and so is more copies than pods.
 func TestNatsReplicaCountIsConfigurable(t *testing.T) {
-	out := helmTemplate(t, "--set", "nats.replicas=1")
+	out := helmTemplate(t, "--set", "nats.replicas=5")
 	sts := findDocByKindAndMetaName(out, "StatefulSet", "agentops-nats")
-	if !strings.Contains(sts, "replicas: 1") {
-		t.Fatalf("nats.replicas=1 must render replicas: 1:\n%s", sts)
+	if !strings.Contains(sts, "replicas: 5") {
+		t.Fatalf("nats.replicas=5 must render replicas: 5:\n%s", sts)
 	}
-	if findDocByKindAndMetaName(out, "PodDisruptionBudget", "agentops-nats") == "" {
-		t.Fatal("the PodDisruptionBudget must still render at one replica")
+	if !strings.Contains(out, "name: NATS_REPLICAS\n              value: \"3\"") {
+		t.Fatal("five pods must still keep three copies of each stream")
+	}
+	if msg := helmTemplateErr(t, "--set", "nats.replicas=1"); !strings.Contains(msg, "at least 3 pods") {
+		t.Fatalf("one pod outside demo mode must be refused: %s", msg)
+	}
+	if msg := helmTemplateErr(t, "--set", "global.demo.enabled=true", "--set", "nats.storageReplicas=3"); !strings.Contains(msg, "exceeds nats.replicas") {
+		t.Fatalf("more copies than pods must be refused: %s", msg)
 	}
 }
 

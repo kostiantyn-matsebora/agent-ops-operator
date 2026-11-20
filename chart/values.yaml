@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
-  tag: 0.63.0
+  tag: 0.64.0
 
 # How many manager pods run at once. Safe above 1 now (durable-chat-ops-broker):
 # the Conversation reconciler claims an ensure-topic op on the Conversation CR
@@ -10,7 +10,12 @@ image:
 # once) instead of answering from an OpQueue that replica's reconciler never
 # populated. Two is the default rather than one: the whole point of the
 # resilience this release adds is that a second pod is there to take over.
-replicas: 2
+#
+# NULLABLE: left unset it is 2, or 1 under `global.demo.enabled` — a demo runs
+# on one node, and the second manager's required anti-affinity would never
+# schedule there. TYPE A VALUE AND IT WINS, in both modes
+# (`agentops.managerReplicas`).
+replicas: null
 
 # How long an ensure-topic claim may sit with no thread yet before the current
 # leader treats it as abandoned and dispatches the op again — never while the
@@ -1098,7 +1103,7 @@ console:
     # surface (spec.stateAccess) instead of a Kubernetes watch, takes channel
     # ops over GET /channel/ops/stream, adds the read-only signals view, and
     # waits out a refused manager connection instead of losing the send.
-    tag: 0.42.0
+    tag: 0.43.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:

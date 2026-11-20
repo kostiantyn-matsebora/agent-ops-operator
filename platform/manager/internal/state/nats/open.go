@@ -34,9 +34,6 @@ type openConfig struct {
 	orphanInterval time.Duration
 	// attemptTimeout bounds one OpenStoresWhenReady attempt.
 	attemptTimeout time.Duration
-	// onDrift is told of every bucket whose live replica count differs from
-	// the configured one (replicas.go).
-	onDrift func(bucket string, have, want int)
 }
 
 // WithSweepInterval overrides the expiry sweep's period, for a test that must
@@ -49,14 +46,6 @@ func WithSweepInterval(d time.Duration) Option {
 // request the server never answers costs one attempt and not the whole budget.
 func WithOpenAttemptTimeout(d time.Duration) Option {
 	return func(c *openConfig) { c.attemptTimeout = d }
-}
-
-// WithReplicaDriftHook is called once for every bucket or object store whose
-// existing replica count differs from the configured one. The backend has
-// already logged the difference and left the bucket as it is, so the hook is
-// for a caller that records it elsewhere.
-func WithReplicaDriftHook(fn func(bucket string, have, want int)) Option {
-	return func(c *openConfig) { c.onDrift = fn }
 }
 
 func newOpenConfig(opts []Option) openConfig {
@@ -95,9 +84,6 @@ type Backend struct {
 	conn  *Conn
 	scope string
 
-	// onDrift is the caller's WithReplicaDriftHook, nil when none.
-	onDrift func(bucket string, have, want int)
-
 	// The concrete handles the one-time import (import.go) needs beyond
 	// what the state.Stores interface exposes: the raw adapterstate bucket
 	// the marker lives in, and typed access to each collection's own
@@ -124,7 +110,7 @@ type Backend struct {
 func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (_ *Backend, err error) {
 	cfg := newOpenConfig(opts)
 	replicas := conn.cfg.replicas()
-	b := &Backend{conn: conn, scope: scope, onDrift: cfg.onDrift}
+	b := &Backend{conn: conn, scope: scope}
 
 	// Each bucket's mirror starts its watch the moment its collection is built.
 	// A later bucket failing must not leave the earlier ones running: a caller
@@ -193,7 +179,7 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 
 	blobsBucket := bucketName(scope, objectStoreBlobs)
 	blobsStore, err := conn.js.CreateOrUpdateObjectStore(ctx, jetstream.ObjectStoreConfig{
-		Bucket: blobsBucket, Replicas: b.keepExistingReplicas(ctx, blobsBucket, objectStreamName(blobsBucket), replicas)})
+		Bucket: blobsBucket, Replicas: replicas})
 	if err != nil {
 		return nil, fmt.Errorf("nats: bootstrap object store %q: %w", blobsBucket, err)
 	}
@@ -239,7 +225,6 @@ const bucketHistory = 64
 // name alongside the handle.
 func (b *Backend) bootstrapKV(ctx context.Context, base string, replicas int) (jetstream.KeyValue, string, error) {
 	name := bucketName(b.scope, base)
-	replicas = b.keepExistingReplicas(ctx, name, kvStreamName(name), replicas)
 	kv, err := b.conn.js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: name, Replicas: replicas, History: bucketHistory})
 	if err != nil {
 		return nil, "", fmt.Errorf("nats: bootstrap bucket %q: %w", name, err)

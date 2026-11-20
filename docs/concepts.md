@@ -2079,8 +2079,8 @@ adapter's own cursor, the same annotation it always was.
   allows. A write is acknowledged once the API server has it.
 - **Under `nats`**, a restart costs what the clustered KV's own guarantee
   allows. Under the default three servers a write is acknowledged once two
-  have it, so losing one server loses nothing. With `nats.replicas: 1` there is no
-  second copy.
+  have it, so losing one server loses nothing. Only demo mode runs one server, and
+  with one there is no second copy.
 - **Reads of one record go to the server**, never a cache, so a
   compare-and-swap precondition is never a guess. Listings are served from an
   in-memory mirror kept current by a watch, since a full list of a large

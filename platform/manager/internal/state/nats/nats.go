@@ -30,11 +30,6 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// DefaultReplicas is the bucket replica count this backend asks for when
-// NATS_REPLICAS is unset: a three-server cluster with no single point of
-// failure (design D-8).
-const DefaultReplicas = 3
-
 // Config is everything Connect needs, read from the environment by the
 // caller (cmd/manager) and never from a mounted file: the manager mounts no
 // volume and reads no secret (invariants.md), so NATS_URL and the
@@ -48,20 +43,15 @@ type Config struct {
 	User     string
 	Password string
 	// Replicas is the replica count every bucket and the object store are
-	// created with (design D-8: "set at bucket creation by the manager,
-	// from NATS_REPLICAS"). Zero means DefaultReplicas.
+	// created with, passed through from NATS_REPLICAS. The manager has no
+	// default of its own: zero sends nothing and the server decides.
 	Replicas int
 	// ConnectTimeout bounds Connect's own dial. Zero means a sane default.
 	ConnectTimeout time.Duration
 }
 
-// replicas resolves the configured replica count, DefaultReplicas for zero.
-func (c Config) replicas() int {
-	if c.Replicas > 0 {
-		return c.Replicas
-	}
-	return DefaultReplicas
-}
+// replicas is the configured replica count, passed through as given.
+func (c Config) replicas() int { return c.Replicas }
 
 // ConfigFromEnv reads NATS_URL, NATS_USER, NATS_PASSWORD and NATS_REPLICAS
 // (task 2.1/2.8). NATS_URL is required: a backend with nowhere to dial is a
@@ -107,6 +97,8 @@ func Connect(cfg Config) (*Conn, error) {
 		nats.Name("agentops-manager"),
 		nats.MaxReconnects(-1),
 		nats.ReconnectWait(time.Second),
+		// The state server may start after the manager: retry, never fail.
+		nats.RetryOnFailedConnect(true),
 	}
 	if cfg.ConnectTimeout > 0 {
 		opts = append(opts, nats.Timeout(cfg.ConnectTimeout))

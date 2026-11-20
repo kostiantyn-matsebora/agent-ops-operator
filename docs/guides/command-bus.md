@@ -14,27 +14,20 @@ next:
   url: /agent-ops-operator/configuration/#command-bus
 ---
 
-Closing a conversation, deleting one, resetting its context — every one of
-these used to run inside the HTTP request that asked for it. A caller waited
-for work it could not observe, and a manager restart mid-request lost
-whatever that request was doing.
+The command bus is a durable queue for work the manager does on request:
+close, delete, reset-context, escalate and incoming signals. The manager stores
+the request and returns. A manager replica runs it afterwards.
 
-**The command bus accepts the request durably, then runs it later**, on
-whichever replica next picks it up. The reply means accepted, not performed.
+A successful reply therefore means the request was accepted. It does not mean
+the work is finished.
 
-## What changes for a caller
+## For API callers
 
-| Endpoint | Before | Now |
-|---|---|---|
-| `reopen`, `delete`, `reset-context`, `/channel/inbound` | the status you already got | the same status, plus `invocationId` and `taskIds` |
-| `/coordinate/close`, `/coordinate/escalate` | `200 {"ok":true}` | the same `200`, plus `invocationId` and `taskIds` |
-| `/signal/inbound` | `200 {"queued": n}` | `202`, plus `invocationId` and `taskIds`, one per admitted signal. `queued` still counts, now meaning accepted |
+The endpoints that queue work now return `invocationId` and `taskIds` in
+their reply. `reset-context` and `/signal/inbound` also return `202` instead of
+`200`. Signal adapters need no change.
 
-`reset-context` and `/signal/inbound` are the two endpoints whose status
-code changed, both from `200` to `202`. Every other endpoint's code was
-already `202` or `200`.
-
-A caller that needs the outcome reads it back:
+To check the result of a task:
 
 ```sh
 curl -s http://agentops-manager.agent-ops.svc:8080/state/tasks/$TASK_ID \
@@ -46,50 +39,37 @@ curl.exe -s http://agentops-manager.agent-ops.svc:8080/state/tasks/$env:TASK_ID 
   -H "Authorization: Bearer $env:ADAPTER_TOKEN"
 ```
 
-A task that succeeds is removed from its queue, so reading it afterwards may answer `404`. A failed one settles to `dead`, with a code — `not_found`, `precondition_failed`, `forbidden`, `conflict`, `unavailable`, `invalid_command` or `internal` — on the ones that fail.
+| Task result | What happens |
+|---|---|
+| Succeeded | The task is removed from its queue. Reading it may return `404`. |
+| Failed with `conflict`, `unavailable` or `internal` | Retried with backoff, then dead-lettered. |
+| Failed with `not_found`, `precondition_failed`, `forbidden` or `invalid_command` | Dead-lettered immediately. |
 
-`conflict`, `unavailable` and `internal` retry with backoff before giving up. The others go straight to a dead-letter record, listed at `GET /state/dead-letters`.
+Dead-lettered tasks and their error codes are listed at `GET /state/dead-letters`.
 
-**`POST /signal/inbound` now accepts and processes too**, on its own
-queue, `in.signal`. It validates, applies the source's `attributeFilters`
-and durably enqueues one `ingest-signal` task per admitted signal, then
-replies.
+## For channel adapter authors
 
-The `in.signal` consumer answers an in-place chat command, or creates the
-`Signal`. It carries the same bounded retry and dead-letter record as any
-other queue. No adapter needs to change — see [the signal adapter
-guide]({{ '/guides/signal-adapter/' | relative_url }}#3-push-them).
+An outbound message is an operation on the adapter's queue. The adapter makes
+three calls:
 
-## What changes for a channel adapter
+1. `GET /channel/ops` returns the next operation without changing it.
+2. `POST /channel/ops/{id}/ack` takes the operation. It is not offered again,
+   and a delivery timer starts.
+3. `POST /channel/ops/{id}/done` reports success, or failure with an `error`.
 
-Every outbound channel operation is a message on its channel's own queue, and
-an adapter takes it in three steps.
+If the timer expires first, the operation fails and is not retried. The manager
+works out what is still owed from the conversation after a short wait. Timers
+are 10 minutes for replies, 2 for notices and 5 for topic operations, set by
+`commandBus.deliveryTtl`.
 
-1. **Read.** `GET /channel/ops` offers the next op and changes nothing.
-2. **Acknowledge.** `POST /channel/ops/{id}/ack` hands it over. The manager
-   never sends it again, and a delivery TTL starts.
-3. **Report.** `POST /channel/ops/{id}/done` says done, or failed with an
-   `error`.
+The console acknowledges operations when it receives them. Upgrade adapter
+images together with the manager, because an older adapter never acknowledges.
 
-```
-POST /channel/ops/send:conv-1:tg-ops:run-7/ack?adapter=telegram
-200  {"ok": true, "deliveryTtlSeconds": 600, "consumed": false}
-```
+## Configuration
 
-An op with no report when its TTL passes is failed, and a failure is final. The manager does not retry it. What is still owed is derived again from the conversation after a cool-off.
-
-The TTLs are per kind, 10 minutes for replies, 2 for notices and 5 for topic operations, and they are chart values under `commandBus.deliveryTtl`.
-
-**The console acknowledges on receipt.** It reads `GET /channel/ops/stream`, and
-the manager deletes each op at the acknowledgement. Which adapters work this way
-is `commandBus.channelReceiptAdapters`. An adapter image from before this
-release never acknowledges, so upgrade adapters together with the manager.
-
-## Running it
-
-With the state store on its default `nats`, the command bus shares that server and credential in buckets of its own, and renders nothing second. With the `kube` store it renders a three-server bundle of its own.
-
-Either way it is selected independently of [the state store](/agent-ops-operator/installation/#storage):
+With the default `nats` state store, the bus uses the same server and adds no
+pods. With the `kube` state store, it deploys its own three-server NATS bundle.
+The backend is set separately from [the state store](/agent-ops-operator/installation/#storage):
 
 ```yaml
 commandBus:
@@ -102,22 +82,13 @@ commandBus:
 # Always
 ```
 
-See [Configuration](/agent-ops-operator/configuration/#command-bus) for
-every value, including the external-server and credential options.
+All values, including an external server and its credential, are in the
+[configuration reference](/agent-ops-operator/configuration/#command-bus).
 
-**`commandBus.backend: memory`** keeps the queue logs in the manager's own
-process instead. It is for tests and local development — refused above one
-manager replica, since a second replica's own heap knows nothing the first
-one accepted.
+`backend: memory` keeps the queues in the manager process. It is meant for tests
+and local development, and is refused with more than one manager replica.
 
-## What it does not do yet
+## Limits
 
-- A plain chat `/close` still closes its whole conversation tree in one
-  task, not one per conversation.
-- An `escalate` on a caused member still runs as one task, not a close
-  task followed by a separate result append.
-- Attempts, backoff, TTL and the other per-queue knobs have no chart value
-  yet — every queue runs at its built-in starting point.
-
-None of these change what a caller sees. They bound how finely
-`/state/tasks` can show its progress.
+- A chat `/close` closes the whole conversation tree as one task.
+- Retry attempts, backoff and delivery timers are not yet chart values, except `commandBus.deliveryTtl`.

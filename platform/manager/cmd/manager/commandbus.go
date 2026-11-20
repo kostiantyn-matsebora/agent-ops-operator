@@ -37,6 +37,10 @@ const (
 	commandBusNatsURLEnv      = "COMMANDBUS_NATS_URL"
 	commandBusNatsUserEnv     = "COMMANDBUS_NATS_USER"
 	commandBusNatsPasswordEnv = "COMMANDBUS_NATS_PASSWORD"
+	// commandBusNatsReplicasEnv is the replica count every bucket is created
+	// with, passed through as the chart gives it. The manager has no default
+	// of its own and does not look at the server.
+	commandBusNatsReplicasEnv = "COMMANDBUS_NATS_REPLICAS"
 )
 
 // commandBusConsumerConcurrencyEnv sizes every consumer.Pool this process
@@ -116,10 +120,12 @@ func channelInventory() []commandbus.Declaration {
 const managerReplicasEnv = "MANAGER_REPLICAS"
 
 // commandBusOpenTimeout bounds how long startup waits for the command
-// bus's own buckets to be placed — a cluster still forming its quorum
-// cannot place a replicated bucket yet, exactly the reasoning
-// newNatsStores's own natsOpenTimeout already carries for the state store.
-var commandBusOpenTimeout = 2 * time.Minute
+// bus's own buckets to be placed. Zero, the default, waits until they are:
+// the startup probe decides when that is too long, never the manager.
+var commandBusOpenTimeout time.Duration
+
+// commandBusOpenAttemptTimeout bounds one attempt to open the bus.
+const commandBusOpenAttemptTimeout = 15 * time.Second
 
 // commandBusOpenRetryInterval is how long newNatsCommandBus waits between
 // attempts while commandBusOpenTimeout has not yet elapsed.
@@ -129,7 +135,7 @@ var commandBusOpenRetryInterval = 3 * time.Second
 // is called with — WithReplicas(1) against a single-node embedded
 // nats-server, which refuses the backend's own 3-replica default outright.
 // Production passes none, so a real install gets commandbus/nats's own
-// DefaultReplicas, matching the chart's three-server bundle (design D-13).
+// no replica count of their own.
 var commandBusNatsOptions []commandbusnats.Option
 
 // commandBusBackendFromEnv resolves the selected backend name and refuses,
@@ -197,6 +203,7 @@ func newNatsCommandBus(mgr ctrl.Manager, namespace string) (commandbus.Bus, erro
 		URL:      url,
 		User:     os.Getenv(commandBusNatsUserEnv),
 		Password: os.Getenv(commandBusNatsPasswordEnv),
+		Replicas: envInt(commandBusNatsReplicasEnv, 0),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("command bus: %w", err)
@@ -225,10 +232,14 @@ func newNatsCommandBus(mgr ctrl.Manager, namespace string) (commandbus.Bus, erro
 // because commandbus/nats, by design (D-1: "neither imports the other"),
 // exposes no retrying variant of its own Open.
 func openCommandBusWhenReady(ctx context.Context, conn *commandbusnats.Conn, scope string, timeout, interval time.Duration, opts ...commandbusnats.Option) (*commandbusnats.Bus, error) {
-	deadline, cancel := context.WithTimeout(ctx, timeout)
+	deadline, cancel := openWaitContext(timeout)
 	defer cancel()
 	for {
-		bus, err := commandbusnats.Open(deadline, conn, scope, opts...)
+		// One attempt is bounded on its own, so a request the server never
+		// answers costs one attempt and not the whole wait.
+		actx, cancelAttempt := context.WithTimeout(deadline, commandBusOpenAttemptTimeout)
+		bus, err := commandbusnats.Open(actx, conn, scope, opts...)
+		cancelAttempt()
 		if err == nil {
 			return bus, nil
 		}

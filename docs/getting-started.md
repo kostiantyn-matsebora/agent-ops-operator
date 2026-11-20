@@ -34,82 +34,39 @@ fifteen minutes, most of it the install.
 ## Before you begin
 
 - A cluster you can `kubectl` into, and Helm.
-- A model credential — a Claude subscription token or an Anthropic API key.
+- An Anthropic API key.
 
 ## Install
 
-1. **Create the release namespace.**
+One command. The token is your model credential; the console token (`demo`) is
+just to sign in — pick a real one outside a laptop.
 
-   ```sh
-   kubectl create namespace agent-ops
-   ```
+```sh
+helm install agent-ops \
+  oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
+  -n agent-ops --create-namespace \
+  --set global.demo.enabled=true \
+  --set console.auth.uiToken=demo \
+  --set pi.credentialsSecret.token=<token>   # an Anthropic API key
+```
 
-   ```powershell
-   kubectl create namespace agent-ops
-   ```
+```powershell
+helm install agent-ops `
+  oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
+  -n agent-ops --create-namespace `
+  --set global.demo.enabled=true `
+  --set console.auth.uiToken=demo `
+  --set pi.credentialsSecret.token=<token>   # an Anthropic API key
+```
 
-2. **Install the chart.** The flag brings up
-   [the Kubernetes integration]({{ '/integrations/kubernetes/' | relative_url }}),
-   wired to the console. The token is just to sign in — pick a real one outside
-   a laptop. To have the chart create the model credential for you, add
-   `--set claude.credentialsSecret.token=<token>` here: it creates the Secret
-   in `agent-ops-conversations`, and step 4 is then already done.
-
-   ```sh
-   helm install agent-ops \
-     oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     -n agent-ops --create-namespace \
-     --set global.demo.enabled=true \
-     --set console.auth.uiToken=demo
-   ```
-
-   ```powershell
-   helm install agent-ops `
-     oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     -n agent-ops --create-namespace `
-     --set global.demo.enabled=true `
-     --set console.auth.uiToken=demo
-   ```
-
-   {: .ao-callout}
-   > **Demo mode's own default.** Left unset, demo mode resolves
-   > `global.agentops.wiringMode` to `coordinator`: a chart-rendered
-   > `Coordinator` claims the console's source and channel on its own, plus a
-   > second, plain `Pipeline` (`k8s-observe-pipeline`) claiming the same
-   > sources — so this walkthrough exercises both of the product's wiring
-   > primitives at once. See
-   > [Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }})
-   > for what the `Coordinator` adds beyond this.
-
-3. **Wait for the manager.** The chart has already created the conversations
-   namespace, `agent-ops-conversations`, where the model credential below
-   belongs.
-
-   ```sh
-   kubectl -n agent-ops rollout status deploy/agentops-manager
-   ```
-
-   ```powershell
-   kubectl -n agent-ops rollout status deploy/agentops-manager
-   ```
-
-4. **Create the model credential.** It is a Secret a runtime pod resolves,
-   so it belongs where the pod runs — `agent-ops-conversations`, not
-   `agent-ops`.
-
-   ```sh
-   kubectl -n agent-ops-conversations create secret generic agentops-pi \
-     --from-literal=apiKey=$ANTHROPIC_API_KEY   # the default runtime is pi, on Anthropic
-   ```
-
-   ```powershell
-   kubectl -n agent-ops-conversations create secret generic agentops-pi `
-     --from-literal=apiKey=$env:ANTHROPIC_API_KEY   # the default runtime is pi, on Anthropic
-   ```
+The flag brings up
+[the Kubernetes integration]({{ '/integrations/kubernetes/' | relative_url }}),
+wired to the console.
 
 ## Ask it something
 
-1. **Forward the console's port.**
+1. **Forward the console's port.** If it refuses, the manager is still starting
+   — retry in a few seconds.
 
    ```sh
    kubectl -n agent-ops port-forward svc/agentops-adapter-console 8080:8080
@@ -121,104 +78,30 @@ fifteen minutes, most of it the install.
 
 2. **Open <http://localhost:8080>** and sign in with `demo`.
 
-3. **Press New conversation** and address one by name:
+3. **Press New conversation** and address a route by name:
 
    > /agentops-coordinator How many nodes does this cluster have?
 
-   Two routes claim the console's source — the chart-rendered `Coordinator`
-   and the showcase `Pipeline` — so an unaddressed message would show a
-   choice list instead of answering. Addressing one by name skips it. Try
-   the showcase route too:
+   Demo mode wires two routes to the console — a `Coordinator` and a plain
+   `Pipeline` (`k8s-observe-pipeline`) — so an unaddressed message shows a
+   choice list instead of answering. Try the other too:
 
    > /k8s-observe-pipeline How many nodes does this cluster have?
 
-   Both answer from the same read-only toolset. The `Coordinator` always
-   decides which of its own `agents[]` to invoke first, even with only one
-   enabled bundle. The `Pipeline` answers directly, in its own thread, every
-   time.
+   Both answer from the same read-only toolset. See
+   [Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}) for
+   what the `Coordinator` adds.
 
-## What you just installed
-
-That answer came from objects the chart created:
-
-| Object | What it is |
-|---|---|
-| `SignalSource/console` | where your questions enter |
-| `AgentProfile/k8s-engineer` | who the agent is. Behaviour only, no tools and no runtime |
-| `AgentCapability/k8s-observe` | the coordinator-mode wiring: those sources, that profile, a read-only toolset, gathered under the `Coordinator`'s own `agents[]` |
-| `Pipeline/k8s-observe-pipeline` | the SAME route rendered a second time, as a plain `Pipeline` — demo mode's showcase of the simpler primitive |
-| `Coordinator/agentops-coordinator` | the orchestrator every enabled bundle's capability is gathered under |
-| `AgentRuntime/default` | the image it runs in, and the credential it uses. It comes from the `claude` bundle, which is on by default |
-
-Neither route has permissions of its own — both read your cluster through the
-bundle's read-only MCP server.
-
-## What a good run looks like
-
-Expect a pause first — a pod has to start and an image to pull. Then, in the
-console:
-
-| Phase | Meaning |
-|---|---|
-| `Working` | input admitted, runtime pod created |
-| `Idle` | run finished, nothing queued |
-
-The answer lands in the thread. Follow-ups in the same thread keep their context.
-
-**It opens with the conclusion**, then a few named sections, with the long
-detail behind a control you can expand.
-
-From the outside, the pod is always a real Kubernetes object, whichever
-state backend the install uses. **It runs in `agent-ops-conversations`**,
-not `agent-ops` — this install split by default:
-
-```sh
-kubectl -n agent-ops-conversations get pods -l app.kubernetes.io/name=agentops-runtime -w
-kubectl -n agent-ops-conversations logs -f agentops-conv-<name>      # live transcript
-```
-
-```powershell
-kubectl -n agent-ops-conversations get pods -l app.kubernetes.io/name=agentops-runtime -w
-kubectl -n agent-ops-conversations logs -f agentops-conv-<name>      # live transcript
-```
-
-{: .ao-callout}
-> **Reading the answer back through `kubectl` needs the `kube` backend.**
-> On the default, `nats`, the Conversation record lives in the state store,
-> not as an object `kubectl` lists. Read the answer in the console instead, or install with
-> `--set stateStore.backend=kube` and (the `Conversation` CR is in
-> `agent-ops-conversations` too, beside the pod):
->
-> ```sh
-> kubectl -n agent-ops-conversations get conversation <name> \
->   -o jsonpath='{.status.runs[0].result}'
-> ```
->
-> ```powershell
-> kubectl -n agent-ops-conversations get conversation <name> `
->   -o jsonpath='{.status.runs[0].result}'
-> ```
-
-The transcript names the tools the route granted, then every call:
-
-```
-[runtime] tools agent=- declared=0 wiring=24 mode=merge -> Read,Grep,Glob,Bash,mcp__kubernetes__…
-[init] model=claude-sonnet-5 tools=55 mcp=kubernetes:connected
-[tool] mcp__kubernetes__resources_list {"apiVersion":"v1","kind":"Node"}
-[claude] 🤖 **5 nodes, all Ready**
-=== RESULT (success, 3 turns, 8s) ===
-```
-
-The pod outlives the answer on purpose, so a follow-up skips the cold start. It
-exits on the idle TTL.
+Expect a pause first — a pod has to start and an image to pull. Follow-ups in the
+same thread keep their context.
 
 ## When nothing happens
 
 | Cause | Where it shows |
 |---|---|
-| Bad or missing credential | the run fails — `status.runs[].status: failed`, non-zero exit code, reason in `kubectl logs` |
-| No storage provisioner | the `agentops-context` PVC, in `agent-ops-conversations`, sits `Pending` and no pod is created. Reinstall with `--set persistence.context.enabled=false` |
-| Nothing claims the source | the source's `Wired` condition is `False` with a reason. The console reports its composer unavailable, and signals are dropped |
+| Bad or missing credential | the run fails — reason in `kubectl -n agent-ops-conversations logs agentops-conv-<name>` |
+| No storage provisioner | the `agentops-context` PVC in `agent-ops-conversations` sits `Pending` and no pod is created. Reinstall with `--set persistence.context.enabled=false` |
+| Nothing claims the source | the source's `Wired` condition is `False` with a reason, and signals are dropped |
 | At capacity | phase `Pending`, no pod, no thread. Five run at once by default |
 
 ## Where to go next
