@@ -35,154 +35,39 @@ truth** — every view is the cluster, rendered.
 
 ## The tour
 
-Five views, one question each.
+Five views, one question each. Every field and control is in
+[the console reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/console.md).
 
 {: .ao-tabs #console}
 - **Overview** — Is anything wrong right now?
 
-  The manager, capacity, the workloads and every condition that is not `True`,
-  on one page.
+  The manager, capacity, the workloads and every condition that is not `True`, on one page.
 
   ![Manager version and leader, two of five runtime slots in use, the runtime images, live-activity telemetry, tables of workloads and adapters, and one problem: a signal source no pipeline claims.]({{ '/assets/img/console/overview-light.png' | relative_url }})
 
 - **Topology** — What is moving between components?
 
-  The install as a network, in **three views of one activity feed**. Every
-  hop moves on all three.
-
-  | View | Shows |
-  |---|---|
-  | Model | what you declared, and what references what |
-  | Components | what runs: adapters, the manager, runtime images, sidecars, and the models, MCP servers and systems outside |
-  | Infrastructure | every pod, boxed by the cluster node it runs on |
-
-  Click an edge, a pulse or a feed row to see **what crossed** it. Narrow the
-  picture to one pipeline's route, or **replay** a past window or one
-  conversation hop by hop.
-
-  The picture fits the screen. The navigation, the panels beside the canvas
-  and the charts under it each fold away.
+  The install as a live graph: what you declared, what runs, and every hop between them, replayable.
 
   ![The Model view: sources, adapters, three pipelines, profiles, runtimes, toolsets and channels, boxed by the bundle that installs them, with a live hop feed beside the graph listing model and tool calls.]({{ '/assets/img/console/topology-light.png' | relative_url }})
 
-  ![The Components view: the manager at the centre, the adapters and sidecars around it, and the model, the MCP server, the repository and the external systems on the rim.]({{ '/assets/img/console/topology-components-light.png' | relative_url }})
+- **Conversations** — What has the fleet been asked, and what did one agent actually do?
 
-  ![The Infrastructure view: each pod boxed by the cluster node it runs on, the conversation pods among them, with the model and the external systems outside every box.]({{ '/assets/img/console/topology-infrastructure-light.png' | relative_url }})
-
-- **Conversations** — What has the fleet been asked, what has nobody read,
-  and what did one agent actually do?
-
-  One view answers all three: an inbox of scopes, the list, and the open
-  conversation's thread pane, side by side — never a table you leave to read
-  a transcript.
-
-  The inbox counts **messages**, not lateness — a `signal`, an `agent` reply
-  or a `relay`, never an ack or a run event.
-
-  Every scope carries its own sum, and **Mark unread** reclaims a conversation
-  you want to come back to. Reading a conversation in another channel never
-  clears the console's unread.
-
-  The list renders as a **coordination tree** by default: a root and every
-  conversation it caused nest together, indented by depth, the root carrying
-  its member count, turn and deadline. Flatten it for the plain newest-first
-  order instead.
+  An inbox, the list and the open thread side by side, where you can also reply or start a new one.
 
   ![The Conversations view with nothing open: the inbox rail with its scopes and counts, and a coordination tree — a two-level incident nested under its root, a closed root marked "nobody notified", a pending alert and a working chat conversation.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
 
-  Opening a row switches the thread pane in place — the URL changes, the
-  list does not move.
-
-  **Runs**, **Graph**, **Sequence** and **YAML** are secondary views of the
-  open conversation, reached from the thread header.
-
-  The transcript reads from the **message that started it**, and rebuilds
-  after a reload or a restart. Acks and notices are not persisted. They show
-  as a presence row while they are live.
-
-  A signal carrying a **severity** shows a small tinted mark on its card —
-  rating, not routing. No shipped source sets one yet.
-
-  A long answer opens with its **conclusion**. Named sections sit above the
-  fold, and the detail behind a control you expand in place. That shape comes
-  from the agent, when its profile declares `outputFormat: blocks` — an answer
-  without the grammar renders as one block, as before.
-
-  The reply box completes commands. Type `/` and it offers what acts on **this**
-  conversation — `/exit` to release its runtime, `/close` to end it — with the
-  difference stated. It never offers a Pipeline: inside a conversation that text
-  is input for the agent.
-
-  ![A conversation open: a signal, the agent's diagnosis with its root cause, evidence and fix, a relayed reply from ops-chat, and quick chips for the pipelines and commands this surface can reach.]({{ '/assets/img/console/conversation-light.png' | relative_url }})
-
-  **A Coordinator's root shows an incident timeline instead of a transcript.**
-  It interleaves the root's own turns with every member's start, result and
-  closure, nesting a member that is itself coordinating in place.
-
-  The reply box is shown from creation, since the root's channels are bound
-  then. The pane is read-only only when no channel is bound or the
-  conversation is closed.
-
-  A member opened directly is read-only and names its place in the tree. It
-  holds no channel of its own, so there is nothing to reply into from there.
-
-  ![A Coordinator's root before escalation: agents invoked, turns and the deadline, two result cards from its members, and the reply box, open from creation.]({{ '/assets/img/console/incident-light.png' | relative_url }})
-
 - **Queues** — What is waiting, and what is stuck?
 
-  The two queues are separate because they fail separately, and every stalled
-  row names its **cause**.
+  The work queue and the delivery queue, each stalled row naming its cause.
 
   ![The work queue with three conversations, one flagged at runtime ceiling, the delivery queue per adapter with the oldest operation in each, and a suppressed-signal cooldown.]({{ '/assets/img/console/queues-light.png' | relative_url }})
 
 - **Configuration** — What is wired to what?
 
-  Every kind, and per kind the columns that matter. A Pipeline row is the whole
-  route on one line.
+  Every kind in a table, a Pipeline's whole route on one line.
 
   ![Three pipelines, each showing its profile, the sources it claims, the channels it posts to, its toolsets, tools mode, MCP configs and Ready status.]({{ '/assets/img/console/configuration-light.png' | relative_url }})
-
-  **Signals** are the one kind with no write path anywhere, ever — the
-  durable record of what arrived and whether it reached an agent.
-
-  The list shows source, phase and age, filterable by source and phase.
-  Opening one shows every claimant's state, a routed one linked to its
-  conversation, and a failed or dropped signal's reason verbatim.
-
-  ![The signals inventory, filterable by source and phase: one routed signal, one partially routed, one pending, and one dropped from a source no Pipeline lists.]({{ '/assets/img/console/signals-light.png' | relative_url }})
-
-## What it does for you
-
-{: .ao-cards}
-- **Watch a run happen**
-
-  The transcript updates live. You see the tools the route granted and every
-  call the agent made, not just the answer.
-
-- **Reply where you are watching**
-
-  The console is a channel. No context switch to a chat app, and the reply lands
-  in the same conversation.
-
-- **Start work without a chat surface**
-
-  *New conversation* posts to the console's own signal source. The route
-  claiming it decides who answers.
-
-- **Tell queued from stuck**
-
-  "The agent has not replied" has several causes, and they need different fixes.
-  Every stalled row names which one.
-
-- **See the wiring, not a diagram of it**
-
-  The graph is built from the CRs and the pods. When the wiring changes, the
-  picture changes, and every model and tool call an agent makes moves on it.
-
-- **Read the objects themselves**
-
-  Conditions, findings, resolved capabilities and the YAML. The console adds no
-  state of its own.
 
 ## Authentication
 

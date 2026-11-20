@@ -19,211 +19,32 @@ any**. It names what starts a conversation, which agent answers, where the
 answer goes, and what that agent may touch.
 
 {: .ao-callout}
-> **To learn what an agent can do, read its Pipeline.** There is nowhere else to
-> look. No permission lives on the profile, and none is inherited.
+> **To learn what an agent can do, read its Pipeline.** No permission lives on
+> the profile, and none is inherited.
 
 ![A SignalSource feeds a Pipeline, and the Pipeline names an AgentProfile to answer, Channels to answer on, and the toolsets and MCP servers it may use.]({{ '/assets/img/guides/pipeline-light.svg' | relative_url }}){: .ao-diagram}
 
-## Before you start
+You create nothing new here. Every object a Pipeline names is already in your
+install. If a bundle shipped sources and tooling but no route, this is the
+missing piece. For the other cases, see [Add your own agent]({{ '/guides/agent-profile/' | relative_url }})
+and [Give your agent tools]({{ '/guides/toolsets/' | relative_url }}).
 
-Creating a Pipeline is appropriate when:
+## What it names
 
-- You want a **second route** over what is already installed — a different agent
-  on an existing source, or an existing agent on a new surface.
-- You enabled a **bundle** that ships sources, profiles and tooling but no
-  wiring, and nothing answers yet.
-- You want an agent that is **reachable by name** and claims no source at all.
-
-It is **not** what you want when:
-
-- The agent you need **does not exist yet**. Create it first —
-  [Add your own agent]({{ '/guides/agent-profile/' | relative_url }}).
-- The tool or server you need does not exist yet —
-  [Give your agent tools]({{ '/guides/toolsets/' | relative_url }}).
-
-**You create nothing new here.** Every object a Pipeline names is already in
-your install, which is what makes this the first thing to learn.
-
-Review
-[Pipeline](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md#pipeline)
-first.
-
-## The overall shape
-
-A Pipeline is six sets of references and one composition rule:
-
-1. **`profileRef`** — who answers. The only **required** field.
-2. **`signalSourceRefs`** — the sources it listens on. Omit it and the Pipeline
-   claims nothing, and is reachable only by name.
-3. **`channelRefs`** — where the answer goes. Every conversation is mirrored on
-   all of them.
-4. **`toolsets` and `mcpConfigs`** — what it may touch, plus the `mode` that
-   composes them against the agent's own definition.
-5. **`runtimeRef` and `serviceAccountName`** — what executes it, and under whose
-   identity. Both optional.
-6. **`persistence`** — where its conversations keep their state. Optional.
-
-Nothing else carries wiring. A `SignalSource` has no profile and no channel. A
-`Channel` has no default profile. That concentration is the point.
-
-**Ready validates every reference.** Until the condition is `True` the Pipeline
-claims nothing, and its message names the object it could not find.
-
-## What runs it, and as whom
-
-**A Pipeline also decides what executes its conversations.** Two optional
-fields, and omitting both is the ordinary case.
-
-| Field | Selects | Omit it and |
+| Field | Means | If omitted |
 |---|---|---|
-| `runtimeRef` | the `AgentRuntime` | the one named `default` runs it |
-| `serviceAccountName` | the identity that runtime executes under | it inherits the release's default, which ships as an account bound to NOTHING |
+| `profileRef` | who answers | **required** |
+| `signalSourceRefs` | the sources it listens on | claims nothing, reachable by name only |
+| `channelRefs` | where the answer goes (all of them, mirrored) | the answer stays on the conversation |
+| `toolsets`, `mcpConfigs` | what it may touch, composed by `mode` | no tools |
+| `runtimeRef` | what executes it | the runtime named `default` |
+| `serviceAccountName` | whose credentials it runs with | an account bound to **nothing** |
+| `persistence` | where its conversations keep state | the release-wide volumes |
 
-**A service account a Pipeline names lives in the conversations
-namespace**, beside the pods that run as it. It exists only once
-`rbac.runtime.serviceAccounts` or a bundle declares it. In a single-namespace layout
-that is the same namespace as everything else.
+**Ready validates every reference.** Until it is `True` the Pipeline claims
+nothing, and its message names what it could not find.
 
-**This is the same decision as `toolsets`.** One says which tools may be called.
-The other says with whose credentials. Both are here so that ONE object states
-what an agent may do.
-
-{: .ao-callout}
-> **Silence means no power.** A route that names no account inherits the
-> release's default, which ships as the FLOOR — bound to nothing, and nothing
-> can be bound to it. It reaches only what its toolsets and MCP servers give it.
-> **Cluster power is an account you declare and then name here.**
-
-```yaml
-spec:
-  profileRef:
-    name: k8s-engineer
-  toolsets:
-    refs:
-      - name: agentops-observe
-      - name: k8s-admin
-  serviceAccountName: agentops-runtime-acting
-```
-
-**Two routes can share one runtime image and differ only in their account** —
-that is what the field is for. The difference is the credentials, not the
-engine.
-
-**Cluster power is an account you DECLARE.** There is no preset posture — a
-named posture nobody declared is a grant nobody reviewed.
-
-```yaml
-# values.yaml
-rbac:
-  runtime:
-    serviceAccounts:
-      - name: agentops-runtime-acting
-        clusterRoles:         # rules YOU write; there is no mode to name
-          - name: workloads
-            rules:
-              - apiGroups: ["apps"]
-                resources: ["deployments"]
-                verbs: ["get", "list", "patch"]
-```
-
-**Naming an account does not create one.** A bundle renders an account only
-where it also grants that route something. `rbac.runtime.serviceAccounts` is
-where you declare yours, and an account this chart never sees is a
-perfectly good reference.
-
-A name nothing backs fails when the pod is created, saying which account.
-
-**THE FLOOR IS HOW YOU RESTRICT ONE ROUTE.** On an install whose inherited
-default is an account of yours that carries rights, naming `agentops-runtime`
-here takes that one route back to nothing:
-
-```yaml
-spec:
-  serviceAccountName: agentops-runtime   # the floor. Holds nothing, always
-```
-
-The chart renders the floor whatever else you configure, which is what keeps it
-available for exactly this.
-
-**Re-wiring never moves a conversation already running.** The conversation
-records what it was created with, so changing this field affects only
-conversations started afterwards. Correcting the `AgentRuntime` itself still
-reaches the ones running.
-
-## Where its conversations keep their state
-
-**A route can declare its own storage**, beside the tools it grants and the
-account it runs as. Omit it and the route takes the release-wide volumes the
-chart configures, which is what nearly every route wants.
-
-**An `AgentRuntime` declares no volume at all.** A runtime is an ENGINE, and
-where a route persists is the route's decision — the same argument that put
-`serviceAccountName` here.
-
-```yaml
-spec:
-  profileRef:
-    name: ha-engineer
-  persistence:
-    context:
-      claimName: ha-ops-context
-```
-
-Each volume takes EITHER a claim or a `PersistentVolume`, never both:
-
-| Field | Means |
-|---|---|
-| `claimName` | a `PersistentVolumeClaim` that already exists. Nothing is created |
-| `volumeName` | a `PersistentVolume`. **The manager renders the claim on it**, as `agentops-<route>-<volume>` |
-
-**A pod can mount only a claim, never a `PersistentVolume`** — which is why
-naming a volume is the one place in agent-ops where naming a resource creates
-it.
-
-**The API server refuses both fields at once.** They decide who creates the
-claim, so both is two answers rather than a preference.
-
-**Either way, the claim is in the conversations namespace**, where the
-runtime pod that mounts it runs. A `claimName` you pre-create belongs there
-too.
-
-In a split layout that is not the release namespace. In a single-namespace
-layout the two are the same.
-
-{: .ao-callout}
-> **The claim outlives the route.** It carries no ownerRef on the Pipeline and
-> the manager holds no `delete` verb on claims, so deleting this route never
-> deletes the accumulated context of the conversations it started. Removing the
-> claim is yours to do deliberately.
-
-**`workspace` takes the same two fields**, for the repository checkout.
-
-**Two routes on ONE runtime can persist to different volumes.** Before this,
-that needed a second `AgentRuntime` identical but for one field — the same
-failure a second trust level used to have.
-
-**Re-wiring never moves a conversation already running here either**, and the
-reason is sharper: that conversation has already WRITTEN to the volume it was
-created against.
-
-## See what you have to wire
-
-```sh
-kubectl -n agent-ops get agentprofiles,signalsources,channels,mcptoolsets,mcpconfigs
-```
-
-```powershell
-kubectl -n agent-ops get agentprofiles,signalsources,channels,mcptoolsets,mcpconfigs
-```
-
-A demo install answers with a `k8s-engineer` profile, a `console` source and
-channel, a `cluster-events` source, and the three built-in toolsets —
-`agentops-observe` (`Read` `Grep` `Glob`), `agentops-shell` (`Bash`) and
-`agentops-edit` (`Edit` `Write`).
-
-That is enough to build a route with no new objects at all.
-
-## Write the Pipeline
+## Write one
 
 <!-- generated: template kind=Pipeline name=my-route fields=signalSourceRefs,channelRefs,toolsets,toolsets.mode,mcpConfigs,runtimeRef,serviceAccountName,persistence.context.claimName comments=off -->
 ```yaml
@@ -252,13 +73,9 @@ spec:
 ```
 <!-- /generated -->
 
-**Name it for its JOB**, not for the channel it answers on. `ha-ops` and
-`k8s-observe` say what they are for. `telegram-route` says nothing.
-
-**Refs apply in order.** Tool lists concatenate with dedup, the first occurrence
-keeping its position. Server keys overlay, and a later ref wins a collision.
-
-## Apply it, and check it is Ready
+Name it for its job, not its channel: `k8s-observe`, not `telegram-route`.
+Tool lists concatenate in order with dedup, and a later server key wins a
+collision.
 
 ```sh
 kubectl -n agent-ops apply -f my-route.yaml
@@ -272,107 +89,78 @@ kubectl -n agent-ops get pipeline my-route `
   -o jsonpath='{.status.conditions[?(@.type==\"Ready\")]}'
 ```
 
-`Ready=True` means every ref resolved. A source you claimed also flips to
-`WIRED=True`, which you can see with `kubectl get signalsources`.
+`Ready=True` means every ref resolved, and a claimed source flips to `WIRED=True`.
+
+## Power: tools and identity
+
+`toolsets` say which tools may be called. `serviceAccountName` says with whose
+credentials. Both live here, so one object states what an agent can do.
+
+{: .ao-callout}
+> **Silence means no power.** A route naming no account runs as one bound to
+> nothing. Cluster power is an account you declare in `rbac.runtime.serviceAccounts`
+> and then name here.
+
+```yaml
+spec:
+  toolsets:
+    refs: [{name: agentops-observe}, {name: k8s-admin}]
+  serviceAccountName: agentops-runtime-acting
+```
+
+- The account lives in the conversations namespace, beside the pods that run as it.
+- A name nothing backs fails when the pod is created, saying which account.
+- To pull one route back to nothing, name `agentops-runtime`, the floor the chart always renders.
+
+## Storage per route
+
+A route can keep its conversations on volumes of its own. Each volume takes
+**either** a claim or a `PersistentVolume`, never both:
+
+```yaml
+spec:
+  persistence:
+    context:
+      claimName: ha-ops-context
+```
+
+| Field | Means |
+|---|---|
+| `claimName` | an existing `PersistentVolumeClaim`, in the conversations namespace |
+| `volumeName` | a `PersistentVolume`; the manager renders the claim `agentops-<route>-<volume>` |
+
+`workspace` takes the same two fields. The claim outlives the route, so deleting
+a Pipeline never deletes the context it accumulated.
+
+Re-wiring never moves a conversation already running. Changes apply to
+conversations started afterwards.
 
 ## Reach it
 
-A Pipeline is reached two ways, and no others:
-
-1. **A signal posted to a source it claims.**
-2. **A `/<pipeline>` command** on any wired chat surface.
+A Pipeline is reached by a signal posted to a source it claims, or by a
+`/<pipeline>` command on any wired chat surface:
 
 ```
 /my-route what is running in kube-system?
 ```
 
-**Addressing needs no claim.** A Pipeline listing no chat source is still
-reachable by name, and the reply lands in the thread it was asked from.
+Addressing needs no claim, and `/pipelines` lists the Ready routes. There is no
+HTTP form that names a Pipeline.
 
-There is no HTTP form that names a Pipeline. A caller selecting its own wiring
-is the shape this object exists to prevent.
+## Sharing a source
 
-`/pipelines` lists the Ready ones, so an addressable route stays discoverable
-whether or not it claims anything.
+Wiring is many-to-many with no exclusivity. Several Pipelines can claim one
+source, and each opens its own conversation. On a chat surface, an
+unaddressed message behaves by how many Ready Pipelines serve it:
 
-## Share a source, or do not
-
-**Wiring is many-to-many in every direction**, and there is no exclusivity
-anywhere:
-
-| Relationship | Allowed |
-|---|---|
-| One Pipeline claims many sources | yes |
-| Many Pipelines claim one source | yes — each opens its **own** conversation, with its own profile and capabilities |
-| One channel carries many Pipelines' conversations | yes |
-
-Two agents watching one thing is an ordinary configuration you choose, not a
-hazard. There is no conflict condition and no tiebreak.
-
-The only consequence of several claimants is on a chat surface:
-
-| Ready Pipelines serving a chat source | An **unaddressed** message |
+| Ready Pipelines | Unaddressed message |
 |---|---|
 | one | routes to it |
-| several | is answered with the list of agents, so the person names one |
-| none | is **dropped**, and the source reports `Wired=False` |
-
-Listing a chat source on a Pipeline that is only ever addressed grants it
-nothing, while making every unaddressed message on that surface ambiguous.
-
-## Compare against a working route
-
-This is what the chart's `kubernetes` renders:
-
-<!-- generated: example preset=tier1 kind=Pipeline name=k8s-observe -->
-```yaml
-# Source: agent-ops-operator/charts/kubernetes/templates/pipelines.yaml
-apiVersion: agentops.dev/v1alpha1
-kind: Pipeline
-metadata:
-  name: k8s-observe
-  namespace: agent-ops
-  labels:
-    app.kubernetes.io/name: agentops-kubernetes
-    helm.sh/chart: "kubernetes-0.4.3"
-spec:
-  # Display only: how this route is recognised in a chat command menu or the
-  # console's typeahead. Nothing routes on it.
-  icon: "aops:observe"
-  profileRef:
-    name: k8s-engineer
-  # Wiring is pipeline-only: without this claim the source reports Wired=False
-  # and DROPS every event it admits.
-  signalSourceRefs:
-    - name: cluster-events
-    - name: console
-  # A class of object this bundle does not render, so each is named from values
-  # and the key is absent when nobody named one. With no channel the
-  # conversation dispatches immediately and its answer lands in
-  # status.runs[].result.
-  channelRefs:
-    - name: console
-  # Declared, not inherited: profiles carry no capabilities and nothing supplies
-  # a default, so this stanza IS the agent's allowlist.
-  toolsets:
-    refs:
-      - name: agentops-observe
-      - name: k8s-observability
-  mcpConfigs:
-    refs:
-      - name: k8s-api
-```
-<!-- /generated -->
-
-Two sources claimed, one channel answered on, the observing toolsets and the
-Kubernetes MCP server granted. Read it and you know exactly what that agent can
-do.
+| several | answered with the list of agents, so the person names one |
+| none | dropped, and the source reports `Wired=False` |
 
 ## What comes next
 
-1. **[Add your own agent]({{ '/guides/agent-profile/' | relative_url }})**
-   — when none of the installed agents is the one you want.
-2. **[Give your agent tools]({{ '/guides/toolsets/' | relative_url }})**
-   — declare new toolsets and MCP servers to bind here.
-3. **[Every Pipeline field]({{ '/crds/pipeline/' | relative_url }})**
-   — the icon, and the full shape of each ref stanza.
+1. **[Add your own agent]({{ '/guides/agent-profile/' | relative_url }})** — when none of the installed agents fits.
+2. **[Give your agent tools]({{ '/guides/toolsets/' | relative_url }})** — declare toolsets and MCP servers to bind here.
+3. **[Every Pipeline field]({{ '/crds/pipeline/' | relative_url }})** — the full shape of each ref.
