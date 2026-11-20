@@ -10,12 +10,11 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
-**BREAKING (console only). `GET /api/conversations` drops `showClosed` and
-`rootTotal`.** A browser's stored `showClosed` preference is harmless and
-ignored.
-
 ### Changed
 
+- **BREAKING (console only). `GET /api/conversations` drops `showClosed` and
+  `rootTotal`.** A browser's stored `showClosed` preference is harmless and
+  ignored.
 - **The console's Open scope replaces All**, and is the default. It lists
   root conversations with `phase≠Closed`. Closed rows no longer show behind
   a "Show closed" toggle on any other scope — the toggle and its stored
