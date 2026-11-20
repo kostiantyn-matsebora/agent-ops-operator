@@ -124,8 +124,13 @@ export function visibleItems(all: ConversationSummary[], scope: Scope, showClose
   if (predicate) raw = withTreeContext(raw, predicate)
   // Closed conversations are hidden by default everywhere except the
   // dedicated Closed scope — narrowed CLIENT-SIDE, since there is no
-  // server-side "exclude closed" param.
-  if (!showClosed && scope.kind !== 'closed') raw = raw.filter((c) => c.phase !== 'Closed')
+  // server-side "exclude closed" param. The rule is per TREE: a closed ROOT
+  // hides its whole tree, and an open root keeps every member, closed or not,
+  // because a member closes the moment it hands its result back.
+  if (!showClosed && scope.kind !== 'closed') {
+    const byName = new Map(all.map((c) => [c.name, c]))
+    raw = raw.filter((c) => (byName.get(rootNameOf(all, c)) ?? c).phase !== 'Closed')
+  }
   return raw
 }
 

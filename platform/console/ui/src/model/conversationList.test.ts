@@ -30,7 +30,8 @@ afterEach(() => {
 
 const names = (rows: ConversationSummary[]) => rows.map((c) => c.name)
 const ROOT = 'incident-response-4a8f21'
-const TREE = [ROOT, `${ROOT}-triage`, `${ROOT}-mitigate`, `${ROOT}-mitigate-drain`, `${ROOT}-mitigate-verify`]
+// The open tree, closed member included: a member closes as soon as it hands its result back.
+const TREE = [ROOT, `${ROOT}-triage`, `${ROOT}-mitigate`, `${ROOT}-notify`, `${ROOT}-mitigate-drain`, `${ROOT}-mitigate-verify`]
 
 describe('a scope', () => {
   it('asks the server only what the server can answer per tree', () => {
@@ -59,6 +60,14 @@ describe('which conversations a scope shows, in the server’s order', () => {
       'cluster-events-7c1d4e', 'console-3f9a2b', 'prometheus-alerts-91b7fd', 'console-b48e10', 'nightly-2f60c8',
       'console-5a81cc', ...TREE,
     ])
+  })
+
+  it('Hide closed is per tree: a closed member stays under its open root, a closed root takes its members with it', () => {
+    const rows = names(visibleItems(page.items, { kind: 'all' }, false))
+    expect(rows).toContain(`${ROOT}-notify`)
+    const closedRoot = page.items.find((c) => c.phase === 'Closed' && !c.causedBy)
+    expect(closedRoot).toBeDefined()
+    expect(rows).not.toContain(closedRoot?.name)
   })
 
   it('Show closed adds the closed ones in place', () => {
@@ -105,11 +114,12 @@ describe('ordering and folding', () => {
       ['console-b48e10', 0, 0],
       ['nightly-2f60c8', 0, 0],
       ['console-5a81cc', 0, 0],
-      [ROOT, 0, 4],
+      [ROOT, 0, 5],
       [`${ROOT}-triage`, 1, 0],
       [`${ROOT}-mitigate`, 1, 2],
       [`${ROOT}-mitigate-drain`, 2, 0],
       [`${ROOT}-mitigate-verify`, 2, 0],
+      [`${ROOT}-notify`, 1, 0],
     ])
   })
 
@@ -166,7 +176,7 @@ describe('useConversationList', () => {
 
   it('returns the scope’s items, its tree and the roots that fold', () => {
     const { result } = renderHook(() => useConversationList({ ...base, scope: { kind: 'all' } }))
-    expect(result.current.rows).toHaveLength(11)
+    expect(result.current.rows).toHaveLength(12)
     expect(result.current.collapsibleNames).toEqual([ROOT, `${ROOT}-mitigate`])
   })
 
