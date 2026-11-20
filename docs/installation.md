@@ -20,36 +20,19 @@ read-only demo on your cluster in fifteen minutes.
 
 ## Install
 
-1. **Create the namespace and the model credential.**
+1. **Create the namespace.**
 
    ```sh
    kubectl create namespace agent-ops
-
-   kubectl -n agent-ops create secret generic agentops-pi \
-     --from-literal=apiKey=$ANTHROPIC_API_KEY   # the default runtime is pi, on Anthropic
    ```
 
    ```powershell
    kubectl create namespace agent-ops
-
-   kubectl -n agent-ops create secret generic agentops-pi `
-     --from-literal=apiKey=$env:ANTHROPIC_API_KEY   # the default runtime is pi, on Anthropic
    ```
 
-   The default runtime is [pi]({{ '/runtimes/pi/' | relative_url }}), on
-   `anthropic` with model `claude-sonnet-5`. A route that names
-   `runtimeRef: claude` needs the `agentops-claude` Secret instead, and
-   `pi.default=false` hands the default back to claude.
-
-2. **Install the chart** from the registry. There is no repo to add and no
-   checkout to clone.
-
-   **Storage is the only setting you cannot change afterwards.** The default
-   needs a ReadWriteMany provisioner, so without one add this flag:
-
-   ```text
-   --set persistence.context.accessModes[0]=ReadWriteOnce
-   ```
+2. **Install the chart** from the registry — no repo to add, no checkout, no
+   pull credential. Read [Namespaces](#namespaces) and [Storage](#storage)
+   first: they are the settings you cannot change afterwards.
 
    ```sh
    helm install agent-ops \
@@ -63,282 +46,113 @@ read-only demo on your cluster in fifteen minutes.
      --version 22.0.0 -n agent-ops
    ```
 
-   **No registry credential.** The chart and every image it renders are public
-   packages on GHCR, so the pull is anonymous and the install needs no
-   `imagePullSecrets`.
+3. **Create the model credential.** The chart has created the conversations
+   namespace, where runtime pods run. The default runtime is
+   [pi]({{ '/runtimes/pi/' | relative_url }}), on Anthropic. (Or pass
+   `--set pi.credentialsSecret.token=<key>` in step 2.)
 
-   Working from a checkout instead? `helm install agent-ops ./chart -n
-   agent-ops` still does the same thing.
+   ```sh
+   kubectl -n agent-ops-conversations create secret generic agentops-pi \
+     --from-literal=apiKey=$ANTHROPIC_API_KEY
+   ```
 
-3. **Verify.**
+   ```powershell
+   kubectl -n agent-ops-conversations create secret generic agentops-pi `
+     --from-literal=apiKey=$env:ANTHROPIC_API_KEY
+   ```
+
+4. **Verify.**
 
    ```sh
    kubectl -n agent-ops rollout status deploy/agentops-manager
-   kubectl -n agent-ops get agentruntime default
    ```
 
    ```powershell
    kubectl -n agent-ops rollout status deploy/agentops-manager
-   kubectl -n agent-ops get agentruntime default
    ```
 
-That brings up the manager, `AgentRuntime/default` and the console — and **no
-routes**, so nothing answers yet. The next two sections fix that.
-
-## Wire your first route
-
-A source no Ready `Pipeline` claims **drops every signal it admits**. A fresh
-install has exactly that, so nothing answers until you declare a route.
-
-The smallest real one names a source, a profile and the tools that profile may
-use:
-
-```yaml
-apiVersion: agentops.dev/v1alpha1
-kind: Pipeline
-metadata:
-  name: cluster-triage
-  namespace: agent-ops
-spec:
-  profileRef:
-    name: k8s-engineer
-  signalSourceRefs:
-    - name: cluster-events
-  toolsets:
-    refs:
-      - name: agentops-observe
-      - name: k8s-observability
-  mcpConfigs:
-    refs:
-      - name: k8s-api
-```
-
-This object carries everything, because the profile holds no tools and no
-permissions of its own.
-
-Two optional fields decide how the route runs:
-
-| Field | Omitted, it is |
-|---|---|
-| `runtimeRef` | the runtime named `default` |
-| `serviceAccountName` | that runtime's own account |
-
-Every field is in
-[concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md).
+That brings up the manager, the default runtime and the console — and **no
+routes**, so nothing answers yet. Enabling a bundle is the quickest way to get
+one.
 
 ## Enable a bundle
 
-A bundle contributes domain — sources, profiles, tooling, channels. The
-substrate they run on comes from this chart.
+A bundle contributes sources, profiles, tooling or channels. The Kubernetes and
+Prometheus bundles also ship a ready-made route, so turning one on is enough
+to get answers. All are off by default, and each page owns its values.
 
-| Bundle | Set | Its values |
-|---|---|---|
-| Kubernetes events | `kubernetes.enabled` | [kubernetes]({{ '/integrations/kubernetes/' | relative_url }}) |
-| Prometheus alerts | `prometheus.enabled` | [prometheus]({{ '/integrations/prometheus/' | relative_url }}) |
-| Telegram | `telegram.enabled` | [telegram]({{ '/integrations/telegram/' | relative_url }}) |
-| Home Assistant | `home-assistant.enabled` | [home-assistant]({{ '/integrations/home-assistant/' | relative_url }}) |
-| Claude CLI runtime | `claude-cli.enabled` | [claude-cli]({{ '/runtimes/claude-cli/' | relative_url }}) |
-| Ollama runtime | `ollama.enabled` | [ollama]({{ '/runtimes/ollama/' | relative_url }}) |
-| GitHub Copilot runtime | `copilot.enabled` | [copilot]({{ '/runtimes/copilot/' | relative_url }}) |
-| Coordination (`agentops-mcp-aops`) | `coordination.enabled` | [coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}) |
+| Bundle | Set |
+|---|---|
+| [Kubernetes events]({{ '/integrations/kubernetes/' | relative_url }}) | `kubernetes.enabled` |
+| [Prometheus alerts]({{ '/integrations/prometheus/' | relative_url }}) | `prometheus.enabled` |
+| [Telegram]({{ '/integrations/telegram/' | relative_url }}) | `telegram.enabled` |
+| [Home Assistant]({{ '/integrations/home-assistant/' | relative_url }}) | `home-assistant.enabled` |
+| [Claude CLI runtime]({{ '/runtimes/claude-cli/' | relative_url }}) | `claude-cli.enabled` |
+| [Ollama runtime]({{ '/runtimes/ollama/' | relative_url }}) | `ollama.enabled` |
+| [GitHub Copilot runtime]({{ '/runtimes/copilot/' | relative_url }}) | `copilot.enabled` |
+| [Coordination]({{ '/guides/coordinate-agents/' | relative_url }}) | `coordination.enabled` |
 
-All eight are off by default. Each bundle's own page owns its values — this
-page does not repeat them.
+Telegram is a channel and ships no route, so bind it to a bundle's route
+(`kubernetes.pipelines.channels`). Want to own the wiring instead? A source no
+Ready `Pipeline` claims drops every signal, so
+[Put an agent to work]({{ '/guides/pipeline/' | relative_url }}) declares your
+own.
 
-The last three start no work of their own. The runtimes execute. Coordination
-lets an agent invoke other agents rather than answering a source or a channel
-itself.
+## Namespaces
 
-**`global.agentops.wiringMode: coordinator` also brings up Coordination**,
-whatever `coordination.enabled` says — the chart-rendered `Coordinator` needs
-that MCP server.
+Runtime pods, their volume claims and accounts run in a second namespace,
+`global.agentops.conversationNamespace` (default `agent-ops-conversations`,
+created by the chart).
+Set `createConversationNamespace: false` to create it yourself. Set it to the release namespace for a single-namespace layout.
+Changing it later is a manual migration, so pick it before you install — see
+[Concepts]({{ '/concepts/#where-things-run-the-control-and-conversations-namespaces' | relative_url }}).
 
-It needs nothing else to install. The self-heal reaper is OFF by default
-(`reaper.enabled: false`). A conversation surveying every open root is real
-cost, and most installs will never need it.
+## Storage
 
-Turn it on with `reaper.enabled: true`. That also brings up the
-`signals/cron` `SignalAdapter` that gives it its trigger (every six hours
-by default, `reaper.schedule`) — no bundle to enable and no extra
-component. See
-[Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}).
-
-## Configure
-
-**Storage and the conversations namespace are the only settings that must be
-right before you install.** Everything else is a `helm upgrade` away and safe
-at its default, and every value the chart takes is in the
+A volume claim cannot be edited once it exists, so set the access mode before
+you install. Everything else is a `helm upgrade` away — every value is in the
 [configuration reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md).
 
-### Namespaces
-
-A release resolves two namespaces — see
-[Concepts]({{ '/concepts/#where-things-run-the-control-and-conversations-namespaces' | relative_url }})
-for what lives in each.
-
-| Key | Default | Consequence |
-|---|---|---|
-| `global.agentops.conversationNamespace` | `agent-ops-conversations` | where runtime pods, their claims and their accounts run. The release namespace is the single-namespace layout |
-| `global.agentops.createConversationNamespace` | `true` | `false` means you create it, labeled however you need |
-
-Pick it before you install. Switching it later is a manual migration, not a
-plain upgrade: close every open conversation, move your Secrets, and rebind
-each claim's PV.
-
-The steps are the `conversationNamespace` upgrade path in
-[the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
-A namespace the chart created carries `helm.sh/resource-policy: keep`, so an
-uninstall leaves it, its Secrets and its claims standing.
-
-### Storage
-
-**Context** keeps what conversations remember. **Workspace** keeps repository
-checkouts, and is off by default because agents re-clone instead.
-
-| Key | Default | Consequence |
-|---|---|---|
-| `persistence.context.accessModes` | `[]` — the chart picks | `ReadWriteMany`, or `ReadWriteOnce` in demo mode where `local-path` refuses RWX. Set it yourself and your value wins |
-| `persistence.context.storageClassName` | `""` | empty uses the cluster's default provisioner. To bind a volume you made yourself, see [pointing a volume at existing storage](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#pointing-a-volume-at-storage-the-chart-did-not-create) |
-| `nats.persistence.storageClassName` | `""` | the storage class of the state servers' volumes. Empty uses the cluster's default provisioner. Fixed once the claims exist |
-| `commandBus.nats.persistence.storageClassName` | `""` | the same, only when you opt into a dedicated command bus server. By default the bus shares the state servers' volumes |
-
-Set the access mode before you install. A claim cannot be edited once it
-exists, so changing your mind means deleting it and starting again.
-
 - **`ReadWriteMany`** is the default. Agent pods can run on any node.
-- **`ReadWriteOnce`** works too, and pins every agent pod to one node.
+- **`ReadWriteOnce`** works too, and pins every agent pod to one node. Without
+  an RWX provisioner, add `--set persistence.context.accessModes[0]=ReadWriteOnce`.
 
-**The state servers need at least three pods.** The default state store runs
-on NATS.
-
-- Outside demo mode the chart refuses `nats.replicas` below `3`.
-- More than three is fine, and each stream still keeps three copies.
-- Only [the demo]({{ '/getting-started/' | relative_url }}) runs one pod, and one manager too, because it runs on one node.
-
-Whether context persists at all, its size, and whether workspace persists too
-are all reversible — see the [configuration reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#storage).
-
-Every route uses these volumes unless it says otherwise. A route can keep its
-state somewhere of its own:
-[per-route storage](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#per-route-storage).
+The state servers need at least three pods (`nats.replicas`). Only the demo runs one. Two more keys are fixed once their claims exist: `persistence.context.storageClassName`
+and `nats.persistence.storageClassName`. Empty uses the cluster's default
+provisioner.
 
 ## Upgrade and uninstall
 
-**Apply the CRDs yourself, before every upgrade.** Helm never upgrades a CRD
-that came from a chart's `crds/` directory. An upgraded install keeps the OLD
-shape until you apply the new one, and a field the new CRD removed keeps
-silently pruning on every write.
-
-There is no repo to clone just for this. Pull the chart you are upgrading to
-and apply the CRDs it carries:
+**Apply the CRDs yourself, before every upgrade.** Helm never upgrades CRDs from
+a chart's `crds/` directory, so an upgraded install keeps the old shape until you do.
 
 ```sh
 helm pull oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
   --version <version> --untar --untardir /tmp/agentops-chart
 kubectl apply -f /tmp/agentops-chart/agent-ops-operator/crds/
-```
 
-```powershell
-helm pull oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-  --version <version> --untar --untardir $env:TEMP\agentops-chart
-kubectl apply -f $env:TEMP\agentops-chart\agent-ops-operator\crds\
-```
-
-Working from a checkout? `kubectl apply -f chart/crds/` does the same thing.
-
-The release that adds the `Signal` kind needs this step: until the new CRD is
-applied, the manager cannot store the signals `/signal/inbound` accepts.
-
-Then the release itself:
-
-```sh
 helm upgrade agent-ops \
   oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
   --version <version> -n agent-ops
 ```
 
 ```powershell
+helm pull oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
+  --version <version> --untar --untardir $env:TEMP\agentops-chart
+kubectl apply -f $env:TEMP\agentops-chart\agent-ops-operator\crds\
+
 helm upgrade agent-ops `
   oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
   --version <version> -n agent-ops
 ```
 
 Read [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
-first, since it is the only place migration steps live, keyed by chart version
-and newest first.
+first — it is the only place migration steps live, newest first.
 
-**The next release is BREAKING**: a release now resolves a second namespace, for
-runtime pods and everything they run as, mount or resolve. Split by
-default — the chart creates `agent-ops-conversations` for you.
-
-This needs a manual step per claim and per Secret you want to keep.
-The full procedure, in order, with commands, is the `[Unreleased]` entry's
-Upgrade section in [the
-changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
-Read it before you upgrade a production install.
-
-Pin today's single-namespace layout instead with
-`global.agentops.conversationNamespace` set to your release namespace — no
-object splits, and no manual step is owed.
-
-**19.0.0 is BREAKING**:
-
-- the default state backend changes to `nats`
-- every channel adapter image upgrades together with the manager, since the
-  `/channel/ops` wire contract changed (see below)
-
-See the changelog entry before you upgrade a production install.
-
-A fresh install now also runs three more pods and three more volumes.
-They are a clustered state server.
-
-It replaces the `Conversation` and `Signal` custom resources as the live
-record. It also holds what lived on `SignalSource` status, the cooldown window
-and the receipt counters, and each adapter's own state.
-
-The state servers' volumes are claims too, so their storage class is set
-before install. See [Storage](#storage).
-
-`kubectl get conversations` stops showing anything on a default install. Pin
-the old behaviour with `stateStore.backend: kube` — see
-[configuration](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#state-store).
-
-An existing install upgrading from `kube` imports its records into `nats` on
-the manager's first start. The steps are in the
-[changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md).
-
-**The same release adds the command bus.** On the default `nats` state store it shares that server and adds nothing to run.
-
-Under the `kube` store it renders a clustered server of its own, three more pods and three more volumes. See [Accept work durably]({{ '/guides/command-bus/' | relative_url }}).
-
-**Upgrade your channel adapter images with the manager.** The wire contract of
-`/channel/ops` changed: an adapter now acknowledges each op it reads. The
-shipped Telegram adapter and the console move with the release, and a
-hand-built adapter must follow the
-[channel adapter specification](contracts/channel-adapter.md).
-
-`close`, `exit`, `reopen`, `delete`, `reset-context` and `escalate` now
-accept and run later instead of performing the work inline. Read
-[the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
-before you upgrade a caller that reads a `200`/`202` as confirmation the
-work finished.
-
-`helm uninstall` removes the workloads but leaves the CRDs and the context
-claim. Under the default `nats` backends it also leaves both the state
-store's server volumes, and the command bus's where it has a server of its own, so reinstalling finds your
-data where it was.
-
-A restarted command bus starts with empty queue logs either way. They are
-declared bounded and lossy telemetry, never the durable record. The buckets of
-a pre-release build of the bus (`tasks`, `ids`, `dead`) are inert and may be
-deleted.
-
-Under the `kube` state-store backend it also leaves every Conversation
-custom resource.
-
-Helm never deletes CRDs that came from a chart's `crds/` directory, so this is
-not something the chart decides. Removing them means deleting them yourself,
-which takes every Conversation custom resource (`kube` backend only) with them:
+`helm uninstall` removes the workloads and leaves the CRDs, the context claim and
+the state servers' volumes, so a reinstall finds your data where it was. To
+remove the CRDs too (which deletes every Conversation custom resource on the
+`kube` backend):
 
 ```sh
 kubectl delete crd $(kubectl get crd -o name | grep '\.agentops\.dev$')

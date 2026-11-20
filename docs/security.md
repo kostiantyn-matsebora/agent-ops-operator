@@ -18,403 +18,62 @@ next:
 agent-ops runs a language model's output inside your cluster, using credentials
 you gave it. **Treat the agent container as untrusted code with a shell.**
 
-## Threat model
-
-![Trust boundaries and the seven flows that cross them. The agent container runs untrusted model output inside the runtime pod, and each crossing carries a control or is named as residual risk.]({{ '/assets/img/security/threat-model-light.svg' | relative_url }}){: .ao-diagram}
-
-**Seven flows cross a trust boundary.** Six carry a control. One does not.
-
-| Crossing | Threat | Control |
-|---|---|---|
-| **1** any pod → operator ns | unauthenticated access to the work contract and every MCP tool | [network segmentation](#network-segmentation) — **off** |
-| **2** agent → MCP server | calls a tool its route never bound | [egress control](#egress-control) — **on** |
-| **3** agent → Kubernetes API | acts on the cluster beyond its route | [authorization](#cluster-authorization) — **on**, granting nothing |
-| **4** agent → Secrets | reads any Secret by creating or entering a pod | [pod execution disabled](#secret-exposure) — **on** |
-| **5** agent → context volume | reads another conversation's context | [no mount of the volume](#context-isolation) — **on** |
-| **6** agent → pod logs | conversation content readable with `pods/log` | **none** — [residual risk](#residual-risk) |
-| **7** any pod → state or bus server | reads or writes conversation state, or a task, directly, bypassing the manager's own authorization | [state store isolation](#state-store-isolation) / [command bus isolation](#command-bus-isolation) — **on** (credential), **off** (network policy) |
-
-**"Operator ns" above is the control namespace.**
-
-A release may resolve a second one, conversations, where the runtime pod
-itself runs. See
-[Concepts]({{ '/concepts/#where-things-run-the-control-and-conversations-namespaces' | relative_url }}).
-
-Every crossing above is the same either way. Namespace is deployment
-topology, not a trust boundary of its own.
-
 **Nothing in the cluster is granted by default.** A route naming no identity runs
 as an account bound to nothing. Acting power is something a route opts into, by
 name.
 
-> This page states the **posture**. [Installation]({{ '/installation/' | relative_url }})
-> states the **keys** — every value, its default and its YAML, in one place, so
-> nothing here can disagree with it.
-{: .ao-callout}
+## Threat model
 
----
+![Trust boundaries and the seven flows that cross them. The agent container runs untrusted model output inside the runtime pod, and each crossing carries a control or is named as residual risk.]({{ '/assets/img/security/threat-model-light.svg' | relative_url }}){: .ao-diagram}
 
-## Defence in depth
+Seven flows cross a trust boundary. Six carry a control. One does not.
 
-Three independent controls, each bounding a different thing. **Closing one
-leaves the next one open**, which is why they are not alternatives.
+| # | Crossing | Control | Catch |
+|---|---|---|---|
+| 1 | any pod → operator namespace | NetworkPolicy per component ([who may reach what](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#who-may-reach-what)) | applies silently where no CNI enforces it |
+| 2 | agent → MCP server | proxy inside the runtime pod ([enforcing the toolset](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#enforcing-the-toolset)) | needs a privileged init container. Misses child-process MCP servers, `https` and tool arguments |
+| 3 | agent → Kubernetes API | least privilege: a route naming no identity is bound to nothing ([the agent's power](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#the-agents-power)) | roles you declare at cluster scope are cluster-wide |
+| 4 | agent → Secrets | pod execution disabled | see below |
+| 5 | agent → context volume | agent container has no mount of it, a sidecar snapshots | needs a runtime that declares context paths, or the whole volume is mounted |
+| 6 | agent → pod logs | none | anyone with `pods/log` reads conversations |
+| 7 | any pod → state or bus server | chart-managed credential, plus network policy. Default: credential on, policy **off** | one shared credential |
 
-### Network segmentation
+"Operator namespace" is the control namespace. A release may run runtime pods in a second, conversations namespace ([Concepts]({{ '/concepts/#where-things-run-the-control-and-conversations-namespaces' | relative_url }})). Every crossing is the same either way: it is deployment topology, not a trust boundary.
 
-![Any pod in the cluster may reach the MCP servers and the work contract, because neither authenticates a caller, unless network policy segments them.]({{ '/assets/img/security/connect-light.svg' | relative_url }}){: .ao-diagram}
+**No `secrets` verb is not the same as cannot read Secrets.** The kubelet
+resolves a Secret when it builds a pod, so an agent that may create or enter a
+pod reads any Secret without asking the API server. Pod execution is the
+boundary, and it is off by default.
 
-| | |
-|---|---|
-| **Threat** | crossing 1 — several components authenticate nobody, so any pod that reaches them can use them |
-| **Control** | one NetworkPolicy per component, admitting only the callers your wiring implies |
-| **Cost** | on a cluster that enforces policy, one missed flow breaks a working install |
-| **Residual risk** | **a policy applies where nothing enforces it, and protects nothing.** No error, and the chart cannot tell the difference |
+**Coordination adds no new crossing.** The manager enforces every bound on
+invoked agents (`agents[]`, `maxAgents`, `maxTurns`, `deadline`, no cycles), and
+each member runs under its own identity, never the caller's.
 
-Two callers break quietly when you enable it: a metrics collector outside the
-namespace, and your ingress controller in front of the console. Both are named
-in [Who may reach what]({{ '/installation/' | relative_url }}#who-may-reach-what).
+Reasoning and rejected alternatives: [ADR 0001](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/adr/0001-bound-component-reach.md).
 
-### Egress control
+## What the platform guarantees
 
-![An agent with a shell bypasses the command-line allowlist, but cannot bypass the egress proxy inside its own pod.]({{ '/assets/img/security/tools-light.svg' | relative_url }}){: .ao-diagram}
+- **The manager reads no Secrets** — it holds no verb on `secrets`; secret-shaped values compile to pod-spec references the kubelet resolves.
+- **Credentials have one holder each.** Only `agentops-gateway-telegram` holds the bot token. Adapter tokens are an HMAC of a master key and the adapter's name, validated by re-deriving it, never stored.
+- **Surfaces do not share credentials.** `/control-plane/*` has its own token and refuses everything when unconfigured. `/state/*` is opened per adapter by `spec.stateAccess`, off by default.
+- **Runtime pods are non-root**, each conversation's workspace is its own subpath, and under egress control all capabilities are dropped.
+- **The events adapter** has its own identity with `list`/`watch` on events, pods, replicasets and (cluster-wide only) nodes. No agent runs as it and it holds no `secrets` verb.
+- **`stateReadAuth` has a second copy** in the conversations namespace, beside the claims housekeeping mounts. It grants read on `/state/*` only, and reading it needs pod execution, which is off by default.
+- **Logs:** only the runtime logs message content — crossing 6. Everything else logs identifiers and errors.
+- **Images** carry an SBOM and provenance and are scanned on every pull request and weekly. **Nothing is signed, and the chart is not attested.**
 
-| | |
-|---|---|
-| **Threat** | crossing 2 — a route's toolsets reach the agent as a command-line allowlist. **That configures a cooperating agent**, and one with a shell calls a bound MCP server directly |
-| **Control** | a proxy inside the runtime pod that the agent's traffic cannot route around |
-| **Cost** | a **privileged init container**, plus a container per active conversation |
-| **Residual risk** | it covers neither MCP servers run as the agent's own child processes, nor `https` endpoints, nor **tool arguments** |
+## Also open
 
-**It is on by default.** A control that constrains an agent which does not
-cooperate should not be something you have to discover.
+Beyond the Catch column above:
 
-**Its cost is a hard failure, not a slowdown.** A namespace under `restricted`
-Pod Security admission refuses that pod — at admission, when a conversation
-starts, not when you render the chart.
-
-Neither uncovered path is passed off as enforced. The conversation's
-`EgressMediated` condition names what is not covered.
-
-Reasoning and rejected alternatives in
-[ADR 0001](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/adr/0001-bound-component-reach.md).
-Keys in
-[Enforcing the toolset]({{ '/installation/' | relative_url }}#enforcing-the-toolset).
-
-### Cluster authorization
-
-An allowlist configures a cooperating agent. **A ServiceAccount binding is what
-an uncooperative one with a shell actually has.**
-
-| | |
-|---|---|
-| **Threat** | crossing 3 — the agent acts on the cluster beyond what its route intended |
-| **Control** | least privilege: a route naming no identity is bound to nothing, and more is an account you declare, stating its own rules |
-| **Grants** | roles the chart writes out, never a built-in role. No `cluster-admin`, no `view` |
-| **Residual risk** | what you declare as cluster roles is **cluster-wide**, the operator's own namespace included |
-
-`agentops.dev` is never granted, so Conversations and Pipelines are unreadable to
-an agent everywhere. That omission is what protects them, rather than scope.
-
-#### Secret exposure
-
-**No `secrets` verb is not the same as cannot read Secrets.**
-
-![An agent allowed to create or enter a pod reads a Secret through the kubelet, without ever asking the API server for it.]({{ '/assets/img/security/secrets-light.svg' | relative_url }}){: .ao-diagram}
-
-The kubelet resolves a Secret when it builds a pod. The verb is never evaluated.
-
-**So pod execution is the Secrets boundary, and it is disabled by default.** It
-gates every write that produces or enters a pod, not one verb: a Job, a
-Deployment and a patch to a pod template are the same path.
-
-**It now also gates `stateReadAuth`'s copy in the conversations namespace** —
-the one credential there that is not the adopter's own, and the same control
-that already covered every adopter Secret a runtime pod resolves.
-
-Keys and worked examples in
-[The agent's power]({{ '/installation/' | relative_url }}#the-agents-power).
-
-#### The events adapter's own read access
-
-**A separate identity from the acting account above** —
-`agentops-signal-k8s-events`, granted `list`/`watch` on events, pods and
-replicasets, and (cluster-wide installs only) nodes, for drain awareness. No
-agent runs as it, and it never calls a tool. It only decides which cluster
-Events become conversations.
-
-- **The grant is a resource, not a field list.** `nodes: list, watch` permits
-  reading whole Node objects — names, labels, addresses, allocatable
-  capacity — even though the adapter itself decodes only `spec.unschedulable`
-  and taints and keeps no node status. Kubernetes RBAC has no way to narrow a
-  grant to the fields code happens to read.
-- **Nothing here is a Secret**, and no adapter identity in this chart carries
-  a `secrets` verb.
-- **A namespaced install (`rbac.clusterWide: false`) has no nodes grant at
-  all** — nodes are cluster-scoped, so there is no namespaced equivalent to
-  fall back to. Drain awareness is simply off there, reported once on each
-  source's condition.
-
-### Agent-invoked agents
-
-**Coordination adds no new crossing.** A `Coordinator`'s conversation reaches
-the aops MCP server exactly like any other bound server — through crossing 2,
-the same egress-controlled path every MCP call takes.
-
-What is new is what a call across it can cause: the MANAGER creating more
-conversations and runtime pods on the caller's behalf, each under its own
-capability and identity.
-
-| | |
-|---|---|
-| **Threat** | a conversation causes the manager to provision more conversations and pods than its own route declared |
-| **Control** | the manager enforces every bound — the caller's own `agents[]` list, its own subtree, one hop for `close` — from a per-conversation token the aops server only forwards |
-| **Cost** | the aops server and its `NetworkPolicy`, reachable only from runtime pods |
-| **Residual risk** | a fan-out an operator did not expect, bounded but not forbidden — see [Residual risk](#residual-risk) |
-
-Three bounds keep it from becoming a second cluster boundary:
-
-- **A typed list, not a name.** `invoke` reaches only what the caller's own
-  Coordinator lists in `agents[]`, never an object it merely knows the name
-  of.
-- **A budget per level.** `maxAgents`, `maxTurns` and `deadline` close a
-  runaway coordination, evaluated on every level's own conversation and never
-  pooled across nesting.
-- **A cycle is refused outright.** A Coordinator invoking a chain that
-  returns to itself never terminates on its own, so the manager refuses it
-  rather than relying on the budget to eventually catch it.
-
-**Each invoked member gets its OWN capability and its OWN identity** — never
-the caller's, and never widened by it. A coordinating agent with a strong
-ServiceAccount can still invoke only members whose own `AgentCapability`
-names a weaker one, exactly as any other wiring resolves.
-
-**The aops MCP server decides none of this.** It holds no credential of its
-own and forwards the caller's token verbatim — every bound above is the
-manager's, re-checked on every call, never the server's.
-
-### State store isolation
-
-Under the default `nats` backend, conversation state lives on a clustered
-server beside the manager rather than in the Kubernetes API.
-
-| | |
-|---|---|
-| **Threat** | crossing 7 — any pod that reaches the state server reads or writes a conversation's own record directly, including another conversation's messages |
-| **Control** | the client port always requires the chart-managed credential. Where network policy is enabled, it also admits the manager's pods alone — the server's peer port admits only its own pods |
-| **Cost** | none beyond the install's existing network-policy decision |
-| **Residual risk** | the credential is one shared secret, not a token per caller, so anything holding it is indistinguishable from the manager. A policy applies where nothing enforces it, silently, same as crossing 1 |
-
-Every other component reaches state through the manager's `/state/*`
-surface instead, which already holds its own token, so none of them needs a
-route to the server at all.
-
-**Under `kube`** this crossing does not exist. State is the Kubernetes API,
-and crossing 3's authorization is what bounds it instead.
-
-### Command bus isolation
-
-Under the default `nats` backend, accepted work sits on a clustered server, structurally the same shape as the state store above and sharing its crossing in the threat table and diagram.
-
-With the state store on `nats` it is that very server, in buckets of its own. With the `kube` store it is a dedicated one.
-
-| | |
-|---|---|
-| **Threat** | crossing 7 — any pod that reaches the bus server reads or submits a task directly, bypassing the manager's own accept step |
-| **Control** | the client port always requires a chart-managed credential. It is the state store's own where the server is shared, and the bus's own where it has a server of its own. Where network policy is enabled, it admits the manager's pods alone |
-| **Cost** | none beyond the install's existing network-policy decision |
-| **Residual risk** | the same as the state store's: one shared credential, and a policy that applies where nothing enforces it |
-
-Every other component reaches accepted work through the manager's
-`/state/tasks*`/`/state/dead-letters` surface instead, never the bus
-server directly.
-
-**A channel adapter reaches its own queue only through the manager.** Reading and acknowledging an op are scoped by the adapter's derived token to the channels that name it.
-
-An acknowledgement hands the op over and starts a delivery TTL, so an adapter that goes silent can hold only its own conversations' later messages, until the TTL fails the message.
-
-**Setting `commandBus.backend: memory`** removes this crossing entirely —
-the queue logs then live in the manager's own process, reachable by nothing
-outside it. It is refused above one replica (see
-[Configuration](configuration.md#commandbus)).
-
----
-
-## The platform's own posture
-
-Properties of the product you cannot read off the values.
-
-| Property | What holds |
-|---|---|
-| **The manager reads no Secrets** | it holds no verb on `secrets` at all. Everything secret-shaped compiles to a pod-spec reference the kubelet resolves |
-| **The Telegram bot credential has one holder** | `agentops-gateway-telegram` alone holds the bot token. The channel adapter holds only a chart-generated call token and relays every Bot API call through the router, whose NetworkPolicy ingress admits the channel adapter on `router.callPort` |
-| **Adapter credentials are not stored** | a per-adapter token is an HMAC of a master key and the adapter's name, validated by re-deriving it. Nothing is minted, stored, or read back |
-| **The control-plane surface holds its own credential** | `/control-plane/*`'s token is distinct from `ADAPTER_TOKEN` and the coordinator token — a caller holding one cannot reach another's surface. Unconfigured, it refuses every request rather than falling open |
-| **Housekeeping holds no Kubernetes grant** | it lists conversations through the manager's `/state/*` surface, authenticated by its own `stateReadAuth` credential. No Role, no RoleBinding, and its ServiceAccount's token is not even mounted (`automountServiceAccountToken: false`) |
-| **The state server's credential is chart-managed, not the manager's to mint** | resolved explicit value, then an existing Secret, then generation on install only — the same order as `adapterAuth`/`controlPlaneAuth`. The manager receives it by `valueFrom` and reads no Secret of its own, under this backend either |
-| **The state read surface is a grant, off by default** | `spec.stateAccess: true` on a `ChannelAdapter` or `SignalAdapter` opens `/state/*` to that adapter's derived token. Silence grants nothing. The console reads through its own adapter's grant. Housekeeping is not an adapter and reads through `stateReadAuth` instead |
-| **`stateReadAuth` now renders beside agent code too** | housekeeping moved to the conversations namespace with the claims it mounts, so its copy of the token renders there — the same value, a second Secret object. It grants read on `/state/*` alone, and reading it at all still needs pod execution, [off by default](#secret-exposure) |
-| **Runtime pods are non-root** | at a fixed uid, and each conversation's workspace is its own subpath of the claim, so concurrent pods cannot see each other's tree |
-| **Under egress control the container is hardened further** | all capabilities dropped, privilege escalation refused |
-
-Every published image carries an **SBOM** and **max-mode provenance**, recorded
-by the build. **Nothing is signed, and the chart is not attested.**
-
-**Every image is scanned for known vulnerabilities**, twice over. On the pull
-request that builds it, a CRITICAL or HIGH finding **with a fix available**
-blocks the merge. Weekly, the published images are scanned again against a
-newer database.
-
-Both scans report to the repository's security tab, and both fail on the same
-fixable finding. The pull-request scan blocks the merge. The weekly scan
-reports before it fails, and turns the README's published-images badge red
-until the image is re-released.
-
-On a pull request from a fork the gate blocks without reporting — a fork's
-token cannot write there.
-
-**A finding with no available fix does not block**, knowingly. An unfixable
-upstream vulnerability is information rather than a task, and a gate that
-cannot be made green is one that gets switched off.
-
-The SBOM is the complete inventory. The scan is the actionable part of it.
-
-Read what an image carries:
-
-{% raw %}
-```sh
-docker buildx imagetools inspect \
-  ghcr.io/kostiantyn-matsebora/agentops-manager:<tag> \
-  --format '{{ json .Provenance }}'
-```
-
-```powershell
-docker buildx imagetools inspect `
-  ghcr.io/kostiantyn-matsebora/agentops-manager:<tag> `
-  --format '{{ json .Provenance }}'
-```
-{% endraw %}
-
-### Code analysis
-
-Security hotspots in the code itself — as opposed to vulnerabilities in what
-an image ships — are reported by SonarCloud, one project per component. They
-appear on that service's dashboard and in its check on the pull request, not
-in the security tab.
-
-Hotspots are reported and not gated: a hotspot is a place to review rather
-than a finding. The quality gate's verdict IS gated — the scan step waits on
-it and fails the component's job, which reports through the required check.
-
-### The fixing loop's push credential
-
-`review-dispatch.yml` fixes review findings and SonarCloud issues on a pull
-request its owner has labelled `conveyor:fix` (the renamed `autofix`). The step
-that writes a fix runs a model under a read-only token and holds no other
-secret.
-
-That step accepts a run started by one bot, `github-actions`, and no other,
-because a carried `conveyor:fix` round is dispatched by this repository's
-own workflow. The gate before it has already re-read the standing
-instruction the bot relayed, and refused the run without one.
-
-The archive station is a session started the same way, and a person still
-merges what it opens.
-
-The model-free step after it pushes the commit through a WRITE DEPLOY KEY
-(`AUTOFIX_DEPLOY_KEY`), repository-scoped and `contents` only, because a push
-made with the workflow token starts no workflow and a `workflow_dispatch`
-run's checks never reach the merge box. It is read by that one job alone.
-
-What crosses between the two is a patch cut by a program read from the base
-branch, never from the pull request.
-
-- It carries every change to a tracked file.
-- A new file crosses only where the model's report declares it.
-- Anything else the model left in the checkout is deleted before the cut and
-  named on the pull request.
-
-What that key can do is push to a branch of this repository. It cannot
-approve, merge, resolve a review thread, or change anything in SonarCloud.
-
-The label is the only thing that makes the job run. Only a person with write
-access can place it directly.
-
-A workflow may also carry it forward on their behalf. It RE-CHECKS their
-standing instruction still stands and still has write access, on the issue it
-opened from, every time.
-
-### Context isolation
-
-A conversation's accumulated context is everything an agent was told and
-everything it produced.
-
-![Under context sync the agent container holds no mount of the durable volume, and a sidecar snapshots to it instead.]({{ '/assets/img/security/context-light.svg' | relative_url }}){: .ao-diagram}
-
-**A default install isolates it.** The reference runtime ships the context paths
-its own backend uses, so nothing has to be turned on.
-
-**The isolation is structural, not permissive.** The agent container holds no
-mount of the durable volume, so it cannot read another conversation's context
-because there is nothing to read from. Durability is not the cost — a sidecar
-holds the volume and snapshots to it.
-
-**Where it does not hold.** The mode needs three things: a runtime that declares
-its context paths, a sidecar image, and a durable context volume.
-
-Short any of the three, the pod is the unsynchronised one. With a durable volume
-and a runtime declaring no paths — what another vendor's runtime gets until its
-entry states them — **the whole volume is mounted into the agent container**.
-
-### Logging
-
-**This does not hold uniformly, so it is stated per component.**
-
-| Component | Logs message content |
-|---|---|
-| the manager, both adapter kinds, the console | **no** — identifiers, counts, operation ids and errors only |
-| the runtime | **yes** — the agent's output, its tool-call arguments and its result, to the pod's stdout |
-
-That is crossing 6. Conversation content is readable by anyone holding
-`pods/log` in the operator's namespace.
-
----
-
-## Residual risk
-
-**Read this section.** A security page listing only what is handled is read as a
-claim that the rest is handled too.
-
-| Open | What it means |
-|---|---|
-| **Unauthenticated surfaces** | the MCP servers accept any caller and the manager's work contract takes no credential. Network segmentation is the only thing that bounds who reaches them, and it is off by default |
-| **A control this chart cannot verify** | a NetworkPolicy applies where nothing enforces it, silently. The install output says how to check, because nothing else can |
-| **Two paths past egress control** | MCP servers run as the agent's own child processes, and `https` endpoints |
-| **Tool arguments** | egress control decides which tool may be called, never with what arguments |
-| **Context isolation a runtime does not get** | a runtime declaring no context paths mounts the whole shared context volume into its agent container |
-| **Conversation content in pod logs** | the runtime writes what the agent produced to its pod's stdout |
-| **Repository hooks under `pi.piCode`** | with the `pi` runtime's `pi.piCode` on (the default), a hook in the checked-out repository's `.claude/settings.json` runs as a shell command in the pod. The tool allowlist does not apply to it, and the runtime approves its own workspace because a headless run cannot ask. `pi.piCode: false` removes it |
-| **Signing and attestation** | no image is signed, and the chart carries no attestation |
-| **Depth in a coordination** | a tree of agents invoking agents nests as deep as every level's own budget allows — nothing bounds the number of LEVELS, only a repeated Coordinator is refused |
-| **A member's consent boundary is a prompt, not a gate** | An instruction tells an invoked member not to act past its task, and nothing checks it at `/coordinate/invoke` |
-
-**The consent boundary is the agent honoring an instruction.** The manager
-enforces WHO may be invoked, never WHAT the invoked agent then does with the
-task.
-
-Several rounds of prompt tuning, reverted twice, preceded the current wording
-(#296). It is stated as open rather than assumed solid.
-
-**None of this is a surprise to the project.** These are decisions with reasons,
-and the reasons are in
-[ADR 0001](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/adr/0001-bound-component-reach.md)
-and in the values documentation. An adopter who cannot see a gap cannot
-compensate for it.
+- **Repository hooks under `pi.piCode`** (on by default). A hook in the checked-out repository's `.claude/settings.json` runs as a shell command in the pod, outside the tool allowlist. `pi.piCode: false` removes it.
+- **No signing or attestation.** No image is signed, and the chart is not attested.
+- **Coordination depth.** Nothing bounds the number of levels, only a repeated Coordinator is refused.
+- **Consent is a prompt, not a gate.** An invoked member is told not to act past its task. The manager enforces who may be invoked, never what it does.
 
 ## Reporting
 
 **Report privately, never in a public issue.**
 [SECURITY.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/SECURITY.md)
-carries the private advisory link, what to include, and the response targets.
-
-**A chart default that grants more than it needs is a finding**, not a
-configuration choice.
+has the advisory link and response targets. A chart default that grants more than
+it needs is a finding, not a configuration choice.
