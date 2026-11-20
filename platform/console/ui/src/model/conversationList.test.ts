@@ -30,7 +30,8 @@ afterEach(() => {
 
 const names = (rows: ConversationSummary[]) => rows.map((c) => c.name)
 const ROOT = 'incident-response-4a8f21'
-const TREE = [ROOT, `${ROOT}-triage`, `${ROOT}-mitigate`, `${ROOT}-mitigate-drain`, `${ROOT}-mitigate-verify`]
+// The open tree, closed member included: a member closes as soon as it hands its result back.
+const TREE = [ROOT, `${ROOT}-triage`, `${ROOT}-mitigate`, `${ROOT}-notify`, `${ROOT}-mitigate-drain`, `${ROOT}-mitigate-verify`]
 
 describe('a scope', () => {
   it('asks the server only what the server can answer per tree', () => {
@@ -61,14 +62,14 @@ describe('which conversations a scope shows, in the server’s order', () => {
     ])
   })
 
-  it('a closed conversation is listed only under Closed — there is no "show closed" to add it in place', () => {
-    const closedNames = ['cluster-events-d902a3', 'node-pressure-c81b4f', `${ROOT}-notify`]
+  it('a closed root is listed only under Closed, and a closed member stays under its open root', () => {
     const open = names(visibleItems(page.items, { kind: 'open' }))
     const closed = names(visibleItems(page.items, { kind: 'closed' }))
-    for (const n of closedNames) {
-      expect(open).not.toContain(n)
-      expect(closed).toContain(n)
-    }
+    expect(open).toContain(`${ROOT}-notify`)
+    const closedRoot = page.items.find((c) => c.phase === 'Closed' && !c.causedBy)
+    expect(closedRoot).toBeDefined()
+    expect(open).not.toContain(closedRoot?.name)
+    expect(closed).toContain(closedRoot?.name)
   })
 
   it('Working keeps every tree with an unread working row, whole — and not a read working one', () => {
@@ -131,11 +132,12 @@ describe('ordering and folding', () => {
       ['console-b48e10', 0, 0],
       ['nightly-2f60c8', 0, 0],
       ['console-5a81cc', 0, 0],
-      [ROOT, 0, 4],
+      [ROOT, 0, 5],
       [`${ROOT}-triage`, 1, 0],
       [`${ROOT}-mitigate`, 1, 2],
       [`${ROOT}-mitigate-drain`, 2, 0],
       [`${ROOT}-mitigate-verify`, 2, 0],
+      [`${ROOT}-notify`, 1, 0],
     ])
   })
 
@@ -192,7 +194,7 @@ describe('useConversationList', () => {
 
   it('returns the scope’s items, its tree and the roots that fold', () => {
     const { result } = renderHook(() => useConversationList({ ...base, scope: { kind: 'open' } }))
-    expect(result.current.rows).toHaveLength(11)
+    expect(result.current.rows).toHaveLength(12)
     expect(result.current.collapsibleNames).toEqual([ROOT, `${ROOT}-mitigate`])
   })
 

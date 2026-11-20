@@ -135,7 +135,14 @@ export function visibleItems(all: ConversationSummary[], scope: Scope): Conversa
   // Pipeline/Coordinator narrow further by their own tree predicate.
   const predicate = TREE_PREDICATE[scope.kind]
   if (predicate) raw = withTreeContext(raw, predicate)
-  if (scope.kind !== 'closed') raw = raw.filter((c) => c.phase !== 'Closed')
+  // Closed conversations are hidden everywhere except the dedicated Closed
+  // scope. The rule is per TREE: a closed ROOT hides its whole tree, and an
+  // open root keeps every member, closed or not, because a member closes the
+  // moment it hands its result back.
+  if (scope.kind !== 'closed') {
+    const byName = new Map(all.map((c) => [c.name, c]))
+    raw = raw.filter((c) => (byName.get(rootNameOf(all, c)) ?? c).phase !== 'Closed')
+  }
   return raw
 }
 
