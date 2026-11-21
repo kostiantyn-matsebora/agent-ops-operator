@@ -1,7 +1,7 @@
 ## 1. Measure and spike before any code
 
 - [ ] 1.1 Measure the share of runs carrying more than one input, from `runs[].inputs` in the run history of the live install, and record the verdict in `design.md` D7. Verify: the number is written and D7 is either confirmed or reopened with the user.
-- [ ] 1.2 Spike on a real NATS server: can the input family keep records with no age limit, and does the convoy queue controller accept a second per-name family. Verify: a throwaway test passes, and the answer is written in `design.md` D1 and D2.
+- [ ] 1.2 Spike on a real NATS server: can the input family keep records with no age limit, and can a claim attach only one key's convoy queue. Verify: a throwaway test passes, and the answers are written in `design.md` D1 and D3.
 - [ ] 1.3 Spike a runtime pod consuming its own queue. Verify: the evidence for refusing it is written in `design.md` D8.
 - [ ] 1.4 Check that `Peek` can read a convoy queue's waiting messages. Verify: a test proves it, or `design.md` lists the console read as its own task.
 
@@ -9,13 +9,13 @@
 
 - [ ] 2.1 Declare `in.conversation` in the inventory with no time to live, an unbounded retry that never drops, and an ack wait longer than the runtime's run limit. The convoy queue behaviour itself is #532's. Verify: an inventory test asserts each of the three, and a test fails an input past the other queues' attempt limit and finds it still waiting.
 - [ ] 2.2 Keep the family's records in a bucket with no age limit. Verify: a test leaves an input past every other queue's retention and finds it waiting.
-- [ ] 2.3 Add `Purge(queue)` to the `Bus` interface and both backends. Verify: the conformance suite scenario passes on `memory` and `nats`, and a purge records no success.
+- [ ] 2.3 Add `ClaimKey` as an optional interface and `Purge(queue, key)` to the `Bus` interface, in both backends. Verify: the conformance scenarios pass on `memory` and `nats`, a key-scoped claim never returns another key's message, and a purge records no success.
 - [ ] 2.4 Declare in the `memory` backend that inputs do not survive a restart, and refuse it above one replica as today. Verify: a test asserts the refusal and the docs line.
 
 ## 3. The manager on the queue
 
 - [ ] 3.1 Submit every input through the queue, with the input id as the command id, in `chat/router.go`, `chat/coordinate.go` and `signalroute/conversation.go`. Verify: a unit test per caller finds one waiting input and no entry on the record.
-- [ ] 3.2 Make `GET /work` claim the conversation's own queue and drop the 2 second record poll. Verify: an envtest shows an idle pod receives a new input within one poll, and a second claim returns nothing while one is inflight.
+- [ ] 3.2 Make `GET /work` claim the conversation's own key and drop the 2 second record poll. Verify: an envtest shows an idle pod receives a new input within one poll, and a second claim returns nothing while one is inflight.
 - [ ] 3.3 Keep `Inflight` as the current run with the task uid and the claim's token, and settle in `POST /work/done`. Verify: a retried report settles once and records one run.
 - [ ] 3.4 Fail with a delay on an unavailable context and when the pod is gone. Verify: an envtest holds an input through a context outage and runs it after.
 - [ ] 3.5 Derive the phase and the capacity check from the queue's statistics and the current run. Verify: the existing capacity and phase tests pass unchanged.

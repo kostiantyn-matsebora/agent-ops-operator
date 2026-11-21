@@ -35,15 +35,15 @@ SHALL be longer than the longest run the runtime permits.
 - **WHEN** the pod running an input is gone
 - **THEN** the input is failed with a delay and delivered again, without waiting for the redelivery wait
 
-### Requirement: Deleting a conversation purges its queue
-Deleting a conversation SHALL discard the inputs still waiting in its queue and
-remove the queue. Closing a conversation SHALL NOT discard them.
+### Requirement: Deleting a conversation purges its inputs
+Deleting a conversation SHALL discard the inputs still waiting for it and
+remove its convoy queue. Closing a conversation SHALL NOT discard them.
 
 A purge SHALL NOT record a success for any input it discards.
 
 #### Scenario: Delete discards waiting inputs
 - **WHEN** a conversation with two waiting inputs is deleted
-- **THEN** its queue no longer exists and neither input is reported as settled
+- **THEN** its convoy queue no longer exists and neither input is reported as settled
 
 #### Scenario: Close keeps waiting inputs
 - **WHEN** a conversation with a waiting input is closed and then reopened

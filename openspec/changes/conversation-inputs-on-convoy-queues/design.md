@@ -11,7 +11,8 @@ See `proposal.md` for the why. This page holds the facts the decisions rest on.
 | An unavailable context holds the input by not consuming it | `handleWorkDone`, `tryDispatch` |
 | `Claim(ctx, queue, consumerID)` takes the next task of a **queue**, not of a key | `internal/commandbus/commandbus.go` |
 | Settle and fail need the task uid and the claim's token | same |
-| `out.<channel>` is already one queue name per channel, resolved by family prefix | `internal/commandbus/` inventory |
+| Routing maps a queue name to regular, convoy or hand-over. The default is convoy | `internal/commandbus/nats/bus.go`, `wm_pubsub.go` |
+| A claim reads one subscription per queue per process and returns any key's next message | `internal/commandbus/nats/lifecycle.go` `feedFor` |
 | The record is shared by the `kube` and `nats` state backends. The `kube` mapping has 19 uses of the input fields | `internal/state/kube/mapping.go` |
 | 13 non-test files read `Inputs`, `Inflight`, `ProcessedInputIDs` or `PendingInputs` | grep over `internal/` and `cmd/` |
 | The same specs lean on an "inflight run" on the conversation | `aops-mcp-server`, `console-live-runs` |
@@ -28,7 +29,7 @@ See `proposal.md` for the why. This page holds the facts the decisions rest on.
 
 - No change to the runtime contract. `/work` and `/work/done` keep their shape and their status codes.
 - No change to how channels, signals or the `conv` queue deliver.
-- No new abstraction. The one `Bus` addition in D5 is called out and can be refused.
+- No new abstraction. The two additions, `ClaimKey` in D3 and `Purge` in D5, are called out and can be refused.
 
 ## Decisions
 
@@ -51,17 +52,25 @@ What option A needs:
 3. A failure parks and retries. It never ends in the dead-letter drop.
 4. The `memory` bus loses inputs on a restart. That is declared, not hidden. It stays for tests and a single replica.
 
-### D2. One queue name per conversation, like `out.<channel>`
+### D2. One family, the conversation is the key
 
-The family is `in.conversation`. A conversation's queue is `in.conversation.<name>`. Its single key is the conversation name.
+The family is `in.conversation`. A message's key is the conversation name.
 
-The rest of the bus already does this for `out.<channel>`, so the inventory, the policies and the conformance suite already handle a family resolved by prefix. Whether `familyOf` and the convoy queue controller accept a second such family is **to verify**.
+Routing in the bus is a function from the queue name to a mode, and the default is convoy. So the family needs no routing entry. One convoy queue per key, one message in flight, order and parallelism across keys are the bus's own (#532).
 
-### D3. `/work` claims the conversation's own queue
+### D3. `/work` claims the conversation's own key
 
-`GET /work?convo=X` calls `Claim(in.conversation.X)`. The claim is now scoped by the queue name, which is why D2 is not a key on one shared queue. A claim on a shared queue could hand the pod another conversation's input.
+`Claim(queue, consumerID)` takes the next message of **any** key of a queue. `GET /work?convo=X` needs X's message, and a claim that returned another conversation's input would run it in the wrong pod.
 
-The long poll waits on the claim and not on a record re-read every 2 seconds. A new input reaches an idle pod as soon as it is published.
+| Option | Verdict |
+|---|---|
+| **A. A key-scoped claim, as an optional interface beside `Renewer`** | **Chosen** |
+| B. One queue name per conversation, as `out.<channel>` does | Rejected. Each name adds a subscription and a registry watch in every process, and `feedFor` keeps them for the life of the process, so deleted conversations leak |
+| C. Claim any key and route the message to its pod | Rejected. The pod pulls today, and a dispatcher would invert the model |
+
+The optional interface is `ClaimKey(ctx, queue, key, consumerID)`. The convoy queue consumer controller already attaches to one key at a time, so a key-scoped claim attaches only that key's convoy queue. The `memory` backend implements it too, and the conformance suite covers it.
+
+The long poll waits on that claim and not on a record re-read every 2 seconds. A new input reaches an idle pod as soon as it is published.
 
 ### D4. The record keeps a small current run
 
@@ -74,16 +83,16 @@ Two reasons:
 
 `Inputs` and `ProcessedInputIDs` go. Settle by task uid and the command id dedup replace the processed ids.
 
-### D5. Closing, deleting and pending counts need three reads and one write on the bus
+### D5. Closing, deleting and pending counts need reads and one write on the bus
 
 | Need | How |
 |---|---|
 | Is anything waiting, and how many | `Stats(queue)`. The phase is `Queued` when it is above 0 or a run is inflight, otherwise `Idle` |
 | The text of what is waiting, for the console | `Peek(queue, limit)`. Today it reads hand-over queues. Whether it can read a convoy queue is **to verify** |
 | A held input | `Fail` with a delay, so the redelivery waits for the context to come back |
-| Delete a conversation | A new `Purge(queue)` on the bus. It discards the waiting messages and removes the queue |
+| Delete a conversation | A new `Purge(queue, key)` on the bus. It discards the key's waiting messages and removes its convoy queue |
 
-`Purge` is the one addition to the `Bus` interface.
+`Purge` and `ClaimKey` are the two additions. `ClaimKey` is an optional interface. `Purge` is on `Bus` itself.
 
 - The alternative is to drain every message with a settle. That records a success for each message that never ran.
 - A closed conversation keeps its waiting inputs, as it keeps everything else today.
@@ -158,7 +167,7 @@ During N's rollout an old replica still appends to the record. The sweep runs on
 - **[Two sources of truth during N]** → the sweep is idempotent by input id and runs on a timer. The system test rolls the manager under load.
 - **[Dropping batching costs more runs]** → D7 measures first.
 - **[The `kube` state backend has no bus]** → a `kube` installation now needs a durable bus. The `memory` bus stays valid only for tests and one replica, and the docs say so.
-- **[`Purge` widens the `Bus` interface]** → it is the only addition, and both backends implement it in the conformance suite.
+- **[`Purge` widens the `Bus` interface]** → it is the only change to `Bus` itself, and both backends implement it in the conformance suite.
 
 ## Migration Plan
 
