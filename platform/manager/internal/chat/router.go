@@ -29,6 +29,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -44,6 +45,7 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/addressing"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/convtask"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namewords"
@@ -386,6 +388,13 @@ func (r *Router) AutoCloseConversation(ctx context.Context, conv *state.Conversa
 // already-closed conversation, and the cascade call after it is never gated
 // on that.
 func (r *Router) closeConversation(ctx context.Context, conv *state.ConversationRecord, farewell string) error {
+	// LEAVES FIRST: the members close before this conversation does, so a
+	// cascade that fails part way leaves an OPEN, still-reachable root over a
+	// partly closed subtree (a retry resumes), never a Closed root over open
+	// members nothing can reach. Same order as closeWithCascade.
+	if err := r.cascadeCloseMembers(ctx, conv.Name, ""); err != nil {
+		return err
+	}
 	if conv.Phase != state.PhaseClosed {
 		// A STABLE op id, so a close whose status write fails and is retried says
 		// goodbye once rather than once per attempt. The farewell still goes
@@ -403,7 +412,58 @@ func (r *Router) closeConversation(ctx context.Context, conv *state.Conversation
 		}
 		log.FromContext(ctx).Info("conversation closed", "conversation", conv.Name)
 	}
+	// A run on the still-open root may have invoked a member after the walk
+	// listed; a closed root can invoke nothing more, so this sweep is the last
+	// word and finds only stragglers.
 	return r.cascadeCloseMembers(ctx, conv.Name, "")
+}
+
+// DeleteTree deletes a conversation and its whole causedBy subtree, LEAVES
+// FIRST and the conversation itself last, so a deletion that fails part way
+// never leaves a member whose parent is gone. The subtree is listed fresh at
+// run time, never trusted from accept time: a member still open is closed
+// before it goes, and a member created after the first listing is caught by
+// re-listing until nothing is left under the conversation.
+func (r *Router) DeleteTree(ctx context.Context, name string) error {
+	for pass := 0; pass < 5; pass++ {
+		descendants, err := r.Descendants(ctx, name)
+		if err != nil {
+			return err
+		}
+		if len(descendants) == 0 {
+			break
+		}
+		byName := make(map[string]*state.ConversationRecord, len(descendants))
+		for i := range descendants {
+			byName[descendants[i].Name] = &descendants[i]
+		}
+		for _, n := range convtask.CascadeOrder(name, descendants) {
+			m, ok := byName[n]
+			if !ok {
+				continue // the root itself, deleted last
+			}
+			if m.Phase != state.PhaseClosed {
+				if err := r.closeConversationReason(ctx, m, "the root conversation was deleted"); err != nil {
+					return err
+				}
+			}
+			if err := r.Conversations.Delete(ctx, state.Key(n)); err != nil && !errors.Is(err, state.ErrNotFound) {
+				return err
+			}
+		}
+	}
+	// Last look before the root goes: a straggler left means a retry, never an orphan.
+	left, err := r.Descendants(ctx, name)
+	if err != nil {
+		return err
+	}
+	if len(left) > 0 {
+		return fmt.Errorf("conversation %s still has %d member(s) after deletion; retrying", name, len(left))
+	}
+	if err := r.Conversations.Delete(ctx, state.Key(name)); err != nil && !errors.Is(err, state.ErrNotFound) {
+		return err
+	}
+	return nil
 }
 
 // ReopenConversation brings a closed conversation back to Idle.
