@@ -14,6 +14,9 @@ A sync command SHALL run its handler in the process that sent it and SHALL retur
 handler's result or refusal in the same call. It SHALL NOT use the bus transport and
 SHALL NOT create a task record.
 
+A sync command is not recorded, so a repeated command id SHALL run its handler again.
+A sync handler SHALL therefore be safe to run twice.
+
 The modes map onto the queue types the bus already has:
 
 - **regular** is a queue that declares no ordering key, so tasks of different keys are claimable in parallel.
@@ -32,6 +35,10 @@ modes only. A sync command is not a task and SHALL NOT appear in either.
 #### Scenario: A sync command refuses in the call
 - **WHEN** a command registered as sync is sent and its handler refuses it
 - **THEN** the same call returns the refusal and no state changed
+
+#### Scenario: A repeated sync command runs again
+- **WHEN** a sync command is sent twice with the same command id
+- **THEN** its handler runs twice, and nothing deduplicates the second
 
 #### Scenario: A sync command survives a bus outage
 - **WHEN** the bus transport cannot accept messages and a sync command is sent

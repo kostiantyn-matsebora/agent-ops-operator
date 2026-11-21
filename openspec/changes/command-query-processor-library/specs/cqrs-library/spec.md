@@ -66,7 +66,10 @@ response for a query. A trigger SHALL build the command or the query and SHALL r
 response. A handler SHALL receive a typed request and return a typed result.
 
 A command SHALL carry its kind, a command id the caller can repeat, an ordering key and
-a correlation id. A query SHALL carry its name, its parameters and a page request. A page request SHALL carry a limit and an offset.
+a correlation id.
+
+A query SHALL carry its name, its parameters and a page request. A page request SHALL
+carry a limit and an offset.
 
 A command response SHALL say whether the command succeeded or was accepted. A
 succeeded command SHALL carry its result. An accepted command SHALL carry the id of the
