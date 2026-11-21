@@ -16,7 +16,11 @@ A convoy queue per conversation already gives one message in flight, order, rede
 
 ## What Changes
 
-- **A convoy queue per conversation.** The key is the conversation name. A message is one input. The command id is the input id, so a repeated submit is a no-op.
+- **Inputs use the bus's convoy queue.** One in flight, order, dedup by command id and delayed redelivery are the Bus's, and #532 already builds them. This change adds only what is specific to conversations:
+  - a declared input family, durable and never dropped
+  - a redelivery wait longer than a run
+  - a purge when a conversation is deleted
+  - the manager and record side: claim from the queue in `/work`, settle in `/work/done`, and the migration
 - **`GET /work` claims from the conversation's convoy queue.** It no longer re-reads the record every 2 seconds. `POST /work/done` settles the claim.
 - **The runtime contract does not change.** Runtimes still long-poll `/work` and report to `/work/done`. No runtime changes.
 - **The hand-built protocol is retired.** `Conversation.Inputs` and `ProcessedInputIDs` leave the record. The compare-and-swap dispatch and the "nothing inflight" check go with them.
@@ -51,7 +55,7 @@ None.
 
 ### Modified Capabilities
 
-- `command-bus`: a durable convoy queue per conversation for inputs, with a claim, a delayed redelivery, and a purge when the conversation is deleted.
+- `command-bus`: the conversation input family is durable and never dropped, its redelivery wait outlives a run, and deleting a conversation purges its queue.
 - `state-store`: the conversation record holds no queue of inputs, and a settled input releases its payload.
 
 `conversation-capacity` and `console-application` do not change. "Nothing inflight and nothing queued" and the work queue view keep their behaviour. Only how they are derived changes, which is design and not spec.

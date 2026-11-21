@@ -7,11 +7,10 @@
 
 ## 2. The input family in the bus
 
-- [ ] 2.1 Declare `in.conversation` in the inventory with no time to live, an unbounded retry that never drops, and an ack wait longer than the runtime's run limit. Verify: an inventory test asserts each of the three.
+- [ ] 2.1 Declare `in.conversation` in the inventory with no time to live, an unbounded retry that never drops, and an ack wait longer than the runtime's run limit. The convoy queue behaviour itself is #532's. Verify: an inventory test asserts each of the three, and a test fails an input past the other queues' attempt limit and finds it still waiting.
 - [ ] 2.2 Keep the family's records in a bucket with no age limit. Verify: a test leaves an input past every other queue's retention and finds it waiting.
 - [ ] 2.3 Add `Purge(queue)` to the `Bus` interface and both backends. Verify: the conformance suite scenario passes on `memory` and `nats`, and a purge records no success.
-- [ ] 2.4 Make a failed delivery with a delay redeliver the same input without ending it. Verify: a conformance scenario fails an input past the other queues' attempt limit and finds it still waiting.
-- [ ] 2.5 Declare in the `memory` backend that inputs do not survive a restart, and refuse it above one replica as today. Verify: a test asserts the refusal and the docs line.
+- [ ] 2.4 Declare in the `memory` backend that inputs do not survive a restart, and refuse it above one replica as today. Verify: a test asserts the refusal and the docs line.
 
 ## 3. The manager on the queue
 

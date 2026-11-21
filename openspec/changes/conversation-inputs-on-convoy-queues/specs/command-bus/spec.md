@@ -1,26 +1,6 @@
 ## ADDED Requirements
 
-### Requirement: Conversation inputs are a durable convoy queue per conversation
-Each conversation SHALL have its own queue of inputs, named by the conversation.
-The queue SHALL deliver one input at a time and in the order they were submitted.
-It SHALL NOT delay or reorder another conversation's queue.
-
-An input SHALL be submitted once, with the input id as its command id. A second
-submit of the same input id SHALL NOT create a second input.
-
-#### Scenario: Inputs of one conversation run one at a time in order
-- **WHEN** three inputs are submitted to one conversation's queue and the first is claimed
-- **THEN** a second claim on that queue returns nothing until the first is settled, and then returns the second input
-
-#### Scenario: Two conversations do not wait for each other
-- **WHEN** two conversations each have an input waiting and one conversation's input is claimed and not settled
-- **THEN** the other conversation's input can be claimed
-
-#### Scenario: A repeated submit is one input
-- **WHEN** the same input id is submitted twice
-- **THEN** the queue holds one input and the second submit returns the first
-
-### Requirement: A conversation input is never dropped by the bus
+### Requirement: The conversation input family is durable and never dropped
 An input is a person's message and SHALL NOT be derivable from anything else.
 The bus SHALL keep an input until it is settled or its conversation is deleted.
 
