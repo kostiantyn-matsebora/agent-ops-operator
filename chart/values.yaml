@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
-  tag: 0.64.0
+  tag: 0.65.0
 
 # How many manager pods run at once. Safe above 1 now (durable-chat-ops-broker):
 # the Conversation reconciler claims an ensure-topic op on the Conversation CR
@@ -1111,7 +1111,9 @@ console:
     # waits out a refused manager connection instead of losing the send.
     # 0.44.0: the Open scope replaces All, the Closed badge counts unread roots
     # only, selection counts roots, and "Archive" reads "Closed".
-    tag: 0.44.0
+    # 0.45.0: the Queues work table pages, long titles clip with a hover tooltip,
+    # and the narrow columns stop wrapping.
+    tag: 0.45.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
