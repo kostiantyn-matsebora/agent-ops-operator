@@ -1,6 +1,7 @@
 ## 1. Inventory and spikes before any code
 
-- [ ] 1.1 Write the action table as `docs/contracts/actions.md`: every manager route, reconciler, sweep and timer, its kind, its trigger, its auth domain and its response today. Verify: a test lists the routes the mux serves and the reconcilers registered, and fails if one is missing from the table.
+- [ ] 1.1 Write the action table as `docs/contracts/actions.md`: every manager route, reconciler, sweep and timer, its kind, its trigger, its auth domain and its response today.
+  Verify: a test lists the routes the mux serves and the reconcilers registered, and fails if one is missing from the table.
 - [ ] 1.2 Spike a shared Go module in this repository: a tag with a `lib/<name>/` prefix, required from a component whose image builds from its own directory, with a `go.work` for local work. Verify: a throwaway Dockerfile build of one component resolves the module, and the answer is written in `design.md` D2.
 - [ ] 1.3 List every other Go component's actions and the commands and queries it sends to the manager. Verify: the list is written in `design.md` D8, and each component is named in task 6.1.
 - [ ] 1.4 Decide with the user whether the library includes the client side, and whether the processors take middleware. Verify: `design.md` D8 and the open questions are updated.
@@ -67,4 +68,5 @@
 - [ ] 9.2 Update `.claude/rules/structure.md` for the `lib/` group and the module rule, and `invariants.md` for the converted-verb row. Verify: a grep finds no stale claim.
 - [ ] 9.3 Add the `docs/CHANGELOG.md` entry under `[Unreleased]`. Verify: it names the library, the sync mode and each family moved.
 - [ ] 9.4 Adopter site: check `introduction.md`, `getting-started.md`, `installation.md` and `docs/guides/*`, and record the pages that needed no change. Verify: the list exists.
-- [ ] 9.5 Run `publication-guard.py --counts` and `retired-vocabulary-guard.py --counts`. Verify: both 0.
+- [ ] 9.5 Add `acceptAndEnqueue` to `.github/retired-vocabulary.json` with its replacement, the command processor. Verify: `retired-vocabulary-guard.py --counts` reports 0 and a grep finds no current claim of it.
+- [ ] 9.6 Run `publication-guard.py --counts` and `retired-vocabulary-guard.py --counts`. Verify: both 0.

@@ -170,10 +170,7 @@ These are Go types, independent of any port. Mapping them to a port, such as one
 
 ## Migration Plan
 
-1. Land the action table (`docs/contracts/actions.md`) and the spike results.
-2. Move the Bus into the library with no behaviour change, then release it.
-3. Add the sync mode and the query processor, then move the routes one family per release.
-4. A rollback works at any step, because no wire contract changes.
+D9 is the ordered sequence, and the spike results land before its first step. A rollback works at any step, because no wire contract changes.
 
 ## Open Questions
 
