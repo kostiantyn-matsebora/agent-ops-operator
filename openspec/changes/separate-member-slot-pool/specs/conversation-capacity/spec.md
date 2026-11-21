@@ -32,6 +32,10 @@ that it is deprecated.
 - **WHEN** the manager starts with the deprecated `MAX_RUNTIMES=8` and no `MAX_ACTIVE_CONVERSATIONS`
 - **THEN** the effective conversations cap is 8 and a deprecation notice is logged
 
+#### Scenario: The deprecated alias does not size the members pool
+- **WHEN** the manager starts with the deprecated `MAX_RUNTIMES=8`, no `MAX_ACTIVE_CONVERSATIONS` and no `MAX_ACTIVE_MEMBERS`
+- **THEN** the conversations cap is 8 and the members cap is 5
+
 #### Scenario: A full conversations pool does not block members
 - **WHEN** five conversations hold pods and a Coordinator root's `invoke` creates a member
 - **THEN** the member is admitted and gets a runtime pod

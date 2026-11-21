@@ -1,6 +1,6 @@
 ## 1. Manager: two pools — backend-developer
 
-- [ ] 1.1 Add `MAX_ACTIVE_MEMBERS` (default 5, invalid → 5) beside `maxActiveConversations()` in `cmd/manager/main.go`, add a `MaxActiveMembers` field to the reconciler and the HTTP server, and verify `cmd/manager` tests cover default, set and invalid values
+- [ ] 1.1 Add `MAX_ACTIVE_MEMBERS` (default 5, invalid → 5) beside `maxActiveConversations()` in `cmd/manager/main.go`, add a `MaxActiveMembers` field to the reconciler and the HTTP server, and verify `cmd/manager` tests cover default, set and invalid values, and that `MAX_RUNTIMES` sets only the conversations cap
 - [ ] 1.2 Add one pool classifier (`CausedBy` set means members, an unreadable conversation means conversations) and one helper splitting live pods and returning each pool's cap, and verify a unit test covers both classes and the unreadable case
 - [ ] 1.3 Scope `admit`, `waitingFIFO`, `evictableCount`, `evictIdleWorker` and the `createRuntimePod` re-check to the conversation's pool, and verify no remaining read of `MaxActiveConversations` outside the helper
 - [ ] 1.4 Scope the pod-deletion wake-up to the deleted pod's pool and its ceiling, and verify with a test that a freed member slot wakes a pending member
@@ -29,7 +29,7 @@
 
 ### 6.1 Reference docs
 
-- [ ] 6.1.1 `docs/concepts.md` Capacity section, `docs/configuration.md` Capacity table and the ephemeral-storage note, `docs/contracts.md` `/status`, `docs/console.md` ceiling row, and `.claude/rules/invariants.md` row naming `MAX_ACTIVE_CONVERSATIONS`
+- [ ] 6.1.1 `docs/concepts.md` Capacity section, `docs/configuration.md` Capacity table and the ephemeral-storage note, `docs/contracts.md` `/status`, `docs/console.md` ceiling row, and the `.claude/rules/invariants.md` row naming `MAX_ACTIVE_CONVERSATIONS`, which gains `MAX_ACTIVE_MEMBERS` beside it
 - [ ] 6.1.2 `docs/CHANGELOG.md` entry marking the capacity change as breaking-by-capacity with the upgrade step, and the metric relabel
 - [ ] 6.1.3 Re-run `python3 .github/scripts/docs-generate.py` and `python3 .github/scripts/retired-vocabulary-guard.py`, and verify both pass
 
