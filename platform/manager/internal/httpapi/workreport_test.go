@@ -220,3 +220,38 @@ func TestWorkDoneNeverReopensAClosedConversation(t *testing.T) {
 		t.Fatalf("the run's result is still worth recording even after close: %+v", got.Status.Runs)
 	}
 }
+
+// A pod still long-polling when /close landed must be handed nothing, even with
+// an input queued before the close. Dispatching it writes Working over Closed,
+// and Closed is sticky: the conversation never reads Closed again and its pod
+// runs on until its idle timeout. Measured on the manager-v0.65.0 release smoke
+// (TestReplicasTwoDeliversEveryConsoleThread): the pod ran a work unit one
+// second after the close, and the conversation never closed.
+func TestWorkIsNotServedToAClosedConversation(t *testing.T) {
+	s, _ := workReportServer(t)
+	conv := &agentopsv1alpha1.Conversation{}
+	if err := s.Client.Get(t.Context(), types.NamespacedName{Namespace: "agent-ops", Name: "conv-a"}, conv); err != nil {
+		t.Fatal(err)
+	}
+	now := metav1.Now()
+	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+	conv.Status.ClosedAt = &now
+	conv.Status.Inflight = nil
+	if err := s.Client.Status().Update(t.Context(), conv); err != nil {
+		t.Fatal(err)
+	}
+
+	unit, served, err := s.tryDispatch(t.Context(), "conv-a", "pod-a")
+	if err != nil || served {
+		t.Fatalf("a closed conversation serves no work, got served=%v err=%v unit=%+v", served, err, unit)
+	}
+
+	got := &agentopsv1alpha1.Conversation{}
+	if err := s.Client.Get(t.Context(), types.NamespacedName{Namespace: "agent-ops", Name: "conv-a"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != agentopsv1alpha1.ConversationClosed || got.Status.Inflight != nil {
+		t.Fatalf("polling must leave a closed conversation closed with nothing in flight, got phase %q inflight %+v",
+			got.Status.Phase, got.Status.Inflight)
+	}
+}

@@ -12,7 +12,7 @@ for the source and the reference material beside this file.
 
 ## [24.0.0] — 2026-11-21
 
-Images: manager 0.65.0, console 0.45.0. Every other image is unchanged.
+Images: manager 0.65.1, console 0.45.0. Manager 0.65.0 was never published. Every other image is unchanged.
 
 ### Added
 
@@ -45,6 +45,12 @@ Images: manager 0.65.0, console 0.45.0. Every other image is unchanged.
 
 ### Fixed
 
+- **A closed conversation no longer serves work, so it stays closed.** A runtime
+  pod still polling when `/close` landed, with an input queued before it, was
+  handed that input, and dispatching it wrote `Working` over `Closed`. Closed is
+  sticky until a reopen, so the conversation never read Closed again and its pod
+  ran on until its idle timeout. The work endpoint now answers nothing for a
+  closed conversation.
 - **A command bus that cannot accept messages no longer stops conversations
   from starting.** A reconcile posted to the chat channels (topics, the thread
   entries, member results) before it created the agent's pod, all on one
