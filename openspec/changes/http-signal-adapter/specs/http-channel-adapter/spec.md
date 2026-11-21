@@ -42,11 +42,11 @@ The endpoint is reply-only. A reply SHALL NOT start a conversation, and the adap
 - **THEN** the adapter returns `400`
 
 ### Requirement: Configuration faults surface on the Channel and stay isolated
-The adapter SHALL validate each Channel's `config` when it loads it. A missing target URL or one that is not `http` or `https` SHALL be reported on that Channel and its deliveries SHALL report `failed`. A fault on one Channel SHALL NOT affect another.
+The adapter SHALL validate each Channel's `config` when it loads it. A missing target URL or one that is not `http` or `https` SHALL be reported with `ready: false`, a `reason` and a `message` through `POST /channel/channels/{name}/status`, and its deliveries SHALL report `failed`. A fault on one Channel SHALL NOT affect another.
 
 #### Scenario: A bad target is reported
 - **WHEN** a Channel's target URL is missing
-- **THEN** the fault is reported on that Channel and another Channel keeps delivering
+- **THEN** the fault is reported through the status endpoint and another Channel keeps delivering
 
 ### Requirement: The adapter's page states the target and loop consequences
 `docs/integrations/http.md` SHALL state that the target URL is the only host the adapter dials, that egress policy should confine it, and that a receiver replying to every delivery can loop.

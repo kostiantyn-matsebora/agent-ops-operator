@@ -42,7 +42,7 @@ See proposal.md for motivation. `signals/alertmanager` and `signals/pulse` are t
 
 **D-12. Typed JSON out, not rendered text.** The adapter POSTs the typed message and does not compose presentation for a receiver it cannot know. The receiver owns rendering.
 
-**D-13. Delivery is get, ack, then done or failed.** A 2xx from the target is `done`. Any other status, a timeout or a transport error is `failed`. The adapter never re-sends after the ack, since a failure is final and the manager owns the cool-off.
+**D-13. Delivery is get, ack, deliver, then done or failed.** A 2xx from the target is `done`. Any other status, a timeout or a transport error is `failed`. The adapter never re-sends after the ack, since a failure is final and the manager owns the cool-off.
 
 **D-14. Replies are reply-only and per-channel authenticated.** `POST /reply/{channel}` needs the Channel's own bearer, a `threadId` and text. It forwards to `/channel/inbound`. The adapter never re-ingests its own outbound post, so a receiver echoing a message back is the owner's loop to avoid.
 
