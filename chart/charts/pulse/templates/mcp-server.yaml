@@ -49,6 +49,7 @@ spec:
       serviceAccountName: {{ . }}
       {{- end }}
       automountServiceAccountToken: false
+      {{- include "agentops.nodeSelector" (dict "own" $s.nodeSelector "global" .Values.global) | nindent 6 }}
       containers:
         - name: mcp-pulse
           image: {{ printf "%s:%s" $s.image.repository (toString $s.image.tag) | quote }}

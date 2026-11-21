@@ -40,6 +40,7 @@ spec:
       # It talks to Telegram and to two in-cluster Services. It has no reason
       # to reach the Kubernetes API, and no ServiceAccount token to do it with.
       automountServiceAccountToken: false
+      {{- include "agentops.nodeSelector" (dict "own" $r.nodeSelector "global" .Values.global) | nindent 6 }}
       containers:
         - name: router
           image: {{ printf "%s:%s" $r.image.repository (toString $r.image.tag) | quote }}

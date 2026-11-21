@@ -95,10 +95,7 @@ spec:
                   matchLabels:
                     app.kubernetes.io/name: agentops-commandbus
                 topologyKey: kubernetes.io/hostname
-      {{- with $v.nodeSelector }}
-      nodeSelector:
-{{ toYaml . | indent 8 }}
-      {{- end }}
+      {{- include "agentops.nodeSelector" (dict "own" $v.nodeSelector "global" $root.Values.global) | nindent 6 }}
       containers:
         - name: commandbus
           image: {{ if $v.image.digest }}{{ printf "%s:%s@%s" $v.image.repository $v.image.tag $v.image.digest | quote }}{{ else }}{{ printf "%s:%s" $v.image.repository $v.image.tag | quote }}{{ end }}

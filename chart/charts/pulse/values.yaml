@@ -346,6 +346,9 @@ mcp:
 # API, not the Kubernetes API, so none is rendered for it.
 mcpServer:
   enabled: false
+  # Where this pod runs. Empty uses global.agentops.platformNodeSelector, and a
+  # non-empty value REPLACES that one for this component.
+  nodeSelector: {}
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-mcp-pulse
     tag: "0.1.1"
