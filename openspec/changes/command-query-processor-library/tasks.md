@@ -12,7 +12,7 @@
 - [ ] 2.2 Move the `Bus` interface, the consumer pool, the `memory` backend and the conformance suite into the core, and the Watermill publisher, subscriber, convoy queue controller and records into the NATS backend. Verify: no code changes beyond imports, and every test in both modules passes.
 - [ ] 2.3 Point the manager at the library. Verify: the manager builds and its full suite passes, including envtest.
 - [ ] 2.4 Run the conformance suite on `memory` and on `nats`, and the three-node cluster test, from the library. Verify: the results match the results before the move.
-- [ ] 2.5 Define the base command, query and the two responses in the core, with `Kind`, `Key`, `CommandID` and `ErrorCode` reused as they are. Verify: unit tests build each contract, and a response with both a result and an error is refused.
+- [ ] 2.5 Define the base command, query and the two responses in the core, with `Kind`, `Key`, `CommandID` and `ErrorCode` reused as they are. Verify: unit tests build each contract, a response with both a result and an error is refused, a page request carries a limit and an offset, and an error code outside the closed set of seven is refused.
 - [ ] 2.6 Release the library with a tag and make the manager require that version. Verify: an image build of the manager resolves it with no `go.work`.
 
 ## 3. The synchronous scenario

@@ -112,7 +112,7 @@ A reconciler's controller-runtime `Reconcile` becomes the trigger. It calls the 
 
 `GET /work` changes state, because it sets the inflight run. So it is a command, whatever its HTTP verb is. `GET /channel/ops` reads without changing, so it is a query.
 
-The table is a first draft, grouped. The first task writes the exact table for routes, reconcilers, sweeps and timers, with each route's response today, before any code changes.
+The table is a first draft, grouped. The table lives in `docs/contracts/actions.md`, a new page beside the other contract pages and linked from `docs/contracts.md`, which keeps owning the manager's HTTP endpoints. The first task writes the exact table for routes, reconcilers, sweeps and timers, with each route's response today, before any code changes.
 
 ### D8. The client side of a component
 

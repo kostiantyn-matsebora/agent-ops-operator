@@ -14,8 +14,16 @@ A sync command SHALL run its handler in the process that sent it and SHALL retur
 handler's result or refusal in the same call. It SHALL NOT use the bus transport and
 SHALL NOT create a task record.
 
-The regular, convoy and hand-over modes SHALL behave as they do without this
-requirement.
+The modes map onto the queue types the bus already has:
+
+- **regular** is a queue that declares no ordering key, so tasks of different keys are claimable in parallel.
+- **convoy** is a queue that declares an ordering key, so tasks sharing a key are serialized.
+- **hand-over** is a queue an adapter reads with peek and acknowledge.
+
+These modes SHALL behave as they do without this requirement.
+
+The requirements on task states and on the task log apply to the asynchronous
+modes only. A sync command is not a task and SHALL NOT appear in either.
 
 #### Scenario: A sync command returns the handler's result
 - **WHEN** a command registered as sync is sent and its handler succeeds

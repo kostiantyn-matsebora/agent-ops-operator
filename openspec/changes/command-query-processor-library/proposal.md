@@ -56,7 +56,7 @@ The design settles each. None is guessed here.
 | The message contracts | new types in the core, reusing the Bus's `Kind`, `Key`, `CommandID` and `ErrorCode` |
 | `.github/components.sh` | `lib/` is a module that is not an image, like `test/` |
 | Module releases | the library needs its own version and tag |
-| `docs/` reference | `contracts.md`, `concepts.md`, `testing.md`, `CHANGELOG.md` |
+| `docs/` reference | `contracts.md`, `concepts.md`, `testing.md`, `CHANGELOG.md`, and the new `docs/contracts/actions.md` |
 | `.claude/rules/` | `structure.md` (the new group), `invariants.md` (the converted-verb row) |
 | Adopter site | `introduction.md`, `getting-started.md`, `installation.md` and `docs/guides/*` describe no route. The documentation task checks each and records that |
 
