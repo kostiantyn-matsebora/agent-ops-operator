@@ -204,7 +204,7 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 	b.adapterStateKV, b.conversations, b.signals, b.cooldowns, b.receipts, b.adapterState = adapterStateKV, conversations, signalsColl, cooldowns, receipts, adapterState
 	b.runsKV, b.blobsStore = runsKV, blobsStore
 	b.runsMirrorStop = runsAppended.items.stop
-	owned := &children{conversations: conversations, runsKV: runsKV, blobs: blobsStore, now: time.Now}
+	owned := &children{conversations: conversations, runsKV: runsKV, runs: runsAppended, runLimit: runsAppended.limit, blobs: blobsStore, now: time.Now}
 	b.owned = owned
 	conversations.onRemoved = owned.removed
 	b.sweeps = []interface{ Run(context.Context) }{signalsExpiring, sweepEvery{owned, cfg.orphanInterval}}

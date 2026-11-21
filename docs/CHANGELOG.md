@@ -12,6 +12,14 @@ for the source and the reference material beside this file.
 
 ### Fixed
 
+- **Reading a conversation's runs no longer creates a NATS consumer per
+  call.** Each read, trim and cascade listed the runs bucket's keys, which makes
+  the server create and delete a consumer. During a disturbance a quarter of
+  those never delivered, so a reconcile almost never completed, and the dead
+  consumers piled up (637 on one stream). The runs are now served from a
+  watch-fed mirror, like the conversation records. The orphan sweep also
+  trims a conversation holding more than its ten runs back to ten, which clears
+  what failed trims left behind.
 - **The manager's watch on the state store backs off instead of retrying every
   second.** A mirror whose watch could not be opened retried once a second,
   per bucket and per replica, and every attempt that timed out could leave a

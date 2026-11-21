@@ -116,6 +116,24 @@ func (a *appended[P, T]) listItemEntries(ctx context.Context, parent state.Key) 
 	return out, nil
 }
 
+// wireKeysUnder lists the wire keys of the run items whose key starts with
+// prefix ("" for all), from the mirror, once it has seen the bucket's latest
+// write. The cascade and the sweep read through it.
+func (a *appended[P, T]) wireKeysUnder(ctx context.Context, prefix string) ([]string, error) {
+	st, err := a.js.Stream(ctx, a.streamName)
+	if err != nil {
+		return nil, fmt.Errorf("nats: list %s: %w", a.decl.Name, err)
+	}
+	if err := a.items.waitCaughtUpTo(ctx, st.CachedInfo().State.LastSeq); err != nil {
+		return nil, fmt.Errorf("nats: list %s: %w", a.decl.Name, err)
+	}
+	var keys []string
+	for k := range a.items.withPrefix(prefix) {
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
 // Grow applies edit to the item with identity id by the declaration's
 // Merge, retrying on a conflicting concurrent write (design D-5: never
 // surfaced to the caller). An edit the item already satisfies writes
