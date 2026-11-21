@@ -31,9 +31,9 @@ var handoverScenarios = []struct {
 	{"a racing acknowledgement hands over once", testHandoverRacingAck},
 }
 
-func countEntries(b Backing, typ entrylog.Type) int {
+func countEntries(t *testing.T, b Backing, typ entrylog.Type) int {
 	n := 0
-	for _, e := range b.Entries() {
+	for _, e := range logOf(t, b).Entries() {
 		if e.Type == typ {
 			n++
 		}
@@ -65,7 +65,7 @@ func testHandoverReadChangesNothing(t *testing.T, open func() Backing, d command
 			t.Fatalf("read %d = %+v, want both messages, oldest first, unclaimed", i, got)
 		}
 	}
-	if after := b.Entries(); len(after) != len(before) {
+	if after := logOf(t, b).Entries(); len(after) != len(before) {
 		t.Fatalf("reading appended %d entries; a read must change nothing", len(after)-len(before))
 	}
 	if limited, _ := bus.Peek(ctx, queue, 1); len(limited) != 1 {
@@ -109,7 +109,7 @@ func testHandoverAckIsIdempotent(t *testing.T, open func() Backing, d commandbus
 	if two.UID != one.UID || two.Lease == nil || two.Lease.Token != one.Lease.Token {
 		t.Fatalf("a repeated acknowledgement must read the first lease back: %+v vs %+v", one.Lease, two.Lease)
 	}
-	if n := countEntries(b, entrylog.TypeClaimed); n != 1 {
+	if n := countEntries(t, b, entrylog.TypeClaimed); n != 1 {
 		t.Fatalf("the message was handed over %d times, want once", n)
 	}
 	// The report is accepted through the handle that did not acknowledge.
@@ -156,11 +156,11 @@ func testHandoverDoneRemoves(t *testing.T, open func() Backing, d commandbus.Dec
 	acked, err := bus.Acknowledge(ctx, queue, "cmd-a", "adapter")
 	mustNoErr(t, err, "Acknowledge")
 	mustNoErr(t, bus.Settle(ctx, acked.UID, acked.Lease.Token), "Settle")
-	b.Compact()
+	logOf(t, b).Compact()
 	if _, err := bus.GetTask(ctx, acked.UID); !errors.Is(err, commandbus.ErrNotFound) {
 		t.Fatalf("a consumed message is removed, GetTask = %v", err)
 	}
-	if left := b.Entries(); len(left) != 0 {
+	if left := logOf(t, b).Entries(); len(left) != 0 {
 		t.Fatalf("the consumed message's entries remain: %v", entryTypes(left))
 	}
 	if got := peekAll(t, ctx, bus, queue); len(got) != 0 {
@@ -260,7 +260,7 @@ func testHandoverRacingAck(t *testing.T, open func() Backing, d commandbus.Decla
 			t.Fatalf("racing acknowledgements saw different leases: %v", tokens)
 		}
 	}
-	if n := countEntries(b, entrylog.TypeClaimed); n != 1 {
+	if n := countEntries(t, b, entrylog.TypeClaimed); n != 1 {
 		t.Fatalf("a racing acknowledgement handed over %d times, want once", n)
 	}
 }

@@ -23,9 +23,10 @@ import (
 // call that appended it returned.
 func entriesEventually(t *testing.T, b Backing, n int) []entrylog.Entry {
 	t.Helper()
+	logOf(t, b)
 	deadline := time.Now().Add(scenarioTimeout)
 	for {
-		got := b.Entries()
+		got := logOf(t, b).Entries()
 		if len(got) >= n || time.Now().After(deadline) {
 			return got
 		}
@@ -94,8 +95,8 @@ func testNothingIsRewritten(t *testing.T, open func() Backing, d commandbus.Decl
 	}
 
 	mustNoErr(t, bus.Settle(ctx, again.UID, again.Lease.Token), "Settle")
-	b.Compact()
-	if left := b.Entries(); len(left) != 0 {
+	logOf(t, b).Compact()
+	if left := logOf(t, b).Entries(); len(left) != 0 {
 		t.Fatalf("a consumed task left %d entries in the log: %v", len(left), entryTypes(left))
 	}
 }
@@ -156,7 +157,7 @@ func testSubmitIsOneWriteUnderARacingConsumer(t *testing.T, open func() Backing,
 	// Every task was consumed, so the log holds none of their entries; what a
 	// racing consumer could never do is append one twice or rewrite it.
 	seen := map[string]int{}
-	for _, e := range b.Entries() {
+	for _, e := range logOf(t, b).Entries() {
 		seen[fmt.Sprintf("%s/%s/%d/%s", e.UID, e.Type, e.Attempt, e.Token)]++
 	}
 	for entry, n := range seen {
@@ -245,7 +246,7 @@ func testLapsedLeaseRedeliversWithNoWrite(t *testing.T, open func() Backing, d c
 	if err := bus.Settle(ctx, claimed.UID, claimed.Lease.Token); err != commandbus.ErrLeaseLost {
 		t.Fatalf("Settle under the lapsed lease = %v, want ErrLeaseLost", err)
 	}
-	if after := b.Entries(); !reflect.DeepEqual(after, before) {
+	if after := logOf(t, b).Entries(); !reflect.DeepEqual(after, before) {
 		t.Fatalf("a lapse and a refused completion wrote entries: %d before, %d after", len(before), len(after))
 	}
 

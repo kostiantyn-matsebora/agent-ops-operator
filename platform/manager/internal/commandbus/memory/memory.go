@@ -115,3 +115,7 @@ func Open(opts ...Option) commandbus.Bus { return New(opts...).Bus() }
 type handle struct{ s *store }
 
 var _ commandbus.Bus = (*handle)(nil)
+
+// EnforcesInvocationCap marks this backend as one that enforces a queue's
+// per-invocation in-flight cap, which the shared suite then checks.
+func (b *Backing) EnforcesInvocationCap() {}

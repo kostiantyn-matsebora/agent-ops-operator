@@ -10,6 +10,26 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **The command bus delivers with plain JetStream and a sequential convoy.**
+  A message is stored once and its task is a record. Order per key comes from
+  a temporary convoy queue per key with one consumer and one message in flight,
+  and redelivery from the broker's own acknowledgement wait. Accepting work no
+  longer waits on any consumer's view, which is what stopped every producer when
+  a replica's view stalled. Delivery mode is configuration per message type, so
+  a new type needs a routing entry and no change to the bus. The `Bus` interface
+  is unchanged. The per-invocation in-flight cap of the `conv` queue is dropped.
+  The consumer pool's concurrency bounds parallel handlers.
+- **A message is never processed for ever.** `commandBus.handlerTimeout`
+  (default `5m`, `COMMANDBUS_HANDLER_TIMEOUT`) bounds each message. At the
+  deadline the handler's context is cancelled and the attempt fails with a
+  retryable code. While a handler runs, the pool keeps its lease alive.
+- **The earlier bus's streams are deleted by the manager.** On start the bus
+  deletes `<scope>_cmdbus_log` and `<scope>_cmdbus_dead` if they exist, and logs
+  which it removed. Nothing reads them any more. What they held, work accepted
+  but not yet run by the earlier backend, is not handed to the new one.
+
 ### Fixed
 
 - **The manager's watch on the state store backs off instead of retrying every
