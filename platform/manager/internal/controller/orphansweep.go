@@ -38,6 +38,11 @@ type OrphanSweeper struct {
 	Client        client.Client
 	Conversations state.Collection[state.ConversationRecord]
 	Namespace     string
+	// LegacyConfigMapNamespaces are further namespaces whose MCP ConfigMaps are
+	// swept too, and nothing else in them: an earlier release built them in the
+	// control namespace, before runtime workloads moved to their own, and no
+	// reconciler looks there any more. Empty when the two namespaces are one.
+	LegacyConfigMapNamespaces []string
 	// Interval is the period between sweeps; zero means
 	// DefaultOrphanSweepInterval.
 	Interval time.Duration
@@ -102,8 +107,20 @@ func (s *OrphanSweeper) sweepPods(ctx context.Context, now time.Time) (int, erro
 
 func (s *OrphanSweeper) sweepConfigMaps(ctx context.Context, now time.Time) (int, error) {
 	deleted := 0
+	for _, ns := range append([]string{s.Namespace}, s.LegacyConfigMapNamespaces...) {
+		n, err := s.sweepConfigMapsIn(ctx, now, ns)
+		deleted += n
+		if err != nil {
+			return deleted, err
+		}
+	}
+	return deleted, nil
+}
+
+func (s *OrphanSweeper) sweepConfigMapsIn(ctx context.Context, now time.Time, namespace string) (int, error) {
+	deleted := 0
 	cms := &corev1.ConfigMapList{}
-	if err := s.Client.List(ctx, cms, client.InNamespace(s.Namespace)); err != nil {
+	if err := s.Client.List(ctx, cms, client.InNamespace(namespace)); err != nil {
 		return deleted, err
 	}
 	prefix := convMCPConfigMapName("")

@@ -522,6 +522,8 @@ func main() {
 			Conversations: stores.Conversations,
 			// Pods and MCP ConfigMaps both render in CONVERSATIONS.
 			Namespace: namespaces.Conversations,
+			// A release from before the split left ConfigMaps in CONTROL.
+			LegacyConfigMapNamespaces: legacyConfigMapNamespaces(namespaces),
 		}); err != nil {
 			setupLog.Error(err, "orphan sweeper")
 			os.Exit(1)
@@ -660,4 +662,14 @@ func main() {
 		setupLog.Error(err, "run")
 		os.Exit(1)
 	}
+}
+
+// legacyConfigMapNamespaces is where an earlier release built MCP ConfigMaps
+// that the sweep must still look at: the control namespace, when it is not the
+// conversations one. Equal namespaces need no second look.
+func legacyConfigMapNamespaces(ns namespace.Namespaces) []string {
+	if ns.Control == ns.Conversations {
+		return nil
+	}
+	return []string{ns.Control}
 }

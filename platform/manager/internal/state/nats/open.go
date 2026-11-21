@@ -2,6 +2,7 @@ package nats
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -23,6 +24,30 @@ const (
 	bucketAdapterState  = "adapterstate"
 	objectStoreBlobs    = "blobs"
 )
+
+// legacyBuckets are buckets an earlier release created and no code opens now:
+// the command bus once kept its tasks, id marks and dead letters in KV buckets
+// before it moved to append-only logs. Nothing reads or writes them, so
+// nothing would ever remove them: opening the stores does. The list is closed
+// and names only those three, never "anything not in the inventory".
+var legacyBuckets = []string{"tasks", "ids", "dead"}
+
+// retireLegacyBuckets deletes each legacy bucket that exists and reports the
+// ones it removed. A bucket that is not there is the normal case.
+func (b *Backend) retireLegacyBuckets(ctx context.Context) ([]string, error) {
+	var removed []string
+	for _, base := range legacyBuckets {
+		err := b.conn.js.DeleteKeyValue(ctx, bucketName(b.scope, base))
+		switch {
+		case err == nil:
+			removed = append(removed, bucketName(b.scope, base))
+		case errors.Is(err, jetstream.ErrBucketNotFound):
+		default:
+			return removed, fmt.Errorf("nats: retire legacy bucket %q: %w", base, err)
+		}
+	}
+	return removed, nil
+}
 
 // Option adjusts how OpenStores opens a collection.
 type Option func(*openConfig)
@@ -96,7 +121,10 @@ type Backend struct {
 	adapterState   *collection[string]
 	runsKV         jetstream.KeyValue
 	runsMirrorStop func() // ends the runs items mirror's watch
-	blobsStore     jetstream.ObjectStore
+
+	// Retired names the legacy buckets this open removed, for the manager to log.
+	Retired    []string
+	blobsStore jetstream.ObjectStore
 
 	sweeps []interface{ Run(context.Context) }
 
@@ -208,6 +236,9 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 	b.owned = owned
 	conversations.onRemoved = owned.removed
 	b.sweeps = []interface{ Run(context.Context) }{signalsExpiring, sweepEvery{owned, cfg.orphanInterval}}
+	// Best effort: a bucket that could not be removed now is removed on the next
+	// open, and must never keep the stores from opening.
+	b.Retired, _ = b.retireLegacyBuckets(ctx)
 	return b, nil
 }
 

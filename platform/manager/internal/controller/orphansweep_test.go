@@ -127,3 +127,48 @@ func TestOrphanSweeperDeletesOnlyWorkloadsWhoseRecordIsGone(t *testing.T) {
 		}
 	}
 }
+
+// An MCP ConfigMap left in the control namespace by a release from before the
+// namespaces were split is swept too, once its record is gone. Nothing else in
+// that namespace is touched, pods included.
+func TestOrphanSweeperAlsoSweepsConfigMapsLeftInTheControlNamespace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := agentopsv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	old := metav1.NewTime(time.Now().Add(-time.Hour))
+	const control = "control-ns"
+	cm := func(conv string) *corev1.ConfigMap {
+		return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name: convMCPConfigMapName(conv), Namespace: control, CreationTimestamp: old}}
+	}
+	unrelatedPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "manager", Namespace: control, CreationTimestamp: old,
+		Labels: map[string]string{runtimepod.LabelConversation: "gone"}}}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithRuntimeObjects(claimTestConv("live"), cm("live"), cm("gone"), unrelatedPod).Build()
+
+	s := &OrphanSweeper{Client: c, Conversations: claimStore(c), Namespace: claimTestNS,
+		LegacyConfigMapNamespaces: []string{control}}
+	if _, err := s.Sweep(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	has := func(obj client.Object, name string) bool {
+		err := c.Get(context.Background(), client.ObjectKey{Namespace: control, Name: name}, obj)
+		return err == nil
+	}
+	if has(&corev1.ConfigMap{}, convMCPConfigMapName("gone")) {
+		t.Error("an orphaned ConfigMap in the control namespace survives the sweep")
+	}
+	if !has(&corev1.ConfigMap{}, convMCPConfigMapName("live")) {
+		t.Error("a ConfigMap whose record exists was swept")
+	}
+	if !has(&corev1.Pod{}, "manager") {
+		t.Error("a pod in the control namespace was swept: only ConfigMaps are swept there")
+	}
+}
