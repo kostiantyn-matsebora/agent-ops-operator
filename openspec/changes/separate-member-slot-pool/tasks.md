@@ -29,11 +29,11 @@
 
 ### 6.1 Reference docs
 
-- [ ] 6.1.1 `docs/concepts.md` Capacity section, `docs/configuration.md` Capacity table and the ephemeral-storage note, `docs/contracts.md` `/status`, `docs/console.md` ceiling row, and the `.claude/rules/invariants.md` row naming `MAX_ACTIVE_CONVERSATIONS`, which gains `MAX_ACTIVE_MEMBERS` beside it
-- [ ] 6.1.2 `docs/CHANGELOG.md` entry marking the capacity change as breaking-by-capacity with the upgrade step, and the metric relabel
-- [ ] 6.1.3 Re-run `python3 .github/scripts/docs-generate.py` and `python3 .github/scripts/retired-vocabulary-guard.py`, and verify both pass
+- [x] 6.1.1 `docs/concepts.md` Capacity section, `docs/configuration.md` Capacity table and the ephemeral-storage note, `docs/contracts.md` `/status`, `docs/console.md` ceiling row, and the `.claude/rules/invariants.md` row naming `MAX_ACTIVE_CONVERSATIONS`, which gains `MAX_ACTIVE_MEMBERS` beside it
+- [x] 6.1.2 `docs/CHANGELOG.md` entry marking the capacity change as breaking-by-capacity with the upgrade step, and the metric relabel
+- [x] 6.1.3 Re-run `python3 .github/scripts/docs-generate.py` and `python3 .github/scripts/retired-vocabulary-guard.py`, and verify both pass
 
 ### 6.2 Adopter site
 
-- [ ] 6.2.1 `docs/installation.md` values row, `docs/getting-started.md` and the landing page where a slot count is stated, and the Coordinator guide under `docs/guides/` naming that a member holds a slot of its own pool
-- [ ] 6.2.2 Re-run `npm run screenshots` and `npm run demo` in `platform/console/ui` for the Queues change, and run `python3 .github/scripts/publication-guard.py`
+- [x] 6.2.1 `docs/installation.md` values row, `docs/getting-started.md` and the landing page where a slot count is stated, and the Coordinator guide under `docs/guides/` naming that a member holds a slot of its own pool
+- [x] 6.2.2 Re-run `npm run screenshots` and `npm run demo` in `platform/console/ui` for the Queues change, and run `python3 .github/scripts/publication-guard.py`
