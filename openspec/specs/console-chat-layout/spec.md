@@ -132,18 +132,18 @@ column SHALL scroll sideways.
 - **THEN** the list fills it, and opening a conversation shows the thread with a control back to the list
 
 ### Requirement: Closed conversations are reached through Closed only
-The Conversations view SHALL NOT offer a control that includes closed conversations in any scope but Closed. Open, Working, Mine, Errored and every Pipeline and Coordinator scope SHALL exclude closed conversations always. Closed SHALL show closed conversations only.
+The Conversations view SHALL NOT offer a control that includes closed conversations in any scope but Closed. Open, Working, Mine, Errored and every Pipeline and Coordinator scope SHALL exclude closed conversations always. Closed SHALL be the only scope showing closed conversations.
 
-The view SHALL NOT read or write a "show closed" preference, and a value left by an earlier version SHALL be ignored.
+The "show closed" preference was removed. The view SHALL NOT read or write it, and any value left by an earlier version SHALL be ignored.
 
 #### Scenario: No scope offers a closed toggle
 - **WHEN** the operator selects any scope
-- **THEN** the list header carries no "Show closed" control
+- **THEN** the list header carries no "Show closed" control, which was removed
 
 #### Scenario: A closed conversation is not in Working
 - **WHEN** a conversation is closed while its last run was Working
 - **THEN** it appears under Closed and under no other scope
 
-#### Scenario: A stored preference is ignored
+#### Scenario: A value from the removed preference is ignored
 - **WHEN** the browser holds a "show closed" value from an earlier version
 - **THEN** the view behaves as if it were absent and every scope but Closed excludes closed conversations
