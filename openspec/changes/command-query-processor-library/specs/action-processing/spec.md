@@ -14,7 +14,7 @@ SHALL return state and SHALL NOT change any.
 The kind of an action SHALL NOT depend on its trigger. An HTTP route, a reconcile
 loop, a sweep, a timer and a queue message are triggers.
 
-The actions and the trigger of each SHALL be written down in one place.
+The actions and the trigger of each SHALL be written down in the action table, `docs/contracts/actions.md`. A test SHALL compare the table with the routes the manager serves and the reconcilers it registers, and SHALL fail on any action missing from the table.
 
 #### Scenario: A query changes nothing
 - **WHEN** any query is executed repeatedly with the same arguments
@@ -26,7 +26,7 @@ The actions and the trigger of each SHALL be written down in one place.
 
 #### Scenario: A new action has a kind
 - **WHEN** an action is added
-- **THEN** the table names its kind and its trigger, and the build fails if it does not
+- **THEN** `docs/contracts/actions.md` names its kind and its trigger, and the table test fails if it does not
 
 ### Requirement: A trigger only calls a processor
 A trigger SHALL build the request, call the command processor or the query processor,

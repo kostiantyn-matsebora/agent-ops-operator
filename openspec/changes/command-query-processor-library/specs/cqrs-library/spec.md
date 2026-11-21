@@ -8,7 +8,7 @@ processor.
 
 ### Requirement: The core of the library has no third-party dependency
 The library's core SHALL import only the standard library. Anything that needs a
-third-party package, such as the NATS backend and Watermill, SHALL be a separate
+third-party package, such as a NATS backend or a third-party messaging package, SHALL be a separate
 module.
 
 A component that imports only the core SHALL NOT gain a third-party dependency from it.
@@ -52,6 +52,10 @@ A query SHALL NOT be delivered through the bus, retried or recorded as a task.
 A component SHALL use the library through its published module path. A component
 SHALL NOT import another component's `internal` package.
 
+#### Scenario: A cross-component internal import fails the build
+- **WHEN** a component imports another component's `internal` package
+- **THEN** a check fails and names the import
+
 #### Scenario: The library is a versioned module
 - **WHEN** a component requires the library
 - **THEN** it requires a tagged version, and a local build may use a workspace file that no image build reads
@@ -71,7 +75,7 @@ task to read back. A refusal SHALL carry an error and SHALL NOT carry a result.
 A query response SHALL carry its data and the page it returns, with the total. A
 refusal SHALL carry an error and SHALL NOT carry data.
 
-An error SHALL carry a code from one closed set and a detail.
+An error SHALL carry a code and a detail. The code SHALL be one of: `not_found`, `precondition_failed`, `forbidden`, `conflict`, `unavailable`, `invalid_command`, `internal`.
 
 #### Scenario: A sync command response carries its result
 - **WHEN** a sync command succeeds

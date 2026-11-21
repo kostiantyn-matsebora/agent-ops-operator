@@ -1,3 +1,8 @@
+## Purpose
+
+The command bus gives a component one way to run a command, now in the calling
+process or later through a queue, by the delivery mode its type is registered with.
+
 ## ADDED Requirements
 
 ### Requirement: The bus has a synchronous scenario beside its asynchronous ones
