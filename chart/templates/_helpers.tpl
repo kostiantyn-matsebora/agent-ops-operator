@@ -215,10 +215,12 @@ and fails its runs naming the choices when there are several. */ -}}
 {{- $env := list
   (dict "name" "OLLAMA_URL" "value" $endpoint)
   (dict "name" "OLLAMA_MODEL" "value" ($v.model | default "" | toString))
-  (dict "name" "OLLAMA_NUM_CTX" "value" ($v.numCtx | default 8192 | toString))
+  (dict "name" "OLLAMA_NUM_CTX" "value" ($v.numCtx | default (include "agentops.limit" (dict "v" $v "key" "contextWindow")) | default 8192 | toString))
   (dict "name" "OLLAMA_KEEP_ALIVE" "value" ($v.keepAlive | default "10m" | toString)) -}}
+{{- $maxOut := include "agentops.limit" (dict "v" $v "key" "maxOutputTokens") -}}
+{{- if $maxOut }}{{ $env = append $env (dict "name" "OLLAMA_NUM_PREDICT" "value" $maxOut) }}{{ end -}}
 {{- range ($v.env | default list) }}{{ $env = append $env . }}{{ end -}}
-{{- $entry := omit $v "enabled" "global" "endpoint" "model" "numCtx" "keepAlive" "env" -}}
+{{- $entry := omit $v "enabled" "global" "endpoint" "model" "numCtx" "keepAlive" "env" "contextWindow" "maxOutputTokens" -}}
 {{- $_ := set $entry "env" $env -}}
 {{- toYaml $entry -}}
 {{- end -}}
@@ -258,6 +260,10 @@ own CR and for the parent's `default` copy, so both carry identical env. */ -}}
   (dict "name" "PI_PROVIDER" "value" ($provider | toString))
   (dict "name" "PI_MODEL" "value" ($model | toString))
   (dict "name" "PI_CODE_ENABLED" "value" ((ternary $v.piCode true (hasKey $v "piCode")) | toString)) -}}
+{{- $window := include "agentops.limit" (dict "v" $v "key" "contextWindow") -}}
+{{- if $window }}{{ $generated = append $generated (dict "name" "PI_CONTEXT_WINDOW" "value" $window) }}{{ end -}}
+{{- $maxOut := include "agentops.limit" (dict "v" $v "key" "maxOutputTokens") -}}
+{{- if $maxOut }}{{ $generated = append $generated (dict "name" "PI_MAX_TOKENS" "value" $maxOut) }}{{ end -}}
 {{- $cred := $v.credentialsSecret | default dict -}}
 {{- if $cred.name }}{{ $generated = append $generated (dict "name" ($cred.envName | default "PI_API_KEY") "valueFrom" (dict "secretKeyRef" (dict "name" $cred.name "key" ($cred.key | default "apiKey")))) }}{{ end -}}
 {{- /* `pi.env` is laid OVER the generated entries: a name it states REPLACES the generated one, so the list never carries a name twice (a duplicate breaks server-side apply). */ -}}
@@ -267,9 +273,19 @@ own CR and for the parent's `default` copy, so both carry identical env. */ -}}
 {{- $env := list -}}
 {{- range $g := $generated }}{{ if not (has $g.name $userNames) }}{{ $env = append $env $g }}{{ end }}{{ end -}}
 {{- range $user }}{{ $env = append $env . }}{{ end -}}
-{{- $entry := omit $v "enabled" "global" "provider" "model" "env" "credentialsSecret" "piCode" -}}
+{{- $entry := omit $v "enabled" "global" "provider" "model" "env" "credentialsSecret" "piCode" "contextWindow" "maxOutputTokens" -}}
 {{- $_ := set $entry "env" $env -}}
 {{- toYaml $entry -}}
+{{- end -}}
+
+{{- /* A MODEL LIMIT (`contextWindow`, `maxOutputTokens`), the bundle's own value
+winning over `global.agentops.runtimeDefaults`. Returns the number as text, or
+EMPTY when neither is set — unset keeps each runtime's own behaviour. Call with
+`(dict "v" <the bundle's values> "key" "<name>")`. */ -}}
+{{- define "agentops.limit" -}}
+{{- $d := dig "agentops" "runtimeDefaults" dict (.v.global | default dict) -}}
+{{- $val := index .v .key | default (index $d .key) -}}
+{{- if $val }}{{ int64 $val }}{{ end -}}
 {{- end -}}
 
 {{- define "agentops.declaredRuntimes" -}}
@@ -287,6 +303,7 @@ its first render passed every test but this guard, which reported "(none)". */ -
 {{- $bv := index $root.Values $key -}}
 {{- if and $bv $bv.enabled -}}
 {{- $entry := omit $bv "enabled" "global" -}}
+{{- if has $key (list "claude" "claude-cli" "copilot") -}}{{- range $k := list "contextWindow" "maxOutputTokens" -}}{{- if index $bv $k -}}{{- fail (printf "%s.%s is set, but the %s runtime has no setting to carry it — its vendor SDK offers none; set it on pi or ollama, or in global.agentops.runtimeDefaults (which only runtimes that support it read)" $key $k $key) -}}{{- end -}}{{- end -}}{{- end -}}
 {{- if eq $key "ollama" -}}{{- $entry = fromYaml (include "agentops.ollamaRuntimeEntry" $bv) -}}{{- end -}}
 {{- if eq $key "copilot" -}}{{- $entry = fromYaml (include "agentops.copilotRuntimeEntry" $bv) -}}{{- end -}}
 {{- if eq $key "pi" -}}{{- $entry = fromYaml (include "agentops.piRuntimeEntry" $bv) -}}{{- end -}}

@@ -4529,3 +4529,52 @@ func TestCommandBusEmptyReceiptListRendersExplicitlyEmpty(t *testing.T) {
 		t.Fatalf("the command bus backend default must be unchanged:\n%s", deploy)
 	}
 }
+
+// The model limits reach each runtime that has a setting for them: the bundle's
+// own value over the release-wide default, and unset keeps today's behaviour.
+func TestModelLimitsReachPiAndOllamaEnv(t *testing.T) {
+	pi := []string{"--set", "pi.enabled=true", "--set", "pi.provider=anthropic", "--set", "pi.model=m"}
+	unset := findDocByKindAndMetaName(helmTemplate(t, pi...), "AgentRuntime", "pi")
+	if strings.Contains(unset, "PI_CONTEXT_WINDOW") || strings.Contains(unset, "PI_MAX_TOKENS") {
+		t.Errorf("unset limits must render no env:\n%s", unset)
+	}
+	def := findDocByKindAndMetaName(helmTemplate(t, append(pi,
+		"--set", "global.agentops.runtimeDefaults.contextWindow=1000000",
+		"--set", "global.agentops.runtimeDefaults.maxOutputTokens=64000")...), "AgentRuntime", "pi")
+	for _, want := range []string{"name: PI_CONTEXT_WINDOW\n      value: \"1000000\"\n", "name: PI_MAX_TOKENS\n      value: \"64000\"\n"} {
+		if !strings.Contains(def, want) {
+			t.Errorf("the release default must reach pi, lacks %q:\n%s", want, def)
+		}
+	}
+	own := findDocByKindAndMetaName(helmTemplate(t, append(pi,
+		"--set", "global.agentops.runtimeDefaults.contextWindow=1000000",
+		"--set", "pi.contextWindow=200000")...), "AgentRuntime", "pi")
+	if !strings.Contains(own, "name: PI_CONTEXT_WINDOW\n      value: \"200000\"\n") {
+		t.Errorf("the bundle's value must win:\n%s", own)
+	}
+	if strings.Contains(own, "contextWindow:") {
+		t.Errorf("a limit is a chart value, never an AgentRuntime field:\n%s", own)
+	}
+	ol := []string{"--set", "ollama.enabled=true", "--set", "ollama.endpoint=http://o:11434"}
+	o := findDocByKindAndMetaName(helmTemplate(t, append(ol,
+		"--set", "global.agentops.runtimeDefaults.contextWindow=32768",
+		"--set", "ollama.maxOutputTokens=2048")...), "AgentRuntime", "ollama")
+	for _, want := range []string{"name: OLLAMA_NUM_CTX\n      value: \"32768\"\n", "name: OLLAMA_NUM_PREDICT\n      value: \"2048\"\n"} {
+		if !strings.Contains(o, want) {
+			t.Errorf("ollama lacks %q:\n%s", want, o)
+		}
+	}
+	both := findDocByKindAndMetaName(helmTemplate(t, append(ol, "--set", "ollama.numCtx=16384", "--set", "ollama.contextWindow=32768")...), "AgentRuntime", "ollama")
+	if !strings.Contains(both, "name: OLLAMA_NUM_CTX\n      value: \"16384\"\n") {
+		t.Errorf("numCtx must win over contextWindow:\n%s", both)
+	}
+}
+
+// A runtime whose vendor offers no setting refuses the value rather than
+// accepting it silently.
+func TestModelLimitsRefusedWhereTheVendorHasNoSetting(t *testing.T) {
+	got := helmTemplateErr(t, "--set", "claude.contextWindow=200000")
+	if !strings.Contains(got, "claude.contextWindow") {
+		t.Errorf("want a refusal naming claude.contextWindow, got:\n%s", got)
+	}
+}

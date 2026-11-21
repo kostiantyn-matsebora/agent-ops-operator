@@ -635,6 +635,12 @@ global:
       # context at a vendor API says `external` and is never failed for a volume
       # it does not need.
       contextStorage: volume
+      # THE MODEL'S LIMITS, for every runtime that has a setting to carry them
+      # (`pi`, `ollama`); a runtime's own bundle value wins. 0 = unset, each
+      # runtime keeps its own behaviour. `claude`, `claude-cli` and `copilot`
+      # have none, and refuse the value on their own bundle.
+      contextWindow: 0
+      maxOutputTokens: 0
       # Idle minutes before a runtime pod exits (respawned on demand).
       #
       # THE ONE NUMBER, and it lives here for the same reason `resources` does:

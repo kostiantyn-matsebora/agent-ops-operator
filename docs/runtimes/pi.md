@@ -114,6 +114,7 @@ pi stays selectable as `runtimeRef: pi`.
 | `pi.model` | the model, by the chosen provider's own id. Default `claude-sonnet-5`. Setting it empty fails the render |
 | `pi.credentialsSecret.token` | the provider's credential. Set, the Secret is created. Empty, the named Secret is yours to create |
 | `pi.piCode` | `true` by default. Lets pi read a checkout's `.claude/` the way Claude Code does, through the `pi-code` package. `false` turns it off |
+| `pi.contextWindow`, `pi.maxOutputTokens` | the model's input window and output ceiling in tokens, written into the model's `models.json` entry. Set them to the model's real limits: without them pi assumes a 128000 window and 16384 output tokens, and a request that outgrows the window gets `max_tokens` of 1 and stops on `length`. Unset keeps pi's defaults. A turn that stops on `length` with no text fails the run, naming the token counts. `global.agentops.runtimeDefaults` takes the same two keys for every runtime that has a setting, and the bundle's own value wins |
 | `pi.env` | further knobs, as env entries — `PI_RUN_TIMEOUT_S` (default 3600), and `PI_PROVIDER_API` / `PI_BASE_URL` for a self-hosted or BYOK endpoint |
 
 **`PI_BASE_URL` points at a self-hosted or BYOK endpoint for the chosen

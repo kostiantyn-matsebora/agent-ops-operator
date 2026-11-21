@@ -80,7 +80,7 @@ func main() {
 	chatTimeout := time.Duration(envInt("OLLAMA_TIMEOUT_S", 600)) * time.Second
 
 	ctx := context.Background()
-	ollama := &Ollama{URL: ollamaURL, Model: model, NumCtx: numCtx, KeepAlive: os.Getenv("OLLAMA_KEEP_ALIVE"), HTTP: newHTTPClient(chatTimeout)}
+	ollama := &Ollama{URL: ollamaURL, Model: model, NumCtx: numCtx, NumPredict: envInt("OLLAMA_NUM_PREDICT", 0), KeepAlive: os.Getenv("OLLAMA_KEEP_ALIVE"), HTTP: newHTTPClient(chatTimeout)}
 
 	logf("[runtime] ollama runtime %s — convo=%s pod=%s ttl=%s workspace=%s model=%s endpoint=%s num_ctx=%d",
 		version, convo, pod, ttl, workspace, model, ollamaURL, numCtx)

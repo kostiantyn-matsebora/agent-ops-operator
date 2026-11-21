@@ -81,11 +81,12 @@ type chatter interface {
 
 // Ollama speaks the native API.
 type Ollama struct {
-	URL       string
-	Model     string
-	NumCtx    int
-	KeepAlive string
-	HTTP      *http.Client
+	URL        string
+	Model      string
+	NumCtx     int
+	NumPredict int
+	KeepAlive  string
+	HTTP       *http.Client
 }
 
 type chatRequest struct {
@@ -119,6 +120,9 @@ func (o *Ollama) Chat(ctx context.Context, messages []Message, tools []ToolDef, 
 		Stream:    true,
 		KeepAlive: o.KeepAlive,
 		Options:   map[string]any{"num_ctx": o.NumCtx},
+	}
+	if o.NumPredict > 0 {
+		req.Options["num_predict"] = o.NumPredict
 	}
 	body, err := json.Marshal(req)
 	if err != nil {

@@ -77,6 +77,34 @@ const PI_PROVIDER_API = process.env.PI_PROVIDER_API || '';
 const PI_BASE_URL = process.env.PI_BASE_URL || '';
 const PI_MODEL = process.env.PI_MODEL || '';
 const PI_API_KEY = process.env.PI_API_KEY || '';
+// The model's limits, from the chart's `contextWindow`/`maxOutputTokens`.
+// Unset (or not a positive integer) leaves the model entry bare, so pi keeps
+// its own defaults — 128000 window, 16384 output tokens — as before.
+function positiveInt(v) {
+  const n = Number.parseInt(v || '', 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+const PI_CONTEXT_WINDOW = positiveInt(process.env.PI_CONTEXT_WINDOW);
+const PI_MAX_TOKENS = positiveInt(process.env.PI_MAX_TOKENS);
+
+// modelEntry is the model's `models.json` entry: the id, plus the limits when
+// declared. Without them pi clamps `max_tokens` to 1 once a request outgrows
+// the window it assumed, and the provider answers with one token and `length`.
+function modelEntry(id, contextWindow, maxTokens) {
+  return {
+    id,
+    ...(contextWindow ? { contextWindow } : {}),
+    ...(maxTokens ? { maxTokens } : {}),
+  };
+}
+
+// lengthStopMessage names a run whose turn ended on the token limit with no
+// text, with the counts, instead of a bare "no answer".
+function lengthStopMessage(info) {
+  const u = info.usage || {};
+  const inTok = (u.input || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
+  return `The model stopped at its token limit before answering (stop reason length; ${inTok} input tokens, ${u.output || 0} output tokens) — set the runtime's contextWindow and maxOutputTokens to the model's real limits, or shorten what the agent reads.`;
+}
 // One run's wall-clock ceiling. pi's `session.prompt()` takes no timeout of
 // its own (confirmed against PromptOptions) — unlike copilot's
 // sendAndWait(prompt, timeoutMs), so this is enforced with a race rather than
@@ -208,7 +236,7 @@ async function getModelContext() {
     apiKey: PI_API_KEY,
     ...(PI_PROVIDER_API ? { api: PI_PROVIDER_API } : {}),
     ...(PI_BASE_URL ? { baseUrl: PI_BASE_URL } : {}),
-    models: [{ id: PI_MODEL }],
+    models: [modelEntry(PI_MODEL, PI_CONTEXT_WINDOW, PI_MAX_TOKENS)],
   };
   fs.writeFileSync(modelsPath, JSON.stringify({ providers: { [PI_PROVIDER]: providerConfig } }));
   const modelRuntime = await s.ModelRuntime.create({ modelsPath, authPath, allowModelNetwork: false });
@@ -277,7 +305,9 @@ function onEvent(ev, state) {
           .filter((c) => c && c.type === 'text' && typeof c.text === 'string')
           .map((c) => c.text)
           .join('');
+        if (!text && msg.stopReason === 'length') state.lengthStop = { usage: msg.usage };
         if (text) {
+          state.lengthStop = null;
           state.lastText = text;
           process.stdout.write(`[pi] ${text}\n`);
         }
@@ -480,7 +510,9 @@ async function attempt(sdk, modelCtx, unit, grant, definitionBody, prompt, denia
     // failure that says why.
     if (!result) {
       status = 'failed';
-      result = denials.length
+      result = state.lengthStop
+        ? lengthStopMessage(state.lengthStop)
+        : denials.length
         ? `The agent produced no answer: its tool call was denied — ${denials[denials.length - 1]}`
         : 'The agent produced no answer.';
     }
@@ -594,6 +626,9 @@ function finish(out, continuity) {
 // for its pure/subprocess-driving pieces without the IIFE below ever running
 // — that only happens when this file is the process entry point.
 module.exports = {
+  modelEntry,
+  lengthStopMessage,
+  positiveInt,
   gitEnv, repoURL, run, clearDir, syncRepo, onEvent, resolvePrompt, contextIdOf,
   buildResourceLoader, openSession, attempt, runPi, finish, resolveContinuity,
   extractBrief, logInventoryGaps, getSdk, getModelContext, closeMcpClients,

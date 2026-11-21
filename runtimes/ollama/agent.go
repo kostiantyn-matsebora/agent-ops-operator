@@ -176,6 +176,11 @@ func (a *Agent) run(ctx context.Context, u WorkUnit, calls *callLog) RunResult {
 		turn = append(turn, resp)
 		if len(resp.ToolCalls) == 0 {
 			result := strings.TrimSpace(resp.Content)
+			if result == "" && resp.Usage != nil && resp.Usage.StopReason == "length" {
+				save()
+				return RunResult{Status: "failed", ExitCode: exitCode(1), RuntimeContextID: t.ID, Continuity: continuity,
+					Result: lengthStopMessage(resp.Usage)}
+			}
 			if result == "" && !nudged {
 				// A small model sometimes ends a turn with nothing — usually a
 				// tool call it could not form, which the server drops unseen.
@@ -259,4 +264,17 @@ func threadOf(u WorkUnit) string {
 		return "general"
 	}
 	return *u.ThreadID
+}
+
+// lengthStopMessage names a turn that ended on the token limit with no text,
+// with the counts, in place of a bare "empty answer".
+func lengthStopMessage(u *Usage) string {
+	in, out := int64(0), int64(0)
+	if u.TokensIn != nil {
+		in = *u.TokensIn
+	}
+	if u.TokensOut != nil {
+		out = *u.TokensOut
+	}
+	return fmt.Sprintf("The model stopped at its token limit before answering (stop reason length; %d input tokens, %d output tokens) — raise the context window or the maximum output tokens, or shorten what the agent reads.", in, out)
 }
