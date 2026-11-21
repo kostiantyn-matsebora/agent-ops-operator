@@ -2,6 +2,7 @@ package nats
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -23,6 +24,30 @@ const (
 	bucketAdapterState  = "adapterstate"
 	objectStoreBlobs    = "blobs"
 )
+
+// legacyBuckets are buckets an earlier release created and no code opens now:
+// the command bus once kept its tasks, id marks and dead letters in KV buckets
+// before it moved to append-only logs. Nothing reads or writes them, so
+// nothing would ever remove them: opening the stores does. The list is closed
+// and names only those three, never "anything not in the inventory".
+var legacyBuckets = []string{"tasks", "ids", "dead"}
+
+// retireLegacyBuckets deletes each legacy bucket that exists and reports the
+// ones it removed. A bucket that is not there is the normal case.
+func (b *Backend) retireLegacyBuckets(ctx context.Context) ([]string, error) {
+	var removed []string
+	for _, base := range legacyBuckets {
+		err := b.conn.js.DeleteKeyValue(ctx, bucketName(b.scope, base))
+		switch {
+		case err == nil:
+			removed = append(removed, bucketName(b.scope, base))
+		case errors.Is(err, jetstream.ErrBucketNotFound):
+		default:
+			return removed, fmt.Errorf("nats: retire legacy bucket %q: %w", base, err)
+		}
+	}
+	return removed, nil
+}
 
 // Option adjusts how OpenStores opens a collection.
 type Option func(*openConfig)
@@ -95,7 +120,11 @@ type Backend struct {
 	receipts       *collection[state.Received]
 	adapterState   *collection[string]
 	runsKV         jetstream.KeyValue
-	blobsStore     jetstream.ObjectStore
+	runsMirrorStop func() // ends the runs items mirror's watch
+
+	// Retired names the legacy buckets this open removed, for the manager to log.
+	Retired    []string
+	blobsStore jetstream.ObjectStore
 
 	sweeps []interface{ Run(context.Context) }
 
@@ -144,6 +173,7 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 	}
 
 	runsAppended.limit = state.RunHistoryLimit
+	stops = append(stops, runsAppended.items.stop)
 
 	signalsKV, signalsBucket, err := b.bootstrapKV(ctx, bucketSignals, replicas)
 	if err != nil {
@@ -201,10 +231,14 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 	}
 	b.adapterStateKV, b.conversations, b.signals, b.cooldowns, b.receipts, b.adapterState = adapterStateKV, conversations, signalsColl, cooldowns, receipts, adapterState
 	b.runsKV, b.blobsStore = runsKV, blobsStore
-	owned := &children{conversations: conversations, runsKV: runsKV, blobs: blobsStore, now: time.Now}
+	b.runsMirrorStop = runsAppended.items.stop
+	owned := &children{conversations: conversations, runsKV: runsKV, runs: runsAppended, runLimit: runsAppended.limit, blobs: blobsStore, now: time.Now}
 	b.owned = owned
 	conversations.onRemoved = owned.removed
 	b.sweeps = []interface{ Run(context.Context) }{signalsExpiring, sweepEvery{owned, cfg.orphanInterval}}
+	// Best effort: a bucket that could not be removed now is removed on the next
+	// open, and must never keep the stores from opening.
+	b.Retired, _ = b.retireLegacyBuckets(ctx)
 	return b, nil
 }
 
@@ -264,6 +298,7 @@ func (b *Backend) Close() {
 	b.cooldowns.mirror.stop()
 	b.receipts.mirror.stop()
 	b.adapterState.mirror.stop()
+	b.runsMirrorStop()
 }
 
 // DefaultOrphanSweepInterval is how often the orphan sweep looks for runs and

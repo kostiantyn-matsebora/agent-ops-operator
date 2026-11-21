@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -27,8 +28,15 @@ const orphanGrace = 10 * time.Minute
 type children struct {
 	conversations *collection[state.ConversationRecord]
 	runsKV        jetstream.KeyValue
-	blobs         jetstream.ObjectStore
-	now           func() time.Time
+	// runs is what lists run keys (the watch-fed mirror) and trims a
+	// conversation's runs to the limit. runsKV is only written to here.
+	runs interface {
+		wireKeysUnder(ctx context.Context, prefix string) ([]string, error)
+		trim(ctx context.Context, parent state.Key)
+	}
+	runLimit int
+	blobs    jetstream.ObjectStore
+	now      func() time.Time
 }
 
 // removed deletes everything conversation key owned. It is called after the
@@ -55,20 +63,12 @@ func (c *children) purgeRuns(ctx context.Context, conversation state.Key) error 
 	return errors.Join(errs...)
 }
 
-// runKeys lists the run item keys matching filter, empty when there are none.
+// runKeys lists the run item keys matching filter, empty when there are none:
+// ">" for every key, or runsPrefixFilter(parent) for one conversation's. It
+// reads the mirror, so it creates no consumer on the server.
 func (c *children) runKeys(ctx context.Context, filter string) ([]string, error) {
-	lister, err := c.runsKV.ListKeysFiltered(ctx, filter)
-	if err != nil {
-		if errors.Is(err, jetstream.ErrNoKeysFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var keys []string
-	for k := range lister.Keys() {
-		keys = append(keys, k)
-	}
-	return keys, nil
+	prefix := strings.TrimSuffix(filter, ">")
+	return c.runs.wireKeysUnder(ctx, prefix)
 }
 
 // deleteBlobsOf removes every blob that names conversation, older than minAge.
@@ -146,6 +146,7 @@ func (c *children) Sweep(ctx context.Context) error {
 	if err != nil {
 		errs = append(errs, fmt.Errorf("nats: list runs to sweep: %w", err))
 	}
+	held := map[string]int{}
 	for _, k := range keys {
 		parent, err := parentOfItemKey(k)
 		if err != nil {
@@ -160,6 +161,15 @@ func (c *children) Sweep(ctx context.Context) error {
 			if err := c.runsKV.Purge(ctx, k); err != nil {
 				errs = append(errs, fmt.Errorf("nats: purge orphan run %q: %w", k, err))
 			}
+			continue
+		}
+		held[parent]++
+	}
+	// A conversation still over the limit (a trim after an append that failed
+	// and was never retried) is brought back to it.
+	for parent, n := range held {
+		if c.runLimit > 0 && n > c.runLimit {
+			c.runs.trim(ctx, state.Key(parent))
 		}
 	}
 

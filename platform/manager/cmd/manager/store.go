@@ -124,6 +124,9 @@ func newNatsStores(mgr ctrl.Manager, namespaces namespace.Namespaces) (state.Sto
 	if err != nil {
 		return state.Stores{}, fmt.Errorf("opening the nats state store: %w", err)
 	}
+	if len(backend.Retired) > 0 {
+		ctrl.Log.WithName("setup").Info("removed buckets no code uses any more", "buckets", backend.Retired)
+	}
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		backend.Run(ctx)
 		return nil

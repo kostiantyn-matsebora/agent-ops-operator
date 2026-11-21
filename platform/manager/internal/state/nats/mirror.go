@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,6 +46,12 @@ type mirror[T any] struct {
 
 	retryDelay time.Duration // read once at construction, from mirrorRetryDelay
 	retryMax   time.Duration // read once at construction, from mirrorRetryMax
+
+	// rawKeys keys the map by the wire key as stored, not the recovered
+	// state.Key. A bucket whose keys are not one escaped name (the runs
+	// bucket's "<parent>.<item>") needs it: unwireKey cannot tell the
+	// separator from a dot inside a name.
+	rawKeys bool
 }
 
 // mirrorEntry is one cached record: the envelope and the KV sequence it was
@@ -59,9 +66,27 @@ type mirrorEntry[T any] struct {
 // newMirror starts the background watch and returns at once; a caller that
 // needs the first catch-up waits on waitReady.
 func newMirror[T any](kv jetstream.KeyValue) *mirror[T] {
-	m := &mirror[T]{kv: kv, byKey: map[state.Key]mirrorEntry[T]{}, ready: make(chan struct{}), closed: make(chan struct{}), retryDelay: mirrorRetryDelay, retryMax: mirrorRetryMax}
+	return startMirror[T](kv, false)
+}
+
+func startMirror[T any](kv jetstream.KeyValue, rawKeys bool) *mirror[T] {
+	m := &mirror[T]{kv: kv, byKey: map[state.Key]mirrorEntry[T]{}, ready: make(chan struct{}), closed: make(chan struct{}), retryDelay: mirrorRetryDelay, retryMax: mirrorRetryMax, rawKeys: rawKeys}
 	go m.run()
 	return m
+}
+
+// withPrefix returns the cached entries whose wire key starts with prefix, as
+// a copy, keyed by the wire key. Only meaningful on a rawKeys mirror.
+func (m *mirror[T]) withPrefix(prefix string) map[string]mirrorEntry[T] {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := map[string]mirrorEntry[T]{}
+	for k, e := range m.byKey {
+		if strings.HasPrefix(string(k), prefix) {
+			out[string(k)] = e
+		}
+	}
+	return out
 }
 
 // waitReady blocks until the mirror's first catch-up over the bucket
@@ -196,9 +221,12 @@ var errWatchEnded = errors.New("nats: the bucket watch ended")
 // key wireKey/unwireKey round-trip; an entry this backend never wrote (a
 // corrupt escape) is dropped rather than crashing the mirror.
 func (m *mirror[T]) apply(entry jetstream.KeyValueEntry) {
-	key, err := unwireKey(entry.Key())
-	if err != nil {
-		return
+	key := entry.Key()
+	if !m.rawKeys {
+		var err error
+		if key, err = unwireKey(key); err != nil {
+			return
+		}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

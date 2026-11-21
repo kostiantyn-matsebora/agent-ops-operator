@@ -25,6 +25,7 @@ type appended[P, T any] struct {
 	parent     *collection[P]
 	parentKey  func(rec *P) state.Key
 	itemsKV    jetstream.KeyValue
+	items      *mirror[T] // the items bucket, watch-fed: a read never creates a server consumer
 	js         jetstream.JetStream
 	bucket     string
 	streamName string
@@ -41,7 +42,7 @@ func newAppended[P, T any](parent *collection[P], parentKey func(*P) state.Key, 
 	if decl.ID == nil || decl.Merge == nil {
 		return nil, fmt.Errorf("nats: appended layout %q needs its declaration's ID and Merge", decl.Name)
 	}
-	return &appended[P, T]{parent: parent, parentKey: parentKey, itemsKV: itemsKV, js: js, bucket: bucket, streamName: kvStreamName(bucket), decl: decl}, nil
+	return &appended[P, T]{parent: parent, parentKey: parentKey, itemsKV: itemsKV, items: startMirror[T](itemsKV, true), js: js, bucket: bucket, streamName: kvStreamName(bucket), decl: decl}, nil
 }
 
 // Append adds item to parent's history under a fresh, unique key — never
@@ -92,30 +93,45 @@ type itemEntry[T any] struct {
 	Env envelope[T]
 }
 
-// listItemEntries lists every entry under parent's prefix, decoded, in no
-// particular order — the one scan List, Grow, GetWithItems and
-// ListWithItems all build on.
+// listItemEntries lists every entry under parent's prefix, in no particular
+// order — the one scan List, Grow, GetWithItems and ListWithItems all build on.
+//
+// It reads the watch-fed mirror, never the server: a key listing makes the
+// server create (and delete) a consumer, a cluster-wide operation, and one ran
+// per reconcile of every conversation. The read still sees every write made
+// before it: it waits until the mirror has observed the bucket's latest
+// sequence, as the parent collection's List does.
 func (a *appended[P, T]) listItemEntries(ctx context.Context, parent state.Key) ([]itemEntry[T], error) {
-	lister, err := a.itemsKV.ListKeysFiltered(ctx, runsPrefixFilter(string(parent)))
+	s, err := a.js.Stream(ctx, a.streamName)
 	if err != nil {
-		if errors.Is(err, jetstream.ErrNoKeysFound) {
-			return nil, nil
-		}
+		return nil, fmt.Errorf("nats: list %s of %q: %w", a.decl.Name, parent, err)
+	}
+	if err := a.items.waitCaughtUpTo(ctx, s.CachedInfo().State.LastSeq); err != nil {
 		return nil, fmt.Errorf("nats: list %s of %q: %w", a.decl.Name, parent, err)
 	}
 	var out []itemEntry[T]
-	for key := range lister.Keys() {
-		entry, err := a.itemsKV.Get(ctx, key)
-		if err != nil {
-			continue // raced a delete between the list and the read; skip it
-		}
-		e, err := decodeEnvelope[T](entry.Value())
-		if err != nil {
-			continue
-		}
-		out = append(out, itemEntry[T]{Key: key, Env: e})
+	for key, e := range a.items.withPrefix(wireKey(string(parent)) + ".") {
+		out = append(out, itemEntry[T]{Key: key, Env: e.Env})
 	}
 	return out, nil
+}
+
+// wireKeysUnder lists the wire keys of the run items whose key starts with
+// prefix ("" for all), from the mirror, once it has seen the bucket's latest
+// write. The cascade and the sweep read through it.
+func (a *appended[P, T]) wireKeysUnder(ctx context.Context, prefix string) ([]string, error) {
+	st, err := a.js.Stream(ctx, a.streamName)
+	if err != nil {
+		return nil, fmt.Errorf("nats: list %s: %w", a.decl.Name, err)
+	}
+	if err := a.items.waitCaughtUpTo(ctx, st.CachedInfo().State.LastSeq); err != nil {
+		return nil, fmt.Errorf("nats: list %s: %w", a.decl.Name, err)
+	}
+	var keys []string
+	for k := range a.items.withPrefix(prefix) {
+		keys = append(keys, k)
+	}
+	return keys, nil
 }
 
 // Grow applies edit to the item with identity id by the declaration's

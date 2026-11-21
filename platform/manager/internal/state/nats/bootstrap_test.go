@@ -158,17 +158,17 @@ func TestEveryReadOfAParentOrItsItemsReportsAFailureOfEither(t *testing.T) {
 	}
 	a.parent.kv = realParent
 
-	// The items cannot be listed.
-	realItems := a.itemsKV
-	a.itemsKV = &scriptedKV{KeyValue: realItems, keys: always(errInjected)}
-	if _, err := a.List(ctx, parent); !errors.Is(err, errInjected) {
-		t.Errorf("List = %v", err)
+	// The items cannot be read: the bucket's stream does not answer.
+	realStream := a.streamName
+	a.streamName = "no-such-stream"
+	if _, err := a.List(ctx, parent); err == nil {
+		t.Errorf("List = nil, want the failure")
 	}
-	if _, _, _, err := a.GetWithItems(ctx, parent); !errors.Is(err, errInjected) {
-		t.Errorf("GetWithItems = %v", err)
+	if _, _, _, err := a.GetWithItems(ctx, parent); err == nil {
+		t.Errorf("GetWithItems = nil, want the failure")
 	}
-	if err := a.Grow(ctx, parent, "r1", state.Run{}); !errors.Is(err, errInjected) {
-		t.Errorf("Grow = %v", err)
+	if err := a.Grow(ctx, parent, "r1", state.Run{}); err == nil {
+		t.Errorf("Grow = nil, want the failure")
 	}
 	// A join that cannot read a record's items drops that record, as a raced
 	// delete does, and keeps the rest.
@@ -179,7 +179,7 @@ func TestEveryReadOfAParentOrItsItemsReportsAFailureOfEither(t *testing.T) {
 	if err := a.Append(ctx, parent, state.Run{RunID: "r3", Status: "s"}); err != nil {
 		t.Errorf("Append whose trim cannot list = %v, want nil", err)
 	}
-	a.itemsKV = realItems
+	a.streamName = realStream
 }
 
 func TestGrowSeesAnItemThatChangesBetweenTheScanAndTheWrite(t *testing.T) {
@@ -193,11 +193,12 @@ func TestGrowSeesAnItemThatChangesBetweenTheScanAndTheWrite(t *testing.T) {
 	inner := a.itemsKV
 	t.Cleanup(func() { a.itemsKV = inner })
 
-	// The scan finds the item; the read right after finds it gone.
+	// The scan (the mirror, no read of its own) finds the item; the read of it
+	// right after finds it gone.
 	reads := 0
 	a.itemsKV = &scriptedKV{KeyValue: inner, get: func(k string) error {
 		reads++
-		if reads == 2 {
+		if reads == 1 {
 			return jetstream.ErrKeyNotFound
 		}
 		return nil
@@ -210,7 +211,7 @@ func TestGrowSeesAnItemThatChangesBetweenTheScanAndTheWrite(t *testing.T) {
 	reads = 0
 	a.itemsKV = &scriptedKV{KeyValue: inner, get: func(k string) error {
 		reads++
-		if reads == 2 {
+		if reads == 1 {
 			return errInjected
 		}
 		return nil

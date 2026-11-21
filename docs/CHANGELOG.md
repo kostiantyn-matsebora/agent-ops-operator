@@ -32,6 +32,21 @@ for the source and the reference material beside this file.
 
 ### Fixed
 
+- **A command bus that cannot accept messages no longer stops conversations
+  from starting.** A reconcile posted to the chat channels (topics, the thread
+  entries, member results) before it created the agent's pod, all on one
+  deadline. With the bus stuck, the first post used the whole deadline, the
+  pod was never created, and every slot stayed free while conversations waited
+  (#527). The chat steps now share a short budget (ten seconds) and starting
+  the agent comes after them within the rest of the reconcile.
+- **Reading a conversation's runs no longer creates a NATS consumer per
+  call.** Each read, trim and cascade listed the runs bucket's keys, which made
+  the server create and delete a consumer. During a disturbance a quarter of
+  those never delivered, so a reconcile almost never completed, and the dead
+  consumers piled up (637 on one stream). The runs are now served from a
+  watch-fed mirror, like the conversation records. The orphan sweep also
+  trims a conversation holding more than its ten runs back to ten, which clears
+  what failed trims left behind.
 - **The manager's watch on the state store backs off instead of retrying every
   second.** A mirror whose watch could not be opened retried once a second,
   per bucket and per replica, and every attempt that timed out could leave a
@@ -40,6 +55,13 @@ for the source and the reference material beside this file.
   list reads timing out. The pause now doubles on each failure up to 30
   seconds and starts over once a watch has delivered. The same applies to the
   command bus's queue mirror.
+- **One stuck call no longer stops every conversation from starting or
+  closing.** The conversation controller reconciled one conversation at a time
+  with no time limit, so a single call that never answered held the only
+  worker and everything behind it waited, with free capacity (#527). It now runs
+  four workers, each reconcile has a two-minute deadline that turns a hang into
+  a retried error, and the active-conversation cap is decided and claimed in
+  one guarded step so parallel workers cannot exceed it.
 
 ## [23.0.0] — 2026-11-21
 
