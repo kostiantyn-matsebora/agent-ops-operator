@@ -1,44 +1,64 @@
 ## 1. Inventory and spikes before any code
 
-- [ ] 1.1 Write the per-route table: every route, its kind, its auth domain, its response today and its status codes. Verify: a test lists the routes the mux serves and fails if one is missing from the table.
-- [ ] 1.2 Spike registering a typed handler with the convoy queue consumer pool, keeping the timeout, the retry and the task record. Verify: a throwaway test passes, and the answer is written in `design.md` D6.
-- [ ] 1.3 Decide with the user whether `GET /work` and `GET /channel/ops` are exempt. Verify: `design.md` D8 and its open question are updated.
-- [ ] 1.4 Settle the package name and the call shape, given that Go has no generic methods. Verify: `design.md` D2 shows the final shape.
+- [ ] 1.1 Write the per-route table: every manager route, its kind, its auth domain, its response today and its status codes. Verify: a test lists the routes the mux serves and fails if one is missing from the table.
+- [ ] 1.2 Spike a shared Go module in this repository: a tag with a `lib/<name>/` prefix, required from a component whose image builds from its own directory, with a `go.work` for local work. Verify: a throwaway Dockerfile build of one component resolves the module, and the answer is written in `design.md` D2.
+- [ ] 1.3 List every other Go component's handlers and say whether any is a command or a query. Verify: the list is written in `design.md` D8, and each component either has a task in section 6 or a recorded reason it has nothing to adopt.
+- [ ] 1.4 Decide with the user whether `GET /work` and `GET /channel/ops` stay as claims, and whether the processors take middleware. Verify: `design.md` D7 and the open questions are updated.
+- [ ] 1.5 Settle the package names and the call shape, given that Go has no generic methods. Verify: `design.md` shows the final shape.
 
-## 2. The processors
+## 2. The library, with the Bus moved in unchanged
 
-- [ ] 2.1 Add the handler registry, the command processor with `Send` and `Post`, and the query processor with `Execute`. Verify: unit tests register a command and a query and run both.
-- [ ] 2.2 Add the pipeline with recovery, timeout and logging. Verify: tests for a panic, a slow handler and the log line.
-- [ ] 2.3 Make `Post` submit to the registered queue with the key function and the idempotency key, and run the handler in the pool. Verify: a test sends two commands of one key and sees order, and a repeated idempotency key creates one.
-- [ ] 2.4 Make a query handler unable to reach the command processor. Verify: a compile-time or test check fails when a query handler tries.
-- [ ] 2.5 Publish the existing activity kinds as events through Watermill's event bus after a write. Verify: a test sees the event after the record shows the change.
+- [ ] 2.1 Create the library as two modules, the stdlib-only core and the NATS backend, and add `lib/` to `.github/components.sh` as modules that are not images. Verify: `components.sh modules` lists them, `components.sh images` does not, and the core's dependency list is empty.
+- [ ] 2.2 Move the `Bus` interface, the consumer pool, the `memory` backend and the conformance suite into the core, and the Watermill publisher, subscriber, convoy queue controller and records into the NATS backend. Verify: no code changes beyond imports, and every test in both modules passes.
+- [ ] 2.3 Point the manager at the library. Verify: the manager builds and its full suite passes, including envtest.
+- [ ] 2.4 Run the conformance suite on `memory` and on `nats`, and the three-node cluster test, from the library. Verify: the results match the results before the move.
+- [ ] 2.5 Release the library with a tag and make the manager require that version. Verify: an image build of the manager resolves it with no `go.work`.
 
-## 3. Move the route families, one at a time
+## 3. The synchronous scenario
 
-- [ ] 3.1 Move one sync command end to end to prove the shape. Verify: its recorded response from 1.1 is unchanged.
-- [ ] 3.2 Move the sync small writes: channel and signal state and status, mark read, `POST /activity`. Verify: the recorded responses are unchanged and they run with the bus stopped.
-- [ ] 3.3 Move the already-async commands: reopen, delete, reset-context, `POST /channel/inbound`, `POST /signal/inbound`. Verify: the recorded responses are unchanged.
-- [ ] 3.4 Move the coordinator and runtime commands: `invoke`, close, escalate, `/work/done`, `/work/context`. Verify: the recorded responses are unchanged, including a corrective input from `/work/done`.
-- [ ] 3.5 Move the queries and name each one's read model or source of truth in the route table. Verify: the route table test fails on a query with neither.
-- [ ] 3.6 Remove `acceptAndEnqueue` and the per-endpoint accept code. Verify: a grep finds neither.
+- [ ] 3.1 Add the sync mode to the routing, and a registry that holds a command type's handler and mode. Verify: a unit test registers one command per mode and each is delivered its own way.
+- [ ] 3.2 Add the sync send: run the handler in the calling process and return its result or refusal. Verify: tests for the result, the refusal, and a run with the bus transport stopped.
+- [ ] 3.3 Make the mode part of the registration with no override by the caller. Verify: a test shows there is no call that changes the mode.
+- [ ] 3.4 Prove the asynchronous modes are unchanged. Verify: the existing convoy and hand-over tests and the conformance suite pass without edits.
 
-## 4. Unit tests
+## 4. The query processor
 
-- [ ] 4.1 Run `go build ./... && go vet ./... && go test ./...` in `platform/manager`. Verify: exit 0.
-- [ ] 4.2 Run the envtest suite with `KUBEBUILDER_ASSETS`. Verify: exit 0.
-- [ ] 4.3 Run `go test -race` over `internal/commandbus/...`, `internal/httpapi/...` and `internal/controller/...`. Verify: no race reported by this change.
-- [ ] 4.4 Run the conformance suite for `memory` and `nats`. Verify: both pass.
+- [ ] 4.1 Add the query registry and `Execute`, in the core and apart from the Bus. Verify: a unit test registers a query and gets its data.
+- [ ] 4.2 Make a query handler unable to reach the command processor. Verify: a compile-time or test check fails when a query handler tries.
+- [ ] 4.3 Verify a query leaves no task. Verify: a test executes a query and finds nothing on the bus.
 
-## 5. System tests
+## 5. The manager's routes, one family at a time
 
-- [ ] 5.1 A lane that stops the bus, asserts a synchronous command still returns its result and an asynchronous one refuses. Verify: the lane passes in `platform/manager/test/system/`.
-- [ ] 5.2 A lane that runs every command family against a real cluster and compares each response with the recorded one. Verify: the lane passes.
-- [ ] 5.3 Run the pack and the dispatched `system-smoke.yml`. Verify: both green, result recorded.
+- [ ] 5.1 Move one sync command end to end to prove the shape. Verify: its recorded response from 1.1 is unchanged.
+- [ ] 5.2 Move the sync small writes: channel and signal state and status, mark read, `POST /activity`. Verify: the recorded responses are unchanged and they run with the bus stopped.
+- [ ] 5.3 Move the already-async commands: reopen, delete, reset-context, `POST /channel/inbound`, `POST /signal/inbound`. Verify: the recorded responses are unchanged.
+- [ ] 5.4 Move the coordinator and runtime commands: `invoke`, close, escalate, `/work/done`, `/work/context`. Verify: the recorded responses are unchanged, including a corrective input from `/work/done`.
+- [ ] 5.5 Move the queries and name each one's read model or source of truth in the route table. Verify: the route table test fails on a query with neither.
+- [ ] 5.6 Remove `acceptAndEnqueue` and the per-endpoint accept code. Verify: a grep finds neither.
 
-## 6. Documentation
+## 6. The other components
 
-- [ ] 6.1 Update the reference docs named in the proposal's Impact: `contracts.md`, `contracts/runtime.md`, `contracts/channel-adapter.md`, `contracts/signal-adapter.md`, `concepts.md`, `testing.md`. Verify: `docs-generate.py --check` passes and a grep finds no claim that an endpoint carries its own accept code.
-- [ ] 6.2 Update `.claude/rules/invariants.md` and `structure.md`. Verify: a grep finds no stale claim.
-- [ ] 6.3 Add the `docs/CHANGELOG.md` entry under `[Unreleased]`. Verify: it names each family moved.
-- [ ] 6.4 Adopter site: check `introduction.md`, `getting-started.md`, `installation.md` and `docs/guides/*`, and record the pages that needed no change. Verify: the list exists.
-- [ ] 6.5 Run `publication-guard.py --counts` and `retired-vocabulary-guard.py --counts`. Verify: both 0.
+- [ ] 6.1 For each component listed in 1.3 that has handlers, adopt the library and keep its response unchanged. Verify: each component's own tests pass, and its image still builds from its own directory.
+- [ ] 6.2 For each component with nothing to adopt, record why in `design.md` D8. Verify: every Go module is either adopted or recorded.
+
+## 7. Unit tests
+
+- [ ] 7.1 Run `go build ./... && go vet ./... && go test ./...` in every module touched, the library's two and every adopting component. Verify: exit 0 in each.
+- [ ] 7.2 Run the manager's envtest suite with `KUBEBUILDER_ASSETS`. Verify: exit 0.
+- [ ] 7.3 Run `go test -race` over the library, `internal/httpapi/...` and `internal/controller/...`. Verify: no race reported by this change.
+- [ ] 7.4 Check that a stdlib-only component still lists no third-party dependency. Verify: its `go.mod` has no `require` of a third-party module.
+
+## 8. System tests
+
+- [ ] 8.1 A lane that stops the bus, asserts a sync command still returns its result and an async one refuses. Verify: the lane passes in `platform/manager/test/system/`.
+- [ ] 8.2 A lane that runs every moved command family against a real cluster and compares each response with the recorded one. Verify: the lane passes.
+- [ ] 8.3 Build every adopting component's image from its own directory. Verify: every image builds, and `.github/components.sh images` is unchanged by `lib/`.
+- [ ] 8.4 Run the pack and the dispatched `system-smoke.yml`. Verify: both green, result recorded.
+
+## 9. Documentation
+
+- [ ] 9.1 Update the reference docs named in the proposal's Impact: `contracts.md`, `concepts.md`, `testing.md`. Verify: `docs-generate.py --check` passes and a grep finds no claim that an endpoint carries its own accept code.
+- [ ] 9.2 Update `.claude/rules/structure.md` for the `lib/` group and the module rule, and `invariants.md` for the converted-verb row. Verify: a grep finds no stale claim.
+- [ ] 9.3 Add the `docs/CHANGELOG.md` entry under `[Unreleased]`. Verify: it names the library, the sync mode and each family moved.
+- [ ] 9.4 Adopter site: check `introduction.md`, `getting-started.md`, `installation.md` and `docs/guides/*`, and record the pages that needed no change. Verify: the list exists.
+- [ ] 9.5 Run `publication-guard.py --counts` and `retired-vocabulary-guard.py --counts`. Verify: both 0.
