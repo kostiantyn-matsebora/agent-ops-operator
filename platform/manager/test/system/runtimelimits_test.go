@@ -45,13 +45,14 @@ func TestRuntimeModelLimitsReachTheRuntimePod(t *testing.T) {
 	ctx := context.Background()
 	stamp := fmt.Sprint(time.Now().UnixNano())
 
-	// Restore the pack's own install afterwards, whatever happens below.
+	// Restore the pack's own install afterwards, whatever happens below. The
+	// upgrade rolls the manager, so it goes through UpgradeManager.
 	t.Cleanup(func() {
-		if err := e.Upgrade(context.Background()); err != nil {
+		if err := e.UpgradeManager(context.Background()); err != nil {
 			t.Errorf("restoring the install: %v", err)
 		}
 	})
-	if err := e.Upgrade(ctx,
+	if err := e.UpgradeManager(ctx,
 		"pi.image=agentops-test-stub-runtime:e2e",
 		"pi.credentialsSecret.name=",
 		"pi.contextWindow=500000",
