@@ -37,13 +37,24 @@ type QueueSample struct {
 	OldestClaimedAge float64
 }
 
+// SlotSample is one capacity POOL's runtime-slot occupancy at scrape time
+// (separate-member-slot-pool design D-6) — Pool is "conversations" or
+// "members", the two independent ceilings, never summed.
+type SlotSample struct {
+	Pool  string
+	InUse int
+	Max   int
+}
+
 // Sample is the manager's gauge-shaped state, read at scrape time. Gauges are
 // LEVELS: they cannot be derived from an event stream, so they are sampled from
 // the same in-memory state GET /status reports — one source, two renderings.
 type Sample struct {
-	Queues                []QueueSample
-	RuntimeSlotsInUse     int
-	RuntimeSlotsMax       int
+	Queues []QueueSample
+	// RuntimeSlots is one entry per pool (conversations, members) — the
+	// Prometheus gauges carry a `pool` label rather than a separate metric
+	// name per pool, retiring the old unlabelled series in the same change.
+	RuntimeSlots          []SlotSample
 	ConversationsInflight map[string]int // by pipeline ("" = unattributed)
 	CooldownsActive       map[string]int // by source
 	// StorageOutage reports whether context storage is being treated as
@@ -177,9 +188,11 @@ func New(sample SampleFunc) *Collector {
 		oldestClaimed: prometheus.NewDesc("agentops_channel_op_oldest_claimed_age_seconds",
 			"Age of the oldest claimed-but-uncompleted channel operation.", []string{"adapter"}, nil),
 		slotsInUse: prometheus.NewDesc("agentops_runtime_slots_in_use",
-			"Conversations currently backed by a runtime pod.", nil, nil),
+			"Conversations currently backed by a runtime pod, by pool "+
+				"(conversations, members — separate-member-slot-pool).", []string{"pool"}, nil),
 		slotsMax: prometheus.NewDesc("agentops_runtime_slots_max",
-			"Maximum simultaneously active conversations (MAX_ACTIVE_CONVERSATIONS).", nil, nil),
+			"Maximum simultaneously active conversations, by pool "+
+				"(MAX_ACTIVE_CONVERSATIONS, MAX_ACTIVE_MEMBERS).", []string{"pool"}, nil),
 		inflight: prometheus.NewDesc("agentops_conversations_inflight",
 			"Conversations with a run in flight, by pipeline.", []string{"pipeline"}, nil),
 		cooldowns: prometheus.NewDesc("agentops_cooldowns_active",
@@ -243,8 +256,10 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	}
 	ch <- prometheus.MustNewConstMetric(c.storageOutage, prometheus.GaugeValue, outage)
 	ch <- prometheus.MustNewConstMetric(c.storageOutageAge, prometheus.GaugeValue, s.StorageOutageAge)
-	ch <- prometheus.MustNewConstMetric(c.slotsInUse, prometheus.GaugeValue, float64(s.RuntimeSlotsInUse))
-	ch <- prometheus.MustNewConstMetric(c.slotsMax, prometheus.GaugeValue, float64(s.RuntimeSlotsMax))
+	for _, slot := range s.RuntimeSlots {
+		ch <- prometheus.MustNewConstMetric(c.slotsInUse, prometheus.GaugeValue, float64(slot.InUse), slot.Pool)
+		ch <- prometheus.MustNewConstMetric(c.slotsMax, prometheus.GaugeValue, float64(slot.Max), slot.Pool)
+	}
 	for pipeline, n := range s.ConversationsInflight {
 		ch <- prometheus.MustNewConstMetric(c.inflight, prometheus.GaugeValue, float64(n), pipeline)
 	}

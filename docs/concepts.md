@@ -1802,17 +1802,35 @@ for the full verb and bound table.
 
 ## Capacity: how many run at once
 
-**A conversation is active while a runtime pod exists for it.** That is the only
-thing the cap counts.
+**A conversation is active while a runtime pod exists for it.** That is the
+only thing either cap below counts.
 
-- **`maxActiveConversations`** (env `MAX_ACTIVE_CONVERSATIONS`, default **5**)
-  is measured from the live pod list, never from conversation status. A pod
-  stuck unschedulable, or a status patch lost to a conflict, cannot invent
-  capacity.
+**Two independent pools, never one shared number:**
+
+| Pool | Env | Default | Counts |
+|---|---|---|---|
+| conversations | `MAX_ACTIVE_CONVERSATIONS` | **5** | an uncaused conversation, no `spec.causedBy` |
+| members | `MAX_ACTIVE_MEMBERS` | **5** | a Coordinator member — a conversation an `invoke` created, `spec.causedBy` set |
+
+- **Each is measured from the live pod list, never from conversation
+  status.** A pod stuck unschedulable, or a status patch lost to a conflict,
+  cannot invent capacity in either pool.
+- **A full pool never blocks the other.** Admission, FIFO ordering, idle
+  eviction and the freed-slot pickup below each run per pool, so five busy
+  Coordinator roots cannot leave every member `Pending` behind them, and a
+  full members pool cannot stall an ordinary conversation either.
+- **Total simultaneous pods can reach the sum of both** — 10 by default,
+  where it was 5 before the members pool existed.
+- **A pod whose conversation record cannot be read counts toward
+  conversations.** That is the conservative reading. It never invents
+  capacity for a member.
 - **A conversation that finished and let its pod exit is `Idle`.** It costs
-  nothing and does not count, which is what makes a small default safe.
-- **`maxRuntimes` / `MAX_RUNTIMES` is the deprecated spelling**, honored for one
-  release when the new key is unset. The manager logs it at startup.
+  nothing and does not count in either pool, which is what makes a small
+  default safe.
+- **`maxRuntimes` / `MAX_RUNTIMES` is the deprecated spelling of
+  `maxActiveConversations`**, honored for one release when the new key is
+  unset, and it feeds the conversations pool only. The manager logs it at
+  startup.
 
 **Over-cap work queues, it is not dropped.** A conversation that cannot be
 admitted gets phase `Pending`: no runtime pod, no chat topic, no MCP ConfigMap,
@@ -1826,13 +1844,17 @@ no dispatch.
 - **The Conversation CR *is* the queue**, so the backlog survives a manager
   restart with no extra CRD.
 
-**Admission is FIFO by creation time.** A pending conversation takes a slot only
-when one is free and no older waiter needs it. No priority, no fairness classes
-between pipelines.
+**Admission is FIFO by creation time, within a conversation's own pool.** A
+pending conversation takes a slot only when one is free in its pool, and
+only when no older waiter of that SAME pool needs it first.
 
-A freed slot is filled at once — the reconciler watches
-runtime pod deletions — with a periodic requeue as the backstop. On admission
-the conversation proceeds normally: topic, MCP, pod, dispatch.
+No priority, no fairness classes between pipelines, and no borrowing across
+pools.
+
+A freed slot is filled at once, from the same pool the freed pod belonged to
+— the reconciler watches runtime pod deletions — with a periodic requeue as
+the backstop. On admission the conversation proceeds normally: topic, MCP,
+pod, dispatch.
 
 **A pending conversation has no thread**, so one notice goes to the originating
 channel's general surface when it enters `Pending`, and only then.

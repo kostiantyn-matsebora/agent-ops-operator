@@ -154,12 +154,27 @@ func reconcilerWithOps(ops *chat.OpQueue) *controller.ConversationReconciler {
 	return reconcilerWithCap(ops, 100)
 }
 
+// reconcilerWithCap wires the conversations pool's own cap only. The members
+// pool's cap is left far above anything a non-capacity test creates (100,
+// the same margin reconcilerWithOps gives the conversations pool) — nothing
+// here is testing member admission, so it must never pend one on this
+// reconciler's zero value (separate-member-slot-pool).
 func reconcilerWithCap(ops *chat.OpQueue, cap int) *controller.ConversationReconciler {
+	return reconcilerWithPoolCaps(ops, cap, 100)
+}
+
+// reconcilerWithPoolCaps wires BOTH independent pools' own caps
+// (separate-member-slot-pool design D-1/D-2) — the capacity tests that are
+// actually about the split (member pool admission, FIFO and eviction
+// scoping) need control over both ceilings at once, which reconcilerWithCap's
+// single parameter cannot express.
+func reconcilerWithPoolCaps(ops *chat.OpQueue, convCap, memberCap int) *controller.ConversationReconciler {
 	return &controller.ConversationReconciler{
 		Client:        k8sClient,
 		Conversations: stores.Conversations, Runs: stores.Runs, Blobs: stores.Blobs, Namespaces: namespace.Namespaces{Control: ns, Conversations: ns},
 		Scheme:                 scheme,
-		MaxActiveConversations: cap,
+		MaxActiveConversations: convCap,
+		MaxActiveMembers:       memberCap,
 		Ops:                    ops,
 		Runtime: runtimepod.Config{
 			Image: "busybox:stub", ServiceAccount: "default",

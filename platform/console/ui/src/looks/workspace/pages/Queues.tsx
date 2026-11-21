@@ -3,7 +3,7 @@ import type { ReactElement, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { resolveIcon } from '../../../model/icon'
 import { usePipelineIconLookup } from '../../../model/pipelineIcon'
-import { STUCK, oldestOp, queueAge, useQueuesPage, workAge } from '../../../model/queues'
+import { STUCK, oldestOp, queueAge, useQueuesPage, workAge, workQueueTitle } from '../../../model/queues'
 import { plain } from '../../../model/text'
 import type { StuckReason } from '../../../api/types'
 import './Queues.css'
@@ -104,7 +104,7 @@ export function QueuesPage(): ReactElement {
       )}
 
       <div className="wk-q-grid">
-        <Card title={`Work queue — ${data.capacity.inUse}/${data.capacity.max} slots, ${data.capacity.waiting} waiting`}>
+        <Card title={workQueueTitle(data)}>
           {data.work.length === 0 ? (
             <Empty title="Nothing is waiting">No conversation is queued and none has a run in flight.</Empty>
           ) : (

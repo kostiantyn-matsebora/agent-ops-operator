@@ -145,9 +145,14 @@ type Server struct {
 
 	// Version is the manager build reported by GET /status.
 	Version string
-	// MaxActiveConversations is the runtime-slot ceiling reported by
-	// GET /status alongside the slots actually in use.
+	// MaxActiveConversations is the conversations-pool runtime-slot ceiling
+	// reported by GET /status alongside the slots actually in use
+	// (separate-member-slot-pool design D-1/D-6) — an uncaused conversation,
+	// CausedBy unset.
 	MaxActiveConversations int
+	// MaxActiveMembers is the members pool's own, fully independent ceiling —
+	// a conversation an `invoke` created, CausedBy set.
+	MaxActiveMembers int
 
 	// MaxQueuedConversations bounds the PENDING backlog. An unbounded queue
 	// reproduces the capacity complaint one level down — no pods, but unbounded

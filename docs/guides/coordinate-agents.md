@@ -84,6 +84,10 @@ Use `coordinatorRef` instead of `capabilityRef` to nest another Coordinator. No 
 
 Nesting never pools — each nested Coordinator has its own budget.
 
+A member also holds a runtime-pod slot of its OWN pool, `maxActiveMembers`
+— never the ordinary-conversation pool `maxActiveConversations` caps. A
+busy root never starves a member on that account, and the reverse holds too.
+
 ## Apply it
 
 ```sh

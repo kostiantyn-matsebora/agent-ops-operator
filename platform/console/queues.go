@@ -86,6 +86,14 @@ type Queues struct {
 		Max     int `json:"max"`
 		Waiting int `json:"waiting"`
 	} `json:"capacity"`
+	// Members is the members pool's own sibling of Capacity, additive
+	// (separate-member-slot-pool) — omitted only when /status itself is
+	// unreachable, same as Capacity.
+	Members *struct {
+		InUse   int `json:"inUse"`
+		Max     int `json:"max"`
+		Waiting int `json:"waiting"`
+	} `json:"members,omitempty"`
 	Work     []WorkRow     `json:"work"`
 	Delivery []DeliveryRow `json:"delivery"`
 	// Cooldowns belong here and nowhere else: a suppressed signal lane looks
@@ -113,6 +121,11 @@ func (a *API) queues(ctx context.Context) Queues {
 	} else {
 		out.Capacity.InUse, out.Capacity.Max, out.Capacity.Waiting =
 			st.RuntimeSlots.InUse, st.RuntimeSlots.Max, st.RuntimeSlots.Waiting
+		out.Members = &struct {
+			InUse   int `json:"inUse"`
+			Max     int `json:"max"`
+			Waiting int `json:"waiting"`
+		}{st.MemberSlots.InUse, st.MemberSlots.Max, st.MemberSlots.Waiting}
 		out.Cooldowns = st.Cooldowns
 		for _, q := range st.Queues {
 			row := DeliveryRow{

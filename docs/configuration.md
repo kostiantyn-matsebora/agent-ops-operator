@@ -201,8 +201,9 @@ with the pod:
 |---|---|---|
 | `global.agentops.runtimeDefaults.contextSync.liveSizeLimit` | `4Gi` | per conversation, on the node running it. Empty is unbounded, which is Kubernetes' own default |
 
-Budget node ephemeral storage for `maxActiveConversations` × this, and raise it
-before a run that checks out something large evicts itself.
+Budget node ephemeral storage for `(maxActiveConversations + maxActiveMembers)
+× this`, and raise it before a run that checks out something large evicts
+itself. Both pools can hold pods at once, so both count toward the total.
 
 `rbac.drainAware` costs the manager its only cluster-scoped permission — reading
 nodes. It shrinks the window in which a reboot can corrupt the volume. It does
@@ -792,8 +793,9 @@ Every value here, and the rest the dependency takes, is in
 
 | Key | Default | Consequence |
 |---|---|---|
-| `maxActiveConversations` | `5` | how many agents hold a pod at once. Over-cap work waits in `Pending` with no pod and no thread |
-| `maxQueuedConversations` | `50` | the backlog bound. `0` queues nothing. Past it, a chat message is declined and the sender is told. A machine signal stays `Pending` and routes when the backlog drains |
+| `maxActiveConversations` | `5` | how many ordinary conversations hold a pod at once — a conversation with no `spec.causedBy`. Over-cap work waits in `Pending` with no pod and no thread |
+| `maxActiveMembers` | `5` | the same cap for Coordinator members, a separate pool — a conversation an `invoke` created, `spec.causedBy` set. A full pool never blocks the other, and total pods can reach the sum of both |
+| `maxQueuedConversations` | `50` | the backlog bound, both pools together. `0` queues nothing. Past it, a chat message is declined and the sender is told. A machine signal stays `Pending` and routes when the backlog drains |
 | `global.agentops.runtimeDefaults.idleTtlMinutes` | `1` | how long a finished agent keeps its pod. Raise it for expensive startup |
 | `replicas` | `2`, or `1` under demo mode | how many manager pods run. Demo mode is one node, where a second pod would sit Pending behind its own anti-affinity, so it defaults to one and drops that rule. A value you type wins in both modes. Safe above 1: every channel op is bus-backed and visible to every replica, never served from an in-memory queue only the leader populated |
 | `signalConsumerConcurrency` | `4` | how many consumers route stored signals at once on the leader. Messages of one `(source, initiationId)` still run one at a time, in arrival order |
