@@ -65,8 +65,9 @@ from every other angle:
 
   - ops QUEUED with nothing claiming them — the adapter is down, and CR state
     says nothing at all, because the op queue lives in the manager's memory;
-  - runtime slots pinned at the ceiling WITH waiters — the system is capacity
-    bound, and every conversation looks merely "Pending".
+  - runtime slots pinned at the ceiling WITH waiters, in EITHER pool — the
+    system is capacity bound in that pool, and every conversation or member
+    looks merely "Pending".
 
 Deliberately not alerting on error RATES: a failed agent run is ordinary and
 paging on it teaches people to ignore the pager.
@@ -109,17 +110,35 @@ spec:
             description: >-
               Adapter {{ "{{ $labels.adapter }}" }} has held a claimed op for
               over ten minutes. See GET /status for which op.
-        - alert: AgentOpsAtRuntimeCeiling
+        # separate-member-slot-pool: conversations and Coordinator members are
+        # two independently-capped pools (`pool` label on both gauges), so the
+        # ceiling is two alerts rather than one series compared to itself.
+        - alert: AgentOpsConversationsAtRuntimeCeiling
           expr: |
-            agentops_runtime_slots_in_use >= agentops_runtime_slots_max
+            agentops_runtime_slots_in_use{pool="conversations"} >= agentops_runtime_slots_max{pool="conversations"}
               and sum(agentops_conversations_inflight) > 0
           for: 15m
           labels:
             severity: info
+            pool: conversations
           annotations:
-            summary: "agent-ops: runtime slots pinned at the ceiling"
+            summary: "agent-ops: conversation runtime slots pinned at the ceiling"
             description: >-
-              Every runtime slot has been in use for fifteen minutes.
-              Conversations are queueing rather than running — raise
+              Every conversation runtime slot has been in use for fifteen
+              minutes. Conversations are queueing rather than running — raise
               maxActiveConversations or shed load.
+        - alert: AgentOpsMembersAtRuntimeCeiling
+          expr: |
+            agentops_runtime_slots_in_use{pool="members"} >= agentops_runtime_slots_max{pool="members"}
+              and sum(agentops_conversations_inflight) > 0
+          for: 15m
+          labels:
+            severity: info
+            pool: members
+          annotations:
+            summary: "agent-ops: Coordinator-member runtime slots pinned at the ceiling"
+            description: >-
+              Every Coordinator-member runtime slot has been in use for
+              fifteen minutes. Members are queueing rather than running —
+              raise maxActiveMembers or shed load.
 {{- end }}{{- end }}

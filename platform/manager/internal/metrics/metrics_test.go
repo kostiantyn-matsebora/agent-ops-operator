@@ -45,6 +45,25 @@ func counterValue(f *dto.MetricFamily) float64 {
 	return total
 }
 
+// gaugeWithLabel finds the one series in a family carrying labelName=value —
+// used for the slot gauges, which now carry a `pool` label instead of being
+// one series each (separate-member-slot-pool).
+func gaugeWithLabel(t *testing.T, f *dto.MetricFamily, labelName, value string) float64 {
+	t.Helper()
+	if f == nil {
+		t.Fatalf("metric family missing (looking for %s=%s)", labelName, value)
+	}
+	for _, m := range f.GetMetric() {
+		for _, lp := range m.GetLabel() {
+			if lp.GetName() == labelName && lp.GetValue() == value {
+				return m.GetGauge().GetValue()
+			}
+		}
+	}
+	t.Fatalf("%s: no series with %s=%s", f.GetName(), labelName, value)
+	return 0
+}
+
 // 1b.2a: an event and its metric observation cannot occur independently. The
 // emitter fans out to the ring buffer AND the registry from one call, so this
 // asserts the coupling rather than two instrumentation passes agreeing today.
@@ -254,7 +273,10 @@ func TestGaugesComeFromTheSampler(t *testing.T) {
 		return Sample{
 			Queues: []QueueSample{{Adapter: "telegram", Queued: 3, Claimed: 1,
 				OldestQueuedAge: 42, OldestClaimedAge: 7}},
-			RuntimeSlotsInUse: 5, RuntimeSlotsMax: 5,
+			RuntimeSlots: []SlotSample{
+				{Pool: "conversations", InUse: 5, Max: 5},
+				{Pool: "members", InUse: 2, Max: 5},
+			},
 			ConversationsInflight: map[string]int{"k8s-ops": 2},
 			CooldownsActive:       map[string]int{"nightly": 9},
 		}
@@ -265,8 +287,6 @@ func TestGaugesComeFromTheSampler(t *testing.T) {
 		"agentops_channel_ops_claimed":                   1,
 		"agentops_channel_op_oldest_queued_age_seconds":  42,
 		"agentops_channel_op_oldest_claimed_age_seconds": 7,
-		"agentops_runtime_slots_in_use":                  5,
-		"agentops_runtime_slots_max":                     5,
 		"agentops_conversations_inflight":                2,
 		"agentops_cooldowns_active":                      9,
 	} {
@@ -278,6 +298,20 @@ func TestGaugesComeFromTheSampler(t *testing.T) {
 			t.Fatalf("%s = %v, want %v", name, v, want)
 		}
 	}
+	// The slot gauges now carry a `pool` label instead of being summed into
+	// one series — each pool's own in-use/max must survive distinctly.
+	if v := gaugeWithLabel(t, got["agentops_runtime_slots_in_use"], "pool", "conversations"); v != 5 {
+		t.Fatalf("conversations pool in-use = %v, want 5", v)
+	}
+	if v := gaugeWithLabel(t, got["agentops_runtime_slots_in_use"], "pool", "members"); v != 2 {
+		t.Fatalf("members pool in-use = %v, want 2", v)
+	}
+	if v := gaugeWithLabel(t, got["agentops_runtime_slots_max"], "pool", "conversations"); v != 5 {
+		t.Fatalf("conversations pool max = %v, want 5", v)
+	}
+	if v := gaugeWithLabel(t, got["agentops_runtime_slots_max"], "pool", "members"); v != 5 {
+		t.Fatalf("members pool max = %v, want 5", v)
+	}
 
 	_, empty := wired(t, nil)
 	if f := gather(t, empty)["agentops_runtime_slots_max"]; f != nil {
@@ -288,7 +322,9 @@ func TestGaugesComeFromTheSampler(t *testing.T) {
 // Every series carries HELP and TYPE — the standard conventions, so an ordinary
 // Prometheus stack consumes this without house knowledge.
 func TestMetricsCarryHelpAndUseStandardNaming(t *testing.T) {
-	log, reg := wired(t, func() Sample { return Sample{RuntimeSlotsMax: 5} })
+	log, reg := wired(t, func() Sample {
+		return Sample{RuntimeSlots: []SlotSample{{Pool: "conversations", Max: 5}}}
+	})
 	log.Emit(activity.Event{Kind: activity.KindConversationCreated, Pipeline: "p"})
 	for name, f := range gather(t, reg) {
 		if !strings.HasPrefix(name, "agentops_") {
