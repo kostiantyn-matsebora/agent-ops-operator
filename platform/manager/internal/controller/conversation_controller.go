@@ -22,6 +22,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -149,6 +150,16 @@ type ConversationReconciler struct {
 	// that cannot attach its volume is the same incident as a run that cannot
 	// reach its context. Nil disables the provisioning edge entirely (tests).
 	StorageBreaker *storagebreaker.Breaker
+
+	// Concurrency is how many conversations reconcile at once. Zero means
+	// DefaultConversationConcurrency.
+	Concurrency int
+
+	slots slots
+
+	// ReconcileTimeout bounds one reconcile. Zero means
+	// DefaultConversationReconcileTimeout.
+	ReconcileTimeout time.Duration
 	// DrainAware releases idle runtime pods from a node that is going down, so
 	// a shared context volume detaches before the machine reboots. OFF by
 	// default and gated in the chart: nodes are cluster-scoped, and reading
@@ -221,6 +232,18 @@ const DefaultClaimStalenessSeconds = 90
 
 // Reconcile implements the reconciliation loop.
 func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	timeout := r.ReconcileTimeout
+	if timeout <= 0 {
+		timeout = DefaultConversationReconcileTimeout
+	}
+	// A call that never answers must become an error the queue retries, never
+	// a worker held for good.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return r.reconcile(ctx, req)
+}
+
+func (r *ConversationReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	key := state.Key(req.Name)
@@ -1053,7 +1076,7 @@ func (r *ConversationReconciler) waitingFIFO(all []state.ConversationRecord, has
 // createRuntimePod does the eviction, and admitting on that basis is what keeps
 // a burst from blocking behind a worker that is doing nothing.
 func (r *ConversationReconciler) admit(ctx context.Context, conv *state.ConversationRecord) (bool, error) {
-	live, err := r.liveRuntimePods(ctx, r.Namespaces.Conversations)
+	live, free, err := r.freeSlots(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -1062,7 +1085,6 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *state.Conversa
 		hasPod[p.Labels[runtimepod.LabelConversation]] = true
 	}
 
-	free := r.MaxActiveConversations - len(live)
 	if free <= 0 {
 		free = r.evictableCount(ctx, live)
 	}
@@ -1440,7 +1462,7 @@ func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *state
 // evictIdleWorker evicts the longest-idle worker whose conversation has
 // nothing queued. It reports false when none can be evicted (every slot is
 // held by a busy conversation) or the delete failed.
-func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv *state.ConversationRecord, live []corev1.Pod) (bool, error) {
+func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv string, live []corev1.Pod) (types.UID, bool, error) {
 	logger := log.FromContext(ctx)
 	type cand struct {
 		pod  corev1.Pod
@@ -1463,15 +1485,15 @@ func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv *stat
 	}
 	if len(cands) == 0 {
 		logger.Info("at the active-conversation cap, all busy — pending",
-			"conversation", conv.Name, "cap", r.MaxActiveConversations)
-		return false, nil
+			"conversation", conv, "cap", r.MaxActiveConversations)
+		return "", false, nil
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].last.Before(cands[j].last) })
 	logger.Info("evicting idle worker to make room", "pod", cands[0].pod.Name)
 	if err := r.Delete(ctx, &cands[0].pod); err != nil && !apierrors.IsNotFound(err) {
-		return false, err
+		return "", false, err
 	}
-	return true, nil
+	return cands[0].pod.UID, true, nil
 }
 
 // createRuntimePod re-checks the conversation cap against a FRESH pod list —
@@ -1481,15 +1503,16 @@ func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv *stat
 func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *state.ConversationRecord) (bool, error) {
 	logger := log.FromContext(ctx)
 
-	live, err := r.liveRuntimePods(ctx, r.Namespaces.Conversations)
-	if err != nil {
+	ok, release, err := r.reserveSlot(ctx, conv.Name)
+	if !ok {
 		return false, err
 	}
-	if len(live) >= r.MaxActiveConversations {
-		if made, err := r.evictIdleWorker(ctx, conv, live); !made {
-			return false, err
+	created := false
+	defer func() {
+		if !created {
+			release()
 		}
-	}
+	}()
 
 	var profile agentopsv1alpha1.AgentProfile
 	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: conv.ProfileRef}, &profile); err != nil {
@@ -1551,10 +1574,14 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *sta
 	}
 	if err := r.Create(ctx, pod); err != nil {
 		if apierrors.IsAlreadyExists(err) {
+			created = true
+			release()
 			return true, nil
 		}
 		return false, err
 	}
+	created = true
+	r.awaitVisible(ctx, conv.Name, release)
 	// The pod exists; everything from here until the agent's first /work is
 	// scheduling and boot, and used to be a silent gap in the sequence.
 	r.Activity.Emit(activity.Event{
@@ -1725,9 +1752,26 @@ func isRuntimePod(obj client.Object) bool {
 // Owns(&corev1.Pod{}) is spelled out as a Watches on the pod with the owner
 // read off its controller reference: the builder's Owns needs For(<the
 // Conversation type>), which is the dependency this change removes.
+// DefaultConversationConcurrency is the default number of conversations
+// reconciled at once. The workqueue never runs one conversation on two
+// workers, so what is shared between conversations is guarded explicitly
+// (slotMu), not by there being one worker.
+const DefaultConversationConcurrency = 4
+
+// DefaultConversationReconcileTimeout bounds a single reconcile.
+const DefaultConversationReconcileTimeout = 2 * time.Minute
+
+func (r *ConversationReconciler) concurrency() int {
+	if r.Concurrency > 0 {
+		return r.Concurrency
+	}
+	return DefaultConversationConcurrency
+}
+
 func (r *ConversationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("conversation").
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.concurrency()}).
 		WatchesRawSource(source.Func(r.startFeed)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.mapPodToOwner)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.MapRuntimePodToPending),

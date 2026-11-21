@@ -21,6 +21,14 @@ for the source and the reference material beside this file.
   seconds and starts over once a watch has delivered. The same applies to the
   command bus's queue mirror.
 
+- **One stuck call no longer stops every conversation from starting or
+  closing.** The conversation controller reconciled one conversation at a time
+  with no time limit, so a single call that never answered held the only
+  worker and everything behind it waited, with free capacity (#527). It now runs
+  four workers, each reconcile has a two-minute deadline that turns a hang into
+  a retried error, and the active-conversation cap is decided and claimed in
+  one guarded step so parallel workers cannot exceed it.
+
 ## [23.0.0] — 2026-11-21
 
 Images: console 0.44.0. Every other image is unchanged.
