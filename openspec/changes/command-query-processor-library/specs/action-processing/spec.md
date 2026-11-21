@@ -50,8 +50,8 @@ Leader election SHALL still gate the trigger.
 
 ### Requirement: A query reads a read model or a named source of truth
 A query SHALL read a read model that commands keep current, or a source of truth the
-action table names, such as the Kubernetes API.
+action table (`docs/contracts/actions.md`) names, such as the Kubernetes API.
 
 #### Scenario: A query that reads a source of truth is named
 - **WHEN** a query reads the Kubernetes API directly
-- **THEN** the action table names it as reading that source
+- **THEN** `docs/contracts/actions.md` names it as reading that source

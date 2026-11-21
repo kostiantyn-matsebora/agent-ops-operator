@@ -1,8 +1,8 @@
 ## 1. Inventory and spikes before any code
 
-- [ ] 1.1 Write the action table: every manager route, reconciler, sweep and timer, its kind, its trigger, its auth domain and its response today. Verify: a test lists the routes the mux serves and the reconcilers registered, and fails if one is missing from the table.
+- [ ] 1.1 Write the action table as `docs/contracts/actions.md`: every manager route, reconciler, sweep and timer, its kind, its trigger, its auth domain and its response today. Verify: a test lists the routes the mux serves and the reconcilers registered, and fails if one is missing from the table.
 - [ ] 1.2 Spike a shared Go module in this repository: a tag with a `lib/<name>/` prefix, required from a component whose image builds from its own directory, with a `go.work` for local work. Verify: a throwaway Dockerfile build of one component resolves the module, and the answer is written in `design.md` D2.
-- [ ] 1.3 List every other Go component's actions and the commands and queries it sends to the manager. Verify: the list is written in `design.md` D8, and each component has a task in section 6.
+- [ ] 1.3 List every other Go component's actions and the commands and queries it sends to the manager. Verify: the list is written in `design.md` D8, and each component is named in task 6.1.
 - [ ] 1.4 Decide with the user whether the library includes the client side, and whether the processors take middleware. Verify: `design.md` D8 and the open questions are updated.
 - [ ] 1.5 Settle the package names and the call shape, given that Go has no generic methods. Verify: `design.md` shows the final shape.
 
@@ -44,6 +44,8 @@
 
 - [ ] 6.1 For each Go component, route its own actions through the library, and, if 1.4 says so, replace its hand-written `manager.go` with the library's sender. Verify: each component's own tests pass and its image still builds from its own directory.
 - [ ] 6.2 Add a check that fails when a Go module listed by `.github/components.sh modules` does not use the library. Verify: the check passes on the repo and fails on a module that drops the import.
+
+- [ ] 6.3 Add a check that fails when a component imports another component's `internal` package. Verify: it passes on the repo and fails on a test import of one.
 
 ## 7. Unit tests
 

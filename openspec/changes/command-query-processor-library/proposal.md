@@ -49,9 +49,10 @@ The design settles each. None is guessed here.
 
 | Area | Change |
 |---|---|
-| New `lib/` module | the command processor, the query processor and the Bus, moved out of `platform/manager/internal/commandbus` |
+| New `lib/` core module | stdlib-only: the command processor, the query processor, the message contracts, the Bus interface, the consumer pool and the memory backend |
+| New `lib/` backend module | the NATS and Watermill Bus backend, moved out of `platform/manager/internal/commandbus`. Only the manager imports it |
 | `platform/manager/` | imports the library. HTTP handlers become thin. The nine reconcilers and the sweeps become command handlers behind their triggers |
-| Other Go components | adopt the library where they have handlers. The first task lists them |
+| Other Go components | every Go component routes its own actions through the library. The first task lists them |
 | The message contracts | new types in the core, reusing the Bus's `Kind`, `Key`, `CommandID` and `ErrorCode` |
 | `.github/components.sh` | `lib/` is a module that is not an image, like `test/` |
 | Module releases | the library needs its own version and tag |
