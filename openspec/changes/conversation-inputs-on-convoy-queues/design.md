@@ -54,7 +54,7 @@ What option A needs:
 
 ### D2. One family, the conversation is the key
 
-The family is `in.conversation`. A message's key is the conversation name.
+The family's working name is `in.conversation`. It is not final until the inventory is changed, see Open Questions. A message's key is the conversation name.
 
 Routing in the bus is a function from the queue name to a mode, and the default is convoy. So the family needs no routing entry. One convoy queue per key, one message in flight, order and parallelism across keys are the bus's own (#532).
 
