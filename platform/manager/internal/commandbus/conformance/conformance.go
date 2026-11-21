@@ -17,31 +17,17 @@ import (
 )
 
 // Backing is a fresh, isolated instance of a backend's durable state, kept
-// alive for one scenario's whole body. Bus returns an independent handle
-// onto it — calling it more than once is how the suite proves a claim
-// completes through a handle other than the one that claimed it (design
-// D-2), without assuming how many connections or goroutines a real backend
-// needs to do that. Advance fast-forwards the backing's clock, so a
-// scenario can skip past a backoff, a lease or a TTL deterministically.
+// alive for one scenario's whole body. Bus returns an independent handle onto
+// it: calling it more than once is how the suite proves a claim completes
+// through a handle other than the one that claimed it. Advance moves the
+// backing's time forward by d, so a scenario can pass a backoff, a lease or a
+// TTL: a backend with a virtual clock jumps it, one with a real broker waits.
 type Backing interface {
 	Bus() commandbus.Bus
 	Advance(d time.Duration)
-	// LeaseDuration reports how long this backing's Claim leases run before
-	// a lapse — bus-wide, not per queue (design D-2 never varies it by
-	// queue). The lease-lapse scenarios advance exactly past it rather than
-	// guessing a number that might also blow through an unrelated queue's
-	// TTL.
+	// LeaseDuration reports how long this backing's Claim leases run before a
+	// lapse, bus-wide, so the lease-lapse scenarios advance exactly past it.
 	LeaseDuration() time.Duration
-	// Entries reads back every entry the backing's log holds, in append
-	// order, as stored. It is how the append-only scenarios see that nothing
-	// was written twice or rewritten (design D-2): a backend that updated an
-	// entry in place would show it here as a changed or repeated one.
-	Entries() []entrylog.Entry
-	// Compact runs whatever removal of consumed entries the backend defers: the
-	// entries of a task that succeeded are removed from the log, like a regular
-	// queue's, and a backend may wait a short grace before doing so. A backend
-	// that removes them inside Settle does nothing here.
-	Compact()
 }
 
 // scenarioTimeout bounds every blocking call (chiefly Claim) a scenario
@@ -56,7 +42,33 @@ const scenarioTimeout = 5 * time.Second
 // second, unrelated queue.
 func Run(t *testing.T, open func() Backing) {
 	t.Helper()
-	for _, d := range commandbus.DefaultInventory() {
+	RunInventory(t, open, commandbus.DefaultInventory())
+}
+
+// LogBacking is what a backend that keeps its queue as an append-only log
+// adds. The scenarios about the log itself run only against one.
+type LogBacking interface {
+	Entries() []entrylog.Entry
+	Compact()
+}
+
+// CapBacking marks a backend that enforces a queue's per-invocation in-flight cap.
+type CapBacking interface{ EnforcesInvocationCap() }
+
+func logOf(t *testing.T, b Backing) LogBacking {
+	t.Helper()
+	lb, ok := b.(LogBacking)
+	if !ok {
+		t.Skip("this backend keeps no entry log")
+	}
+	return lb
+}
+
+// RunInventory is Run over a given inventory, so a backend whose timers are
+// real can run the suite with short durations.
+func RunInventory(t *testing.T, open func() Backing, inv []commandbus.Declaration) {
+	t.Helper()
+	for _, d := range inv {
 		d := d
 		name := string(d.Queue)
 		if d.Kind != commandbus.KindDefault {

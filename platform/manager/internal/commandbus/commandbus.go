@@ -166,3 +166,13 @@ type Bus interface {
 	// queue with no distinct kinds.
 	Stats(ctx context.Context, queue Queue, kind Kind) (QueueStats, error)
 }
+
+// Renewer is implemented by a Bus whose leases a long-running handler must
+// extend. A holder calls Renew while it works; one that stops calling lets the
+// lease lapse, and the task is delivered again. A backend with no such need
+// need not implement it.
+type Renewer interface {
+	// Renew extends the live lease of a held task. A lease that lapsed or was
+	// taken is ErrLeaseLost.
+	Renew(ctx context.Context, taskUID string, leaseToken string) error
+}

@@ -278,6 +278,19 @@ func (r *ConversationReconciler) reconcile(ctx context.Context, req ctrl.Request
 		return r.reconcileClosed(ctx, &conv)
 	}
 
+	// A MEMBER NEVER OUTLIVES ITS PARENT. A member whose parent record is
+	// gone (rolled back by a storage disturbance, or removed by a path that
+	// missed it) has no root to report to and nothing to be reached from, so
+	// it is closed here and left to the auto-delete clock. Only a definite
+	// not-found counts: a failed read says nothing about the parent.
+	if conv.CausedBy != nil && r.Router != nil {
+		if _, _, err := r.Conversations.Get(ctx, state.Key(conv.CausedBy.Parent)); errors.Is(err, state.ErrNotFound) {
+			log.FromContext(ctx).Info("closing an orphaned member: its parent conversation no longer exists",
+				"conversation", conv.Name, "parent", conv.CausedBy.Parent)
+			return ctrl.Result{}, r.Router.CloseConversationReason(ctx, &conv, "its parent conversation no longer exists")
+		}
+	}
+
 	// The DEADLINE budget edge (design D-E): a Coordinator-rooted conversation
 	// past its own snapshotted deadline is closed budget-exceeded — its own
 	// members first, then escalated — whatever else is happening on it. This is
@@ -945,6 +958,10 @@ func (r *ConversationReconciler) autoDelete(ctx context.Context, conv *state.Con
 	}
 	log.FromContext(ctx).Info("auto-deleting a long-closed conversation",
 		"conversation", conv.Name, "closedFor", elapsed.Round(time.Minute), "window", r.AutoDeleteClosedAge)
+	if r.Router != nil {
+		// Members go first, leaves to root, so no member outlives its parent.
+		return ctrl.Result{}, r.Router.DeleteTree(ctx, conv.Name)
+	}
 	return ctrl.Result{}, r.Conversations.Delete(ctx, state.Key(conv.Name))
 }
 
