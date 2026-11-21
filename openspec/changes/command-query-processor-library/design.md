@@ -154,7 +154,7 @@ The library defines four base contracts, reusing what the Bus already has.
 | **Query response** | the typed data and a page: limit, offset and total. A refusal carries an error and no data |
 | **Error** | a code from the closed set the Bus already has, and a detail |
 
-`Kind`, `Key`, `CommandID` and `ErrorCode` move into the core as they are. The payload becomes typed for a handler, and stays bytes on the transport.
+`Queue`, `Kind`, `Key`, `CommandID` and `ErrorCode` move into the core as they are. `Queue` moves because the async modes name the queue a command is delivered on. The payload becomes typed for a handler, and stays bytes on the transport.
 
 The existing routes map onto these. Where a route's response already fits, nothing changes. Where it does not, the action table says so.
 
