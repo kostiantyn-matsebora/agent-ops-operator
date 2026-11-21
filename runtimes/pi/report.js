@@ -56,6 +56,24 @@ function drop(obj) {
   return obj;
 }
 
+/** totalIn is every input token a call consumed, cache parts included. */
+function totalIn(u) {
+  const input = count(u.input);
+  if (input === undefined) return undefined;
+  return input + (count(u.cacheRead) ?? 0) + (count(u.cacheWrite) ?? 0);
+}
+
+/** resultBytes measures what a tool returned, without keeping it. */
+function resultBytes(result) {
+  if (result == null) return 0;
+  const content = result.content !== undefined ? result.content : result;
+  if (typeof content === 'string') return Buffer.byteLength(content);
+  if (Array.isArray(content)) {
+    return content.reduce((n, b) => n + (typeof b?.text === 'string' ? Buffer.byteLength(b.text) : Buffer.byteLength(JSON.stringify(b ?? null))), 0);
+  }
+  return Buffer.byteLength(JSON.stringify(content));
+}
+
 /**
  * toolIdentity names a call in the agent-ops vocabulary, with its server.
  * An MCP tool's identity is its own registered name, `mcp__<server>__<tool>`
@@ -89,7 +107,11 @@ function newCallRecorder() {
           const u = msg.usage || {};
           turns.push({
             model: field(msg.model),
-            tokensIn: count(u.input),
+            // The contract's `tokensIn` INCLUDES the cache parts (runtime.md);
+            // pi reports `input` as the uncached remainder, so the total is
+            // rebuilt here, as runtimes/claude does. Left as pi gave it, the
+            // console's derived "fresh" figure went negative.
+            tokensIn: totalIn(u),
             tokensOut: count(u.output),
             cacheReadTokens: count(u.cacheRead),
             // Reported under the CONTRACT's existing field for this exact
@@ -129,6 +151,7 @@ function newCallRecorder() {
           pending.delete(ev.toolCallId);
           const d = count(ev.durationMs);
           if (d !== undefined) call.durationMs = d;
+          call.resultBytes = resultBytes(ev.result);
           return;
         }
         default:
@@ -144,4 +167,4 @@ function newCallRecorder() {
   };
 }
 
-module.exports = { newCallRecorder, toolIdentity, MAX_TURNS, MAX_TOOL_CALLS, MAX_FIELD };
+module.exports = { newCallRecorder, totalIn, resultBytes, toolIdentity, MAX_TURNS, MAX_TOOL_CALLS, MAX_FIELD };

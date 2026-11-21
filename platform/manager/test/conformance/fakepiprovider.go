@@ -36,6 +36,8 @@ import (
 //	             actually proves live (narrower than "every count is
 //	             omitted": measured against the real SDK, only
 //	             reasoningTokens stays genuinely absent)
+//	length       ends the turn on finish_reason "length" with no text, 250000
+//	             prompt tokens and one completion token
 //	calls        answers a "bash" tool call on the first turn (pi's own
 //	             built-in, vocabulary.js's BUILTIN.Bash mapping — the ONLY
 //	             built-in this lane ever grants), a final answer once the
@@ -125,6 +127,12 @@ func (p *FakePiProvider) handle(w http.ResponseWriter, r *http.Request) {
 		// double-side absence actually proves once pi's own SDK has
 		// normalized it.
 		send(map[string]any{"content": "an answer the vendor reported no accounting for"}, "stop", nil)
+	case "length":
+		// A turn the provider cut at its token limit before any text: empty
+		// content, finish_reason "length", a large prompt count — the shape a
+		// request that outgrew the assumed window produced.
+		send(map[string]any{}, "length",
+			map[string]any{"usage": map[string]any{"prompt_tokens": 250000, "completion_tokens": 1, "total_tokens": 250001}})
 	case "calls":
 		if !hasToolResult {
 			send(map[string]any{"tool_calls": []map[string]any{{"index": 0, "id": "call_1", "type": "function",
@@ -149,7 +157,7 @@ func (p *FakePiProvider) handle(w http.ResponseWriter, r *http.Request) {
 
 // piDirectives is the vocabulary this double recognizes. Anything else reads
 // as the default completion — see the type's doc comment.
-var piDirectives = []string{"slow", "unparsable", "calls"}
+var piDirectives = []string{"slow", "unparsable", "calls", "length"}
 
 // piLastUserContent returns the last user-role message's text — the
 // original prompt, stable across every call of one run even once

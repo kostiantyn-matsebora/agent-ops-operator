@@ -523,6 +523,15 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
+	// A closed conversation is inert: it serves no work. A pod still polling
+	// after /close landed, with an input queued before it, would otherwise be
+	// handed that input, and the dispatch below writes Working over Closed.
+	// Closed is sticky until an explicit reopen, so the conversation never
+	// reads Closed again and its pod runs on until its idle timeout (the
+	// TestReplicasTwoDeliversEveryConsoleThread failure on manager-v0.65.0).
+	if conv.Phase == state.PhaseClosed {
+		return dispatch.WorkUnit{}, false, nil
+	}
 	// pending-topic gate: a channel-bound conversation waits until AT LEAST ONE
 	// thread binding exists before its first unit dispatches (waiting for all
 	// would deadlock on one broken channel; late topics catch up). Dangling

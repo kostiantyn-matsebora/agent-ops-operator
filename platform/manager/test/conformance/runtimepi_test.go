@@ -364,9 +364,7 @@ func runtimePiAssertAPI7OmitsWhatPiCannotDetermine(t *testing.T, mgr *FakeManage
 // directive — pi's own REAL built-in `bash` tool executes
 // `echo AGENTOPS_CONFORMANCE_TOOL_MARKER` for real inside WORKSPACE; this
 // asserts only the fields runtimes/pi/report.js actually produces for a tool
-// call (`tool`/`durationMs`) — it has no `resultBytes` field, unlike
-// runtimes/ollama's own report (COMPAT-2: never invent a field a runtime
-// does not send).
+// call (`tool`/`durationMs`/`resultBytes`).
 func runtimePiAssertAPI4AndAPI8(t *testing.T, mgr *FakeManager, convo string) {
 	t.Helper()
 	c := runtimePiRun(t, mgr, runtimePiUnit("api4-8", convo, "calls now",
@@ -385,6 +383,9 @@ func runtimePiAssertAPI4AndAPI8(t *testing.T, mgr *FakeManager, convo string) {
 	}
 	if d, ok := call["durationMs"].(float64); !ok || d < 0 {
 		t.Fatalf("durationMs, when pi's own built-in reports it, must be a non-negative number: %+v", call)
+	}
+	if b, ok := call["resultBytes"].(float64); !ok || b <= 0 {
+		t.Fatalf("a tool call that returned output must report its size, so the call that filled the context is visible: %+v", call)
 	}
 	raw, _ := json.Marshal(c.Raw)
 	if strings.Contains(string(raw), "echo AGENTOPS_CONFORMANCE_TOOL_MARKER") || strings.Contains(string(raw), "AGENTOPS_CONFORMANCE_TOOL_MARKER") {
@@ -481,5 +482,91 @@ func TestRuntimePiIdleExit(t *testing.T) {
 	})
 	if !strings.Contains(p.Output(), "idle TTL reached") {
 		t.Fatalf("the exit must be the documented idle-TTL lifecycle exit, not a crash: %s", p.Output())
+	}
+}
+
+// The model's declared limits reach pi's own `models.json` entry, and a turn
+// the provider cuts at its token limit with no text fails the run naming the
+// limit and the counts — not "no answer".
+func TestRuntimePiModelLimits(t *testing.T) {
+	mgr := NewFakeManager(t, "unused")
+	provider := NewFakePiProvider(t)
+	home := t.TempDir()
+	const convo = "rt-pi-limits"
+	startPiRuntime(t, []string{
+		"CONTROL_URL=" + mgr.URL(),
+		"CONVO_ID=" + convo,
+		"POD_NAME=test-pod",
+		"WORKSPACE=" + t.TempDir(),
+		"HOME=" + home,
+		"RUNTIME_IDLE_TTL_M=10",
+		"PI_API_KEY=test-key",
+		"PI_PROVIDER=fake",
+		"PI_PROVIDER_API=openai-completions",
+		"PI_BASE_URL=" + provider.URL() + "/v1",
+		"PI_MODEL=fake-model",
+		"PI_CONTEXT_WINDOW=1000000",
+		"PI_MAX_TOKENS=64000",
+	})
+
+	c := runtimePiRun(t, mgr, runtimePiUnit("limits-length", convo, "length now",
+		map[string]any{"allowedTools": "", "toolsMode": "overwrite"}))
+	if c.Raw["status"] != "failed" {
+		t.Fatalf("a length stop with no text must fail the run: %+v", c.Raw)
+	}
+	result, _ := c.Raw["result"].(string)
+	if !strings.Contains(result, "token limit") || !strings.Contains(result, "250000 input tokens, 1 output tokens") ||
+		strings.Contains(result, "produced no answer") {
+		t.Fatalf("the failure must name the limit and the counts: %q", result)
+	}
+	turns, _ := c.Raw["turns"].([]any)
+	if len(turns) != 1 {
+		t.Fatalf("one model call: %+v", c.Raw["turns"])
+	}
+	if turn, _ := turns[0].(map[string]any); turn["stopReason"] != "length" {
+		t.Fatalf("the stop reason must be reported as length: %+v", turn)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(home, ".pi", "agent", "models.json"))
+	if err != nil {
+		t.Fatalf("models.json: %v", err)
+	}
+	var cfg struct {
+		Providers map[string]struct {
+			Models []map[string]any `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	models := cfg.Providers["fake"].Models
+	if len(models) != 1 || models[0]["id"] != "fake-model" || models[0]["contextWindow"] != float64(1000000) || models[0]["maxTokens"] != float64(64000) {
+		t.Fatalf("the declared limits must reach the model entry: %s", raw)
+	}
+}
+
+// Unset limits keep today's bare entry, so nothing changes on upgrade.
+func TestRuntimePiUnsetLimitsKeepABareModelEntry(t *testing.T) {
+	mgr := NewFakeManager(t, "unused")
+	provider := NewFakePiProvider(t)
+	home := t.TempDir()
+	const convo = "rt-pi-bare"
+	startPiRuntime(t, []string{
+		"CONTROL_URL=" + mgr.URL(), "CONVO_ID=" + convo, "POD_NAME=test-pod",
+		"WORKSPACE=" + t.TempDir(), "HOME=" + home, "RUNTIME_IDLE_TTL_M=10",
+		"PI_API_KEY=test-key", "PI_PROVIDER=fake", "PI_PROVIDER_API=openai-completions",
+		"PI_BASE_URL=" + provider.URL() + "/v1", "PI_MODEL=fake-model",
+	})
+	c := runtimePiRun(t, mgr, runtimePiUnit("bare", convo, "plain task",
+		map[string]any{"allowedTools": "", "toolsMode": "overwrite"}))
+	if c.Raw["status"] != "succeeded" {
+		t.Fatalf("%+v", c.Raw)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, ".pi", "agent", "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "contextWindow") || strings.Contains(string(raw), "maxTokens") {
+		t.Fatalf("unset limits must leave the entry bare: %s", raw)
 	}
 }

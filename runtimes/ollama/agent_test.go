@@ -230,3 +230,16 @@ func TestEmptyAnswerIsNudgedOnce(t *testing.T) {
 		t.Errorf("a second empty answer fails: %+v", res)
 	}
 }
+
+func TestLengthStopWithNoTextFailsNamingTheLimit(t *testing.T) {
+	s := &scripted{replies: []Message{withUsage(text(""), "m", 9000, 1, "length")}}
+	a, _ := newAgent(t, s)
+	res := a.Run(context.Background(), WorkUnit{RunID: "r1", Convo: "c", PromptText: "q"})
+	if res.Status != "failed" || !strings.Contains(res.Result, "token limit") ||
+		!strings.Contains(res.Result, "9000 input tokens, 1 output tokens") {
+		t.Errorf("%+v", res)
+	}
+	if len(s.sent) != 1 {
+		t.Errorf("a length stop must not be nudged and retried: %d calls", len(s.sent))
+	}
+}
