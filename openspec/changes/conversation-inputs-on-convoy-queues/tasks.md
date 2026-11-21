@@ -7,7 +7,7 @@
 
 ## 2. The input family in the bus
 
-- [ ] 2.1 Declare `in.conversation` in the inventory with no time to live, an unbounded retry that never drops, and a lease longer than the runtime's run limit. Verify: an inventory test asserts each of the three.
+- [ ] 2.1 Declare `in.conversation` in the inventory with no time to live, an unbounded retry that never drops, and an ack wait longer than the runtime's run limit. Verify: an inventory test asserts each of the three.
 - [ ] 2.2 Keep the family's records in a bucket with no age limit. Verify: a test leaves an input past every other queue's retention and finds it waiting.
 - [ ] 2.3 Add `Purge(queue)` to the `Bus` interface and both backends. Verify: the conformance suite scenario passes on `memory` and `nats`, and a purge records no success.
 - [ ] 2.4 Make a failed delivery with a delay redeliver the same input without ending it. Verify: a conformance scenario fails an input past the other queues' attempt limit and finds it still waiting.
@@ -17,7 +17,7 @@
 
 - [ ] 3.1 Submit every input through the queue, with the input id as the command id, in `chat/router.go`, `chat/coordinate.go` and `signalroute/conversation.go`. Verify: a unit test per caller finds one waiting input and no entry on the record.
 - [ ] 3.2 Make `GET /work` claim the conversation's own queue and drop the 2 second record poll. Verify: an envtest shows an idle pod receives a new input within one poll, and a second claim returns nothing while one is inflight.
-- [ ] 3.3 Keep `Inflight` as the current run with the task uid and lease token, and settle in `POST /work/done`. Verify: a retried report settles once and records one run.
+- [ ] 3.3 Keep `Inflight` as the current run with the task uid and the claim's token, and settle in `POST /work/done`. Verify: a retried report settles once and records one run.
 - [ ] 3.4 Fail with a delay on an unavailable context and when the pod is gone. Verify: an envtest holds an input through a context outage and runs it after.
 - [ ] 3.5 Derive the phase and the capacity check from the queue's statistics and the current run. Verify: the existing capacity and phase tests pass unchanged.
 - [ ] 3.6 Purge the queue on delete and release the payload blobs from the waiting inputs. Verify: an envtest deletes a conversation with two waiting inputs and finds neither the queue nor the blobs.

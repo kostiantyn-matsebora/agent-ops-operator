@@ -42,10 +42,10 @@ SHALL NOT be offered for an install that serves more than one replica.
 - **WHEN** a claimed input is failed more times than any other queue allows
 - **THEN** it is still waiting, redelivered after a delay
 
-### Requirement: An input's lease outlives a run
+### Requirement: An input is not redelivered while its run may still be running
 A claimed input SHALL NOT be delivered a second time while its run is still
-allowed to be running. The lease on a conversation's input SHALL be longer than
-the longest run the runtime permits.
+allowed to be running. The wait before the bus redelivers a conversation's input
+SHALL be longer than the longest run the runtime permits.
 
 #### Scenario: A long run is not redelivered
 - **WHEN** a run lasts longer than the ack wait of any other queue
@@ -53,7 +53,7 @@ the longest run the runtime permits.
 
 #### Scenario: A pod that dies releases its input
 - **WHEN** the pod running an input is gone
-- **THEN** the input is failed with a delay and delivered again, without waiting for the lease
+- **THEN** the input is failed with a delay and delivered again, without waiting for the redelivery wait
 
 ### Requirement: Deleting a conversation purges its queue
 Deleting a conversation SHALL discard the inputs still waiting in its queue and

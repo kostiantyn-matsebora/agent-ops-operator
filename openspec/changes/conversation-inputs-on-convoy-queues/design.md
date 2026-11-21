@@ -10,7 +10,7 @@ See `proposal.md` for the why. This page holds the facts the decisions rest on.
 | `POST /work/done` records the run, appends to `ProcessedInputIDs` (bounded to 50), clears `Inflight`, then moves the phase in a second write | `handleWorkDone` |
 | An unavailable context holds the input by not consuming it | `handleWorkDone`, `tryDispatch` |
 | `Claim(ctx, queue, consumerID)` takes the next task of a **queue**, not of a key | `internal/commandbus/commandbus.go` |
-| Settle and fail need the task uid and a lease token | same |
+| Settle and fail need the task uid and the claim's token | same |
 | `out.<channel>` is already one queue name per channel, resolved by family prefix | `internal/commandbus/` inventory |
 | The record is shared by the `kube` and `nats` state backends. The `kube` mapping has 19 uses of the input fields | `internal/state/kube/mapping.go` |
 | 13 non-test files read `Inputs`, `Inflight`, `ProcessedInputIDs` or `PendingInputs` | grep over `internal/` and `cmd/` |
@@ -65,11 +65,11 @@ The long poll waits on the claim and not on a record re-read every 2 seconds. A 
 
 ### D4. The record keeps a small current run
 
-`Inflight` stays, smaller. It holds the run id, the dispatch time, the task uid and the lease token. It drops `InputIDs`.
+`Inflight` stays, smaller. It holds the run id, the dispatch time, the task uid and the claim's token. It drops `InputIDs`.
 
 Two reasons:
 
-1. `POST /work/done` arrives in a separate request, possibly on another replica. Settle needs the task uid and the lease token. They have to live somewhere shared.
+1. `POST /work/done` arrives in a separate request, possibly on another replica. Settle needs the task uid and the claim's token. They have to live somewhere shared.
 2. The `aops-mcp-server` and console specs record a move and show presence on "the inflight run".
 
 `Inputs` and `ProcessedInputIDs` go. Settle by task uid and the command id dedup replace the processed ids.
@@ -89,13 +89,20 @@ Two reasons:
 - A closed conversation keeps its waiting inputs, as it keeps everything else today.
 - Only delete removes them.
 
-### D6. The lease outlives a run
+### D6. The redelivery timer outlives a run
 
-A convoy queue redelivers when the ack wait passes. The input family sets the lease longer than the longest run the runtime allows, plus a margin. The runtime stops a run at `RUN_TIMEOUT_MS`, 3600 seconds by default.
+Exclusivity does not come from a lease. The server allows one message in flight per convoy queue, and every replica attaches to it. No replica holds the queue.
 
-If the lease were shorter, a long run would see its input delivered a second time to the same conversation, and the one-message-in-flight guarantee would be gone.
+The broker still redelivers a message nobody acknowledges. That timer is the ack wait. It is not exclusivity. It is the safety net for a message whose holder is gone.
 
-A pod that dies mid-run does not wait for the lease. The conversation reconciler already clears `Inflight` when the pod is gone. It will now fail the task with a delay, so the input redelivers.
+A run can last 3600 seconds, the runtime's `RUN_TIMEOUT_MS` default. If the timer is shorter, the broker delivers the input again while the run goes on.
+
+| Option | Verdict |
+|---|---|
+| **A. Set the ack wait of the input family above the run limit, plus a margin** | **Chosen** |
+| B. A replica sends in-progress signals while the run is inflight | Rejected. It needs a holder that survives, a heartbeat and renewal logic, which is the leasing we dropped |
+
+A pod that dies mid-run does not wait for the timer. The conversation reconciler already clears `Inflight` when the pod is gone. It will now fail the task with a delay, so the input redelivers.
 
 ### D7. Batching is dropped unless measured
 
@@ -147,7 +154,7 @@ During N's rollout an old replica still appends to the record. The sweep runs on
 ## Risks / Trade-offs
 
 - **[A message is lost]** → D1, and a system test that restarts the whole bus and the manager with inputs waiting.
-- **[A convoy queue lease shorter than a run]** → D6, and a test with a run longer than the ack wait.
+- **[A redelivery timer shorter than a run]** → D6, and a test with a run longer than the ack wait of the other queues.
 - **[Two sources of truth during N]** → the sweep is idempotent by input id and runs on a timer. The system test rolls the manager under load.
 - **[Dropping batching costs more runs]** → D7 measures first.
 - **[The `kube` state backend has no bus]** → a `kube` installation now needs a durable bus. The `memory` bus stays valid only for tests and one replica, and the docs say so.
