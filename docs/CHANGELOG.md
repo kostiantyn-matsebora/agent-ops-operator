@@ -12,6 +12,13 @@ for the source and the reference material beside this file.
 
 ### Fixed
 
+- **A command bus that cannot accept messages no longer stops conversations
+  from starting.** A reconcile posted to the chat channels (topics, the thread
+  entries, member results) before it created the agent's pod, all on one
+  deadline. With the bus stuck, the first post used the whole deadline, the
+  pod was never created, and every slot stayed free while conversations waited
+  (#527). The chat steps now share a short budget (ten seconds) and starting
+  the agent comes after them within the rest of the reconcile.
 - **Reading a conversation's runs no longer creates a NATS consumer per
   call.** Each read, trim and cascade listed the runs bucket's keys, which makes
   the server create and delete a consumer. During a disturbance a quarter of

@@ -157,6 +157,11 @@ type ConversationReconciler struct {
 
 	slots slots
 
+	// ChatBudget bounds every chat-channel step of one reconcile together
+	// (topics, thread fan-out, member results). Zero means
+	// DefaultConversationChatBudget.
+	ChatBudget time.Duration
+
 	// ReconcileTimeout bounds one reconcile. Zero means
 	// DefaultConversationReconcileTimeout.
 	ReconcileTimeout time.Duration
@@ -412,8 +417,15 @@ func (r *ConversationReconciler) reconcile(ctx context.Context, req ctrl.Request
 	// patch), which re-triggers reconciliation. Requeue as a fallback — op ids
 	// are stable per conversation×channel, so re-enqueues dedup.
 	topicPending := false
+	// Everything that talks to a chat channel shares ONE short budget, so a
+	// command bus that cannot accept a message costs this reconcile seconds,
+	// not its whole deadline. Starting the agent comes after these steps and
+	// must never wait on them: delivery is meant to run in PARALLEL with
+	// dispatch, never ahead of it.
+	chatCtx, cancelChat := context.WithTimeout(ctx, r.chatBudget())
+	defer cancelChat()
 	if r.Ops != nil {
-		waiting, err := r.ensureTopics(ctx, &conv)
+		waiting, err := r.ensureTopics(chatCtx, &conv)
 		if err != nil {
 			logger.Error(err, "ensureTopics enqueue (continuing chat-less)")
 		}
@@ -428,7 +440,7 @@ func (r *ConversationReconciler) reconcile(ctx context.Context, req ctrl.Request
 		// what happened. The op ids are stable, so re-deriving everything on
 		// every pass is the BACKSTOP that makes a delivery derivable rather
 		// than queue-resident.
-		r.fanOutThread(ctx, &conv, runs)
+		r.fanOutThread(chatCtx, &conv, runs)
 	}
 	// The BACKSTOP for a member's result reaching its parent
 	// (coordination-loop): the FAST PATH in `/work/done` marks a run
@@ -437,7 +449,7 @@ func (r *ConversationReconciler) reconcile(ctx context.Context, req ctrl.Request
 	// gave up retrying. Independent of chat topics entirely: a caused
 	// conversation binds no channel, so this must not be gated on r.Ops.
 	if r.Router != nil {
-		if err := r.deliverMemberResults(ctx, &conv, runs); err != nil {
+		if err := r.deliverMemberResults(chatCtx, &conv, runs); err != nil {
 			logger.Error(err, "re-deriving unrouted member results")
 		}
 	}
@@ -850,7 +862,9 @@ func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *stat
 			}
 			// a gone channel has nothing left to archive on it
 			if ch := r.servingChannel(ctx, t.Channel); ch != nil {
-				r.Ops.EnqueueCloseTopic(ctx, ch, t.ThreadID, conv)
+				cctx, cancel := context.WithTimeout(ctx, r.chatBudget())
+				r.Ops.EnqueueCloseTopic(cctx, ch, t.ThreadID, conv)
+				cancel()
 			}
 		}
 	}
@@ -881,7 +895,9 @@ func (r *ConversationReconciler) enqueueDeleteConversations(ctx context.Context,
 		// were told it could be reopened; deletion makes that false, and
 		// correcting it is the whole point. Sending both would leave an
 		// adapter guessing whether the pair meant one ending or two.
-		r.Ops.EnqueueDeleteConversation(ctx, ch, t.ThreadID, conv)
+		dctx, cancel := context.WithTimeout(ctx, r.chatBudget())
+		r.Ops.EnqueueDeleteConversation(dctx, ch, t.ThreadID, conv)
+		cancel()
 		if r.Ops.Pending(chat.DeleteConversationOpID(conv.Name, t.Channel)) {
 			outstanding = true
 		}
@@ -1180,7 +1196,11 @@ func (r *ConversationReconciler) notifyQueued(ctx context.Context, conv *state.C
 	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespaces.Control, Name: ref}, &ch); err != nil || ch.Spec.Adapter == "" {
 		return
 	}
-	r.Ops.EnqueueMessage(ctx, &ch, conv, conv.ThreadFor(ref), chat.Notice(
+	// Bounded like every chat step: a bus that accepts nothing must not hold
+	// the reconcile that parks this conversation.
+	nctx, cancel := context.WithTimeout(ctx, r.chatBudget())
+	defer cancel()
+	r.Ops.EnqueueMessage(nctx, &ch, conv, conv.ThreadFor(ref), chat.Notice(
 		"⏳ Queued for capacity — every agent slot is busy. This starts as soon as one frees up."))
 }
 
@@ -1760,6 +1780,17 @@ const DefaultConversationConcurrency = 4
 
 // DefaultConversationReconcileTimeout bounds a single reconcile.
 const DefaultConversationReconcileTimeout = 2 * time.Minute
+
+// DefaultConversationChatBudget is how long one reconcile may spend on chat
+// delivery before it moves on to starting the agent.
+const DefaultConversationChatBudget = 10 * time.Second
+
+func (r *ConversationReconciler) chatBudget() time.Duration {
+	if r.ChatBudget > 0 {
+		return r.ChatBudget
+	}
+	return DefaultConversationChatBudget
+}
 
 func (r *ConversationReconciler) concurrency() int {
 	if r.Concurrency > 0 {
