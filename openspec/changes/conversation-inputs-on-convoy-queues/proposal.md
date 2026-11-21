@@ -75,4 +75,4 @@ None.
 | `.claude/rules/` | `invariants.md` (the strictly-serial row, the queue logs as a bounded state home, the conversation messages row), `terminology.md`, `wiring.md` |
 | Adopter site | `introduction.md`, `getting-started.md`, `installation.md` and `docs/guides/*` do not mention the input queue. The documentation task checks each and records that. The `installation.md` upgrade note for the migration is the one addition |
 
-**Depends on PR #532.** The `command-bus` spec on master still describes the log engine that #532 replaces. A spec change for #532 must land first, or in the same pull request, so this change's deltas apply to the right text.
+**Builds on #532, which is merged.** The convoy queue code is in master. The `command-bus` spec on master still describes the log engine that #532 replaced, and no spec change for #532 exists yet. This change's deltas are additive and do not rely on those stale requirements. That spec change is owed separately.
