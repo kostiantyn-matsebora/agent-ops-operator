@@ -55,7 +55,6 @@ for the source and the reference material beside this file.
   list reads timing out. The pause now doubles on each failure up to 30
   seconds and starts over once a watch has delivered. The same applies to the
   command bus's queue mirror.
-
 - **One stuck call no longer stops every conversation from starting or
   closing.** The conversation controller reconciled one conversation at a time
   with no time limit, so a single call that never answered held the only
