@@ -10,6 +10,10 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+## [24.0.0] — 2026-11-21
+
+Images: manager 0.65.0, console 0.45.0. Every other image is unchanged.
+
 ### Added
 
 - **`global.agentops.platformNodeSelector` places every platform pod.** The
