@@ -12,7 +12,9 @@ The rest of the capability is what makes a batch reviewable: an explicit list an
 never a filter, bounded at one screen, a per-conversation outcome, working
 conversations excluded unless asked for, and the same treatment for bulk
 DELETE — which refuses anything not already closed.
+
 ## Requirements
+
 ### Requirement: The console closes a selected batch of conversations
 The console SHALL offer an action that ends several conversations in one
 gesture. The action SHALL take an explicit list of conversation names supplied
@@ -135,16 +137,23 @@ ordered it.
 - **THEN** it is refused with 401
 
 ### Requirement: Selection is explicit and the confirmation names the cost
-The conversation list SHALL offer per-row selection and a select-all control
-scoped to the rows on the current page. The close action SHALL be disabled with
-nothing selected, and SHALL require a confirmation that states how many
-conversations will be closed, how many of them are working, and that closing
-cannot be undone. There SHALL be no control that selects conversations beyond
-the current page.
+The conversation list SHALL offer per-row selection on root conversations and a select-all control scoped to the root rows on the current page that are not already closing.
+
+The close action SHALL be disabled with nothing selected, and SHALL require a confirmation that states how many root conversations will be closed, how many of them are working, that the cascade also reaches their members, and that closing cannot be undone.
+
+There SHALL be no control that selects conversations beyond the current page.
+
+Every count the selection surfaces SHALL be over selected roots: the "N
+selected" label, the action buttons' suffixes, the confirmation title and the
+result totals. A member SHALL NOT contribute to any of them.
 
 #### Scenario: Confirmation states the count
-- **WHEN** an operator triggers the close action over four selected conversations
-- **THEN** a confirmation names the four conversations to be closed and that the action cannot be undone
+- **WHEN** an operator triggers the close action over four selected root conversations
+- **THEN** a confirmation names the four conversations to be closed and that closing cannot be undone
+
+#### Scenario: The selection label counts roots
+- **WHEN** an operator selects two roots that have five members between them
+- **THEN** the selection bar reads 2 selected and the close and delete buttons carry the suffix 2
 
 #### Scenario: Nothing selected disables the action
 - **WHEN** no conversation is selected
@@ -152,7 +161,11 @@ the current page.
 
 #### Scenario: Selection cannot escape the page
 - **WHEN** an operator uses the select-all control
-- **THEN** only the conversations on the current page are selected
+- **THEN** only the root conversations on the current page are selected
+
+#### Scenario: The result totals count roots
+- **WHEN** a batch over three roots closes two and skips one
+- **THEN** the result reads 2 closed, 1 skipped, 0 failed
 
 ### Requirement: A conversation being closed is shown as closing
 A `Conversation` held by its deletion finalizer SHALL be presented as closing
@@ -169,25 +182,29 @@ which it already watches.
 - **THEN** it cannot be selected for a close batch
 
 ### Requirement: Closed conversations are presented as a state, not an absence
-The console SHALL list a `Closed` conversation, label it, and distinguish it
-from one held by its close-topics finalizer on the way out. A closed
-conversation keeps its recorded answers and costs no runtime pod and no
-capacity, so it is a row worth showing rather than a gap in the list.
+The console SHALL list a `Closed` conversation, label it Closed, and distinguish it from one held by its close-topics finalizer on the way out.
 
-A closed conversation SHALL NOT be typeable. That decision SHALL be read from
-the conversation's PHASE — which is on the CR and survives everything — and not
-from console-process state alone. The console's own record that a thread was
-archived lives in memory for one session, so a console restart would otherwise
-put the composer back on every closed conversation and let a person type into
-one that answers each message with "this conversation is closed".
+A closed conversation keeps its recorded answers and costs no runtime pod and no capacity, so it is a row worth showing rather than a gap in the list.
+
+The console SHALL use the word Closed, and never Archive or archived, in
+every string it shows a person for this state: the inbox row, the thread
+banner, the close confirmation and the `/close` chip.
+
+A closed conversation SHALL NOT be typeable. That decision SHALL be read from the conversation's PHASE — which is on the CR and survives everything — and not from console-process state alone.
+
+The console's own record that a thread was closed lives in memory for one session, so a console restart would otherwise put the composer back on every closed conversation and let a person type into one that answers each message with "this conversation is closed".
 
 #### Scenario: A closed conversation is listed and labelled
 - **WHEN** the conversation list is rendered after a close
 - **THEN** the conversation appears with a `Closed` label, distinct from the `closing` label of one being deleted
 
+#### Scenario: A closed thread says closed
+- **WHEN** the operator opens a closed conversation
+- **THEN** the thread banner reads that the thread was closed and offers no composer
+
 #### Scenario: A restarted console still refuses to type into a closed conversation
 - **WHEN** a console process that never observed the close renders a `Closed` conversation
-- **THEN** it is reported as archived and offers no composer
+- **THEN** it offers no composer
 
 ### Requirement: A closed conversation can be reopened from its row
 The console SHALL offer reopen on a `Closed` conversation, per row. Reopening
