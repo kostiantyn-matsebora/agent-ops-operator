@@ -190,6 +190,11 @@ func (s *Server) taskReopen(ctx context.Context, p *convtask.Payload) error {
 // every cascade-member task it enqueues (handleConversationDelete,
 // deepest-first) tolerate a descendant another path already removed.
 func (s *Server) taskDelete(ctx context.Context, p *convtask.Payload) error {
+	if s.Router != nil {
+		// Leaves first, re-listed at run time: a member opened or created since
+		// accept is removed before its parent, never orphaned.
+		return s.Router.DeleteTree(ctx, p.Conversation)
+	}
 	if err := s.Conversations.Delete(ctx, state.Key(p.Conversation)); err != nil && !errors.Is(err, state.ErrNotFound) {
 		return err // unparsed: Fail's own ParseErrorCode falls back to internal, retried
 	}
