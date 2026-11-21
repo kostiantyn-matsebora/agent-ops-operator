@@ -47,8 +47,11 @@ model: ""               # e.g. qwen2.5:14b
 # silently drops the front of an over-long prompt — where the system prompt and
 # the signal payload sit — so it is never left to the server. Raise it for
 # models that support more; the cost is memory on the model server.
-# (`numCtx` is the older name for this key and still wins when set.)
 contextWindow: 8192
+
+# DEPRECATED, the older name for `contextWindow`. Still honoured: it wins when set,
+# so an install that sets it keeps its value. 0 = unset.
+numCtx: 0
 
 # THE OUTPUT CEILING in tokens, sent as `num_predict`. 0 = the model's own
 # limit, which is Ollama's behaviour when nothing is sent.
