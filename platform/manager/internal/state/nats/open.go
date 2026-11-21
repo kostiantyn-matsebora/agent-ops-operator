@@ -95,6 +95,7 @@ type Backend struct {
 	receipts       *collection[state.Received]
 	adapterState   *collection[string]
 	runsKV         jetstream.KeyValue
+	runsMirrorStop func() // ends the runs items mirror's watch
 	blobsStore     jetstream.ObjectStore
 
 	sweeps []interface{ Run(context.Context) }
@@ -144,6 +145,7 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 	}
 
 	runsAppended.limit = state.RunHistoryLimit
+	stops = append(stops, runsAppended.items.stop)
 
 	signalsKV, signalsBucket, err := b.bootstrapKV(ctx, bucketSignals, replicas)
 	if err != nil {
@@ -201,6 +203,7 @@ func OpenStores(ctx context.Context, conn *Conn, scope string, opts ...Option) (
 	}
 	b.adapterStateKV, b.conversations, b.signals, b.cooldowns, b.receipts, b.adapterState = adapterStateKV, conversations, signalsColl, cooldowns, receipts, adapterState
 	b.runsKV, b.blobsStore = runsKV, blobsStore
+	b.runsMirrorStop = runsAppended.items.stop
 	owned := &children{conversations: conversations, runsKV: runsKV, blobs: blobsStore, now: time.Now}
 	b.owned = owned
 	conversations.onRemoved = owned.removed
@@ -264,6 +267,7 @@ func (b *Backend) Close() {
 	b.cooldowns.mirror.stop()
 	b.receipts.mirror.stop()
 	b.adapterState.mirror.stop()
+	b.runsMirrorStop()
 }
 
 // DefaultOrphanSweepInterval is how often the orphan sweep looks for runs and
