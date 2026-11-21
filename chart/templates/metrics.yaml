@@ -130,7 +130,8 @@ spec:
         - alert: AgentOpsMembersAtRuntimeCeiling
           expr: |
             agentops_runtime_slots_in_use{pool="members"} >= agentops_runtime_slots_max{pool="members"}
-              and sum(agentops_conversations_inflight) > 0
+          # No gate on agentops_conversations_inflight: it counts every
+          # conversation by pipeline, not members, so it said nothing about this pool.
           for: 15m
           labels:
             severity: info

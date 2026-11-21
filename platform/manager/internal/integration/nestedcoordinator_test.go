@@ -22,6 +22,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 )
 
@@ -85,10 +86,10 @@ func reportMemberRunDone(t *testing.T, srv *httpapi.Server, name, runID string) 
 
 // mkNestingCoordinator creates a Coordinator naming ONE agents[] entry
 // "child", nesting another Coordinator when nextCoordinator is non-empty or
-// invoking capabilityRef (cap) otherwise — mirroring
+// invoking capabilityRef (capName) otherwise — mirroring
 // TestInvokeMemberCreatesANestedCoordinatorMember's (chat/coordinate_test.go)
 // shape against the real API server.
-func mkNestingCoordinator(t *testing.T, name, profile, nextCoordinator, cap string) {
+func mkNestingCoordinator(t *testing.T, name, profile, nextCoordinator, capName string) {
 	t.Helper()
 	mkCoordinator(t, name, nil, nil, profile, nil)
 	co := reconcileCoordinator(t, name)
@@ -96,7 +97,7 @@ func mkNestingCoordinator(t *testing.T, name, profile, nextCoordinator, cap stri
 	if nextCoordinator != "" {
 		entry.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: nextCoordinator}
 	} else {
-		entry.CapabilityRef = &agentopsv1alpha1.ObjectRef{Name: cap}
+		entry.CapabilityRef = &agentopsv1alpha1.ObjectRef{Name: capName}
 	}
 	co.Spec.Agents = []agentopsv1alpha1.CoordinatorAgentEntry{entry}
 	if err := k8sClient.Update(context.Background(), co); err != nil {
@@ -165,53 +166,32 @@ func TestIdleMemberCoordinatorsSlotIsEvictedForItsOwnChild(t *testing.T) {
 	}
 }
 
-// TestNestedCoordinatorChainLongerThanTheMembersCeilingCompletes: a chain of
-// six nested Coordinator members against a ceiling of five still completes
-// (design D-7's own worked example): no level is ever left Pending, and the
-// pool never holds more pods than its own ceiling at once.
-//
-// A level does not stay idle for long once its own child finishes: the
-// child's result lands back on it as a fresh input (coordination-loop:
-// "a member's result becomes an input on its parent"), which makes it
-// NeedsWorker again — so it is NOT necessarily the one eviction reclaims.
-// Only the deepest level with no finished child yet is reliably idle; this
-// test does not pin WHICH level eviction picks, only that the ceiling holds
-// and nobody ever stalls behind it.
-func TestNestedCoordinatorChainLongerThanTheMembersCeilingCompletes(t *testing.T) {
-	clearRuntimePods(t)
-	const depth = 6
-	const membersCap = 5
-
+// mkNestedChain creates the leaf capability and depth nested Coordinators
+// co-nest-chain-1..depth, each nesting the next, the last invoking the leaf.
+func mkNestedChain(t *testing.T, depth int) {
+	t.Helper()
 	mkProfile(t, "prof-nest-chain")
 	mkCapability(t, "cap-nest-chain-leaf", "prof-nest-chain")
 	reconcileCapability(t, "cap-nest-chain-leaf")
 	for i := 1; i <= depth; i++ {
-		name := fmt.Sprintf("co-nest-chain-%d", i)
+		next, leaf := "", ""
 		if i < depth {
-			mkNestingCoordinator(t, name, "prof-nest-chain", fmt.Sprintf("co-nest-chain-%d", i+1), "")
+			next = fmt.Sprintf("co-nest-chain-%d", i+1)
 		} else {
-			mkNestingCoordinator(t, name, "prof-nest-chain", "", "cap-nest-chain-leaf")
+			leaf = "cap-nest-chain-leaf"
 		}
+		mkNestingCoordinator(t, fmt.Sprintf("co-nest-chain-%d", i), "prof-nest-chain", next, leaf)
 	}
+}
 
-	root := &agentopsv1alpha1.Conversation{}
-	root.Name, root.Namespace = "nest-chain-root", ns
-	root.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-nest-chain"}
-	root.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-nest-chain-1"}
-	if err := k8sClient.Create(context.Background(), root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { cleanupConversation(t, root.Name) })
-
-	srv := apiServer()
-	rc := reconcilerWithPoolCaps(nil, 100, membersCap)
-
-	// Level 1's caller is the root, which is not itself a pool-counted
-	// member — it needs no dispatched/done bookkeeping of its own. Every
-	// level after that is BUSY (inflight) when it invokes its own child,
-	// then immediately reports that run done: idle and evictable, which is
-	// what lets a chain deeper than the ceiling keep moving (design D-7).
-	callerName, callerCoordinatorRef := root.Name, "co-nest-chain-1"
+// walkNestedChain invokes each level from its parent and reconciles it,
+// failing if any level is left Pending. Level 1's caller is the root, which
+// is not pool-counted, so it needs no dispatched/done bookkeeping. Every
+// later level is BUSY when it invokes its child, then reports done: idle and
+// evictable, which lets a chain deeper than the ceiling keep moving (D-7).
+func walkNestedChain(t *testing.T, srv *httpapi.Server, rc *controller.ConversationReconciler, rootName string, depth, membersCap int) []string {
+	t.Helper()
+	callerName, callerCoordinatorRef := rootName, "co-nest-chain-1"
 	var members []string
 	for i := 1; i <= depth; i++ {
 		runID := fmt.Sprintf("r-chain-%d", i)
@@ -230,6 +210,41 @@ func TestNestedCoordinatorChainLongerThanTheMembersCeilingCompletes(t *testing.T
 		members = append(members, member)
 		callerName, callerCoordinatorRef = member, fmt.Sprintf("co-nest-chain-%d", i+1)
 	}
+	return members
+}
+
+// TestNestedCoordinatorChainLongerThanTheMembersCeilingCompletes: a chain of
+// six nested Coordinator members against a ceiling of five still completes
+// (design D-7's own worked example): no level is ever left Pending, and the
+// pool never holds more pods than its own ceiling at once.
+//
+// A level does not stay idle for long once its own child finishes: the
+// child's result lands back on it as a fresh input (coordination-loop:
+// "a member's result becomes an input on its parent"), which makes it
+// NeedsWorker again — so it is NOT necessarily the one eviction reclaims.
+// Only the deepest level with no finished child yet is reliably idle; this
+// test does not pin WHICH level eviction picks, only that the ceiling holds
+// and nobody ever stalls behind it.
+func TestNestedCoordinatorChainLongerThanTheMembersCeilingCompletes(t *testing.T) {
+	clearRuntimePods(t)
+	const depth = 6
+	const membersCap = 5
+
+	mkNestedChain(t, depth)
+
+	root := &agentopsv1alpha1.Conversation{}
+	root.Name, root.Namespace = "nest-chain-root", ns
+	root.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-nest-chain"}
+	root.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-nest-chain-1"}
+	if err := k8sClient.Create(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupConversation(t, root.Name) })
+
+	srv := apiServer()
+	rc := reconcilerWithPoolCaps(nil, 100, membersCap)
+
+	members := walkNestedChain(t, srv, rc, root.Name, depth, membersCap)
 
 	alive := 0
 	for _, m := range members {

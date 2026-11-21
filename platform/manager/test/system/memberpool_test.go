@@ -69,6 +69,57 @@ func memberPodNeverAppears(t *testing.T, ctx context.Context, e *Env, conv strin
 	}
 }
 
+// mkChainCoordinators creates the depth nested Coordinators. Level 1 alone
+// claims a source: every deeper level's root is created by its parent's invoke.
+func mkChainCoordinators(t *testing.T, ctx context.Context, e *Env, stamp string, depth int, coordName func(int) string, leafCapName string) {
+	t.Helper()
+	for i := 1; i <= depth; i++ {
+		var entry agentopsv1alpha1.CoordinatorAgentEntry
+		if i < depth {
+			entry = coordinatorRefEntry("child", coordName(i+1), "the next level of the chain")
+		} else {
+			entry = capabilityEntry("child", leafCapName, "the leaf of the chain")
+		}
+		var sources []string
+		if i == 1 {
+			srcName := "e2e-chain-src-" + stamp
+			mustCreate(t, e.K, source(srcName, "e2e", nil))
+			sources = []string{srcName}
+		}
+		mustCreate(t, e.K, coordinatorObj(coordName(i), ProfileStub, sources, []agentopsv1alpha1.CoordinatorAgentEntry{entry}))
+		if err := waitCoordinatorReady(ctx, e.K, coordName(i), 2*time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// walkChain invokes each level from its parent once the parent's run is
+// inflight (the real "busy parent" window, design D-7) and waits for the
+// level's pod. It returns the member conversations in level order.
+func walkChain(t *testing.T, ctx context.Context, e *Env, stamp, rootName string, depth, hold int, coordName func(int) string) []string {
+	t.Helper()
+	callerName := rootName
+	var members []string
+	for i := 1; i <= depth; i++ {
+		waitFor(t, fmt.Sprintf("caller %s inflight before invoking level %d", callerName, i+1), 2*time.Minute, func() (bool, error) {
+			c, err := e.K.Conversation(ctx, callerName)
+			if err != nil {
+				return false, err
+			}
+			return c.Status.Inflight != nil, nil
+		})
+		task := "echo leaf-done-" + stamp
+		if i < depth {
+			task = fmt.Sprintf("hold %d level-%d-"+stamp, hold, i+1)
+		}
+		member := e.invokeMember(t, coordName(i), callerName, "child", task)
+		memberPodReady(t, ctx, e, member, 3*time.Minute)
+		members = append(members, member)
+		callerName = member
+	}
+	return members
+}
+
 // 5.1a — a chain of nested Coordinator members one level deeper than the
 // members ceiling (chart default maxActiveMembers: 5, chart/values.yaml)
 // still completes end to end, against a REAL kubelet: no level is ever left
@@ -101,30 +152,7 @@ func TestNestedCoordinatorChainLongerThanTheMembersCeilingCompletes(t *testing.T
 	leafCapName := leafCap + stamp
 	mustCreate(t, e.K, agentCapability(leafCapName, ProfileStub))
 
-	for i := 1; i <= depth; i++ {
-		var entry agentopsv1alpha1.CoordinatorAgentEntry
-		if i < depth {
-			entry = coordinatorRefEntry("child", coordName(i+1), "the next level of the chain")
-		} else {
-			entry = capabilityEntry("child", leafCapName, "the leaf of the chain")
-		}
-		var co *agentopsv1alpha1.Coordinator
-		if i == 1 {
-			// Level 1 alone claims a source — every deeper level's own root is
-			// created only by its parent's invoke, exactly as
-			// mkNestingCoordinator's envtest counterpart never wires a source
-			// for co-nest-chain-2..depth.
-			srcName := "e2e-chain-src-" + stamp
-			mustCreate(t, e.K, source(srcName, "e2e", nil))
-			co = coordinatorObj(coordName(i), ProfileStub, []string{srcName}, []agentopsv1alpha1.CoordinatorAgentEntry{entry})
-		} else {
-			co = coordinatorObj(coordName(i), ProfileStub, nil, []agentopsv1alpha1.CoordinatorAgentEntry{entry})
-		}
-		mustCreate(t, e.K, co)
-		if err := waitCoordinatorReady(ctx, e.K, coordName(i), 2*time.Minute); err != nil {
-			t.Fatal(err)
-		}
-	}
+	mkChainCoordinators(t, ctx, e, stamp, depth, coordName, leafCapName)
 
 	// Level 1's own root, opened by an ordinary admitted signal — holding long
 	// enough to invoke level 2 within its own window.
@@ -135,29 +163,7 @@ func TestNestedCoordinatorChainLongerThanTheMembersCeilingCompletes(t *testing.T
 		t.Fatalf("the admitted signal must open a root claimed by level 1's Coordinator, got %+v", root.Spec.CoordinatorRef)
 	}
 
-	callerName := root.Name
-	var members []string
-	for i := 1; i <= depth; i++ {
-		// Wait for the caller's own run to be inflight — the real window in
-		// which its invoke of the next level is a genuine "busy parent" move
-		// (design D-7), never a race against a run that already finished.
-		waitFor(t, fmt.Sprintf("caller %s inflight before invoking level %d", callerName, i+1), 2*time.Minute, func() (bool, error) {
-			c, err := e.K.Conversation(ctx, callerName)
-			if err != nil {
-				return false, err
-			}
-			return c.Status.Inflight != nil, nil
-		})
-
-		task := "echo leaf-done-" + stamp
-		if i < depth {
-			task = fmt.Sprintf("hold %d level-%d-"+stamp, hold, i+1)
-		}
-		member := e.invokeMember(t, coordName(i), callerName, "child", task)
-		memberPodReady(t, ctx, e, member, 3*time.Minute)
-		members = append(members, member)
-		callerName = member
-	}
+	members := walkChain(t, ctx, e, stamp, root.Name, depth, hold, coordName)
 
 	// The leaf never invokes further, so it is the chain's own last run — wait
 	// it out so the chain is fully quiescent before the ceiling check below.

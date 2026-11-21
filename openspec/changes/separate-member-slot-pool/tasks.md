@@ -13,7 +13,7 @@
 
 ## 3. Console — frontend-developer
 
-- [x] 3.1 Show both pools in the Queues reading in `platform/console/ui/src/model/queues.ts` and its view (ceiling detail names the key per pool), and verify with a vitest case plus a screenshot of the Queues page. The screenshot step was skipped — no reachable manager backend in this sandbox. Vitest coverage proves the rendering instead. Also wired `platform/console/queues.go`/`manager.go` to forward the manager's `members` field — not named in this task's own file list, but required for the UI to receive real data.
+- [ ] 3.1 Show both pools in the Queues reading in `platform/console/ui/src/model/queues.ts` and its view (ceiling detail names the key per pool), and verify with a vitest case plus a screenshot of the Queues page. PENDING: the screenshot step was skipped — no reachable manager backend in this sandbox. Vitest coverage proves the rendering instead. Also wired `platform/console/queues.go`/`manager.go` to forward the manager's `members` field — not named in this task's own file list, but required for the UI to receive real data.
 
 ## 4. Unit tests — testing-specialist
 
@@ -23,7 +23,7 @@
 
 ## 5. System tests
 
-- [x] 5.1 Extend a lane in `platform/manager/test/system/` (the capacity/replicas lane) so a chain of nested Coordinator members longer than `MAX_ACTIVE_MEMBERS` completes without stalling, and a Coordinator root with more members than the members ceiling, beside a full conversations pool, admits members up to `MAX_ACTIVE_MEMBERS` and no more, then run the pack against this working copy's tree. Written and compiles/vets clean under `-tags system`. Not executed here — no docker/k3d in this sandbox — dispatched to `system-smoke.yml` instead
+- [ ] 5.1 Extend a lane in `platform/manager/test/system/` (the capacity/replicas lane) so a chain of nested Coordinator members longer than `MAX_ACTIVE_MEMBERS` completes without stalling, and a Coordinator root with more members than the members ceiling, beside a full conversations pool, admits members up to `MAX_ACTIVE_MEMBERS` and no more, then run the pack against this working copy's tree. Written and compiles/vets clean under `-tags system`. Not executed here — no docker/k3d in this sandbox — dispatched to `system-smoke.yml` instead
 
 ## 6. Documentation
 
