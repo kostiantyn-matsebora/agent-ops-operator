@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { resolveIcon } from '../../../model/icon'
@@ -59,8 +60,11 @@ function Empty({ title, children }: Readonly<{ title: string; children?: ReactNo
   )
 }
 
+const WORK_PAGE_SIZE = 5
+
 export function QueuesPage(): ReactElement {
   const { data, isLoading, error } = useQueuesPage()
+  const [page, setPage] = useState(0)
   if (isLoading && !data) {
     return (
       <main className="wk-pane wk-page" aria-label="Queues and capacity">
@@ -78,6 +82,10 @@ export function QueuesPage(): ReactElement {
       </main>
     )
   }
+
+  const pages = Math.max(1, Math.ceil(data.work.length / WORK_PAGE_SIZE))
+  const cur = Math.min(page, pages - 1)
+  const rows = data.work.slice(cur * WORK_PAGE_SIZE, (cur + 1) * WORK_PAGE_SIZE)
 
   return (
     <main className="wk-pane wk-page" aria-label="Queues and capacity">
@@ -101,10 +109,10 @@ export function QueuesPage(): ReactElement {
             <Empty title="Nothing is waiting">No conversation is queued and none has a run in flight.</Empty>
           ) : (
             <div className="wk-tw">
-              <table className="wk-tbl" aria-label="work queue">
+              <table className="wk-tbl wk-q-work" aria-label="work queue">
                 <thead>
                   <tr>
-                    <th>Conversation</th>
+                    <th className="wk-q-conv">Conversation</th>
                     <th>Phase</th>
                     <th>Queued</th>
                     <th>Age</th>
@@ -112,10 +120,14 @@ export function QueuesPage(): ReactElement {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.work.map((row) => (
+                  {rows.map((row) => (
                     <tr key={row.conversation}>
-                      <td>
-                        <Link className="wk-q-link" to={`/conversations/${row.conversation}`}>
+                      <td className="wk-q-conv">
+                        <Link
+                          className="wk-q-link wk-q-clip"
+                          to={`/conversations/${row.conversation}`}
+                          title={plain(row.title || row.conversation)}
+                        >
                           <Text>{row.title || row.conversation}</Text>
                         </Link>
                         {row.pipeline && (
@@ -136,6 +148,19 @@ export function QueuesPage(): ReactElement {
                   ))}
                 </tbody>
               </table>
+              {pages > 1 && (
+                <div className="wk-q-pager">
+                  <button type="button" aria-label="Previous page" disabled={cur === 0} onClick={() => setPage(cur - 1)}>
+                    &lt;
+                  </button>
+                  <span>
+                    {cur + 1} / {pages}
+                  </span>
+                  <button type="button" aria-label="Next page" disabled={cur >= pages - 1} onClick={() => setPage(cur + 1)}>
+                    &gt;
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </Card>
