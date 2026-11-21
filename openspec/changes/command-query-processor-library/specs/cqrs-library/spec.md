@@ -62,8 +62,10 @@ SHALL NOT import another component's `internal` package.
 
 ### Requirement: The library defines the base command, query and response
 The library SHALL define a base command, a base query, a response for a command and a
-response for a query. A trigger SHALL build the command or the query and SHALL read the
-response. A handler SHALL receive a typed request and return a typed result.
+response for a query.
+
+A trigger SHALL build the command or the query and SHALL read the response. A handler
+SHALL receive a typed request and return a typed result.
 
 A command SHALL carry its kind, a command id the caller can repeat, an ordering key and
 a correlation id.

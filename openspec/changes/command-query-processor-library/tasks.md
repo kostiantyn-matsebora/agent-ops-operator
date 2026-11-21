@@ -18,7 +18,7 @@
 ## 3. The synchronous scenario
 
 - [ ] 3.1 Add the sync mode to the routing, and a registry that holds a command type's handler and mode. Verify: a unit test registers one command per mode and each is delivered its own way.
-- [ ] 3.2 Add the sync send: run the handler in the calling process and return its result or refusal. Verify: tests for the result, the refusal, and a run with the bus transport stopped.
+- [ ] 3.2 Add the sync send: run the handler in the calling process and return its result or refusal. Verify: tests for the result, the refusal, a run with the bus transport stopped, and a command sent twice with the same id, whose handler runs twice.
 - [ ] 3.3 Make the mode part of the registration with no override by the caller. Verify: a test shows there is no call that changes the mode.
 - [ ] 3.4 Prove the asynchronous modes are unchanged. Verify: the existing convoy and hand-over tests and the conformance suite pass without edits.
 
