@@ -14,10 +14,17 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/entrylog"
 )
 
-// mirrorRetryDelay bounds how fast a mirror whose watch dropped (server
-// restart, network blip) tries again — mirrors internal/state/nats's own
-// mirrorRetryDelay, restated rather than imported (design D-1).
-var mirrorRetryDelay = time.Second
+// mirrorRetryDelay is the first pause before a mirror whose watch dropped
+// (server restart, network blip) tries again, and mirrorRetryMax the most it
+// grows to — mirrors internal/state/nats's own pair, restated rather than
+// imported (design D-1). Each further failure in a row doubles the pause, and
+// a watch that delivered an entry starts it over: a watch is a consumer
+// created on the server, and a fixed retry against a server that is slow to
+// create them only adds attempts.
+var (
+	mirrorRetryDelay = time.Second
+	mirrorRetryMax   = 30 * time.Second
+)
 
 // caughtUpPollInterval bounds how often waitCaughtUpTo re-checks once it has
 // to wait at all — mirrors internal/state/nats's own constant of the same
@@ -108,21 +115,29 @@ func (m *mirror) waitCaughtUpTo(ctx context.Context, target uint64) error {
 func (m *mirror) watch(stream string, applied func() uint64, apply func(seq uint64, data []byte), ready chan struct{}) {
 	var once sync.Once
 	caughtUp := func() { once.Do(func() { close(ready) }) }
+	pause := mirrorRetryDelay
 	for {
-		if err := m.watchOnce(stream, applied, apply, caughtUp); err != nil {
+		progressed, err := m.watchOnce(stream, applied, apply, caughtUp)
+		if err != nil {
 			m.mu.Lock()
 			m.lastErr = err
 			m.mu.Unlock()
 		}
+		if progressed {
+			pause = mirrorRetryDelay // a healthy connection earns a fast first retry
+		}
 		select {
 		case <-m.closed:
 			return
-		case <-time.After(mirrorRetryDelay):
+		case <-time.After(pause):
 		}
+		pause = min(pause*2, max(mirrorRetryMax, mirrorRetryDelay))
 	}
 }
 
-func (m *mirror) watchOnce(stream string, applied func() uint64, apply func(uint64, []byte), caughtUp func()) error {
+// watchOnce reports whether the watch delivered at least one entry before it
+// ended, which is what resets the retry pause.
+func (m *mirror) watchOnce(stream string, applied func() uint64, apply func(uint64, []byte), caughtUp func()) (progressed bool, err error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -134,7 +149,7 @@ func (m *mirror) watchOnce(stream string, applied func() uint64, apply func(uint
 	}()
 	s, err := m.js.Stream(ctx, stream)
 	if err != nil {
-		return fmt.Errorf("stream info %q: %w", stream, err)
+		return false, fmt.Errorf("stream info %q: %w", stream, err)
 	}
 	if s.CachedInfo().State.Msgs == 0 {
 		caughtUp()
@@ -145,11 +160,11 @@ func (m *mirror) watchOnce(stream string, applied func() uint64, apply func(uint
 	}
 	consumer, err := m.js.OrderedConsumer(ctx, stream, cfg)
 	if err != nil {
-		return fmt.Errorf("open ordered consumer on %q: %w", stream, err)
+		return false, fmt.Errorf("open ordered consumer on %q: %w", stream, err)
 	}
 	msgs, err := consumer.Messages()
 	if err != nil {
-		return fmt.Errorf("open message iterator on %q: %w", stream, err)
+		return false, fmt.Errorf("open message iterator on %q: %w", stream, err)
 	}
 	defer msgs.Stop()
 	for {
@@ -157,9 +172,9 @@ func (m *mirror) watchOnce(stream string, applied func() uint64, apply func(uint
 		if err != nil {
 			select {
 			case <-m.closed:
-				return nil
+				return progressed, nil
 			default:
-				return fmt.Errorf("%w: %v", errWatchEnded, err)
+				return progressed, fmt.Errorf("%w: %v", errWatchEnded, err)
 			}
 		}
 		meta, err := msg.Metadata()
@@ -167,6 +182,7 @@ func (m *mirror) watchOnce(stream string, applied func() uint64, apply func(uint
 			continue
 		}
 		apply(meta.Sequence.Stream, msg.Data())
+		progressed = true
 		if meta.NumPending == 0 {
 			caughtUp()
 		}

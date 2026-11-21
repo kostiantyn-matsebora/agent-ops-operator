@@ -12,10 +12,20 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
-// mirrorRetryDelay bounds how fast a mirror whose watch dropped (server
-// restart, network blip) tries again.
-// A variable only so a test need not wait a second per retry.
-var mirrorRetryDelay = time.Second
+// mirrorRetryDelay is the first pause before a mirror whose watch dropped
+// (server restart, network blip) tries again, and mirrorRetryMax is the most
+// that pause grows to. Each further failure in a row doubles it, and a watch
+// that replays the bucket starts it over.
+//
+// It grows because a watch is a consumer created on the server. Against a
+// server that is already slow to create them, a fixed retry adds one more
+// attempt every second per bucket per replica, and an attempt that times out
+// can leave a consumer behind that the server never cleans up.
+// Variables only so a test need not wait a second per retry.
+var (
+	mirrorRetryDelay = time.Second
+	mirrorRetryMax   = 30 * time.Second
+)
 
 // mirror is the watch-fed, in-memory read model List serves from (design
 // D-4): one background watch over the whole bucket keeps a map of every
@@ -34,6 +44,7 @@ type mirror[T any] struct {
 	closed  chan struct{}
 
 	retryDelay time.Duration // read once at construction, from mirrorRetryDelay
+	retryMax   time.Duration // read once at construction, from mirrorRetryMax
 }
 
 // mirrorEntry is one cached record: the envelope and the KV sequence it was
@@ -48,7 +59,7 @@ type mirrorEntry[T any] struct {
 // newMirror starts the background watch and returns at once; a caller that
 // needs the first catch-up waits on waitReady.
 func newMirror[T any](kv jetstream.KeyValue) *mirror[T] {
-	m := &mirror[T]{kv: kv, byKey: map[state.Key]mirrorEntry[T]{}, ready: make(chan struct{}), closed: make(chan struct{}), retryDelay: mirrorRetryDelay}
+	m := &mirror[T]{kv: kv, byKey: map[state.Key]mirrorEntry[T]{}, ready: make(chan struct{}), closed: make(chan struct{}), retryDelay: mirrorRetryDelay, retryMax: mirrorRetryMax}
 	go m.run()
 	return m
 }
@@ -108,45 +119,55 @@ func (m *mirror[T]) waitCaughtUpTo(ctx context.Context, target uint64) error {
 // once and heal.
 func (m *mirror[T]) run() {
 	ctx := context.Background()
+	pause := m.retryDelay
 	for {
 		select {
 		case <-m.closed:
 			return
 		default:
 		}
-		if err := m.runOnce(ctx); err != nil {
+		caughtUp, err := m.runOnce(ctx)
+		if err != nil {
 			m.mu.Lock()
 			m.lastErr = err
 			m.mu.Unlock()
 		}
+		if caughtUp {
+			pause = m.retryDelay // a healthy connection earns a fast first retry
+		}
 		select {
 		case <-m.closed:
 			return
-		case <-time.After(m.retryDelay):
+		case <-time.After(pause):
 		}
+		pause = min(pause*2, max(m.retryMax, m.retryDelay))
 	}
 }
 
 // runOnce drains one watch to completion (or failure), replaying every key's
 // current value then every future change — what "a list after a returned
 // create includes it" needs.
-func (m *mirror[T]) runOnce(ctx context.Context) error {
+//
+// caughtUp reports whether this watch replayed the whole bucket before it
+// ended, which is what resets the retry pause.
+func (m *mirror[T]) runOnce(ctx context.Context) (caughtUp bool, err error) {
 	w, err := m.kv.WatchAll(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer w.Stop()
 	for {
 		select {
 		case <-m.closed:
-			return nil
+			return caughtUp, nil
 		case entry, ok := <-w.Updates():
 			if !ok {
 				// The watch ended, however far it had got: reconnect and replay.
-				return errWatchEnded
+				return caughtUp, errWatchEnded
 			}
 			if entry == nil {
 				m.markReady() // every initial value has now been replayed
+				caughtUp = true
 				continue
 			}
 			m.apply(entry)

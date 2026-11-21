@@ -10,6 +10,17 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The manager's watch on the state store backs off instead of retrying every
+  second.** A mirror whose watch could not be opened retried once a second,
+  per bucket and per replica, and every attempt that timed out could leave a
+  consumer behind on the NATS server. After a storage disturbance that grew
+  to about two thousand dead consumers on one bucket and kept the manager's
+  list reads timing out. The pause now doubles on each failure up to 30
+  seconds and starts over once a watch has delivered. The same applies to the
+  command bus's queue mirror.
+
 ## [23.0.0] — 2026-11-21
 
 Images: console 0.44.0. Every other image is unchanged.
