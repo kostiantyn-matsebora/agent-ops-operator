@@ -33,6 +33,14 @@ requirement.
 - **WHEN** a command registered as convoy is sent
 - **THEN** the call answers once the command is durably submitted, and the handler runs in the consumer pool, one at a time per key and in order
 
+#### Scenario: A regular command is unchanged
+- **WHEN** a command registered as regular is sent
+- **THEN** the call answers once the command is durably submitted, and the handler runs in the consumer pool with no ordering across keys
+
+#### Scenario: A hand-over command is unchanged
+- **WHEN** a command registered as hand-over is sent
+- **THEN** the message is read by an adapter, acknowledged, and reported done or failed, and the bus never redelivers it after the acknowledgement
+
 #### Scenario: The caller cannot override the mode
 - **WHEN** a caller sends a command registered as sync
 - **THEN** there is no argument by which the caller makes it asynchronous

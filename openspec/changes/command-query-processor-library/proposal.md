@@ -14,10 +14,10 @@ Brighter and Darker in .NET have this shape: a command processor with sync and a
 - **A query processor.** It is separate. `Execute` runs a query's handler and returns data. It changes no state.
 - **The library is the application layer, and it defines the message contracts.** Beside the two processors it defines what crosses them: a base command, a base query, and the response of each. Triggers, such as HTTP and reconcile loops, sit outside it. Handlers, which hold the domain logic, sit inside each component.
 - **Both are one library**, shared by the components. It is a new Go module, not part of `platform/manager/internal`.
-- **The components use it.** The manager's HTTP routes first. The other components where they have handlers.
+- **The components use it.** The manager's HTTP routes first. Then every other Go component, for its own actions.
 - **Every action is a command or a query, whatever triggers it.** The HTTP handler, the reconcile loop, the sweep and the timer each build a request and call a processor. The logic lives in the handler.
 
-Nothing here changes the Bus's asynchronous behaviour, and nothing changes a route's wire contract unless the per-route table says so.
+Nothing here changes the Bus's asynchronous behaviour, and nothing changes a route's wire contract unless the action table (`docs/contracts/actions.md`) says so.
 
 ## Out of scope
 
