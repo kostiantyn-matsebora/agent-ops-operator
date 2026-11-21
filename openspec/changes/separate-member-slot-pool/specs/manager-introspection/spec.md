@@ -1,9 +1,17 @@
 ## MODIFIED Requirements
 
 ### Requirement: Manager runtime state is served by GET /status
-The manager SHALL serve `GET /status`, adapter-token authenticated, reporting at minimum: build version; the identity of the replica holding the leader lease; runtime slots in use against `MAX_ACTIVE_CONVERSATIONS` and, separately, against `MAX_ACTIVE_MEMBERS`, each with its own waiting count; per-adapter channel op queue depth with the oldest queued op and the oldest claimed-but-uncompleted op; and active cooldowns. The runtime-slot Prometheus gauges SHALL carry a `pool` label naming the pool.
+The manager SHALL serve `GET /status`, adapter-token authenticated. It SHALL report at minimum:
 
-This state is in-memory by design — `OpQueue` holds pending and claimed ops in no Kubernetes object — so without this endpoint it is unobservable by any client.
+- the build version
+- the identity of the replica holding the leader lease
+- runtime slots in use against `MAX_ACTIVE_CONVERSATIONS` and, separately, against `MAX_ACTIVE_MEMBERS`, each with its own waiting count
+- per-adapter channel op queue depth, with the oldest queued op and the oldest claimed-but-uncompleted op
+- active cooldowns
+
+The runtime-slot Prometheus gauges SHALL carry a `pool` label naming the pool.
+
+This state is in-memory by design. `OpQueue` holds pending and claimed ops in no Kubernetes object, so without this endpoint it is unobservable by any client.
 
 #### Scenario: A stalled adapter is diagnosable
 - **WHEN** an adapter claims ops and does not complete them

@@ -2,18 +2,21 @@
 
 ### Requirement: Simultaneously active conversations are capped
 A conversation SHALL be considered **active** while a runtime pod exists for it
-(pod phase `Running` or `Pending`); a conversation whose pod has exited is not
-active and SHALL NOT consume capacity. Active conversations SHALL be counted in
-TWO independent pools: the **conversations** pool, holding every conversation
-with no `causedBy`, and the **members** pool, holding every conversation an
-`invoke` created (`causedBy` set). The manager SHALL admit at most
-`MAX_ACTIVE_CONVERSATIONS` active conversations (chart `maxActiveConversations`),
-default **5**, and at most `MAX_ACTIVE_MEMBERS` active members (chart
-`maxActiveMembers`), default **5**, at a time. The limits SHALL be counted from
-live runtime pods rather than from conversation status, so a pod that is stuck or
-a status patch that was lost cannot inflate available capacity. A pod whose
-conversation cannot be read SHALL be counted in the conversations pool. When
-`MAX_ACTIVE_CONVERSATIONS` is unset and the deprecated `MAX_RUNTIMES` is set,
+(pod phase `Running` or `Pending`). A conversation whose pod has exited is not
+active and SHALL NOT consume capacity.
+
+Active conversations SHALL be counted in TWO independent pools:
+
+| Pool | Holds | Limit | Chart value | Default |
+|---|---|---|---|---|
+| conversations | every conversation with no `causedBy` | `MAX_ACTIVE_CONVERSATIONS` | `maxActiveConversations` | 5 |
+| members | every conversation an `invoke` created (`causedBy` set) | `MAX_ACTIVE_MEMBERS` | `maxActiveMembers` | 5 |
+
+The limits SHALL be counted from live runtime pods rather than from conversation
+status, so a stuck pod or a lost status patch cannot inflate available capacity.
+A pod whose conversation cannot be read SHALL be counted in the conversations pool.
+
+When `MAX_ACTIVE_CONVERSATIONS` is unset and the deprecated `MAX_RUNTIMES` is set,
 the manager SHALL honor the deprecated value for the conversations pool and log
 that it is deprecated.
 
@@ -49,11 +52,12 @@ that it is deprecated.
 
 ### Requirement: Admission, ordering and eviction are scoped to a pool
 FIFO admission by creation time, the waiting set, the freed-slot wake-up and idle
-eviction SHALL each operate within one pool. A pending conversation SHALL be
-admitted only when its own pool has a free slot and no older pending conversation
-of that pool is waiting. Making room SHALL evict only an idle runtime pod of the
-same pool; a pod of the other pool SHALL NOT be evicted, and a younger waiting
-conversation of one pool SHALL NOT be held behind an older one of the other.
+eviction SHALL each operate within one pool.
+
+- A pending conversation SHALL be admitted only when its own pool has a free slot and no older pending conversation of that pool is waiting.
+- Making room SHALL evict only an idle runtime pod of the same pool.
+- A pod of the other pool SHALL NOT be evicted.
+- A younger waiting conversation of one pool SHALL NOT be held behind an older one of the other.
 
 #### Scenario: An older waiting conversation does not hold a member back
 - **WHEN** an older conversation waits on a full conversations pool and a younger member waits for a free members slot

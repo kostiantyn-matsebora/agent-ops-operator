@@ -1,10 +1,10 @@
 ## 1. Manager: two pools — backend-developer
 
 - [ ] 1.1 Add `MAX_ACTIVE_MEMBERS` (default 5, invalid → 5) beside `maxActiveConversations()` in `cmd/manager/main.go`, add a `MaxActiveMembers` field to the reconciler and the HTTP server, and verify `cmd/manager` tests cover default, set and invalid values
-- [ ] 1.2 Add one pool classifier (`CausedBy` set → members; unreadable conversation → conversations) and one helper splitting live pods and returning each pool's cap; verify a unit test covers both classes and the unreadable case
+- [ ] 1.2 Add one pool classifier (`CausedBy` set means members, an unreadable conversation means conversations) and one helper splitting live pods and returning each pool's cap, and verify a unit test covers both classes and the unreadable case
 - [ ] 1.3 Scope `admit`, `waitingFIFO`, `evictableCount`, `evictIdleWorker` and the `createRuntimePod` re-check to the conversation's pool, and verify no remaining read of `MaxActiveConversations` outside the helper
 - [ ] 1.4 Scope the pod-deletion wake-up to the deleted pod's pool and its ceiling, and verify with a test that a freed member slot wakes a pending member
-- [ ] 1.5 Report both pools in `/status` (additive `members` sibling) and relabel the slot gauges with `pool`; verify `status_test.go` and the metrics tests
+- [ ] 1.5 Report both pools in `/status` (additive `members` sibling), relabel the slot gauges with `pool`, and verify `status_test.go` and the metrics tests
 
 ## 2. Chart — deployment-engineer
 
