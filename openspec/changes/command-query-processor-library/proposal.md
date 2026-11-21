@@ -53,7 +53,7 @@ The design settles each. None is guessed here.
 | New `lib/` backend module | the NATS and Watermill Bus backend, moved out of `platform/manager/internal/commandbus`. Only the manager imports it |
 | `platform/manager/` | imports the library. HTTP handlers become thin. The nine reconcilers and the sweeps become command handlers behind their triggers |
 | Other Go components | every Go component routes its own actions through the library. The first task lists them |
-| The message contracts | new types in the core, reusing the Bus's `Kind`, `Key`, `CommandID` and `ErrorCode` |
+| The message contracts | new types in the core, reusing the Bus's `Queue`, `Kind`, `Key`, `CommandID` and `ErrorCode` verbatim. The spec lists the seven existing codes and adds none |
 | `.github/components.sh` | `lib/` is a module that is not an image, like `test/` |
 | Module releases | the library needs its own version and tag |
 | `docs/` reference | `contracts.md`, `concepts.md`, `testing.md`, `CHANGELOG.md`, and the new `docs/contracts/actions.md` |
