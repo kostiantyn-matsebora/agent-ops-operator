@@ -145,7 +145,7 @@ The adapter SHALL ship as its own subchart at `chart/charts/http/`, like every o
 
 The parent `chart/values.yaml` SHALL document an `http:` block with `enabled: false` and a typical enablement snippet. The subchart SHALL read no parent scope but `global.`.
 
-By default the bundle SHALL render the `SignalAdapter` with its port, workload knobs and the adapter's own floor service account, and nothing else. It SHALL NOT be enabled by demo mode.
+By default the bundle SHALL render the `SignalAdapter` and the `ChannelAdapter` (see `http-channel-adapter`), each with its port where it serves one, workload knobs and its own floor service account, and nothing else. It SHALL NOT be enabled by demo mode.
 
 #### Scenario: Default install renders nothing
 - **WHEN** the chart is installed with default values

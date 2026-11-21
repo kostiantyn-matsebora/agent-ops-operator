@@ -36,7 +36,20 @@ See proposal.md for motivation. `signals/alertmanager` and `signals/pulse` are t
 
 **D-9. Validate before push.** `API-6` and `API-7` refuse the whole batch for a bad `severity` or `signalId`. The adapter validates both itself and degrades the field, so one bad value never drops a signal.
 
+**D-10. Two modules, one bundle.** `channels/http` and `signals/http` are separate components and images (`structure.md`: a directory is a component). They share only the chart bundle and the integration page.
+
+**D-11. The delivery target is opaque `Channel.spec.config`.** The target URL lives there and the manager never parses it. The bearer for the outbound call comes from the Channel's `credentialsSecretRef`, when one is projected. Alternative: a URL on the `ChannelAdapter`. Rejected because one adapter serves many Channels, so a single URL cannot be per-channel.
+
+**D-12. Typed JSON out, not rendered text.** The adapter POSTs the typed message and does not compose presentation for a receiver it cannot know. The receiver owns rendering.
+
+**D-13. Delivery is get, ack, deliver, then done or failed.** A 2xx from the target is `done`. Any other status, a timeout or a transport error is `failed`. The adapter never re-sends after the ack, since a failure is final and the manager owns the cool-off.
+
+**D-14. Replies are reply-only and per-channel authenticated.** `POST /reply/{channel}` needs the Channel's own bearer, a `threadId` and text. It forwards to `/channel/inbound`. The adapter never re-ingests its own outbound post, so a receiver echoing a message back is the owner's loop to avoid.
+
 ## Risks / Trade-offs
+
+- [The owner-set target URL is an SSRF surface] → only the owner-set URL is ever dialled, never one taken from a message, and the page recommends egress policy.
+- [A receiver that replies to every delivery loops] → the page warns, and a reply carries only the thread id and text.
 
 - [A templated `kind` lets a token holder choose the prompt] → mandatory per-source token, a constant recommended, the page says so.
 - [An unset `kind` gives fresh-id requests the read-only investigation prompt] → the page tells owners to set `task`.
