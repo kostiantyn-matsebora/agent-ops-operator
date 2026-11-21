@@ -227,7 +227,7 @@ matching coverage.
 
 | Decides | Cannot decide |
 |---|---|
-| durable accept, idempotent submit, dedup across every task state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-lapse redelivery, bounded retry into dead, TTL expiry counting as settled, the hand-over (a peek changes nothing, an idempotent acknowledgement, a final failure), a gap-free resumable feed, dead-letter listing, per-queue statistics | latency or throughput under load, or anything only a real server decides |
+| durable accept, idempotent submit, dedup across every task state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-lapse redelivery, bounded retry into dead, TTL expiry counting as settled, the hand-over (a peek changes nothing, an idempotent acknowledgement, a final failure), a submit that is one write under a racing consumer, a gap-free resumable feed, dead-letter listing, per-queue statistics | latency or throughput under load, or anything only a real server decides |
 
 - **Both backends run the same suite.** `commandbus/memory` runs it in its
   own package. `commandbus/nats` runs it against an in-process JetStream

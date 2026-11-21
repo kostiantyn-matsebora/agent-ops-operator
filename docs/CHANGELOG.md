@@ -19,8 +19,8 @@ for the source and the reference material beside this file.
   longer waits on any consumer's view, which is what stopped every producer when
   a replica's view stalled. Delivery mode is configuration per message type, so
   a new type needs a routing entry and no change to the bus. The `Bus` interface
-  is unchanged. The per-invocation in-flight cap of the `conv` queue is dropped;
-  the consumer pool's concurrency bounds parallel handlers.
+  is unchanged. The per-invocation in-flight cap of the `conv` queue is dropped.
+  The consumer pool's concurrency bounds parallel handlers.
 - **A message is never processed for ever.** `commandBus.handlerTimeout`
   (default `5m`, `COMMANDBUS_HANDLER_TIMEOUT`) bounds each message. At the
   deadline the handler's context is cancelled and the attempt fails with a
