@@ -93,11 +93,19 @@ func mkChainCoordinators(t *testing.T, ctx context.Context, e *Env, stamp string
 	}
 }
 
+// chainWalk groups walkChain's chain-shaped inputs.
+type chainWalk struct {
+	stamp, rootName string
+	depth, hold     int
+	coordName       func(int) string
+}
+
 // walkChain invokes each level from its parent once the parent's run is
 // inflight (the real "busy parent" window, design D-7) and waits for the
 // level's pod. It returns the member conversations in level order.
-func walkChain(t *testing.T, ctx context.Context, e *Env, stamp, rootName string, depth, hold int, coordName func(int) string) []string {
+func walkChain(t *testing.T, ctx context.Context, e *Env, w chainWalk) []string {
 	t.Helper()
+	stamp, rootName, depth, hold, coordName := w.stamp, w.rootName, w.depth, w.hold, w.coordName
 	callerName := rootName
 	var members []string
 	for i := 1; i <= depth; i++ {
@@ -163,7 +171,7 @@ func TestNestedCoordinatorChainLongerThanTheMembersCeilingCompletes(t *testing.T
 		t.Fatalf("the admitted signal must open a root claimed by level 1's Coordinator, got %+v", root.Spec.CoordinatorRef)
 	}
 
-	members := walkChain(t, ctx, e, stamp, root.Name, depth, hold, coordName)
+	members := walkChain(t, ctx, e, chainWalk{stamp, root.Name, depth, hold, coordName})
 
 	// The leaf never invokes further, so it is the chain's own last run — wait
 	// it out so the chain is fully quiescent before the ceiling check below.

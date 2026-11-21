@@ -36,4 +36,4 @@
 ### 6.2 Adopter site
 
 - [x] 6.2.1 `docs/installation.md` values row, `docs/getting-started.md` and the landing page where a slot count is stated, and the Coordinator guide under `docs/guides/` naming that a member holds a slot of its own pool
-- [x] 6.2.2 Re-run `npm run screenshots` and `npm run demo` in `platform/console/ui` for the Queues change, and run `python3 .github/scripts/publication-guard.py`
+- [ ] 6.2.2 Re-run `npm run screenshots` and `npm run demo` in `platform/console/ui` for the Queues change, and run `python3 .github/scripts/publication-guard.py`
