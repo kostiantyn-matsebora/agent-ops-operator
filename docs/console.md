@@ -171,7 +171,7 @@ each cause has a different fix:
 |---|---|
 | `nothing claiming` | ops queued, no adapter polling — its pod is down |
 | `adapter wedged` | claimed and never completed — stuck mid-delivery |
-| `at runtime ceiling` | capacity-bound, **not broken** — raise `maxActiveConversations` or shed load |
+| `at runtime ceiling` | capacity-bound, **not broken** — raise `maxActiveConversations` (conversations) or `maxActiveMembers` (members), or shed load |
 | `runtime hung` | inflight far beyond typical — the runtime is hung, not queued |
 
 Cooldowns are shown here too: a suppressed signal lane looks exactly like an idle

@@ -12,6 +12,10 @@ for the source and the reference material beside this file.
 
 ### Added
 
+- **`maxActiveMembers` (`MAX_ACTIVE_MEMBERS`, default `5`) bounds Coordinator
+  members on their own pool**, separate from `maxActiveConversations`. A
+  member is a conversation an `invoke` created, `spec.causedBy` set.
+
 - **`global.agentops.platformNodeSelector` places every platform pod.** The
   manager, NATS, the Telegram gateway and every MCP server take it as their
   `nodeSelector`, and a component's own `nodeSelector` replaces it for that
@@ -21,6 +25,15 @@ for the source and the reference material beside this file.
 
 ### Changed
 
+- **BREAKING (capacity): runtime-pod capacity is now two independent pools.**
+  `maxActiveConversations` keeps its default of `5` and now counts
+  conversations only. Coordinator members draw from the new
+  `maxActiveMembers` pool instead, so total simultaneous pods can reach 10
+  where it was 5. Admission, FIFO ordering, idle eviction and the
+  freed-slot pickup all run per pool — a full pool never blocks the other.
+  The `agentops_runtime_slots_in_use` and `agentops_runtime_slots_max`
+  gauges gain a `pool` label (`conversations`, `members`), and the old
+  unlabelled series are retired in this same change.
 - **The command bus delivers with plain JetStream and a sequential convoy.**
   A message is stored once and its task is a record. Order per key comes from
   a temporary convoy queue per key with one consumer and one message in flight,
@@ -71,6 +84,16 @@ for the source and the reference material beside this file.
   four workers, each reconcile has a two-minute deadline that turns a hang into
   a retried error, and the active-conversation cap is decided and claimed in
   one guarded step so parallel workers cannot exceed it.
+
+### Upgrade
+
+- **To hold today's total pod count, lower `maxActiveConversations` and
+  `maxActiveMembers` between them.** Each has a minimum of `1`. Size node
+  resources for the sum of both, not for `maxActiveConversations` alone.
+- **A Prometheus rule or dashboard reading `agentops_runtime_slots_in_use`
+  or `agentops_runtime_slots_max` with no `pool` label stops matching.** Add
+  `pool="conversations"` to keep today's reading, or sum both pools to
+  recover the old combined figure.
 
 ## [23.0.0] — 2026-11-21
 

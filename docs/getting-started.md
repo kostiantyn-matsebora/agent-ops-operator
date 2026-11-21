@@ -102,7 +102,7 @@ same thread keep their context.
 | Bad or missing credential | the run fails — reason in `kubectl -n agent-ops-conversations logs agentops-conv-<name>` |
 | No storage provisioner | the `agentops-context` PVC in `agent-ops-conversations` sits `Pending` and no pod is created. Reinstall with `--set persistence.context.enabled=false` |
 | Nothing claims the source | the source's `Wired` condition is `False` with a reason, and signals are dropped |
-| At capacity | phase `Pending`, no pod, no thread. Five run at once by default |
+| At capacity | phase `Pending`, no pod, no thread. Five conversations run at once by default, in a pool of their own |
 
 ## Where to go next
 
