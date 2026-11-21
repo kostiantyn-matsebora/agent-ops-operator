@@ -733,8 +733,9 @@ independent of the state store above.
 
 | Key | Default | Consequence |
 |---|---|---|
-| `commandBus.backend` | `nats` | `nats` keeps the queue logs on a clustered server. `memory` keeps them in one process's heap — tests and local development only, refused above one `replicas` |
+| `commandBus.backend` | `nats` | `nats` keeps the messages and task records on a clustered server. `memory` keeps them in one process's heap — tests and local development only, refused above one `replicas` |
 | `commandBus.consumerConcurrency` | `4` | consumers per queue, per replica |
+| `commandBus.handlerTimeout` | `5m` | the longest one message may be processed. At the deadline the handler is cancelled and the attempt fails, to be delivered again up to its attempts, then parked. Renders `COMMANDBUS_HANDLER_TIMEOUT` |
 | `commandBus.channelReceiptAdapters` | `[console]` | the channel adapters whose acknowledgement is only their receipt of an op: no delivery TTL, no report, and the manager deletes the op at the acknowledgement. Renders `CHANNEL_RECEIPT_ADAPTERS`. An empty list means none, so every adapter must report |
 | `commandBus.deliveryTtl.stable` | `10m` | how long an adapter has, from acknowledging a reply or an input card, to report it done. With no report the manager fails it, final. Renders `CHANNEL_DELIVERY_TTL_STABLE` |
 | `commandBus.deliveryTtl.ephemeral` | `2m` | the same for an ack or a notice. `CHANNEL_DELIVERY_TTL_EPHEMERAL` |

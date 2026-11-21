@@ -2028,10 +2028,18 @@ payload is not copied into the conversation object.
   [configuration](configuration.md#command-bus)). `nats`, the default, shares
   the state store's server or runs a clustered one of its own. `memory`, one
   process's heap, is for tests only.
-  - **Every queue is an append-only log.** A message is appended once and never
-    modified. Claim, failure and settle are further entries, and state is
-    folded from them. A message that succeeded is removed, and one never
-    consumed is kept 7 days.
+  - **A message moves by JetStream's own mechanics, and a task is a record.**
+    The message is stored once, in one stream. Order per key, delivery, the
+    acknowledgement and redelivery after an unanswered lease are the broker's.
+    Each task's state is one record in a key-value bucket, written by the
+    submitter and then by whoever holds the task. A succeeded task is kept only
+    for its dedup window, and one never consumed for 7 days.
+  - **Delivery is configured per message type.** A *regular* queue is read by
+    competing consumers. A *sequential convoy* gives each key a temporary convoy
+    queue with one consumer and one message in flight, so a key's messages run in
+    order and different keys in parallel. A *hand-over* queue is read by an
+    adapter over HTTP and served from the task records. A new type is one routing
+    entry and needs no change to the bus.
   - **Declared bounded and lossy telemetry**, same as the activity ring
     below. The Conversation record stays the only durable truth — a lost
     log never loses a conversation, and the reconciler re-derives

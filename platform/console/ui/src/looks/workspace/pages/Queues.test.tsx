@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { Queues } from '../../../api/types'
 import { QueuesPage } from './Queues'
@@ -83,5 +83,28 @@ describe('workspace QueuesPage', () => {
     state.value = { error: new Error('boom') }
     page(<QueuesPage />)
     expect(screen.getByText('Could not load queues')).toBeInTheDocument()
+  })
+
+  it('pages the work queue, five rows at a time, and puts the full title on hover', () => {
+    const work = Array.from({ length: 7 }, (_, n) => ({
+      conversation: `c-${n}`, title: `Long title number ${n}`, phase: 'Running', queued: 1, ageSeconds: 10,
+    }))
+    state.value = { data: queues({ work: work as Queues['work'] }) }
+    page(<QueuesPage />)
+    const table = () => within(screen.getByRole('table', { name: 'work queue' }))
+    expect(table().getAllByRole('row')).toHaveLength(6) // header + 5
+    expect(table().getByRole('link', { name: 'Long title number 0' })).toHaveAttribute('title', 'Long title number 0')
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(table().getAllByRole('row')).toHaveLength(3) // header + 2
+    expect(table().getByRole('link', { name: 'Long title number 6' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Previous page' }))
+    expect(table().getByRole('link', { name: 'Long title number 0' })).toBeInTheDocument()
+  })
+
+  it('shows no pager for a single page', () => {
+    page(<QueuesPage />)
+    expect(screen.queryByRole('button', { name: 'Next page' })).not.toBeInTheDocument()
   })
 })

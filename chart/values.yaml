@@ -85,6 +85,12 @@ commandBus:
   # CONCURRENCY), independent of which backend answers it. Matches
   # cmd/manager/commandbus.go's own defaultCommandBusConsumerConcurrency.
   consumerConcurrency: 4
+  # The longest one message may be processed by a consumer pool. At the deadline
+  # the handler's context is cancelled and the attempt fails with a retryable
+  # code, so the message is delivered again, up to its attempts, then parked.
+  # Matches consumer.DefaultHandlerTimeout, the bound the bus's lease has always
+  # been.
+  handlerTimeout: 5m
   # Adapters whose acknowledgement is only their RECEIPT of a message (the
   # console): the manager consumes a message at that acknowledgement. Every
   # other adapter reports done or failed within the delivery TTL below.

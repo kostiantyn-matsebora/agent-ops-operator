@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/consumer"
 	commandbusmemory "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 	commandbusnats "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/nats"
 )
@@ -61,6 +62,16 @@ const defaultCommandBusConsumerConcurrency = 4
 // the Bus this file opens, has nothing left to invent.
 func commandBusConsumerConcurrency() int {
 	return envInt(commandBusConsumerConcurrencyEnv, defaultCommandBusConsumerConcurrency)
+}
+
+// commandBusHandlerTimeoutEnv bounds how long one message may be processed by a
+// consumer pool. At the deadline the handler's context is cancelled and the
+// attempt is failed with a retryable code, so a message is never processed for
+// ever. The default is the bound the bus's lease has always been.
+const commandBusHandlerTimeoutEnv = "COMMANDBUS_HANDLER_TIMEOUT"
+
+func commandBusHandlerTimeout() time.Duration {
+	return envDurationOr(commandBusHandlerTimeoutEnv, consumer.DefaultHandlerTimeout)
 }
 
 // The adapters whose acknowledgement is only their receipt of a message
@@ -216,6 +227,9 @@ func newNatsCommandBus(mgr ctrl.Manager, namespace string) (commandbus.Bus, erro
 		return nil, fmt.Errorf("opening the nats command bus: %w", err)
 	}
 
+	if len(bus.Retired) > 0 {
+		ctrl.Log.WithName("command-bus").Info("deleted the streams of the earlier log-based bus", "streams", bus.Retired)
+	}
 	if err := mgr.AddReadyzCheck("command-bus", commandBusReadinessCheck(conn)); err != nil {
 		return nil, fmt.Errorf("registering the command bus's readiness check: %w", err)
 	}

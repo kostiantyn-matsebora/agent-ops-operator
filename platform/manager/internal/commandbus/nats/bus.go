@@ -1,28 +1,33 @@
+// Package nats is the production command bus backend. It carries no state of
+// its own beyond NATS: messages travel in one JetStream stream, a task's state
+// is a record in a key-value bucket, and the delivery itself, order per key,
+// redelivery and acknowledgement, is the broker's own.
+//
+// A message type is delivered one of three ways, by configuration:
+//
+//   - a regular queue: competing consumers on one shared durable consumer;
+//   - a sequential convoy: one convoy queue per key, one message of it in
+//     flight at a time, in order, while other keys run in parallel;
+//   - a hand-over queue (a declared DeliveryTTL): served from the task
+//     records to an adapter that acknowledges and reports over HTTP.
 package nats
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/entrylog"
 )
 
-// The stream names of the closed inventory (package doc), before Scope's own
-// prefix.
-const (
-	streamLog  = "cmdbus_log"
-	streamDead = "cmdbus_dead"
-)
-
-// Option configures Open.
+// Option tunes a Bus.
 type Option func(*busConfig)
 
 type busConfig struct {
@@ -30,56 +35,31 @@ type busConfig struct {
 	leaseDuration      time.Duration
 	inventory          []commandbus.Declaration
 	sweepInterval      time.Duration
-	logMaxAge          time.Duration
-	logMaxMsgs         int64
-	settledGrace       time.Duration
 	deadLetterMaxAge   time.Duration
 	deadLetterMaxCount int
-	clock              *clock
+	routing            Routing
+	concurrency        int
+	convoyIdle         time.Duration
 }
 
-// defaultLeaseDuration matches commandbus/memory's own default (and
-// internal/chat's OpQueue.ReclaimAfter): no design value is named for
-// commandbus specifically, and reusing the existing number is a smaller
-// surprise than inventing a second one.
-const defaultLeaseDuration = 5 * time.Minute
-
-// DefaultSweepInterval is how often the background sweep (sweep.go) closes a
-// lapsed task whose attempts are spent, heals the dead log, and lets the
-// mirror forget what the log's own retention has dropped.
-const DefaultSweepInterval = 30 * time.Second
-
-// DefaultLogMaxAge is the queue log's retention: the stream drops an entry
-// older than this, and nothing else removes one (design D-2). It is long
-// enough that a conversation task queued through an outage is still there to
-// run, and every task has settled long before it.
-const DefaultLogMaxAge = 7 * 24 * time.Hour
-
-// DefaultSettledGrace is how long the entries of a task that succeeded stay in
-// the log before they are removed. Every replica's mirror drops the task the
-// moment it applies the succeeded entry, so the grace changes no state; it only
-// lets a replica still catching up, and a Feed consumer, read the entries of a
-// task before they go, instead of finding a gap. Zero removes them inside the
-// Settle that appended the succeeded entry.
-const DefaultSettledGrace = 30 * time.Second
-
-// DefaultDeadLetterMaxAge and DefaultDeadLetterMaxCount bound the dead log
-// independently of the queue log's own retention — a dead-letter record is
-// worth keeping as long as the queue's entries, and a count cap besides.
 const (
+	defaultLeaseDuration = 5 * time.Minute
+	// DefaultSweepInterval is how often the sweep looks for settled records to
+	// drop and idle convoy queues to remove.
+	DefaultSweepInterval = 30 * time.Second
+	// DefaultDeadLetterMaxAge and DefaultDeadLetterMaxCount bound the dead
+	// letters a bus keeps.
 	DefaultDeadLetterMaxAge   = 7 * 24 * time.Hour
 	DefaultDeadLetterMaxCount = 10000
+	defaultConvoyIdle         = 10 * time.Minute
 )
 
 func newBusConfig(opts []Option) busConfig {
 	cfg := busConfig{
-		leaseDuration:      defaultLeaseDuration,
-		inventory:          commandbus.DefaultInventory(),
-		sweepInterval:      DefaultSweepInterval,
-		logMaxAge:          DefaultLogMaxAge,
-		settledGrace:       DefaultSettledGrace,
-		deadLetterMaxAge:   DefaultDeadLetterMaxAge,
-		deadLetterMaxCount: DefaultDeadLetterMaxCount,
+		leaseDuration: defaultLeaseDuration, inventory: commandbus.DefaultInventory(),
+		sweepInterval: DefaultSweepInterval, deadLetterMaxAge: DefaultDeadLetterMaxAge,
+		deadLetterMaxCount: DefaultDeadLetterMaxCount, concurrency: 4, convoyIdle: defaultConvoyIdle,
+		routing: func(string) Mode { return ModeConvoy },
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -87,177 +67,63 @@ func newBusConfig(opts []Option) busConfig {
 	return cfg
 }
 
-// WithReplicas overrides the replica count every stream is created with.
-// Zero (the default) means Conn's own configured replicas.
+// WithReplicas sets the replica count of every stream and bucket the bus creates.
 func WithReplicas(n int) Option { return func(c *busConfig) { c.replicas = n } }
 
-// WithLeaseDuration overrides how long a Claim's lease runs before the
-// backend treats it as lapsed (design D-2: bus-wide, never per queue).
+// WithLeaseDuration sets how long a delivered message may go unanswered before
+// the broker hands it to another consumer.
 func WithLeaseDuration(d time.Duration) Option { return func(c *busConfig) { c.leaseDuration = d } }
 
-// WithInventory overrides the queue declarations Submit, Fail and Stats
-// resolve against.
+// WithInventory replaces the queue inventory.
 func WithInventory(inv []commandbus.Declaration) Option {
 	return func(c *busConfig) { c.inventory = inv }
 }
 
-// WithSweepInterval overrides the background sweep's period.
+// WithSweepInterval sets the sweep period.
 func WithSweepInterval(d time.Duration) Option { return func(c *busConfig) { c.sweepInterval = d } }
 
-// WithLogRetention overrides the queue log's own limits: the age past which
-// the stream drops an entry, and an optional count cap (zero means none).
-// These are the only way an entry leaves the log.
-func WithLogRetention(maxAge time.Duration, maxMsgs int64) Option {
-	return func(c *busConfig) { c.logMaxAge, c.logMaxMsgs = maxAge, maxMsgs }
-}
-
-// WithSettledGrace overrides how long a consumed task's entries stay in the log
-// before they are removed. Zero removes them inside Settle itself.
-func WithSettledGrace(d time.Duration) Option { return func(c *busConfig) { c.settledGrace = d } }
-
-// WithDeadLetterRetention overrides the dead log's own age and count caps.
-// Zero maxAge or maxCount disables that half of the cap.
+// WithDeadLetterRetention bounds the dead letters kept.
 func WithDeadLetterRetention(maxAge time.Duration, maxCount int) Option {
 	return func(c *busConfig) { c.deadLetterMaxAge, c.deadLetterMaxCount = maxAge, maxCount }
 }
 
-// withClock injects a clock a test's Backing can Advance (claim.go). Unexported:
-// production has no business fast-forwarding its own bus, only
-// commandbus/conformance's Backing contract needs it, and that is satisfied
-// from inside this package's own tests (package nats, not nats_test), never
-// from outside it.
-func withClock(c *clock) Option { return func(cfg *busConfig) { cfg.clock = c } }
+// WithRouting says, per queue, whether it is a regular queue or a sequential
+// convoy. A new message type is one more answer here, and no other change.
+func WithRouting(r Routing) Option { return func(c *busConfig) { c.routing = r } }
 
-// Bus is the nats backend's commandbus.Bus: two JetStream streams (package
-// doc) bootstrapped under one scope, plus the in-memory mirror (mirror.go)
-// Claim and Stats read instead of the server.
+// WithConsumerConcurrency sets how many messages of a regular queue may be in
+// flight at once, across every replica.
+func WithConsumerConcurrency(n int) Option { return func(c *busConfig) { c.concurrency = n } }
+
+// WithConvoyIdle sets how long a convoy queue sits empty before it is removed.
+func WithConvoyIdle(d time.Duration) Option { return func(c *busConfig) { c.convoyIdle = d } }
+
+// Bus implements commandbus.Bus over NATS.
 type Bus struct {
-	js      jetstream.JetStream
-	logName string
-	// logs is the queue log stream handle, used only for calls that keep no
-	// state on it (GetLastMsgForSubject, DeleteMsg): a handle caches its info
-	// unguarded, so Info is always read through a fresh one (logInfo).
-	logs jetstream.Stream
-	subj subjects
-	inv  []commandbus.Declaration
-	dead string // the dead stream's name
+	// Retired names the streams of the earlier log-based bus this Open deleted.
+	Retired []string
 
-	leaseDuration      time.Duration
-	sweepInterval      time.Duration
-	logMaxAge          time.Duration
-	settledGrace       time.Duration
-	deadLetterMaxAge   time.Duration
-	deadLetterMaxCount int
+	js     jetstream.JetStream
+	nc     *nats.Conn
+	subj   subjects
+	stream string
+	cfg    busConfig
 
-	clock  *clock
-	mirror *mirror
+	tasks       jetstream.KeyValue
+	tasksStream string
+	convoys     *convoyController
+	pub         *Publisher
+	mirror      *taskMirror
 
-	// selfSeq is the highest log sequence this *Bus value has itself
-	// appended. Claim fences on it (claim.go) before trusting the mirror for
-	// the in-flight-cap and per-key ordering checks: the mirror's watch is
-	// asynchronous even against this same process's own prior writes, and two
-	// Claim calls made back to back on one Bus value must see the first's
-	// effect on the second, not wait out a stale view the way a genuinely
-	// cross-replica race may (design D-2 only promises that a stranger's
-	// stale view delays a claim, never that this backend may ignore its own
-	// most recent write).
-	selfSeq atomic.Uint64
+	ctx    context.Context
+	cancel context.CancelFunc
 
-	closed chan struct{}
+	mu    sync.Mutex
+	feeds map[commandbus.Queue]<-chan *message.Message
+	held  map[string]*message.Message // lease token to the message this process holds
+	subs  []*Subscriber
 }
 
-// bumpSelfSeq records seq as having been appended by this Bus value, if it is
-// the highest one seen yet.
-func (b *Bus) bumpSelfSeq(seq uint64) {
-	for {
-		cur := b.selfSeq.Load()
-		if seq <= cur || b.selfSeq.CompareAndSwap(cur, seq) {
-			return
-		}
-	}
-}
-
-var _ commandbus.Bus = (*Bus)(nil)
-
-// Open bootstraps the two streams under scope (empty means unscoped, a
-// single-tenant install) and starts the mirror, blocking until its first
-// catch-up completes or ctx ends — so a Claim or Submit made right after Open
-// returns never races an empty, still-filling cache.
-func Open(ctx context.Context, conn *Conn, scope string, opts ...Option) (*Bus, error) {
-	cfg := newBusConfig(opts)
-	replicas := cfg.replicas
-	if replicas <= 0 {
-		replicas = conn.cfg.Replicas
-	}
-	subj := newSubjects(scope)
-
-	logName := bucketName(scope, streamLog)
-	logStream, err := bootstrapStream(ctx, conn.js, jetstream.StreamConfig{
-		Name: logName, Subjects: []string{subj.logFilter()}, Replicas: replicas,
-		MaxAge: cfg.logMaxAge, MaxMsgs: limitOrUnset(cfg.logMaxMsgs),
-	})
-	if err != nil {
-		return nil, err
-	}
-	deadName := bucketName(scope, streamDead)
-	if _, err := bootstrapStream(ctx, conn.js, jetstream.StreamConfig{
-		Name: deadName, Subjects: []string{subj.deadFilter()}, Replicas: replicas,
-		MaxAge: cfg.deadLetterMaxAge, MaxMsgs: limitOrUnset(int64(cfg.deadLetterMaxCount)),
-	}); err != nil {
-		return nil, err
-	}
-
-	c := cfg.clock
-	if c == nil {
-		c = newClock(time.Now)
-	}
-	b := &Bus{
-		js: conn.js, logs: logStream, logName: logName, subj: subj, inv: cfg.inventory, dead: deadName,
-		leaseDuration: cfg.leaseDuration, sweepInterval: cfg.sweepInterval, logMaxAge: cfg.logMaxAge, settledGrace: cfg.settledGrace,
-		deadLetterMaxAge: cfg.deadLetterMaxAge, deadLetterMaxCount: cfg.deadLetterMaxCount,
-		clock: c, closed: make(chan struct{}),
-	}
-	b.mirror = newMirror(conn.js, logName, deadName, entrylog.New(cfg.inventory), c.notify)
-	if err := b.mirror.waitReady(ctx); err != nil {
-		b.mirror.stop()
-		return nil, fmt.Errorf("commandbus/nats: open: %w", err)
-	}
-	return b, nil
-}
-
-// limitOrUnset maps a zero cap to JetStream's "no limit".
-func limitOrUnset(n int64) int64 {
-	if n <= 0 {
-		return -1
-	}
-	return n
-}
-
-// Close ends the background mirror watch. Not part of commandbus.Bus —
-// production holds one Bus for the manager's whole life — but a test opening
-// many isolated Bus values over one scope calls it to avoid leaking a goroutine
-// and a subscription per scenario.
-func (b *Bus) Close() {
-	select {
-	case <-b.closed:
-	default:
-		close(b.closed)
-	}
-	b.mirror.stop()
-}
-
-// advanceClock fast-forwards b's clock by d (claim.go), waking every blocked
-// Claim at once rather than leaving it to the next poll. Unexported for the
-// reason withClock is: only this package's own tests call it, through the
-// conformance.Backing this package's test file builds.
-func (b *Bus) advanceClock(d time.Duration) { b.clock.advance(d) }
-
-// leaseDur reports the lease duration every Claim on b grants.
-func (b *Bus) leaseDur() time.Duration { return b.leaseDuration }
-
-// bucketName prefixes base with scope, as internal/state/nats's own bucketName
-// does — the two packages share the idea (an install may point both at one
-// server, design D-1) without sharing the code.
 func bucketName(scope, base string) string {
 	if scope == "" {
 		return base
@@ -265,137 +131,136 @@ func bucketName(scope, base string) string {
 	return scope + "_" + base
 }
 
-// bootstrapStream creates or updates a stream with direct gets turned off: a
-// direct get may be served by any replica, including one that has not applied
-// a write the mirror was just told about (gotchas.md's AllowDirect entry;
-// internal/state/nats's own leaderReadsOnly is the same fix for the same
-// reason, restated here rather than imported — design D-1 keeps the two
-// backends independent). Retention is the limits policy and nothing else.
-func bootstrapStream(ctx context.Context, js jetstream.JetStream, cfg jetstream.StreamConfig) (jetstream.Stream, error) {
-	cfg.Retention = jetstream.LimitsPolicy
-	cfg.Storage = jetstream.FileStorage
-	cfg.Discard = jetstream.DiscardOld
-	cfg.AllowDirect = false
-	s, err := js.CreateOrUpdateStream(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("commandbus/nats: bootstrap stream %q: %w", cfg.Name, err)
+// Open creates, or finds, everything the bus needs and starts it. It reads
+// before it writes, so an install that already has every stream and bucket
+// needs no metadata change to start.
+func Open(ctx context.Context, conn *Conn, scope string, opts ...Option) (*Bus, error) {
+	cfg := newBusConfig(opts)
+	replicas := cfg.replicas
+	if replicas <= 0 {
+		replicas = conn.cfg.Replicas
 	}
-	return s, nil
+	subj := newSubjects(scope)
+	stream := bucketName(scope, "cb")
+	if err := ensurePubSubStream(ctx, conn.js, stream, subj, replicas, time.Minute); err != nil {
+		return nil, err
+	}
+	tasksBucket := bucketName(scope, "cbtasks")
+	tasks, err := openBucket(ctx, conn.js, jetstream.KeyValueConfig{Bucket: tasksBucket, History: 8, Replicas: replicas, TTL: cfg.deadLetterMaxAge * 2})
+	if err != nil {
+		return nil, err
+	}
+	registry, err := openBucket(ctx, conn.js, jetstream.KeyValueConfig{Bucket: bucketName(scope, "cbconvoys"), History: 1, Replicas: replicas})
+	if err != nil {
+		return nil, err
+	}
+	bctx, cancel := context.WithCancel(context.Background())
+	b := &Bus{
+		js: conn.js, nc: conn.nc, subj: subj, stream: stream, cfg: cfg,
+		tasks: tasks, tasksStream: "KV_" + tasksBucket,
+		convoys: newConvoyController(registry, subj), ctx: bctx, cancel: cancel,
+		feeds: map[commandbus.Queue]<-chan *message.Message{}, held: map[string]*message.Message{},
+	}
+	b.Retired = retireLegacyStreams(ctx, conn.js, scope)
+	b.pub = newPublisher(b.pubsubConfig())
+	b.mirror = newTaskMirror()
+	go b.mirror.run(bctx, tasks)
+	if err := b.mirror.waitReady(ctx); err != nil {
+		cancel()
+		return nil, fmt.Errorf("commandbus/nats: open: %w", err)
+	}
+	return b, nil
 }
 
-// append writes ap's entry to its subject, conditional on the subject's last
-// sequence still being the one the plan saw, and returns the sequence the log
-// gave it. A rejected condition is isWrongLastSeq(err): the lost side of a
-// race, for the caller to re-plan from a fresher view.
-func (b *Bus) append(ctx context.Context, ap entrylog.Append) (uint64, error) {
-	data, err := json.Marshal(ap.Entry)
-	if err != nil {
-		return 0, fmt.Errorf("commandbus/nats: encode %s entry of %s: %w", ap.Entry.Type, ap.Entry.UID, err)
-	}
-	ack, err := b.js.Publish(ctx, b.subj.forEntry(ap.Entry), data,
-		jetstream.WithMsgID(msgID(ap.Entry)), jetstream.WithExpectLastSequencePerSubject(ap.ExpectLast))
-	if err != nil {
-		if isWrongLastSeq(err) {
-			b.reconcileLast(ctx, ap.Entry)
+// legacyStreams are the streams the log-based bus created. No code reads them
+// now, and what they hold was never handed to the backend that replaced it.
+var legacyStreams = []string{"cmdbus_log", "cmdbus_dead"}
+
+// retireLegacyStreams deletes each legacy stream that exists and returns the
+// names it deleted. A failed delete is left for the next open.
+func retireLegacyStreams(ctx context.Context, js jetstream.JetStream, scope string) []string {
+	var gone []string
+	for _, base := range legacyStreams {
+		name := bucketName(scope, base)
+		if err := js.DeleteStream(ctx, name); err == nil {
+			gone = append(gone, name)
 		}
-		return 0, err
 	}
-	b.bumpSelfSeq(ack.Sequence)
-	return ack.Sequence, nil
+	return gone
 }
 
-// logInfo reads the queue log's current state from the server. It opens a
-// fresh stream handle per call: a handle caches its info unguarded, so one
-// shared across goroutines would race.
-func (b *Bus) logInfo(ctx context.Context) (*jetstream.StreamInfo, error) {
-	s, err := b.js.Stream(ctx, b.logName)
+// openBucket gets a bucket and creates it only if it is missing, then makes
+// sure no replica answers a read from a view that lags a write.
+func openBucket(ctx context.Context, js jetstream.JetStream, cfg jetstream.KeyValueConfig) (jetstream.KeyValue, error) {
+	kv, err := js.KeyValue(ctx, cfg.Bucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		kv, err = js.CreateKeyValue(ctx, cfg)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("commandbus/nats: log info: %w", err)
+		return nil, fmt.Errorf("commandbus/nats: open bucket %q: %w", cfg.Bucket, err)
 	}
-	return s.CachedInfo(), nil
-}
-
-// reconcileLast re-learns the server's last sequence on the subject a rejected
-// append was conditional on. The mirror's own belief goes stale in a way an
-// ordered consumer cannot report: the log removes entries (a consumed task's,
-// or those past its age limit) and a consumer is never told of a removal. After
-// the mirror has caught up to what the server holds, the next plan is
-// conditional on the truth, so a rejection is a lost race and never a standing
-// one.
-func (b *Bus) reconcileLast(ctx context.Context, e entrylog.Entry) {
-	ctx, cancel := context.WithTimeout(ctx, reconcileTimeout)
-	defer cancel()
-	var seq uint64
-	last, err := b.logs.GetLastMsgForSubject(ctx, b.subj.forEntry(e))
-	switch {
-	case err == nil:
-		seq = last.Sequence
-	case !errors.Is(err, jetstream.ErrMsgNotFound):
-		return
+	s, err := js.Stream(ctx, "KV_"+cfg.Bucket)
+	if err != nil {
+		return nil, fmt.Errorf("commandbus/nats: open bucket %q: %w", cfg.Bucket, err)
 	}
-	if err := b.mirror.waitCaughtUpTo(ctx, seq); err != nil {
-		return
+	if sc := s.CachedInfo().Config; sc.AllowDirect {
+		sc.AllowDirect = false
+		if _, err := js.UpdateStream(ctx, sc); err != nil {
+			return nil, fmt.Errorf("commandbus/nats: bucket %q: turn direct reads off: %w", cfg.Bucket, err)
+		}
+		if kv, err = js.KeyValue(ctx, cfg.Bucket); err != nil {
+			return nil, fmt.Errorf("commandbus/nats: reopen bucket %q: %w", cfg.Bucket, err)
+		}
 	}
-	b.mirror.log.SetLast(e, seq)
+	return kv, nil
 }
 
-// reconcileTimeout bounds reconcileLast: a rejected append is retried either
-// way, so a reconcile that cannot finish quickly is simply skipped.
-const reconcileTimeout = 2 * time.Second
+func (b *Bus) pubsubConfig() pubsubConfig {
+	return pubsubConfig{js: b.js, stream: b.stream, subj: b.subj, convoys: b.convoys, routing: b.route}
+}
 
-// sync blocks until the mirror holds everything the log held when sync asked
-// the server, so a decision read from it is never staler than the call. The
-// target is the last entry the log still HOLDS, not its last sequence: the log
-// removes the entries of consumed tasks, so its last sequence may name an entry
-// no consumer will ever be delivered. A log holding nothing has nothing to
-// catch up to.
-func (b *Bus) sync(ctx context.Context) error {
-	last, err := b.logs.GetLastMsgForSubject(ctx, b.subj.logFilter())
-	switch {
-	case errors.Is(err, jetstream.ErrMsgNotFound):
-		return b.mirror.waitReady(ctx)
-	case err != nil:
-		return fmt.Errorf("commandbus/nats: last log entry: %w", err)
+// route is the Routing the publisher uses: a hand-over queue is served from
+// the records, everything else as configured.
+func (b *Bus) route(topic string) Mode {
+	if b.handover(commandbus.Queue(topic)) {
+		return ModeHandover
 	}
-	return b.mirror.waitCaughtUpTo(ctx, max(last.Sequence, b.selfSeq.Load()))
+	return b.cfg.routing(topic)
 }
 
-// clock is the virtual time every Claim/Submit/Fail/reap decision reads
-// (mirroring commandbus/memory's own store.now/advance): base keeps moving
-// in real time on its own, offset only ever grows, via advance — so a
-// test's one jump forward stays fast-forwarded, rather than snapping back
-// the moment real time next advances. See package memory's own doc on
-// Backing.Advance for why that is what "fast forward" has to mean here.
-type clock struct {
-	base   func() time.Time
-	offset atomic.Int64
-
-	mu sync.Mutex
-	ch chan struct{}
+// handover reports whether a queue is a hand-over queue (design D-17).
+func (b *Bus) handover(q commandbus.Queue) bool {
+	for _, d := range b.cfg.inventory {
+		if d.Queue == familyOf(q) && d.Policy.DeliveryTTL > 0 {
+			return true
+		}
+	}
+	return false
 }
 
-func newClock(base func() time.Time) *clock {
-	return &clock{base: base, ch: make(chan struct{})}
+func familyOf(q commandbus.Queue) commandbus.Queue {
+	if strings.HasPrefix(string(q), "out.") {
+		return commandbus.OutFamily
+	}
+	return q
 }
 
-func (c *clock) now() time.Time { return c.base().Add(time.Duration(c.offset.Load())) }
-
-func (c *clock) advance(d time.Duration) {
-	c.offset.Add(int64(d))
-	c.notify()
+func (b *Bus) decl(q commandbus.Queue, k commandbus.Kind) (commandbus.Declaration, error) {
+	d, ok := commandbus.Resolve(b.cfg.inventory, q, k)
+	if !ok {
+		return commandbus.Declaration{}, fmt.Errorf("%w: queue=%q kind=%q", commandbus.ErrUnknownQueue, q, k)
+	}
+	return d, nil
 }
 
-// notify wakes everyone waiting on wait(): every blocked Claim poll, so a
-// clock jump or a fresh mirror update is seen at once.
-func (c *clock) notify() {
-	c.mu.Lock()
-	close(c.ch)
-	c.ch = make(chan struct{})
-	c.mu.Unlock()
-}
-
-func (c *clock) wait() <-chan struct{} {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.ch
+// Close stops everything the bus runs. The connection stays the caller's.
+func (b *Bus) Close() {
+	b.cancel()
+	b.mu.Lock()
+	subs := b.subs
+	b.subs = nil
+	b.mu.Unlock()
+	for _, s := range subs {
+		_ = s.Close()
+	}
 }
