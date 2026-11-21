@@ -623,7 +623,7 @@ func main() {
 	// unused until now).
 	convPool, err := consumer.New(consumer.Config{
 		Bus: bus, Queue: httpapi.ConvQueue, Handler: api.HandleConvTask,
-		Concurrency: commandBusConsumerConcurrency(),
+		Concurrency: commandBusConsumerConcurrency(), HandlerTimeout: commandBusHandlerTimeout(),
 	})
 	if err != nil {
 		setupLog.Error(err, "conv task consumer")
@@ -640,7 +640,7 @@ func main() {
 	// handleSignalInbound's own publish/answerCommands split moved into.
 	signalPool, err := consumer.New(consumer.Config{
 		Bus: bus, Queue: httpapi.SignalIngestQueue, Handler: api.HandleIngestSignalTask,
-		Concurrency: commandBusConsumerConcurrency(),
+		Concurrency: commandBusConsumerConcurrency(), HandlerTimeout: commandBusHandlerTimeout(),
 	})
 	exitOnSetupError("in.signal task consumer", err)
 	exitOnSetupError("in.signal task consumer", mgr.Add(manager.RunnableFunc(signalPool.Run)))

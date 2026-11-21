@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -26,6 +27,19 @@ const (
 	// ModeConvoy is the sequential convoy: one convoy queue per key, one message
 	// of it in flight at a time, in order. Other keys run in parallel.
 	ModeConvoy
+	// ModeHandover is a queue read by an adapter over HTTP: the message is
+	// stored under the key's subject and served from the task records, with no
+	// consumer.
+	ModeHandover
+)
+
+// Metadata the subscriber stamps on a message it delivers, and the bus reads.
+const (
+	metaUID      = "uid"
+	metaReply    = "reply"
+	metaAttempt  = "attempt"
+	metaNakDelay = "nak-delay"
+	metaTerm     = "term"
 )
 
 // Routing says how the messages of a topic (a queue) are delivered.
@@ -92,30 +106,45 @@ func newPublisher(cfg pubsubConfig) *Publisher { return &Publisher{cfg: cfg} }
 
 func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	for _, m := range messages {
-		ctx := m.Context()
-		subject := p.cfg.regularSubject(topic)
-		if p.cfg.routing(topic) == ModeConvoy {
-			key := m.Metadata.Get(KeyMetadata)
-			if key == "" {
-				return fmt.Errorf("commandbus/nats: convoy topic %q needs the %q metadata", topic, KeyMetadata)
-			}
-			cv, err := p.cfg.convoys.Ensure(ctx, commandbus.Queue(topic), commandbus.Key(key), time.Now())
-			if err != nil {
-				return err
-			}
-			subject = cv.Subject
-		}
-		msg := nats.NewMsg(subject)
-		msg.Data = m.Payload
-		msg.Header.Set(msgIDHeader, m.UUID)
-		for k, v := range m.Metadata {
-			msg.Header.Set(metaPrefix+k, v)
-		}
-		if _, err := p.cfg.js.PublishMsg(ctx, msg); err != nil {
-			return fmt.Errorf("commandbus/nats: publish to %q: %w", topic, err)
+		if _, err := p.PublishSeq(topic, m); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// PublishSeq publishes one message and returns the sequence the stream gave
+// it, which is its place in line.
+func (p *Publisher) PublishSeq(topic string, m *message.Message) (uint64, error) {
+	ctx := m.Context()
+	subject := p.cfg.regularSubject(topic)
+	switch p.cfg.routing(topic) {
+	case ModeConvoy, ModeHandover:
+		key := m.Metadata.Get(KeyMetadata)
+		if key == "" {
+			return 0, fmt.Errorf("commandbus/nats: topic %q needs the %q metadata", topic, KeyMetadata)
+		}
+		if p.cfg.routing(topic) == ModeConvoy {
+			cv, err := p.cfg.convoys.Ensure(ctx, commandbus.Queue(topic), commandbus.Key(key), time.Now())
+			if err != nil {
+				return 0, err
+			}
+			subject = cv.Subject
+		} else {
+			subject = p.cfg.convoys.subjectFor(commandbus.Queue(topic), commandbus.Key(key))
+		}
+	}
+	msg := nats.NewMsg(subject)
+	msg.Data = m.Payload
+	msg.Header.Set(msgIDHeader, m.UUID)
+	for k, v := range m.Metadata {
+		msg.Header.Set(metaPrefix+k, v)
+	}
+	ack, err := p.cfg.js.PublishMsg(ctx, msg)
+	if err != nil {
+		return 0, fmt.Errorf("commandbus/nats: publish to %q: %w", topic, err)
+	}
+	return ack.Sequence, nil
 }
 
 func (p *Publisher) Close() error { return nil }
@@ -133,6 +162,10 @@ type Subscriber struct {
 	// in flight across every subscriber of it.
 	concurrency int
 	maxDeliver  int
+	// renew keeps a held message alive with an in-progress signal. The bus turns
+	// it off and leaves renewal to whoever holds the claim, so an abandoned claim
+	// lapses.
+	renew bool
 
 	mu     sync.Mutex
 	stops  []func()
@@ -143,7 +176,7 @@ func newSubscriber(cfg pubsubConfig, concurrency int) *Subscriber {
 	if concurrency <= 0 {
 		concurrency = 4
 	}
-	return &Subscriber{cfg: cfg, ackWait: defaultAckWait, nackDelay: time.Second, concurrency: concurrency, maxDeliver: 5}
+	return &Subscriber{cfg: cfg, ackWait: defaultAckWait, nackDelay: time.Second, concurrency: concurrency, maxDeliver: 5, renew: true}
 }
 
 func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error) {
@@ -244,14 +277,18 @@ func (s *Subscriber) consume(ctx context.Context, cons jetstream.Consumer, out c
 				m.Metadata.Set(k[len(metaPrefix):], v[0])
 			}
 		}
+		m.Metadata.Set(metaReply, js.Reply())
+		if md, err := js.Metadata(); err == nil {
+			m.Metadata.Set(metaAttempt, strconv.FormatUint(md.NumDelivered, 10))
+		}
 		m.SetContext(ctx)
 		select {
 		case out <- m:
 		case <-ctx.Done():
 			return
 		}
-		s.settle(ctx, js, m)
-	})
+		go s.settle(ctx, js, m)
+	}, jetstream.PullMaxMessages(1))
 	if err != nil {
 		return fmt.Errorf("commandbus/nats: consume: %w", err)
 	}
@@ -265,6 +302,7 @@ func (s *Subscriber) consume(ctx context.Context, cons jetstream.Consumer, out c
 }
 
 // settle waits for the handler's answer, renewing the ack-wait while it runs.
+// A nack carries its own delay, or asks that the message never come back.
 func (s *Subscriber) settle(ctx context.Context, js jetstream.Msg, m *message.Message) {
 	tick := time.NewTicker(s.ackWait / 3)
 	defer tick.Stop()
@@ -274,12 +312,22 @@ func (s *Subscriber) settle(ctx context.Context, js jetstream.Msg, m *message.Me
 			_ = js.Ack()
 			return
 		case <-m.Nacked():
-			_ = js.NakWithDelay(s.nackDelay)
+			if m.Metadata.Get(metaTerm) != "" {
+				_ = js.Term()
+				return
+			}
+			delay := s.nackDelay
+			if d, err := time.ParseDuration(m.Metadata.Get(metaNakDelay)); err == nil {
+				delay = d
+			}
+			_ = js.NakWithDelay(delay)
 			return
 		case <-tick.C:
-			_ = js.InProgress()
+			if s.renew {
+				_ = js.InProgress()
+			}
 		case <-ctx.Done():
-			return // unacked: the server redelivers it after its ack-wait
+			return // unanswered: the server redelivers it after its ack-wait
 		}
 	}
 }

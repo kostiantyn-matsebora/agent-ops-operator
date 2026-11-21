@@ -2,78 +2,125 @@ package nats
 
 import (
 	"context"
+	"errors"
+	"sort"
 	"time"
+
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 )
 
-// Run drives the background sweep until ctx ends or the Bus is closed. The
-// sweep appends the two entries a reader cannot derive on its own, removes the
-// entries of consumed tasks once their grace has passed (the only removal the
-// bus makes), and lets the in-memory mirror forget what the logs' own limits
-// have already dropped.
+// Run sweeps until ctx ends. The sweep is safe on any replica: every change it
+// makes is conditional on the revision it read, so two sweeps never both act.
 func (b *Bus) Run(ctx context.Context) {
-	ticker := time.NewTicker(b.sweepInterval)
-	defer ticker.Stop()
+	t := time.NewTicker(b.cfg.sweepInterval)
+	defer t.Stop()
 	for {
+		b.Sweep(ctx)
 		select {
 		case <-ctx.Done():
 			return
-		case <-b.closed:
+		case <-b.ctx.Done():
 			return
-		case <-ticker.C:
-			b.sweepOnce(ctx)
+		case <-t.C:
 		}
 	}
 }
 
-func (b *Bus) sweepOnce(ctx context.Context) {
-	now := b.clock.now()
-	b.closeLapsedTasks(ctx, now)
-	b.healDeadLog(ctx, now)
-	b.mirror.forgetDead(func(t commandbus.Task) bool { return b.deadKept(t, now) })
-	b.removeConsumed(ctx, 0)
-	b.mirror.log.Prune(now, now.Add(-b.logMaxAge))
+// Sweep makes the facts a record only implies, and removes what is finished:
+//   - a lease that lapsed with its attempts spent, and a task waiting past its
+//     TTL, are written as dead and expired, and a hand-over task's message is
+//     dropped from the stream;
+//   - a succeeded task is dropped once its dedup window has passed;
+//   - dead letters are kept to their age and count;
+//   - a convoy queue that has sat empty past the idle time is removed.
+func (b *Bus) Sweep(ctx context.Context) {
+	now := time.Now()
+	var dead []mirrored
+	for _, d := range b.mirror.all() {
+		decl, _ := commandbus.Resolve(b.cfg.inventory, d.doc.Task.Queue, d.doc.Task.Kind)
+		t := b.viewOf(d.doc.Task, now)
+		switch {
+		case t.State == commandbus.StateSucceeded:
+			if now.After(t.SucceededAt.Add(decl.Policy.DedupWindow)) {
+				b.drop(ctx, d)
+			}
+		case t.State == commandbus.StateDead:
+			if d.doc.Task.State != commandbus.StateDead {
+				b.settleImplied(ctx, d, t)
+			}
+			if now.Sub(t.DeadAt) > b.cfg.deadLetterMaxAge {
+				b.drop(ctx, d)
+			} else {
+				dead = append(dead, d)
+			}
+		case t.State == commandbus.StateExpired:
+			b.settleImplied(ctx, d, t)
+			b.drop(ctx, d)
+		}
+	}
+	if over := len(dead) - b.cfg.deadLetterMaxCount; over > 0 {
+		sort.Slice(dead, func(i, j int) bool { return dead[i].doc.Task.DeadAt.Before(dead[j].doc.Task.DeadAt) })
+		for _, d := range dead[:over] {
+			b.drop(ctx, d)
+		}
+	}
+	b.sweepConvoys(ctx, now)
 }
 
-// closeLapsedTasks appends the dead entry for every task whose lease lapsed
-// with its attempts spent. The fold already reads it as dead; the entry makes
-// it a fact of the log and reaches the dead log. A lost race means a
-// competing entry landed; the next sweep sees whatever is true then.
-func (b *Bus) closeLapsedTasks(ctx context.Context, now time.Time) {
-	for _, f := range b.mirror.log.PlanLapsedDeaths(now) {
-		if _, err := b.append(ctx, f.Append); err == nil {
-			b.archiveDead(ctx, f.Task)
+// settleImplied writes what the record only implied, so it is a fact.
+func (b *Bus) settleImplied(ctx context.Context, d mirrored, t commandbus.Task) {
+	doc := d.doc
+	doc.Task = t
+	if _, err := b.putDoc(ctx, d.key, doc, d.rev); err == nil && b.handover(t.Queue) {
+		_ = b.deleteMessage(doc.Seq)
+	}
+}
+
+func (b *Bus) drop(ctx context.Context, d mirrored) {
+	if err := b.tasks.Delete(ctx, d.key, jetstream.LastRevision(d.rev)); err == nil {
+		b.mirror.remove(d.key, d.rev+1)
+		if b.handover(d.doc.Task.Queue) {
+			_ = b.deleteMessage(d.doc.Seq)
 		}
 	}
 }
 
-// healDeadLog copies a dead task the dead log lacks — a crash between Fail's
-// two appends — into it.
-func (b *Bus) healDeadLog(ctx context.Context, now time.Time) {
-	for _, t := range b.mirror.log.DeadTasks("", now) {
-		if !b.mirror.hasDead(t.UID) {
-			b.archiveDead(ctx, t)
+// sweepConvoys removes the convoy queues that hold nothing and have delivered
+// nothing for the idle time. The registry entry goes first, by revision, so an
+// entry made again meanwhile survives, then the consumer; a message that
+// arrives later makes the queue again.
+func (b *Bus) sweepConvoys(ctx context.Context, now time.Time) {
+	convoys, err := b.convoys.List(ctx)
+	if err != nil {
+		return
+	}
+	s, err := b.js.Stream(ctx, b.stream)
+	if err != nil {
+		return
+	}
+	for _, cv := range convoys {
+		cons, err := s.Consumer(ctx, cv.Consumer)
+		if err != nil {
+			if errors.Is(err, jetstream.ErrConsumerNotFound) && now.Sub(cv.CreatedAt) > b.cfg.convoyIdle {
+				_ = b.convoys.Remove(ctx, cv)
+			}
+			continue
+		}
+		info, err := cons.Info(ctx)
+		if err != nil || info.NumPending > 0 || info.NumAckPending > 0 {
+			continue
+		}
+		last := info.Created
+		if info.Delivered.Last != nil && info.Delivered.Last.After(last) {
+			last = *info.Delivered.Last
+		}
+		if now.Sub(last) < b.cfg.convoyIdle {
+			continue
+		}
+		if err := b.convoys.Remove(ctx, cv); err == nil {
+			_ = s.DeleteConsumer(ctx, cv.Consumer)
 		}
 	}
-}
-
-// deadKept reports whether the dead log's own age limit still holds t.
-func (b *Bus) deadKept(t commandbus.Task, now time.Time) bool {
-	return b.deadLetterMaxAge <= 0 || now.Sub(t.DeadAt) <= b.deadLetterMaxAge
-}
-
-// withDeadLimits keeps what the dead log's limits would hold of dead (oldest
-// death first): within the age cap, and the newest deadLetterMaxCount.
-func (b *Bus) withinDeadLimits(dead []commandbus.Task, now time.Time) []commandbus.Task {
-	kept := dead[:0:0]
-	for _, t := range dead {
-		if b.deadKept(t, now) {
-			kept = append(kept, t)
-		}
-	}
-	if n := b.deadLetterMaxCount; n > 0 && len(kept) > n {
-		kept = kept[len(kept)-n:]
-	}
-	return kept
 }

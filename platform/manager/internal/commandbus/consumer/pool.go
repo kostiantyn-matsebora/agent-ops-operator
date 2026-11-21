@@ -77,8 +77,18 @@ func codeFor(err error) commandbus.ErrorCode {
 // only the fallback for the bus itself misbehaving.
 const claimRetryInterval = time.Second
 
+// DefaultHandlerTimeout bounds one message's processing when Config sets none.
+// It is the bound the bus's lease has always been, so a handler that runs
+// longer than it was never going to keep its message anyway.
+const DefaultHandlerTimeout = 5 * time.Minute
+
 // Config configures one Pool. Every field is required except ConsumerID.
 type Config struct {
+	// HandlerTimeout is the longest one message may be processed. At the
+	// deadline the handler's context is cancelled and the attempt is failed with
+	// a retryable code, so a message is never processed forever. Zero is
+	// DefaultHandlerTimeout.
+	HandlerTimeout time.Duration
 	// Bus is claimed from and settled/failed against.
 	Bus commandbus.Bus
 	// Queue is the one FIFO lane this pool claims from.
@@ -184,7 +194,7 @@ func (p *Pool) settleOrFail(ctx context.Context, logger logr.Logger, task comman
 	if task.Lease != nil {
 		leaseToken = task.Lease.Token
 	}
-	err := p.cfg.Handler(ctx, task)
+	err := p.handle(ctx, logger, task, leaseToken)
 	if err == nil {
 		if sErr := p.cfg.Bus.Settle(ctx, task.UID, leaseToken); sErr != nil && !errors.Is(sErr, commandbus.ErrLeaseLost) {
 			logger.Error(sErr, "settle failed", "task", task.UID)
@@ -193,5 +203,59 @@ func (p *Pool) settleOrFail(ctx context.Context, logger logr.Logger, task comman
 	}
 	if fErr := p.cfg.Bus.Fail(ctx, task.UID, leaseToken, codeFor(err), err.Error()); fErr != nil && !errors.Is(fErr, commandbus.ErrLeaseLost) {
 		logger.Error(fErr, "fail failed", "task", task.UID)
+	}
+}
+
+// handle runs the handler under its deadline, keeping the lease alive while it
+// works when the bus asks for that. A handler that overruns, or whose lease was
+// taken from it, has its context cancelled; one that ignores the context is
+// left behind and the attempt is failed without waiting for it.
+func (p *Pool) handle(ctx context.Context, logger logr.Logger, task commandbus.Task, leaseToken string) error {
+	timeout := p.cfg.HandlerTimeout
+	if timeout <= 0 {
+		timeout = DefaultHandlerTimeout
+	}
+	hctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if r, ok := p.cfg.Bus.(commandbus.Renewer); ok && task.Lease != nil {
+		if every := time.Until(task.Lease.Until) / 3; every > 0 {
+			go renewWhile(hctx, cancel, r, task.UID, leaseToken, every, logger)
+		}
+	}
+	done := make(chan error, 1)
+	go func() { done <- p.cfg.Handler(hctx, task) }()
+	select {
+	case err := <-done:
+		if err != nil && errors.Is(hctx.Err(), context.DeadlineExceeded) {
+			return WithCode(commandbus.CodeUnavailable, fmt.Errorf("handler timed out after %s: %w", timeout, err))
+		}
+		return err
+	case <-hctx.Done():
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		logger.Info("handler did not stop at its deadline, failing the attempt", "task", task.UID, "timeout", timeout.String())
+		return WithCode(commandbus.CodeUnavailable, fmt.Errorf("handler timed out after %s", timeout))
+	}
+}
+
+// renewWhile extends the lease every interval until ctx ends. A lease that is
+// lost cancels the handler: another consumer may now hold the message.
+func renewWhile(ctx context.Context, cancel context.CancelFunc, r commandbus.Renewer, uid, token string, every time.Duration, logger logr.Logger) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := r.Renew(ctx, uid, token); err != nil {
+				if errors.Is(err, commandbus.ErrLeaseLost) {
+					cancel()
+					return
+				}
+				logger.V(1).Info("lease renewal failed, will retry", "task", uid, "error", err.Error())
+			}
+		}
 	}
 }

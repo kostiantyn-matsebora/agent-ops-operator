@@ -697,6 +697,9 @@ func testPerQueueStatistics(t *testing.T, open func() Backing, d commandbus.Decl
 // coverage as any other declared behaviour. Skipped on a queue whose
 // policy declares no cap (every one except "conv" today).
 func testPerInvocationInFlightCap(t *testing.T, open func() Backing, d commandbus.Declaration, queue commandbus.Queue) {
+	if _, ok := open().(CapBacking); !ok {
+		t.Skip("this backend does not enforce a per-invocation in-flight cap")
+	}
 	invCap := d.Policy.InFlightCapPerInvocation
 	if invCap <= 0 {
 		t.Skip("queue declares no per-invocation in-flight cap")

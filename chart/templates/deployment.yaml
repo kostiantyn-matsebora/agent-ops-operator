@@ -128,6 +128,10 @@ spec:
             # SIGNAL_CONSUMER_CONCURRENCY below.
             - name: COMMANDBUS_CONSUMER_CONCURRENCY
               value: {{ .Values.commandBus.consumerConcurrency | quote }}
+            # The longest one message may be processed. At the deadline the
+            # handler is cancelled and the attempt fails, to be delivered again.
+            - name: COMMANDBUS_HANDLER_TIMEOUT
+              value: {{ .Values.commandBus.handlerTimeout | quote }}
             # Receipt-only adapters (the console) and the per-kind delivery
             # TTLs. An empty list renders an explicitly empty value: the
             # manager treats a SET-but-empty variable as none, and an unset
