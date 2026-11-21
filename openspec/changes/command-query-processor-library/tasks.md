@@ -1,7 +1,6 @@
 ## 1. Inventory and spikes before any code
 
-- [ ] 1.1 Write the action table as `docs/contracts/actions.md`: every manager route, reconciler, sweep and timer, its kind, its trigger, its auth domain and its response today.
-  Verify: a test lists the routes the mux serves and the reconcilers registered, and fails if one is missing from the table.
+- [ ] 1.1 Write `docs/contracts/actions.md`: every route, reconciler, sweep and timer, with its kind, trigger, auth domain and response today. Verify: a test fails when a served route or registered reconciler is missing from it.
 - [ ] 1.2 Spike a shared Go module in this repository: a tag with a `lib/<name>/` prefix, required from a component whose image builds from its own directory, with a `go.work` for local work. Verify: a throwaway Dockerfile build of one component resolves the module, and the answer is written in `design.md` D2.
 - [ ] 1.3 List every other Go component's actions and the commands and queries it sends to the manager. Verify: the list is written in `design.md` D8, and each component is named in task 6.1.
 - [ ] 1.4 Decide with the user whether the library includes the client side, and whether the processors take middleware. Verify: `design.md` D8 and the open questions are updated.
@@ -35,7 +34,7 @@
 - [ ] 5.2 Move the sync small writes: channel and signal state and status, mark read, `POST /activity`. Verify: the recorded responses are unchanged and they run with the bus stopped.
 - [ ] 5.3 Move the already-async commands: reopen, delete, reset-context, `POST /channel/inbound`, `POST /signal/inbound`. Verify: the recorded responses are unchanged.
 - [ ] 5.4 Move the coordinator and runtime commands: `invoke`, close, escalate, `/work/done`, `/work/context`. Verify: the recorded responses are unchanged, including a corrective input from `/work/done`.
-- [ ] 5.5 Move the queries and name each one's read model or source of truth in the route table. Verify: the route table test fails on a query with neither.
+- [ ] 5.5 Move the queries and name each one's read model or source of truth in the action table. Verify: the action table test fails on a query with neither.
 - [ ] 5.6 Remove `acceptAndEnqueue` and the per-endpoint accept code. Verify: a grep finds neither.
 - [ ] 5.7 Move `GET /work` and the ack and done ends of `/channel/ops` to commands, keeping the long poll in the HTTP trigger. Verify: the recorded responses are unchanged and a poll still waits up to 30 seconds.
 - [ ] 5.8 Move the sweeps and timers to commands behind their triggers. Verify: each sweep's tests pass unchanged.
