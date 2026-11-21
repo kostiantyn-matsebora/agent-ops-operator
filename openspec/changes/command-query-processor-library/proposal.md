@@ -28,7 +28,6 @@ Mapping the message contracts to a port, such as one uniform HTTP envelope, is a
 The design settles each. None is guessed here.
 
 - **How components consume a shared module.** Today every component builds from its own directory and none shares code. Fourteen of the sixteen Go modules have no third-party dependency.
-- **Moving the Bus out of `internal/`.** Other modules cannot import it where it is.
 - **The client side.** Whether the library includes an HTTP sender of the same typed commands and queries, so each adapter's hand-written `manager.go` goes. Six signal adapters, the channel adapter and the console each have one.
 - **The call shape in Go.** Go has no generic methods.
 - **Middleware.** Whether the processors take recovery, timeout and logging.

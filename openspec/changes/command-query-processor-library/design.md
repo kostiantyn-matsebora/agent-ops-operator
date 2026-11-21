@@ -148,8 +148,8 @@ The library defines four base contracts, reusing what the Bus already has.
 
 | Contract | Carries |
 |---|---|
-| **Command** | its kind (the name), a command id the caller can repeat, an ordering key, a correlation id and a typed payload |
-| **Query** | its name, typed parameters and a page request: limit and offset |
+| **Command** | its kind, a command id the caller can repeat, an ordering key, a correlation id and a typed payload |
+| **Query** | its kind, typed parameters and a page request: limit and offset |
 | **Command response** | an outcome, `succeeded` for a sync command or `accepted` for an async one. A sync command carries its typed result. An async command carries the task id to read back. A refusal carries an error and no result |
 | **Query response** | the typed data and a page: limit, offset and total. A refusal carries an error and no data |
 | **Error** | a code from the closed set the Bus already has, and a detail |
