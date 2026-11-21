@@ -100,6 +100,9 @@ func WithConvoyIdle(d time.Duration) Option { return func(c *busConfig) { c.conv
 
 // Bus implements commandbus.Bus over NATS.
 type Bus struct {
+	// Retired names the streams of the earlier log-based bus this Open deleted.
+	Retired []string
+
 	js     jetstream.JetStream
 	nc     *nats.Conn
 	subj   subjects
@@ -158,6 +161,7 @@ func Open(ctx context.Context, conn *Conn, scope string, opts ...Option) (*Bus, 
 		convoys: newConvoyController(registry, subj), ctx: bctx, cancel: cancel,
 		feeds: map[commandbus.Queue]<-chan *message.Message{}, held: map[string]*message.Message{},
 	}
+	b.Retired = retireLegacyStreams(ctx, conn.js, scope)
 	b.pub = newPublisher(b.pubsubConfig())
 	b.mirror = newTaskMirror()
 	go b.mirror.run(bctx, tasks)
@@ -166,6 +170,23 @@ func Open(ctx context.Context, conn *Conn, scope string, opts ...Option) (*Bus, 
 		return nil, fmt.Errorf("commandbus/nats: open: %w", err)
 	}
 	return b, nil
+}
+
+// legacyStreams are the streams the log-based bus created. No code reads them
+// now, and what they hold was never handed to the backend that replaced it.
+var legacyStreams = []string{"cmdbus_log", "cmdbus_dead"}
+
+// retireLegacyStreams deletes each legacy stream that exists and returns the
+// names it deleted. A failed delete is left for the next open.
+func retireLegacyStreams(ctx context.Context, js jetstream.JetStream, scope string) []string {
+	var gone []string
+	for _, base := range legacyStreams {
+		name := bucketName(scope, base)
+		if err := js.DeleteStream(ctx, name); err == nil {
+			gone = append(gone, name)
+		}
+	}
+	return gone
 }
 
 // openBucket gets a bucket and creates it only if it is missing, then makes

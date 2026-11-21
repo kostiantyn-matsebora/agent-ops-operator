@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 )
 
@@ -222,4 +224,35 @@ func TestAConvoyQueueHoldingAMessageIsNotSwept(t *testing.T) {
 		t.Fatalf("a convoy queue with an unsettled message was swept: %+v", left)
 	}
 	_ = first
+}
+
+// The streams the log-based bus left behind are removed when the bus opens, and
+// the bus says which it removed. Nothing else reads them.
+func TestOpenRemovesTheStreamsTheLogBasedBusLeftBehind(t *testing.T) {
+	scope := newScope(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	for _, base := range []string{"cmdbus_log", "cmdbus_dead"} {
+		name := bucketName(scope, base)
+		if _, err := testConn.js.CreateStream(ctx, jetstream.StreamConfig{Name: name, Subjects: []string{name + ".>"}}); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		if _, err := testConn.js.Publish(ctx, name+".x", []byte("old")); err != nil {
+			t.Fatalf("publish %s: %v", name, err)
+		}
+	}
+	b := openBus(t, scope)
+	if len(b.Retired) != 2 {
+		t.Fatalf("Retired = %v, want the two old streams", b.Retired)
+	}
+	for _, base := range []string{"cmdbus_log", "cmdbus_dead"} {
+		if _, err := testConn.js.Stream(ctx, bucketName(scope, base)); !errors.Is(err, jetstream.ErrStreamNotFound) {
+			t.Errorf("%s still exists (err %v)", base, err)
+		}
+	}
+	// Opening again finds nothing to remove.
+	b2 := openBus(t, scope)
+	if len(b2.Retired) != 0 {
+		t.Errorf("second Open retired %v, want nothing", b2.Retired)
+	}
 }

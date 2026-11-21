@@ -25,6 +25,10 @@ for the source and the reference material beside this file.
   (default `5m`, `COMMANDBUS_HANDLER_TIMEOUT`) bounds each message. At the
   deadline the handler's context is cancelled and the attempt fails with a
   retryable code. While a handler runs, the pool keeps its lease alive.
+- **The earlier bus's streams are deleted by the manager.** On start the bus
+  deletes `<scope>_cmdbus_log` and `<scope>_cmdbus_dead` if they exist, and logs
+  which it removed. Nothing reads them any more. What they held, work accepted
+  but not yet run by the earlier backend, is not handed to the new one.
 
 ### Fixed
 

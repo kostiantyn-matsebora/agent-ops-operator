@@ -227,6 +227,9 @@ func newNatsCommandBus(mgr ctrl.Manager, namespace string) (commandbus.Bus, erro
 		return nil, fmt.Errorf("opening the nats command bus: %w", err)
 	}
 
+	if len(bus.Retired) > 0 {
+		ctrl.Log.WithName("command-bus").Info("deleted the streams of the earlier log-based bus", "streams", bus.Retired)
+	}
 	if err := mgr.AddReadyzCheck("command-bus", commandBusReadinessCheck(conn)); err != nil {
 		return nil, fmt.Errorf("registering the command bus's readiness check: %w", err)
 	}
