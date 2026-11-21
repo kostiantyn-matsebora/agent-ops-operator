@@ -20,7 +20,7 @@ for the source and the reference material beside this file.
   (#527). The chat steps now share a short budget (ten seconds) and starting
   the agent comes after them within the rest of the reconcile.
 - **Reading a conversation's runs no longer creates a NATS consumer per
-  call.** Each read, trim and cascade listed the runs bucket's keys, which makes
+  call.** Each read, trim and cascade listed the runs bucket's keys, which made
   the server create and delete a consumer. During a disturbance a quarter of
   those never delivered, so a reconcile almost never completed, and the dead
   consumers piled up (637 on one stream). The runs are now served from a
