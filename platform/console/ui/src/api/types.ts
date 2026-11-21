@@ -329,8 +329,19 @@ export interface DeliveryRow {
   adapterHealth?: Health
 }
 
+/** One pool's slots: how many are in use, the ceiling, and how many wait behind it. */
+export interface PoolStat {
+  inUse: number
+  max: number
+  waiting: number
+}
+
 export interface Queues {
-  capacity: { inUse: number; max: number; waiting: number }
+  /** The conversations pool — an uncaused conversation, no `spec.causedBy`. */
+  capacity: PoolStat
+  /** The members pool — a Coordinator member, `causedBy` set. Additive: absent
+   * until the backend reports it, same shape as `capacity`. */
+  members?: PoolStat
   work: WorkRow[]
   delivery: DeliveryRow[]
   cooldowns: CooldownStat[]

@@ -300,6 +300,37 @@ func TestQueuesWorkRowsAndStuckReasons(t *testing.T) {
 	}
 }
 
+// separate-member-slot-pool: the manager's /status reports the members pool
+// as an additive sibling of runtimeSlots, and /api/queues must forward it
+// as its own additive sibling of capacity rather than drop it.
+func TestQueuesForwardsTheMembersPoolAlongsideCapacity(t *testing.T) {
+	f := newFakeManager(t, ChannelInfo{Name: "console"})
+	adapter, tr, cache := consoleUnderTest(t, f, fixtureInstall()...)
+	adapter.refreshChannels(context.Background())
+	api := NewAPI(APIDeps{
+		Cache: cache, Transcripts: tr, Adapter: adapter,
+		Activity: NewActivityWindow(adapter.mgr, 500), Manager: adapter.mgr,
+		Config: &Config{Namespace: "agent-ops", AdapterName: "console", UIToken: "tok", WriteEnabled: true},
+	})
+	st := &ManagerStatus{}
+	st.RuntimeSlots.InUse, st.RuntimeSlots.Max, st.RuntimeSlots.Waiting = 2, 5, 0
+	st.MemberSlots.InUse, st.MemberSlots.Max, st.MemberSlots.Waiting = 5, 5, 3
+	api.mgr = newStatusManager(t, st)
+	h := api.Handler(http.NotFoundHandler())
+
+	var q Queues
+	getJSON(t, h, "/api/queues", &q)
+	if q.Capacity.InUse != 2 || q.Capacity.Max != 5 {
+		t.Fatalf("conversations pool must stay untouched by the members pool: %+v", q.Capacity)
+	}
+	if q.Members == nil {
+		t.Fatal("members pool must be forwarded, not dropped")
+	}
+	if q.Members.InUse != 5 || q.Members.Max != 5 || q.Members.Waiting != 3 {
+		t.Fatalf("members pool forwarded wrong: %+v", q.Members)
+	}
+}
+
 // A Closed conversation is INERT (invariants.md: "no place in the FIFO
 // waiting set") and can carry unpruned spec.inputs forever — one that
 // arrived but was never processed before close. Measured live: the Queues
