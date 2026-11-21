@@ -8,7 +8,7 @@ processor.
 
 ### Requirement: The core of the library has no third-party dependency
 The library's core SHALL import only the standard library. Anything that needs a
-third-party package, such as a NATS backend or a third-party messaging package, SHALL be a separate
+third-party package, such as a messaging backend, SHALL be a separate
 module.
 
 A component that imports only the core SHALL NOT gain a third-party dependency from it.
