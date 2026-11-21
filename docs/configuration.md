@@ -26,6 +26,30 @@ Switching it later is a migration, not a `helm upgrade`.
 | `global.agentops.conversationNamespace` | `agent-ops-conversations` | where runtime pods, their claims and the runtime accounts live. The release namespace gives the single-namespace layout |
 | `global.agentops.createConversationNamespace` | `true` | the chart creates the namespace and keeps it on uninstall. `false` when you made it yourself |
 
+## Where the platform pods run
+
+One value places every platform pod, the ones this release runs outside the
+conversations namespace: the manager, NATS, the Telegram gateway and every MCP
+server.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `global.agentops.platformNodeSelector` | `{}` | a `nodeSelector` for every platform pod. Empty adds nothing |
+| `<component>.nodeSelector` | `{}` | that component's own. A non-empty value **replaces** the platform one for that component, it is not merged with it |
+
+The own keys are `nodeSelector` (the manager), `nats.nodeSelector`,
+`commandbus.nodeSelector`, `telegram.router.nodeSelector`,
+`kubernetes.mcpServers.nodeSelector`, `prometheus.mcpServers.nodeSelector`,
+`pulse.mcpServer.nodeSelector` and `home-assistant.adminMcpServer.nodeSelector`.
+
+Runtime pods, housekeeping and the context probe run beside the conversations
+and are placed by the runtime's own `nodeSelector`, never by this value. Adapters,
+signals and the console are built by the manager from their own resources and
+are not placed by it either.
+
+Check that a node carries the label before setting it. A selector nothing
+matches leaves every platform pod `Pending`.
+
 ## Storage
 
 The access mode and storage class are set once, before install — see

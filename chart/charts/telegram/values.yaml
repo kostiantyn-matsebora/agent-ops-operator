@@ -70,6 +70,9 @@ signalAdapter:
 # api.telegram.org directly, it calls this process' POST
 # /telegram/call/{method}, so this chart renders a Service for it too.
 router:
+  # Where this pod runs. Empty uses global.agentops.platformNodeSelector, and a
+  # non-empty value REPLACES that one for this component.
+  nodeSelector: {}
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-gateway-telegram
     tag: 0.7.1

@@ -91,6 +91,9 @@ mcp:
 # render. It needs NO Kubernetes RBAC: it reads an HTTP endpoint, not the API.
 mcpServers:
   enabled: false
+  # Where this pod runs. Empty uses global.agentops.platformNodeSelector, and a
+  # non-empty value REPLACES that one for this component.
+  nodeSelector: {}
   image:
     # Six read-only tools: execute_query, execute_range_query, list_metrics,
     # get_metric_metadata, get_targets, health_check.

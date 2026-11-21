@@ -543,6 +543,9 @@ adminMcp:
 # do) ∩ (what the toolset grants), two walls rather than one.
 adminMcpServer:
   enabled: false
+  # Where this pod runs. Empty uses global.agentops.platformNodeSelector, and a
+  # non-empty value REPLACES that one for this component.
+  nodeSelector: {}
   image:
     repository: ghcr.io/homeassistant-ai/ha-mcp
     # PINNED, and the pin is load-bearing: the toolset above enumerates tool

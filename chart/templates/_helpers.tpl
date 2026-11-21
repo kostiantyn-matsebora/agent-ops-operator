@@ -1407,3 +1407,26 @@ sources:
 agents:
 {{ toYaml $agents | indent 2 }}
 {{- end -}}
+
+{{- /* WHERE A PLATFORM POD RUNS. The platform pods are everything this release
+runs outside the conversations namespace: the manager, NATS, the Telegram
+gateway and every MCP server. `global.agentops.platformNodeSelector` places all
+of them at once; a component's own `nodeSelector` REPLACES it for that
+component, so the one pod that must sit elsewhere says so itself. Empty on both
+sides renders nothing, which is what an install that sets neither already gets.
+
+Not for the runtime pods, housekeeping or the context probe: those are
+conversation-side workloads, placed by the runtime's own `nodeSelector`.
+
+Call it as
+  {{ include "agentops.nodeSelector" (dict "own" $own "global" .Values.global) | nindent 6 }}
+inside a pod spec. `.global` is the release's `.Values.global` from any chart. */ -}}
+{{- define "agentops.nodeSelector" -}}
+{{- $own := .own | default dict -}}
+{{- $platform := dig "agentops" "platformNodeSelector" dict (.global | default dict) -}}
+{{- $chosen := ternary $own $platform (not (empty $own)) -}}
+{{- with $chosen }}
+nodeSelector:
+{{ toYaml . | indent 2 }}
+{{- end }}
+{{- end -}}

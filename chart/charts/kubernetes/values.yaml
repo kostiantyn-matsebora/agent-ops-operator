@@ -506,6 +506,9 @@ mcp:
 # is how an agent reaches Kubernetes, and turning it off leaves one that cannot.
 mcpServers:
   enabled: true
+  # Where this pod runs. Empty uses global.agentops.platformNodeSelector, and a
+  # non-empty value REPLACES that one for this component.
+  nodeSelector: {}
   image:
     # Talks to the API directly (no kubectl in the image) and resolves
     # in-cluster config from the pod SA, which is what makes the second

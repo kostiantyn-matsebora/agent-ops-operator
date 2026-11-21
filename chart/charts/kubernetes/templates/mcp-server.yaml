@@ -48,6 +48,7 @@ spec:
       serviceAccountName: {{ $sa }}
       # The token IS the credential — this server holds no kubeconfig and reads
       # the cluster as this SA. Left at the default (true) on purpose.
+      {{- include "agentops.nodeSelector" (dict "own" .Values.mcpServers.nodeSelector "global" .Values.global) | nindent 6 }}
       containers:
         - name: mcp
           image: {{ printf "%s:%s" $s.image.repository (toString $s.image.tag) | quote }}

@@ -46,10 +46,7 @@ spec:
                   app.kubernetes.io/name: agentops-manager
               topologyKey: kubernetes.io/hostname
       {{- end }}
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-{{ toYaml . | indent 8 }}
-      {{- end }}
+      {{- include "agentops.nodeSelector" (dict "own" .Values.nodeSelector "global" .Values.global) | nindent 6 }}
       containers:
         - name: manager
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
