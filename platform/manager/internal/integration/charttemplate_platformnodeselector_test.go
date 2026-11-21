@@ -27,7 +27,7 @@ var platformWorkloadArgs = []string{
 	"--set", "home-assistant.adminMcp.enabled=true", "--set", "home-assistant.adminMcpServer.enabled=true",
 	"--set", "home-assistant.adminMcpServer.credentialsSecret=ha-admin",
 	"--set", "telegram.enabled=true", "--set", "telegram.surface.enabled=true",
-	"--set", "telegram.surface.chatId=-100123", "--set", "telegram.surface.credentials.botToken=x",
+	"--set", "telegram.surface.chatId=-100", "--set", "telegram.surface.credentials.botToken=x",
 }
 
 var platformWorkloads = []string{
