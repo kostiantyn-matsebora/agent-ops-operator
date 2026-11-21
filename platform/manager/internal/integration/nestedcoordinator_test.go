@@ -40,14 +40,17 @@ func invokeChild(t *testing.T, srv *httpapi.Server, callerName, callerCoordinato
 	return member
 }
 
-// finishNestedMemberRun reports a member's one dispatched task done through the
-// real /work/done path, carrying the member's own pending task input as
-// Inflight.InputIDs so the report also consumes it — the same mechanism
-// TestCoordinateInvokeCreatesAMemberAndRoutesItsResultBack uses, extended to
-// also clear the input queue. Afterwards the member has nothing queued and
-// nothing inflight: dispatch.NeedsWorker is false, and a pod it still holds
-// is EVICTABLE (design D-7's "the parent's run ends").
-func finishNestedMemberRun(t *testing.T, srv *httpapi.Server, name, runID string) {
+// markMemberDispatched simulates a runtime claiming a member's one pending
+// task as its current run, carrying the task's own input id as
+// Inflight.InputIDs so a later /work/done also consumes it. This must
+// happen BEFORE the member calls `invoke`: `/coordinate/invoke`'s own
+// stampMove (coordinate.go, design D-A) only marks a move on an EXISTING
+// inflight entry, and `/work/done`'s move-per-turn judge (moveperturn.go,
+// coordination-loop: "every root turn ends in a move") reads an un-moved
+// turn on a coordinatorRef-carrying conversation as a MISS — appending a
+// corrective input that would leave PendingInputs non-empty, so the member
+// would never go idle however its run is reported.
+func markMemberDispatched(t *testing.T, name, runID string) {
 	t.Helper()
 	ctx := context.Background()
 	var conv agentopsv1alpha1.Conversation
@@ -62,6 +65,16 @@ func finishNestedMemberRun(t *testing.T, srv *httpapi.Server, name, runID string
 	if err := k8sClient.Status().Update(ctx, &conv); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// reportMemberRunDone is the other half of markMemberDispatched: the real
+// /work/done path, called once the member's own `invoke` of its child has
+// already stamped Moved — so the run is recorded as a move, the pending
+// task input is consumed (Inflight.InputIDs), and nothing is left queued.
+// dispatch.NeedsWorker is false from here on: a pod the member still holds
+// is EVICTABLE (design D-7's "the parent's run ends").
+func reportMemberRunDone(t *testing.T, srv *httpapi.Server, name, runID string) {
+	t.Helper()
 	rec := adapterReq(srv, "POST", "/work/done", map[string]any{
 		"convo": name, "runId": runID, "status": "succeeded", "result": "invoked its own child, then finished",
 	}, srv.AdapterToken)
@@ -133,16 +146,14 @@ func TestIdleMemberCoordinatorsSlotIsEvictedForItsOwnChild(t *testing.T) {
 		t.Fatalf("the parent must carry the nested Coordinator's own ref, got %+v", gotParent.Spec.CoordinatorRef)
 	}
 
+	// The parent is BUSY (inflight) when it invokes its own child — the same
+	// order a real run follows: dispatched, call invoke, then report done.
+	// stampMove needs that inflight entry to mark the move.
+	markMemberDispatched(t, parent, "r-nd-parent")
 	child := invokeChild(t, srv, parent, "co-nest-nd-b", "child", "do the leaf work")
-	finishNestedMemberRun(t, srv, parent, "r-nd-parent") // the parent's own run ends: idle, evictable
-
-	debugParent := getConv(t, parent)
-	t.Logf("DEBUG parent after finish: phase=%v inflight=%+v inputs=%+v processed=%v",
-		debugParent.Status.Phase, debugParent.Status.Inflight, debugParent.Spec.Inputs, debugParent.Status.ProcessedInputIDs)
+	reportMemberRunDone(t, srv, parent, "r-nd-parent") // the parent's own run ends: idle, evictable
 
 	reconcileWith(t, rc, child)
-	debugChild := getConv(t, child)
-	t.Logf("DEBUG child after reconcile: phase=%v", debugChild.Status.Phase)
 	if !podExists(t, child) {
 		t.Fatal("the child must be admitted by evicting its own idle parent, not left Pending")
 	}
@@ -156,8 +167,16 @@ func TestIdleMemberCoordinatorsSlotIsEvictedForItsOwnChild(t *testing.T) {
 
 // TestNestedCoordinatorChainLongerThanTheMembersCeilingCompletes: a chain of
 // six nested Coordinator members against a ceiling of five still completes
-// (design D-7's own worked example) — each level's pod is reclaimed once it
-// goes idle, which is what lets the next level run without ever stalling.
+// (design D-7's own worked example): no level is ever left Pending, and the
+// pool never holds more pods than its own ceiling at once.
+//
+// A level does not stay idle for long once its own child finishes: the
+// child's result lands back on it as a fresh input (coordination-loop:
+// "a member's result becomes an input on its parent"), which makes it
+// NeedsWorker again — so it is NOT necessarily the one eviction reclaims.
+// Only the deepest level with no finished child yet is reliably idle; this
+// test does not pin WHICH level eviction picks, only that the ceiling holds
+// and nobody ever stalls behind it.
 func TestNestedCoordinatorChainLongerThanTheMembersCeilingCompletes(t *testing.T) {
 	clearRuntimePods(t)
 	const depth = 6
@@ -187,26 +206,39 @@ func TestNestedCoordinatorChainLongerThanTheMembersCeilingCompletes(t *testing.T
 	srv := apiServer()
 	rc := reconcilerWithPoolCaps(nil, 100, membersCap)
 
+	// Level 1's caller is the root, which is not itself a pool-counted
+	// member — it needs no dispatched/done bookkeeping of its own. Every
+	// level after that is BUSY (inflight) when it invokes its own child,
+	// then immediately reports that run done: idle and evictable, which is
+	// what lets a chain deeper than the ceiling keep moving (design D-7).
 	callerName, callerCoordinatorRef := root.Name, "co-nest-chain-1"
 	var members []string
 	for i := 1; i <= depth; i++ {
+		runID := fmt.Sprintf("r-chain-%d", i)
+		if i > 1 {
+			markMemberDispatched(t, callerName, runID)
+		}
 		member := invokeChild(t, srv, callerName, callerCoordinatorRef, "child", fmt.Sprintf("level %d", i))
+		if i > 1 {
+			reportMemberRunDone(t, srv, callerName, runID)
+		}
 		reconcileWith(t, rc, member)
 		if !podExists(t, member) {
 			t.Fatalf("level %d of %d (members cap %d) must be admitted, not left Pending — the chain stalled",
 				i, depth, membersCap)
 		}
 		members = append(members, member)
-		if len(members) >= 2 {
-			// The level just before this one has nothing left to do until this
-			// child's result arrives — idle and evictable, exactly what lets a
-			// chain deeper than the ceiling keep moving.
-			finishNestedMemberRun(t, srv, members[len(members)-2], fmt.Sprintf("r-chain-%d", i-1))
-		}
 		callerName, callerCoordinatorRef = member, fmt.Sprintf("co-nest-chain-%d", i+1)
 	}
 
-	if podExists(t, members[0]) {
-		t.Fatal("the oldest, long-idle level must have been reclaimed to admit a level beyond the ceiling")
+	alive := 0
+	for _, m := range members {
+		if podExists(t, m) {
+			alive++
+		}
+	}
+	if alive != membersCap {
+		t.Fatalf("a chain of %d levels against a members cap of %d must hold exactly %d pods at once once it has run its course, got %d",
+			depth, membersCap, membersCap, alive)
 	}
 }
