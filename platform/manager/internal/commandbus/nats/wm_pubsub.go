@@ -166,6 +166,9 @@ type Subscriber struct {
 	// it off and leaves renewal to whoever holds the claim, so an abandoned claim
 	// lapses.
 	renew bool
+	// attachHook, set by a test, runs before a convoy queue is attached and may
+	// fail it.
+	attachHook func(Convoy) error
 
 	mu     sync.Mutex
 	stops  []func()
@@ -216,7 +219,7 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 		cancel()
 		return nil, fmt.Errorf("commandbus/nats: attach regular queue %q: %w", topic, err)
 	}
-	if err := s.consume(ctx, cons, out, &wg); err != nil {
+	if _, err := s.consume(ctx, cons, out, &wg); err != nil {
 		cancel()
 		return nil, err
 	}
@@ -224,52 +227,130 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 	return out, nil
 }
 
-// followConvoys attaches to the convoy queues of one topic as the registry
-// reports them.
+// convoyResync is how often the registry is read again, a safety net for an
+// event the watch missed.
+const convoyResync = 30 * time.Second
+
+// attachRetry is how long a convoy queue that could not be attached waits
+// before the next try.
+const attachRetry = time.Second
+
+// attached is a convoy queue this subscriber consumes.
+type attached struct {
+	stop context.CancelFunc
+}
+
+// followConvoys keeps this subscriber attached to every convoy queue of a
+// topic. An attach that fails is retried, a consume loop that ends without
+// being asked to is attached again, and the registry is read again now and
+// then, so a queue is never left unconsumed because of one failed moment, such
+// as a leader change.
 func (s *Subscriber) followConvoys(ctx context.Context, topic string, events <-chan ConvoyEvent, out chan<- *message.Message, wg *sync.WaitGroup) {
-	attached := map[string]context.CancelFunc{}
+	live := map[string]*attached{}
+	want := map[string]Convoy{}
+	lost := make(chan string, 64)
 	defer func() {
-		for _, stop := range attached {
-			stop()
+		for _, a := range live {
+			a.stop()
 		}
 	}()
-	for ev := range events {
-		if ev.Deleted {
-			if stop, ok := attached[ev.Convoy.Subject]; ok { // a deletion names the registry key
-				stop()
-				delete(attached, ev.Convoy.Subject)
+	try := func() {
+		for rk, cv := range want {
+			if _, ok := live[rk]; ok {
+				continue
 			}
-			continue
+			cctx, stop := context.WithCancel(ctx)
+			closed, err := s.attachConvoy(cctx, cv, out, wg)
+			if err != nil {
+				stop()
+				continue
+			}
+			live[rk] = &attached{stop: stop}
+			go func() {
+				select {
+				case <-closed:
+					if cctx.Err() == nil {
+						select {
+						case lost <- rk:
+						case <-ctx.Done():
+						}
+					}
+				case <-cctx.Done():
+				}
+			}()
 		}
-		cv := ev.Convoy
-		if string(cv.Queue) != topic {
-			continue
-		}
-		rk := registryKey(cv.Queue, cv.Key)
-		if _, ok := attached[rk]; ok {
-			continue
-		}
-		cons, err := s.cfg.js.CreateOrUpdateConsumer(ctx, s.cfg.stream, jetstream.ConsumerConfig{
-			Durable: cv.Consumer, FilterSubject: cv.Subject, AckPolicy: jetstream.AckExplicitPolicy,
-			AckWait: s.ackWait, MaxDeliver: s.maxDeliver,
-			MaxAckPending: 1, // the sequential convoy: one message of the key in flight
-		})
-		if err != nil {
-			continue // the registry is watched again on the next event; the entry stays
-		}
-		cctx, stop := context.WithCancel(ctx)
-		if err := s.consume(cctx, cons, out, wg); err != nil {
-			stop()
-			continue
-		}
-		attached[rk] = stop
 	}
+	retry := time.NewTicker(attachRetry)
+	defer retry.Stop()
+	resync := time.NewTicker(convoyResync)
+	defer resync.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if ev.Deleted {
+				if a, ok := live[ev.Convoy.Subject]; ok { // a deletion names the registry key
+					a.stop()
+					delete(live, ev.Convoy.Subject)
+				}
+				delete(want, ev.Convoy.Subject)
+				continue
+			}
+			if string(ev.Convoy.Queue) != topic {
+				continue
+			}
+			want[registryKey(ev.Convoy.Queue, ev.Convoy.Key)] = ev.Convoy
+			try()
+		case rk := <-lost:
+			if a, ok := live[rk]; ok {
+				a.stop()
+				delete(live, rk)
+			}
+			try()
+		case <-retry.C:
+			try()
+		case <-resync.C:
+			if all, err := s.cfg.convoys.List(ctx); err == nil {
+				for _, cv := range all {
+					if string(cv.Queue) == topic {
+						want[registryKey(cv.Queue, cv.Key)] = cv
+					}
+				}
+				try()
+			}
+		}
+	}
+}
+
+// attachConvoy attaches to the shared consumer of one convoy queue, creating
+// it if needed, with one message in flight.
+func (s *Subscriber) attachConvoy(ctx context.Context, cv Convoy, out chan<- *message.Message, wg *sync.WaitGroup) (<-chan struct{}, error) {
+	if s.attachHook != nil {
+		if err := s.attachHook(cv); err != nil {
+			return nil, err
+		}
+	}
+	actx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cons, err := s.cfg.js.CreateOrUpdateConsumer(actx, s.cfg.stream, jetstream.ConsumerConfig{
+		Durable: cv.Consumer, FilterSubject: cv.Subject, AckPolicy: jetstream.AckExplicitPolicy,
+		AckWait: s.ackWait, MaxDeliver: s.maxDeliver,
+		MaxAckPending: 1, // the sequential convoy: one message of the key in flight
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.consume(ctx, cons, out, wg)
 }
 
 // consume feeds a consumer's messages to out until ctx ends. Each message is
 // kept alive with an in-progress signal while the handler holds it, and is
 // acked, delayed or left to its ack-wait by the handler's answer.
-func (s *Subscriber) consume(ctx context.Context, cons jetstream.Consumer, out chan<- *message.Message, wg *sync.WaitGroup) error {
+func (s *Subscriber) consume(ctx context.Context, cons jetstream.Consumer, out chan<- *message.Message, wg *sync.WaitGroup) (<-chan struct{}, error) {
 	cc, err := cons.Consume(func(js jetstream.Msg) {
 		m := message.NewMessage(js.Headers().Get(msgIDHeader), js.Data())
 		for k, v := range js.Headers() {
@@ -290,7 +371,7 @@ func (s *Subscriber) consume(ctx context.Context, cons jetstream.Consumer, out c
 		go s.settle(ctx, js, m)
 	}, jetstream.PullMaxMessages(1))
 	if err != nil {
-		return fmt.Errorf("commandbus/nats: consume: %w", err)
+		return nil, fmt.Errorf("commandbus/nats: consume: %w", err)
 	}
 	wg.Add(1)
 	go func() {
@@ -298,7 +379,7 @@ func (s *Subscriber) consume(ctx context.Context, cons jetstream.Consumer, out c
 		<-ctx.Done()
 		cc.Stop()
 	}()
-	return nil
+	return cc.Closed(), nil
 }
 
 // settle waits for the handler's answer, renewing the ack-wait while it runs.

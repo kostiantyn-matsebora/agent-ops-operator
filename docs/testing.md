@@ -227,11 +227,23 @@ matching coverage.
 
 | Decides | Cannot decide |
 |---|---|
-| durable accept, idempotent submit, dedup across every task state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-lapse redelivery, bounded retry into dead, TTL expiry counting as settled, the hand-over (a peek changes nothing, an idempotent acknowledgement, a final failure), no entry written twice and a submit that survives a racing claim, a gap-free resumable feed, dead-letter listing, per-queue statistics | latency or throughput under load, or anything only a real server decides |
+| durable accept, idempotent submit, dedup across every task state, park then release, FIFO with a retry keeping its place, serialization per key under parallel consumers, lease completion through a second handle, lease-lapse redelivery, bounded retry into dead, TTL expiry counting as settled, the hand-over (a peek changes nothing, an idempotent acknowledgement, a final failure), a gap-free resumable feed, dead-letter listing, per-queue statistics | latency or throughput under load, or anything only a real server decides |
 
 - **Both backends run the same suite.** `commandbus/memory` runs it in its
   own package. `commandbus/nats` runs it against an in-process JetStream
-  server. Both are part of the ordinary `go test ./...`.
+  server, with an inventory of short real durations, because a real broker's
+  timers cannot be moved by a fake clock: `Advance` waits. Both are part of the
+  ordinary `go test ./...`.
+- **Scenarios about a backend's own mechanism run only on it.** The append-only
+  scenarios (nothing rewritten, state folded from entries, a lapsed lease with
+  no write) run on `commandbus/memory`, which keeps an entry log, and skip on
+  `commandbus/nats`. The per-invocation in-flight cap is checked only on a
+  backend that enforces it.
+- **`commandbus/nats` has its own tests for what the suite cannot see:** two
+  replicas holding one sequential convoy in order and one at a time, a stopped
+  replica's message moving to another, a handler that outlives its ack wait
+  kept alive, an idle convoy queue removed and made again, and a settle from
+  another handle ending redelivery.
 - **The bench prints real round-trip numbers for each**, same convention as
   the state store's own: `go test -bench=. ./internal/commandbus/...`.
 

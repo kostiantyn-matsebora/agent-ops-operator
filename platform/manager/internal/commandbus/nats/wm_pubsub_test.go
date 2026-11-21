@@ -273,3 +273,28 @@ func TestAConvoyMessageHeldByAStoppedReplicaMovesToAnother(t *testing.T) {
 		t.Fatalf("order after failover: %v", order)
 	}
 }
+
+// An attach that fails, as one does during a leader change, is tried again: the
+// convoy queue is not left unconsumed because the registry says nothing more
+// about it.
+func TestAConvoyQueueThatFailsToAttachIsAttachedAgain(t *testing.T) {
+	env := newPubsubEnv(t)
+	pub := newPublisher(env.cfg(t))
+	var fails, got atomic.Int32
+	s := newSubscriber(env.cfg(t), 4)
+	s.attachHook = func(Convoy) error {
+		if fails.Add(1) <= 2 {
+			return fmt.Errorf("the consumer's leader is changing")
+		}
+		return nil
+	}
+	t.Cleanup(func() { s.Close() })
+	run(t, s, "conv", func(*message.Message) error { got.Add(1); return nil })
+	if err := pub.Publish("conv", msg("m", "k", "x")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the message after the failed attaches", func() bool { return got.Load() == 1 })
+	if fails.Load() < 3 {
+		t.Fatalf("the attach was tried %d times, want a retry after each failure", fails.Load())
+	}
+}
