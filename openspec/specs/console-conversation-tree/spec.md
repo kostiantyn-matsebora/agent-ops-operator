@@ -142,7 +142,7 @@ A member SHALL NOT be deletable on its own from this view, on the same
 grounds as closing it. The row menu SHALL NOT offer delete for a member row,
 and a member SHALL NOT be selectable.
 
-The select-all control SHALL select root conversations only, and SHALL skip a root already closing or being deleted.
+The select-all control SHALL follow the same rule as for closing a root.
 
 The server SHALL NOT trust the view. A delete request that names a member directly SHALL report that name skipped, with a reason that it is a member and naming its parent, and SHALL NOT act on it.
 

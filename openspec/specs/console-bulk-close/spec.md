@@ -163,6 +163,14 @@ result totals. A member SHALL NOT contribute to any of them.
 - **WHEN** an operator uses the select-all control
 - **THEN** only the root conversations on the current page are selected
 
+#### Scenario: Select-all skips a row already closing
+- **WHEN** the current page holds three roots and one is already closing
+- **THEN** the select-all control selects the other two roots and leaves the closing one unselected
+
+#### Scenario: Closing a root closes its members
+- **WHEN** an operator closes a root that has three bound members
+- **THEN** the root and all three members are closed, and the result totals still count the one root
+
 #### Scenario: The result totals count roots
 - **WHEN** a batch over three roots closes two and skips one
 - **THEN** the result reads 2 closed, 1 skipped, 0 failed

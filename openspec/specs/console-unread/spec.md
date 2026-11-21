@@ -120,7 +120,7 @@ pipeline, one coordinator or Closed.
 - **WHEN** the operator turns on the unread filter
 - **THEN** only conversations with a count above zero are returned, with a total match count and correct pagination
 
-#### Scenario: The badge is a sum
+#### Scenario: The badge counts conversations
 - **WHEN** two open root conversations hold one and three unread messages
 - **THEN** the navigation badge reads two
 
