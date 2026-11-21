@@ -1103,7 +1103,9 @@ console:
     # surface (spec.stateAccess) instead of a Kubernetes watch, takes channel
     # ops over GET /channel/ops/stream, adds the read-only signals view, and
     # waits out a refused manager connection instead of losing the send.
-    tag: 0.43.0
+    # 0.44.0: the Open scope replaces All, the Closed badge counts unread roots
+    # only, selection counts roots, and "Archive" reads "Closed".
+    tag: 0.44.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
