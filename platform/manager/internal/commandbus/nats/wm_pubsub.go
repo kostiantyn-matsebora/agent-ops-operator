@@ -149,6 +149,41 @@ func (p *Publisher) PublishSeq(topic string, m *message.Message) (uint64, error)
 
 func (p *Publisher) Close() error { return nil }
 
+// outbox is the channel a subscription delivers on. A send holds a read lock and
+// the close takes the write lock, so a delivery that is still in flight when
+// the subscription ends can never send on a closed channel.
+type outbox struct {
+	mu     sync.RWMutex
+	closed bool
+	ch     chan *message.Message
+}
+
+func newOutbox() *outbox { return &outbox{ch: make(chan *message.Message)} }
+
+// send delivers m, or gives up when ctx ends or the outbox is closed.
+func (o *outbox) send(ctx context.Context, m *message.Message) bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.closed {
+		return false
+	}
+	select {
+	case o.ch <- m:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (o *outbox) close() {
+	o.mu.Lock()
+	if !o.closed {
+		o.closed = true
+		close(o.ch)
+	}
+	o.mu.Unlock()
+}
+
 // Subscriber is a Watermill subscriber over JetStream. A regular topic is one
 // shared durable consumer. A convoy topic attaches to the shared durable
 // consumer of every convoy queue of the topic, those that exist and those
@@ -183,7 +218,7 @@ func newSubscriber(cfg pubsubConfig, concurrency int) *Subscriber {
 }
 
 func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error) {
-	out := make(chan *message.Message)
+	box := newOutbox()
 	ctx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	if s.closed {
@@ -195,7 +230,7 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 	s.mu.Unlock()
 
 	var wg sync.WaitGroup
-	closeOut := func() { wg.Wait(); close(out) }
+	closeOut := func() { wg.Wait(); box.close() }
 	if s.cfg.routing(topic) == ModeConvoy {
 		events, err := s.cfg.convoys.Watch(ctx)
 		if err != nil {
@@ -205,10 +240,10 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.followConvoys(ctx, topic, events, out, &wg)
+			s.followConvoys(ctx, topic, events, box, &wg)
 		}()
 		go closeOut()
-		return out, nil
+		return box.ch, nil
 	}
 	cons, err := s.cfg.js.CreateOrUpdateConsumer(ctx, s.cfg.stream, jetstream.ConsumerConfig{
 		Durable: regularConsumerName(topic), FilterSubject: s.cfg.regularSubject(topic),
@@ -219,12 +254,12 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 		cancel()
 		return nil, fmt.Errorf("commandbus/nats: attach regular queue %q: %w", topic, err)
 	}
-	if _, err := s.consume(ctx, cons, out, &wg); err != nil {
+	if _, err := s.consume(ctx, cons, box, &wg); err != nil {
 		cancel()
 		return nil, err
 	}
 	go closeOut()
-	return out, nil
+	return box.ch, nil
 }
 
 // convoyResync is how often the registry is read again, a safety net for an
@@ -245,7 +280,7 @@ type attached struct {
 // being asked to is attached again, and the registry is read again now and
 // then, so a queue is never left unconsumed because of one failed moment, such
 // as a leader change.
-func (s *Subscriber) followConvoys(ctx context.Context, topic string, events <-chan ConvoyEvent, out chan<- *message.Message, wg *sync.WaitGroup) {
+func (s *Subscriber) followConvoys(ctx context.Context, topic string, events <-chan ConvoyEvent, out *outbox, wg *sync.WaitGroup) {
 	live := map[string]*attached{}
 	want := map[string]Convoy{}
 	lost := make(chan string, 64)
@@ -328,7 +363,7 @@ func (s *Subscriber) followConvoys(ctx context.Context, topic string, events <-c
 
 // attachConvoy attaches to the shared consumer of one convoy queue, creating
 // it if needed, with one message in flight.
-func (s *Subscriber) attachConvoy(ctx context.Context, cv Convoy, out chan<- *message.Message, wg *sync.WaitGroup) (<-chan struct{}, error) {
+func (s *Subscriber) attachConvoy(ctx context.Context, cv Convoy, out *outbox, wg *sync.WaitGroup) (<-chan struct{}, error) {
 	if s.attachHook != nil {
 		if err := s.attachHook(cv); err != nil {
 			return nil, err
@@ -350,7 +385,7 @@ func (s *Subscriber) attachConvoy(ctx context.Context, cv Convoy, out chan<- *me
 // consume feeds a consumer's messages to out until ctx ends. Each message is
 // kept alive with an in-progress signal while the handler holds it, and is
 // acked, delayed or left to its ack-wait by the handler's answer.
-func (s *Subscriber) consume(ctx context.Context, cons jetstream.Consumer, out chan<- *message.Message, wg *sync.WaitGroup) (<-chan struct{}, error) {
+func (s *Subscriber) consume(ctx context.Context, cons jetstream.Consumer, out *outbox, wg *sync.WaitGroup) (<-chan struct{}, error) {
 	cc, err := cons.Consume(func(js jetstream.Msg) {
 		m := message.NewMessage(js.Headers().Get(msgIDHeader), js.Data())
 		for k, v := range js.Headers() {
@@ -363,9 +398,7 @@ func (s *Subscriber) consume(ctx context.Context, cons jetstream.Consumer, out c
 			m.Metadata.Set(metaAttempt, strconv.FormatUint(md.NumDelivered, 10))
 		}
 		m.SetContext(ctx)
-		select {
-		case out <- m:
-		case <-ctx.Done():
+		if !out.send(ctx, m) {
 			return
 		}
 		go s.settle(ctx, js, m)
