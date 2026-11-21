@@ -10,6 +10,15 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`global.agentops.platformNodeSelector` places every platform pod.** The
+  manager, NATS, the Telegram gateway and every MCP server take it as their
+  `nodeSelector`, and a component's own `nodeSelector` replaces it for that
+  component. The default is empty, so nothing about an install changes until it
+  is set. Adapters, signals and the console are not covered, because the
+  manager builds their pods from their own resources.
+
 ### Changed
 
 - **The command bus delivers with plain JetStream and a sequential convoy.**
@@ -40,15 +49,6 @@ for the source and the reference material beside this file.
   list reads timing out. The pause now doubles on each failure up to 30
   seconds and starts over once a watch has delivered. The same applies to the
   command bus's queue mirror.
-
-### Added
-
-- **`global.agentops.platformNodeSelector` places every platform pod.** The
-  manager, NATS, the Telegram gateway and every MCP server take it as their
-  `nodeSelector`, and a component's own `nodeSelector` replaces it for that
-  component. The default is empty, so nothing about an install changes until it
-  is set. Adapters, signals and the console are not covered, because the
-  manager builds their pods from their own resources.
 
 ## [23.0.0] — 2026-11-21
 
