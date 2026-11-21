@@ -26,6 +26,65 @@
   overflow-wrap: anywhere;
 }
 
+.wk-q-card .wk-q-work {
+  table-layout: fixed;
+}
+
+.wk-q-work th,
+.wk-q-work td {
+  white-space: nowrap !important;
+  overflow-wrap: normal !important;
+}
+
+.wk-q-work th:not(.wk-q-conv) {
+  width: 62px;
+}
+
+.wk-q-work th:nth-child(2) {
+  width: 78px;
+}
+
+.wk-q-work td:not(.wk-q-conv) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wk-q-clip {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wk-q-work .wk-q-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wk-q-pager {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  padding-top: 8px;
+  font-size: 13px;
+  color: var(--ao-text-subtle);
+}
+
+.wk-q-pager button {
+  background: none;
+  color: inherit;
+  border: 1px solid var(--ao-border);
+  border-radius: 4px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.wk-q-pager button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .wk-q-sub {
   display: block;
   color: var(--ao-text-subtle);

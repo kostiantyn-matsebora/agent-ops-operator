@@ -159,6 +159,11 @@ because they fail differently:
   acknowledged but never reported. This exists in **no Kubernetes object**. Without
   the manager's `/status` it is reported unavailable rather than rendered empty.
 
+The work table shows five conversations a page, with `<` and `>` to move between
+pages. A long title is cut to one line with an ellipsis and carries its full text
+as a hover tooltip. Slots held by an idle runtime have no row: a row needs queued
+input or a run in flight, so the slot count can exceed the number of rows.
+
 Every row carries an age, and stuck items are flagged with the cause, because
 each cause has a different fix:
 
