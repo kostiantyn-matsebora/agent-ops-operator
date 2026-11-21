@@ -43,16 +43,15 @@ endpoint: ""            # e.g. http://ollama.ollama.svc:11434
 # which sizes are worth trying.
 model: ""               # e.g. qwen2.5:14b
 
-# THE CONTEXT WINDOW, sent on EVERY request. Ollama's server default silently
-# drops the front of an over-long prompt — where the system prompt and the
-# signal payload sit — so it is never left to the server. Raise it for models
-# that support more; the cost is memory on the model server.
-numCtx: 0               # 0 = `contextWindow`, else 8192
+# THE CONTEXT WINDOW in tokens, sent on EVERY request. Ollama's server default
+# silently drops the front of an over-long prompt — where the system prompt and
+# the signal payload sit — so it is never left to the server. Raise it for
+# models that support more; the cost is memory on the model server.
+# (`numCtx` is the older name for this key and still wins when set.)
+contextWindow: 8192
 
-# `contextWindow` is the shared name for what `numCtx` sets; `numCtx` wins when
-# both are given. `maxOutputTokens` is sent as `num_predict`
-# (unset: the model's own limit).
-contextWindow: 0
+# THE OUTPUT CEILING in tokens, sent as `num_predict`. 0 = the model's own
+# limit, which is Ollama's behaviour when nothing is sent.
 maxOutputTokens: 0
 
 # How long the server keeps the model loaded after a run ("5m", "1h", "-1"

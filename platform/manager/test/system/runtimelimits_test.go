@@ -54,7 +54,7 @@ func TestRuntimeModelLimitsReachTheRuntimePod(t *testing.T) {
 	if err := e.Upgrade(ctx,
 		"pi.image=agentops-test-stub-runtime:e2e",
 		"pi.credentialsSecret.name=",
-		"pi.contextWindow=1000000",
+		"pi.contextWindow=500000",
 		"pi.maxOutputTokens=64000",
 	); err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestRuntimeModelLimitsReachTheRuntimePod(t *testing.T) {
 	for _, ev := range rt.Spec.Env {
 		stored[ev.Name] = ev.Value
 	}
-	if stored["PI_CONTEXT_WINDOW"] != "1000000" || stored["PI_MAX_TOKENS"] != "64000" {
+	if stored["PI_CONTEXT_WINDOW"] != "500000" || stored["PI_MAX_TOKENS"] != "64000" {
 		t.Fatalf("the stored AgentRuntime must keep the limits as env: %+v", rt.Spec.Env)
 	}
 
@@ -94,7 +94,7 @@ func TestRuntimeModelLimitsReachTheRuntimePod(t *testing.T) {
 		t.Fatalf("runtime pod: %v %d", err, len(pods))
 	}
 	env := workerEnv(pods[0])
-	if env["PI_CONTEXT_WINDOW"] != "1000000" || env["PI_MAX_TOKENS"] != "64000" {
+	if env["PI_CONTEXT_WINDOW"] != "500000" || env["PI_MAX_TOKENS"] != "64000" {
 		var got []string
 		for k, v := range env {
 			got = append(got, k+"="+v)

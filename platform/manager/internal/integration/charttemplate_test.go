@@ -4534,11 +4534,18 @@ func TestCommandBusEmptyReceiptListRendersExplicitlyEmpty(t *testing.T) {
 // own value over the release-wide default, and unset keeps today's behaviour.
 func TestModelLimitsReachPiAndOllamaEnv(t *testing.T) {
 	pi := []string{"--set", "pi.enabled=true", "--set", "pi.provider=anthropic", "--set", "pi.model=m"}
-	unset := findDocByKindAndMetaName(helmTemplate(t, pi...), "AgentRuntime", "pi")
+	shipped := findDocByKindAndMetaName(helmTemplate(t, pi...), "AgentRuntime", "pi")
+	for _, want := range []string{"name: PI_CONTEXT_WINDOW\n      value: \"400000\"\n", "name: PI_MAX_TOKENS\n      value: \"128000\"\n"} {
+		if !strings.Contains(shipped, want) {
+			t.Errorf("the shipped limits must be defined, lacks %q:\n%s", want, shipped)
+		}
+	}
+	unset := findDocByKindAndMetaName(helmTemplate(t, append(pi, "--set", "pi.contextWindow=0", "--set", "pi.maxOutputTokens=0")...), "AgentRuntime", "pi")
 	if strings.Contains(unset, "PI_CONTEXT_WINDOW") || strings.Contains(unset, "PI_MAX_TOKENS") {
-		t.Errorf("unset limits must render no env:\n%s", unset)
+		t.Errorf("0 must render no env:\n%s", unset)
 	}
 	def := findDocByKindAndMetaName(helmTemplate(t, append(pi,
+		"--set", "pi.contextWindow=0", "--set", "pi.maxOutputTokens=0",
 		"--set", "global.agentops.runtimeDefaults.contextWindow=1000000",
 		"--set", "global.agentops.runtimeDefaults.maxOutputTokens=64000")...), "AgentRuntime", "pi")
 	for _, want := range []string{"name: PI_CONTEXT_WINDOW\n      value: \"1000000\"\n", "name: PI_MAX_TOKENS\n      value: \"64000\"\n"} {
@@ -4547,7 +4554,7 @@ func TestModelLimitsReachPiAndOllamaEnv(t *testing.T) {
 		}
 	}
 	own := findDocByKindAndMetaName(helmTemplate(t, append(pi,
-		"--set", "global.agentops.runtimeDefaults.contextWindow=1000000",
+		"--set", "global.agentops.runtimeDefaults.contextWindow=500000",
 		"--set", "pi.contextWindow=200000")...), "AgentRuntime", "pi")
 	if !strings.Contains(own, "name: PI_CONTEXT_WINDOW\n      value: \"200000\"\n") {
 		t.Errorf("the bundle's value must win:\n%s", own)
@@ -4557,7 +4564,7 @@ func TestModelLimitsReachPiAndOllamaEnv(t *testing.T) {
 	}
 	ol := []string{"--set", "ollama.enabled=true", "--set", "ollama.endpoint=http://o:11434"}
 	o := findDocByKindAndMetaName(helmTemplate(t, append(ol,
-		"--set", "global.agentops.runtimeDefaults.contextWindow=32768",
+		"--set", "ollama.contextWindow=32768",
 		"--set", "ollama.maxOutputTokens=2048")...), "AgentRuntime", "ollama")
 	for _, want := range []string{"name: OLLAMA_NUM_CTX\n      value: \"32768\"\n", "name: OLLAMA_NUM_PREDICT\n      value: \"2048\"\n"} {
 		if !strings.Contains(o, want) {

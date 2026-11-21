@@ -62,14 +62,16 @@ provider: anthropic
 # enabled, for the same reason. Setting it empty fails the render.
 model: claude-sonnet-5
 
-# THE MODEL'S LIMITS. Unset keeps today's behaviour. `contextWindow` is the
-# model's input window in tokens, `maxOutputTokens` its output ceiling. Each
-# overrides `global.agentops.runtimeDefaults` for this runtime only. Written
-# into pi's `models.json` entry for the model: without them pi assumes a 128000
-# window and 16384 output tokens for a model it has no entry for, and clamps
-# `max_tokens` to 1 when a request outgrows that window.
-contextWindow: 0
-maxOutputTokens: 0
+# THE MODEL'S LIMITS, in tokens — DEFINED, and they must match `model` above.
+# Written into pi's `models.json` entry for the model. Left out, pi assumes a
+# 128000 window and 16384 output tokens for a model it has no entry for, and
+# clamps `max_tokens` to 1 when a request outgrows that window: the provider
+# then answers with one token and `length`, and the run fails. The defaults are
+# the window and output ceiling of the default model; CHANGE BOTH WHEN YOU
+# CHANGE `model`. 0 leaves the entry bare (pi's own assumptions). Each
+# overrides `global.agentops.runtimeDefaults` for this runtime only.
+contextWindow: 400000
+maxOutputTokens: 128000
 
 # READ A CHECKOUT'S `.claude/` THE WAY CLAUDE CODE DOES. ON by default. The
 # image carries the `pi-code` package, which loads CLAUDE.md and its @imports,

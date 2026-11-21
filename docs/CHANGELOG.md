@@ -18,7 +18,7 @@ for the source and the reference material beside this file.
   (it assumed 128000 and 16384 otherwise); `ollama` takes `contextWindow` as
   `numCtx`'s alias and sends `maxOutputTokens` as `num_predict`. `claude`,
   `claude-cli` and `copilot` have no setting and refuse the value on their own
-  bundle. Unset keeps today's behaviour.
+  bundle. `0` leaves a runtime's own behaviour.
 
 ### Fixed
 

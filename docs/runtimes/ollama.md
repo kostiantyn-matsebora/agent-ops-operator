@@ -109,8 +109,8 @@ this is the only runtime — so it is the default without the flag.
 |---|---|
 | `ollama.endpoint` | the server's URL, as a pod reaches it |
 | `ollama.model` | a model already pulled there, by its Ollama name. Optional while the server has exactly one |
-| `ollama.numCtx` | the context window, sent on every request. Default `8192`. `ollama.contextWindow` (or `global.agentops.runtimeDefaults.contextWindow`) sets the same number; `numCtx` wins |
-| `ollama.maxOutputTokens` | the output ceiling, sent as `num_predict`. Unset: the model's own limit. A turn that stops on it with no text fails the run, naming the token counts |
+| `ollama.contextWindow` | the context window, sent on every request. Default `8192`. `ollama.numCtx` is the older name for the same setting and wins when set |
+| `ollama.maxOutputTokens` | the output ceiling, sent as `num_predict`. Default `0`: the model's own limit. A turn that stops on it with no text fails the run, naming the token counts |
 | `ollama.keepAlive` | how long the server keeps the model loaded after a run. Default `10m` |
 | `ollama.env` | further knobs, as env entries — a bearer for a proxy in front of Ollama goes here, with `valueFrom` |
 
