@@ -10,6 +10,25 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Model limits as chart values.** `contextWindow` and `maxOutputTokens`, on
+  the `pi` and `ollama` bundles and in `global.agentops.runtimeDefaults`, the
+  bundle's own value winning. `pi` writes them into its `models.json` entry
+  (it assumed 128000 and 16384 otherwise). The bundle defines them, 400000 and
+  128000, for its default model. `ollama` takes `contextWindow` as the new name
+  of `numCtx` and sends `maxOutputTokens` as `num_predict`. `claude`,
+  `claude-cli` and `copilot` have no setting and refuse the value on their own
+  bundle. `0` leaves a runtime's own behaviour.
+
+### Fixed
+
+- A turn that stops on `length` with no text now fails the run naming the token
+  counts, on `pi` and `ollama`, instead of "no answer".
+- `pi` reports `tokensIn` as the contract defines it, cache parts included, so
+  the console's "Fresh" column is no longer negative, and reports each tool
+  call's `resultBytes`, so "Result size" is filled.
+
 ## [24.0.0] — 2026-11-21
 
 Images: manager 0.65.1, console 0.45.0. Manager 0.65.0 was never published. Every other image is unchanged.

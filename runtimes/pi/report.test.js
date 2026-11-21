@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
-const { newCallRecorder, toolIdentity, MAX_TURNS, MAX_TOOL_CALLS, MAX_FIELD } = require('./report');
+const { newCallRecorder, toolIdentity, MAX_TURNS, MAX_TOOL_CALLS, MAX_FIELD, totalIn, resultBytes } = require('./report');
 
 const FIXTURE = path.join(__dirname, '..', '..', 'test', 'fixtures', 'pi-session-events.jsonl');
 
@@ -27,14 +27,14 @@ test('the captured session events produce the expected report', () => {
       // Turn one both READS and WRITES cache, and the provider reports a
       // reasoning breakdown — all three are real, present facts, not
       // omitted (API-7 is about an UNKNOWN fact, not a reported zero).
-      { model: 'fake-model', tokensIn: 2400, tokensOut: 42, cacheReadTokens: 1800, cacheCreationTokens: 300, reasoningTokens: 64, stopReason: 'toolUse' },
+      { model: 'fake-model', tokensIn: 4500, tokensOut: 42, cacheReadTokens: 1800, cacheCreationTokens: 300, reasoningTokens: 64, stopReason: 'toolUse' },
       // Turn two's usage carries no cache or reasoning keys at all — omitted,
       // never reported as zero.
       { model: 'fake-model', tokensIn: 2600, tokensOut: 18, stopReason: 'stop' },
     ],
     toolCalls: [
-      { tool: 'mcp__kubernetes__pods_list', server: 'kubernetes', durationMs: 350 },
-      { tool: 'Bash', durationMs: 20 },
+      { tool: 'mcp__kubernetes__pods_list', server: 'kubernetes', durationMs: 350, resultBytes: 49 },
+      { tool: 'Bash', durationMs: 20, resultBytes: 43 },
     ],
   });
 });
@@ -92,7 +92,7 @@ test('tool_execution_end with no durationMs (the tool never ran) reports none', 
     { type: 'tool_execution_start', toolCallId: 'c1', toolName: 'read', args: { path: 'x' } },
     { type: 'tool_execution_end', toolCallId: 'c1', toolName: 'read', result: '', isError: true },
   ]);
-  assert.deepStrictEqual(r.toolCalls, [{ tool: 'Read' }]);
+  assert.deepStrictEqual(r.toolCalls, [{ tool: 'Read', resultBytes: 0 }]);
 });
 
 test('a tool_execution_end for an id never started is ignored rather than recorded as a new call', () => {
@@ -103,4 +103,16 @@ test('a tool_execution_end for an id never started is ignored rather than record
 test('a tool_execution_start with no toolName is never recorded', () => {
   const r = replay([{ type: 'tool_execution_start', toolCallId: 'c1' }]);
   assert.deepStrictEqual(r, {});
+});
+
+test('tokensIn is the contract total — the cache parts are added to the uncached input', () => {
+  assert.strictEqual(totalIn({ input: 100, cacheRead: 700, cacheWrite: 50 }), 850);
+  assert.strictEqual(totalIn({ input: 100 }), 100);
+  assert.strictEqual(totalIn({}), undefined);
+});
+
+test('resultBytes measures a tool result of each shape, keeping none of it', () => {
+  assert.strictEqual(resultBytes(undefined), 0);
+  assert.strictEqual(resultBytes('abc'), 3);
+  assert.strictEqual(resultBytes({ content: [{ type: 'text', text: 'ab' }, { type: 'text', text: 'c' }] }), 3);
 });

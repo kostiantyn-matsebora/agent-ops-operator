@@ -32,7 +32,7 @@ process.env.WORKSPACE = tmp('agentops-pi-workspace-');
 const {
   gitEnv, repoURL, run, clearDir, syncRepo, onEvent, resolvePrompt,
   contextIdOf, finish, resolveContinuity, extractBrief, WORKSPACE, SESSIONS_ROOT,
-  pollNextUnit, reportDone,
+  pollNextUnit, reportDone, modelEntry, lengthStopMessage, positiveInt,
 } = require('./runtime');
 
 // Stubs the built-in global `fetch` for the duration of one test and
@@ -112,6 +112,28 @@ test('onEvent records a turn_end error rather than text', () => {
   assert.deepStrictEqual(s.errors, ['boom']);
   assert.strictEqual(s.lastText, '');
   assert.strictEqual(s.turns, 1);
+});
+
+test('modelEntry carries the declared limits, and stays bare when none is set', () => {
+  assert.deepStrictEqual(modelEntry('m', 0, 0), { id: 'm' });
+  assert.deepStrictEqual(modelEntry('m', 1000000, 64000), { id: 'm', contextWindow: 1000000, maxTokens: 64000 });
+  assert.deepStrictEqual(modelEntry('m', 200000, 0), { id: 'm', contextWindow: 200000 });
+});
+
+test('positiveInt reads only a positive integer', () => {
+  assert.strictEqual(positiveInt('200000'), 200000);
+  for (const v of ['', undefined, '0', '-5', 'abc']) assert.strictEqual(positiveInt(v), 0);
+});
+
+test('a length stop with no text is recorded and named with the token counts', () => {
+  const s = state();
+  onEvent({ type: 'turn_end', message: { stopReason: 'length', content: [], usage: { input: 100, cacheRead: 50, cacheWrite: 10, output: 1 } } }, s);
+  assert.ok(s.lengthStop);
+  const msg = lengthStopMessage(s.lengthStop);
+  assert.match(msg, /token limit/);
+  assert.match(msg, /160 input tokens, 1 output tokens/);
+  onEvent({ type: 'turn_end', message: { stopReason: 'stop', content: [{ type: 'text', text: 'ok' }] } }, s);
+  assert.strictEqual(s.lengthStop, null);
 });
 
 test('onEvent tracks a tool call start and completion', () => {
