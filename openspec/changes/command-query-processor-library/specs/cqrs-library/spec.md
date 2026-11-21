@@ -55,3 +55,40 @@ SHALL NOT import another component's `internal` package.
 #### Scenario: The library is a versioned module
 - **WHEN** a component requires the library
 - **THEN** it requires a tagged version, and a local build may use a workspace file that no image build reads
+
+### Requirement: The library defines the base command, query and response
+The library SHALL define a base command, a base query, a response for a command and a
+response for a query. A trigger SHALL build the command or the query and SHALL read the
+response. A handler SHALL receive a typed request and return a typed result.
+
+A command SHALL carry its kind, a command id the caller can repeat, an ordering key and
+a correlation id. A query SHALL carry its name, its parameters and a page request.
+
+A command response SHALL say whether the command succeeded or was accepted. A
+succeeded command SHALL carry its result. An accepted command SHALL carry the id of the
+task to read back. A refusal SHALL carry an error and SHALL NOT carry a result.
+
+A query response SHALL carry its data and the page it returns, with the total. A
+refusal SHALL carry an error and SHALL NOT carry data.
+
+An error SHALL carry a code from one closed set and a detail.
+
+#### Scenario: A sync command response carries its result
+- **WHEN** a sync command succeeds
+- **THEN** its response says it succeeded and carries the handler's result
+
+#### Scenario: An async command response carries a task id
+- **WHEN** an async command is accepted
+- **THEN** its response says it was accepted and carries the id of the task to read back
+
+#### Scenario: A refusal carries an error and no result
+- **WHEN** a handler refuses a command
+- **THEN** the response carries an error with a code from the closed set and no result
+
+#### Scenario: A query response carries a page
+- **WHEN** a query returns a list
+- **THEN** the response carries the data, the limit, the offset and the total
+
+#### Scenario: The error code set is closed
+- **WHEN** a handler returns an error
+- **THEN** its code is one of the closed set, and the library refuses a code outside it

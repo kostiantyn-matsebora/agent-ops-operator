@@ -8,6 +8,8 @@ See `proposal.md` for the why. These are the facts the decisions rest on.
 | Each component builds from its own directory. No Dockerfile shares code from another directory, and no `go.mod` has a `replace` | the Dockerfiles and `go.mod` files |
 | The Bus is `platform/manager/internal/commandbus`. A Go module cannot import another module's `internal/` | the language |
 | The Bus's routing is a function from a queue name to a mode: regular, convoy or hand-over | `internal/commandbus/nats/wm_pubsub.go` |
+| The Bus already defines `Queue`, `Key`, `CommandID` and `Kind` as strings, a `SubmitRequest` with an untyped payload, a `Task`, and a closed `ErrorCode` set of seven codes | `internal/commandbus/commandbus.go`, `errors.go`, `task.go` |
+| The console's list response already carries `limit`, `offset` and `total` | the console API |
 | The convoy queue consumer pool depends on the `Bus` interface only | `internal/commandbus/consumer` |
 | Watermill's `CommandBus.Send` returns only the publish error and has no query side | Watermill 1.5.3 `components/cqrs` |
 | The manager serves about 46 routes in four auth domains and the coordinator routes | `internal/httpapi/server.go`, `coordinate.go` |
@@ -131,6 +133,32 @@ A component's own actions follow D6 whether or not it serves a route. The cron a
 | 5 | Move the manager's routes, one family at a time | Each family keeps a test of its current response |
 | 6 | Move the sweeps and timers, then the reconcilers, one kind at a time | Each reconciler's envtest passes unchanged |
 | 7 | The other components, one at a time | Each component's own tests |
+
+### D10. The library is the application layer, and it defines the message contracts
+
+| Layer | Holds | Where |
+|---|---|---|
+| Triggers | HTTP routes, reconcile loops, sweeps, timers, queue messages | outside the library |
+| Application | the processors and the message contracts | the library |
+| Handlers | the domain logic of a command or a query | inside each component |
+
+A trigger builds a message and reads a response. A handler receives a typed request and returns a typed result. Neither knows the other.
+
+The library defines four base contracts, reusing what the Bus already has.
+
+| Contract | Carries |
+|---|---|
+| **Command** | its kind (the name), a command id the caller can repeat, an ordering key, a correlation id and a typed payload |
+| **Query** | its name, typed parameters and a page request: limit and offset |
+| **Command response** | an outcome, `succeeded` for a sync command or `accepted` for an async one. A sync command carries its typed result. An async command carries the task id to read back. A refusal carries an error and no result |
+| **Query response** | the typed data and a page: limit, offset and total. A refusal carries an error and no data |
+| **Error** | a code from the closed set the Bus already has, and a detail |
+
+`Kind`, `Key`, `CommandID` and `ErrorCode` move into the core as they are. The payload becomes typed for a handler, and stays bytes on the transport.
+
+The existing routes map onto these. Where a route's response already fits, nothing changes. Where it does not, the action table says so.
+
+These are Go types, independent of any port. Mapping them to a port, such as one uniform HTTP envelope, is a later change and not part of this one. The existing routes keep their wire shapes.
 
 ## Risks / Trade-offs
 

@@ -12,11 +12,16 @@ Brighter and Darker in .NET have this shape: a command processor with sync and a
 
 - **The Bus gets a synchronous scenario.** A command type is registered with a handler. Routing decides its mode, and "sync" joins the existing regular, convoy and hand-over modes. A sync command runs its handler in-process and returns the result or the refusal. The asynchronous scenario is **unchanged**.
 - **A query processor.** It is separate. `Execute` runs a query's handler and returns data. It changes no state.
+- **The library is the application layer, and it defines the message contracts.** Beside the two processors it defines what crosses them: a base command, a base query, and the response of each. Triggers, such as HTTP and reconcile loops, sit outside it. Handlers, which hold the domain logic, sit inside each component.
 - **Both are one library**, shared by the components. It is a new Go module, not part of `platform/manager/internal`.
 - **The components use it.** The manager's HTTP routes first. The other components where they have handlers.
 - **Every action is a command or a query, whatever triggers it.** The HTTP handler, the reconcile loop, the sweep and the timer each build a request and call a processor. The logic lives in the handler.
 
 Nothing here changes the Bus's asynchronous behaviour, and nothing changes a route's wire contract unless the per-route table says so.
+
+## Out of scope
+
+Mapping the message contracts to a port, such as one uniform HTTP envelope, is a later change. The contracts here are Go types, and the existing routes keep their wire shapes.
 
 ## Open questions
 
@@ -47,6 +52,7 @@ The design settles each. None is guessed here.
 | New `lib/` module | the command processor, the query processor and the Bus, moved out of `platform/manager/internal/commandbus` |
 | `platform/manager/` | imports the library. HTTP handlers become thin. The nine reconcilers and the sweeps become command handlers behind their triggers |
 | Other Go components | adopt the library where they have handlers. The first task lists them |
+| The message contracts | new types in the core, reusing the Bus's `Kind`, `Key`, `CommandID` and `ErrorCode` |
 | `.github/components.sh` | `lib/` is a module that is not an image, like `test/` |
 | Module releases | the library needs its own version and tag |
 | `docs/` reference | `contracts.md`, `concepts.md`, `testing.md`, `CHANGELOG.md` |
