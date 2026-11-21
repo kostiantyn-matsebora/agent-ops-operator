@@ -4,6 +4,8 @@ The manager already has the asynchronous half of a command processor. It is the 
 
 It has no synchronous half, and nothing for queries. So the HTTP layer mixes reading and writing in one handler. `handleWorkDone` reads the record, judges a Coordinator turn, records the run, clears the inflight run and moves the phase. `tryDispatch` reads, decides and writes. Each endpoint carries its own accept-and-run-later code (`acceptAndEnqueue`). A reader cannot tell a command from a query.
 
+The unit is the **action**. An action is a command or a query whatever triggers it: an HTTP route, a reconcile loop, a sweep, a timer, a queue message. The trigger only builds the request and calls a processor.
+
 Brighter and Darker in .NET have this shape: a command processor with sync and async, and a query processor. Go has no equivalent. Watermill's command bus covers only the asynchronous part, and has no query side.
 
 ## What Changes
@@ -12,7 +14,7 @@ Brighter and Darker in .NET have this shape: a command processor with sync and a
 - **A query processor.** It is separate. `Execute` runs a query's handler and returns data. It changes no state.
 - **Both are one library**, shared by the components. It is a new Go module, not part of `platform/manager/internal`.
 - **The components use it.** The manager's HTTP routes first. The other components where they have handlers.
-- **Every manager route is a command, a query or a claim.** The HTTP handler parses, calls a processor and writes the response.
+- **Every action is a command or a query, whatever triggers it.** The HTTP handler, the reconcile loop, the sweep and the timer each build a request and call a processor. The logic lives in the handler.
 
 Nothing here changes the Bus's asynchronous behaviour, and nothing changes a route's wire contract unless the per-route table says so.
 
@@ -22,18 +24,17 @@ The design settles each. None is guessed here.
 
 - **How components consume a shared module.** Today every component builds from its own directory and none shares code. Fourteen of the sixteen Go modules have no third-party dependency.
 - **Moving the Bus out of `internal/`.** Other modules cannot import it where it is.
-- **Which components adopt it.** "Every component" is taken per component, by what handlers it has.
+- **The client side.** Whether the library includes an HTTP sender of the same typed commands and queries, so each adapter's hand-written `manager.go` goes. Six signal adapters, the channel adapter and the console each have one.
 - **The call shape in Go.** Go has no generic methods.
 - **Middleware.** Whether the processors take recovery, timeout and logging.
 - **Events.** Whether a command publishes an event. This is not part of this change unless asked for.
-- **Claims.** `GET /work` and `GET /channel/ops` long-poll and read and change state in one call.
 
 ## Capabilities
 
 ### New Capabilities
 
 - `cqrs-library`: a shared library with a command processor, a synchronous and an asynchronous path, and a separate query processor. It is consumed by the components as a module.
-- `api-cqrs`: every manager route is a command, a query or a claim, and calls a processor.
+- `action-processing`: every action is a command or a query whatever triggers it, and its trigger only calls a processor.
 
 ### Modified Capabilities
 
@@ -44,7 +45,7 @@ The design settles each. None is guessed here.
 | Area | Change |
 |---|---|
 | New `lib/` module | the command processor, the query processor and the Bus, moved out of `platform/manager/internal/commandbus` |
-| `platform/manager/` | imports the library. HTTP handlers become thin and the logic moves to command and query handlers |
+| `platform/manager/` | imports the library. HTTP handlers become thin. The nine reconcilers and the sweeps become command handlers behind their triggers |
 | Other Go components | adopt the library where they have handlers. The first task lists them |
 | `.github/components.sh` | `lib/` is a module that is not an image, like `test/` |
 | Module releases | the library needs its own version and tag |

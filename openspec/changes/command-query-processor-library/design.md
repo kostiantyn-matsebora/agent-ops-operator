@@ -11,6 +11,8 @@ See `proposal.md` for the why. These are the facts the decisions rest on.
 | The convoy queue consumer pool depends on the `Bus` interface only | `internal/commandbus/consumer` |
 | Watermill's `CommandBus.Send` returns only the publish error and has no query side | Watermill 1.5.3 `components/cqrs` |
 | The manager serves about 46 routes in four auth domains and the coordinator routes | `internal/httpapi/server.go`, `coordinate.go` |
+| The manager has nine reconcilers, thirteen runnables or leader-gated registrations, and three sweeps | `internal/controller`, `cmd/manager`, `orphansweep.go`, `commandbus/nats/sweep.go`, `state/nats/cascade.go` |
+| Six signal adapters, the channel adapter and the console each hand-write a `manager.go` client with the same `do` helper | grep over `signals/`, `channels/`, `platform/console/` |
 | A reasoned table lists what stays synchronous: `invoke`, `/work*`, the coordinator reads, adapter state and status, `/activity`, mark read | `async-operations` spec |
 
 ## Goals / Non-Goals
@@ -19,6 +21,7 @@ See `proposal.md` for the why. These are the facts the decisions rest on.
 
 - The Bus's asynchronous behaviour does not change.
 - Sync or async is declared once, with the command, and the caller cannot override it.
+- Every action is a command or a query, whatever triggers it.
 - A reader can tell from a handler whether it changes state.
 - The components share one library instead of one copy each.
 
@@ -82,27 +85,40 @@ The caller cannot choose the mode. A route's kind is fixed by what the route is.
 
 It is not part of the Bus. A query is not delivered, retried or recorded.
 
-### D6. The routes, by kind
+### D6. The unit is the action, and a trigger only calls a processor
 
-| Kind | Routes | Registered as |
+An action is a command or a query. A trigger is whatever starts it. The trigger builds the request and calls a processor, and the handler does the work.
+
+| Trigger | Examples | Calls |
+|---|---|---|
+| HTTP route | `POST /work/done`, `GET /state/conversations` | a command or a query |
+| Reconcile loop | the nine reconcilers | a command, for example `ReconcileConversation{key}` |
+| Sweep or timer | the orphan sweep, the bus sweep, a cron tick | a command |
+| Queue message | an async command delivered by the consumer pool | the registered command handler |
+
+A reconciler's controller-runtime `Reconcile` becomes the trigger. It calls the command and maps the result to a requeue. The reconcile logic does not change, since it is level-triggered and carries only a key. Leader election still gates the trigger.
+
+### D7. The actions the manager's routes trigger
+
+| Kind | Routes | Mode |
 |---|---|---|
 | Command, async | reopen, delete, reset-context, `POST /channel/inbound`, `POST /signal/inbound` | an async mode. The reply means accepted |
 | Command, sync | `POST /work/done`, `POST /work/context`, `POST /coordinate/invoke`, `/coordinate/close`, `/coordinate/escalate` | sync |
-| Command, sync, small | `PUT /channel/state/...`, `PUT /signal/state/...`, the two status routes, `POST /channel/read`, `POST /activity` | sync |
-| Claim | `GET /work`, `GET /channel/ops`, its stream, ack and done | See D7 |
-| Query | `/state/*` (nine routes), `GET /channel/channels`, vocabulary, `GET /channel/state/...`, `GET /signal/sources`, `GET /signal/state/...`, `GET /activity` and its stream, `GET /status`, `GET /pipelines/{name}/resolved`, `POST /coordinate/read`, `/agents`, `/tree`, `/open-roots`, `GET /healthz` | the query processor |
+| Command, sync | `GET /work`, which claims an input and returns it | sync. The 30 second wait belongs to the HTTP trigger |
+| Command, sync, small | `PUT /channel/state/...`, `PUT /signal/state/...`, the two status routes, `POST /channel/read`, `POST /activity`, `POST /channel/ops/{id}/ack` and `/done` | sync |
+| Query | `/state/*` (nine routes), `GET /channel/ops` and its stream, `GET /channel/channels`, vocabulary, `GET /channel/state/...`, `GET /signal/sources`, `GET /signal/state/...`, `GET /activity` and its stream, `GET /status`, `GET /pipelines/{name}/resolved`, `POST /coordinate/read`, `/agents`, `/tree`, `/open-roots`, `GET /healthz` | the query processor |
 
-The table is a first draft, grouped. The first task writes the exact per-route table, with each route's response today, before any code changes.
+`GET /work` changes state, because it sets the inflight run. So it is a command, whatever its HTTP verb is. `GET /channel/ops` reads without changing, so it is a query.
 
-### D7. Claims are not commands
+The table is a first draft, grouped. The first task writes the exact table for routes, reconcilers, sweeps and timers, with each route's response today, before any code changes.
 
-`GET /work` and `GET /channel/ops` read and change state in one call, and they long-poll up to 30 seconds. They are the Bus's own consumer protocol, so they stay as they are, named as claims in the spec. The ack and done ends of `/channel/ops` are commands and follow D6.
+### D8. The client side of a component
 
-### D8. Which components adopt it
+A component's hand-written `manager.go` is a sender of commands and queries to the manager. Six signal adapters, the channel adapter and the console each have one, and each defines the same `do` helper and the manager's paths by hand.
 
-The manager first. For each other Go component, the first task lists the handlers it has and whether any is a command or a query.
+If the library includes a sender for the same typed commands and queries, each of those clients shrinks to the library's. The command and query types live once, and a change to a route changes one type. This is an **open question** for the user. It adds a wire format and a client to the library.
 
-A component with no handler of its own has nothing to adopt, and the task records that. The Node runtimes cannot use a Go library and are out of scope.
+A component's own actions follow D6 whether or not it serves a route. The cron adapter's tick is a trigger for a `FireJob` command, and its handler sends `POST /signal/inbound` to the manager.
 
 ### D9. Migration
 
@@ -113,7 +129,8 @@ A component with no handler of its own has nothing to adopt, and the task record
 | 3 | Add the sync mode and the registry | New tests |
 | 4 | Add the query processor | New tests |
 | 5 | Move the manager's routes, one family at a time | Each family keeps a test of its current response |
-| 6 | The other components, one at a time | Each component's own tests |
+| 6 | Move the sweeps and timers, then the reconcilers, one kind at a time | Each reconciler's envtest passes unchanged |
+| 7 | The other components, one at a time | Each component's own tests |
 
 ## Risks / Trade-offs
 
@@ -121,7 +138,7 @@ A component with no handler of its own has nothing to adopt, and the task record
 - **[Every library change needs a tag and a bump in the consumers]** → the library changes rarely, and a `go.work` file covers local work.
 - **[Moving the Bus breaks the manager's imports]** → step 1 changes no behaviour, and the full suite runs before and after.
 - **[A route's response changes by accident]** → the first task records every response, and each family keeps a test of it.
-- **[Adoption is forced where a component has no handlers]** → D8 lets a component record that it has nothing to adopt.
+- **[The reconcilers are a large surface]** → they move last, one kind at a time, and each keeps its envtest unchanged.
 
 ## Migration Plan
 
@@ -132,7 +149,7 @@ A component with no handler of its own has nothing to adopt, and the task record
 
 ## Open Questions
 
-- Whether `GET /work` and `GET /channel/ops` stay as claims (D7).
+- Whether the library includes the client side (D8).
 - Whether the processors take middleware: recovery, timeout and logging.
 - Whether a command publishes an event. It is not in this change unless asked for.
 - The package names and the final call shape, given that Go has no generic methods.

@@ -1,9 +1,9 @@
 ## 1. Inventory and spikes before any code
 
-- [ ] 1.1 Write the per-route table: every manager route, its kind, its auth domain, its response today and its status codes. Verify: a test lists the routes the mux serves and fails if one is missing from the table.
+- [ ] 1.1 Write the action table: every manager route, reconciler, sweep and timer, its kind, its trigger, its auth domain and its response today. Verify: a test lists the routes the mux serves and the reconcilers registered, and fails if one is missing from the table.
 - [ ] 1.2 Spike a shared Go module in this repository: a tag with a `lib/<name>/` prefix, required from a component whose image builds from its own directory, with a `go.work` for local work. Verify: a throwaway Dockerfile build of one component resolves the module, and the answer is written in `design.md` D2.
-- [ ] 1.3 List every other Go component's handlers and say whether any is a command or a query. Verify: the list is written in `design.md` D8, and each component either has a task in section 6 or a recorded reason it has nothing to adopt.
-- [ ] 1.4 Decide with the user whether `GET /work` and `GET /channel/ops` stay as claims, and whether the processors take middleware. Verify: `design.md` D7 and the open questions are updated.
+- [ ] 1.3 List every other Go component's actions and the commands and queries it sends to the manager. Verify: the list is written in `design.md` D8, and each component has a task in section 6.
+- [ ] 1.4 Decide with the user whether the library includes the client side, and whether the processors take middleware. Verify: `design.md` D8 and the open questions are updated.
 - [ ] 1.5 Settle the package names and the call shape, given that Go has no generic methods. Verify: `design.md` shows the final shape.
 
 ## 2. The library, with the Bus moved in unchanged
@@ -35,11 +35,14 @@
 - [ ] 5.4 Move the coordinator and runtime commands: `invoke`, close, escalate, `/work/done`, `/work/context`. Verify: the recorded responses are unchanged, including a corrective input from `/work/done`.
 - [ ] 5.5 Move the queries and name each one's read model or source of truth in the route table. Verify: the route table test fails on a query with neither.
 - [ ] 5.6 Remove `acceptAndEnqueue` and the per-endpoint accept code. Verify: a grep finds neither.
+- [ ] 5.7 Move `GET /work` and the ack and done ends of `/channel/ops` to commands, keeping the long poll in the HTTP trigger. Verify: the recorded responses are unchanged and a poll still waits up to 30 seconds.
+- [ ] 5.8 Move the sweeps and timers to commands behind their triggers. Verify: each sweep's tests pass unchanged.
+- [ ] 5.9 Move the nine reconcilers to commands behind their `Reconcile`, one kind at a time, with the requeue mapped from the result and leader election still gating the trigger. Verify: each reconciler's envtest passes unchanged and a non-leader sends no command.
 
 ## 6. The other components
 
-- [ ] 6.1 For each component listed in 1.3 that has handlers, adopt the library and keep its response unchanged. Verify: each component's own tests pass, and its image still builds from its own directory.
-- [ ] 6.2 For each component with nothing to adopt, record why in `design.md` D8. Verify: every Go module is either adopted or recorded.
+- [ ] 6.1 For each Go component, route its own actions through the library, and, if 1.4 says so, replace its hand-written `manager.go` with the library's sender. Verify: each component's own tests pass and its image still builds from its own directory.
+- [ ] 6.2 Add a check that fails when a Go module listed by `.github/components.sh modules` does not use the library. Verify: the check passes on the repo and fails on a module that drops the import.
 
 ## 7. Unit tests
 
