@@ -10,6 +10,10 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+## [23.0.0] — 2026-11-21
+
+Images: console 0.44.0. Every other image is unchanged.
+
 ### Changed
 
 - **BREAKING (console only): `GET /api/conversations` drops `showClosed` and
