@@ -21,7 +21,7 @@
 
 ## 3. Unit tests
 
-- [ ] 3.1 `go build ./... && go vet ./...` pass in `signals/http`, and `.github/components.sh images` lists `signal-http` and `adapter-http`.
+- [ ] 3.1 `go build ./... && go vet ./...` pass in `signals/http` and `channels/http`, and `.github/components.sh images` lists `signal-http` and `channel-http`.
 - [ ] 3.2 Unit tests for the bearer check: wrong, absent, other-source and query-string tokens.
 - [ ] 3.3 Table-driven tests covering every row of the default and unresolved table.
 - [ ] 3.4 Tests for each output rule: `kind` (including `chat`), `severity` (including `fatal`), `signalId`, `title`, `labels` and the request cap.

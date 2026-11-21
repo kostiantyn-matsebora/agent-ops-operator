@@ -38,7 +38,7 @@ See proposal.md for motivation. `signals/alertmanager` and `signals/pulse` are t
 
 **D-10. Two modules, one bundle.** `channels/http` and `signals/http` are separate components and images (`structure.md`: a directory is a component). They share only the chart bundle and the integration page.
 
-**D-11. The delivery target is opaque `Channel.spec.config`.** The target URL lives there and the manager never parses it. The bearer for the outbound call comes from the Channel's `credentialsSecretRef`. Alternative: a URL on the `ChannelAdapter`. Rejected because adapter CRs carry no configuration.
+**D-11. The delivery target is opaque `Channel.spec.config`.** The target URL lives there and the manager never parses it. The bearer for the outbound call comes from the Channel's `credentialsSecretRef`, when one is projected. Alternative: a URL on the `ChannelAdapter`. Rejected because one adapter serves many Channels, so a single URL cannot be per-channel.
 
 **D-12. Typed JSON out, not rendered text.** The adapter POSTs the typed message and does not compose presentation for a receiver it cannot know. The receiver owns rendering.
 

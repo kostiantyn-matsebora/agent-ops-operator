@@ -10,7 +10,7 @@ Nothing accepts an arbitrary HTTP request as a signal. `signals/alertmanager` an
 - **`kind` is unset by default.** The adapter sends none and the manager reads `alert`. A templated or constant `kind` may be `alert`, `job` or `task`, never `chat`.
 - **A bearer token is mandatory per source**, from that source's own `credentialsSecretRef`. There is no anonymous mode and no adapter-wide token.
 - **Bad config surfaces on the source.** Templates are parsed at source load. A fault sets `Ready=False` through the status endpoint.
-- **New adapter `channels/http`** (image `agentops-adapter-http`). It delivers each agent message by POSTing typed JSON to a URL set on the `Channel`, and accepts replies on `POST /reply/{channel}`. It is reply-only, so it never starts a conversation.
+- **New adapter `channels/http`** (image `agentops-channel-http`). It delivers each agent message by POSTing typed JSON to a URL set on the `Channel`, and accepts replies on `POST /reply/{channel}`. It is reply-only, so it never starts a conversation.
 - **A chart bundle** `chart/charts/http/` rendering the `SignalAdapter` and the `ChannelAdapter`, default off, one `http.enabled`.
 - Not a change to the manager or to the signal adapter contract's obligations.
 

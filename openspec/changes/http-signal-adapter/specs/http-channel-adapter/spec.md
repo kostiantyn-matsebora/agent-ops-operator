@@ -5,7 +5,7 @@ The generic HTTP channel adapter in `channels/http/`. A dependency-free module t
 ## ADDED Requirements
 
 ### Requirement: The adapter serves Channels through the channel adapter contract
-A channel adapter in `channels/http/` (own dependency-free Go module and image `agentops-adapter-http`, listed by `.github/components.sh images` as `adapter-http`) SHALL serve `Channel`s whose `spec.adapter` names its `ChannelAdapter`, through `docs/contracts/channel-adapter.md`. It SHALL read operations from `GET /channel/ops`, acknowledge each, then report `done` or `failed`.
+A channel adapter in `channels/http/` (own dependency-free Go module and image `agentops-channel-http`, listed by `.github/components.sh images` as `channel-http`) SHALL serve `Channel`s whose `spec.adapter` names its `ChannelAdapter`, through `docs/contracts/channel-adapter.md`. It SHALL serve its reply endpoint on the port declared by `ChannelAdapter.spec.port` (`LISTEN_ADDR`). It SHALL read operations from `GET /channel/ops`, acknowledge each, then report `done` or `failed`.
 
 #### Scenario: An operation is delivered and reported
 - **WHEN** the manager queues a message for a served Channel
