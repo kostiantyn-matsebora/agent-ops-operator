@@ -18,7 +18,7 @@ func TestListingWithItemsEqualsTheCombinedRead(t *testing.T) {
 	ctx := context.Background()
 	for i, runs := range []int{0, 1, 3} {
 		name := fmt.Sprintf("conv-items-%d", i)
-		if _, err := s.Conversations.Create(ctx, state.Key(name), fixtureRecord(name)); err != nil {
+		if _, _, err := s.Conversations.Create(ctx, state.Key(name), fixtureRecord(name)); err != nil {
 			t.Fatal(err)
 		}
 		for r := 0; r < runs; r++ {
@@ -63,7 +63,7 @@ func TestAPutAfterAnAppendCarriesTheRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	rec := fixtureRecord("conv-put-items")
-	rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
+	_, rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
 	if err != nil {
 		t.Fatal(err)
 	}

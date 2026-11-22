@@ -91,7 +91,7 @@ func TestFeedDeliversTheLifecycleInOrder(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if _, err := store.Create(ctx, "early", state.ConversationRecord{Name: "early", ProfileRef: "p"}); err != nil {
+	if _, _, err := store.Create(ctx, "early", state.ConversationRecord{Name: "early", ProfileRef: "p"}); err != nil {
 		t.Fatal(err)
 	}
 	q := &recordingQueue{}
@@ -100,7 +100,7 @@ func TestFeedDeliversTheLifecycleInOrder(t *testing.T) {
 	}
 	waitForNames(t, q, "early") // the initial list
 
-	if _, err := store.Create(ctx, "a", state.ConversationRecord{Name: "a", ProfileRef: "p"}); err != nil {
+	if _, _, err := store.Create(ctx, "a", state.ConversationRecord{Name: "a", ProfileRef: "p"}); err != nil {
 		t.Fatal(err)
 	}
 	waitForNames(t, q, "early", "a")
@@ -111,7 +111,7 @@ func TestFeedDeliversTheLifecycleInOrder(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Create(ctx, "b", state.ConversationRecord{Name: "b", ProfileRef: "p"}); err != nil {
+	if _, _, err := store.Create(ctx, "b", state.ConversationRecord{Name: "b", ProfileRef: "p"}); err != nil {
 		t.Fatal(err)
 	}
 	waitForNames(t, q, "early", "a", "b")

@@ -19,7 +19,7 @@ func TestCreateGetRoundTripsEveryField(t *testing.T) {
 	ctx := context.Background()
 
 	want := fixtureRecord("conv-roundtrip")
-	rev, err := s.Conversations.Create(ctx, state.Key(want.Name), want)
+	_, rev, err := s.Conversations.Create(ctx, state.Key(want.Name), want)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestUpdatePreservesRunsAppendedBetweenReadAndWrite(t *testing.T) {
 	ctx := context.Background()
 
 	rec := fixtureRecord("conv-update-preserves-runs")
-	if _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
+	if _, _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if err := s.Runs.Append(ctx, state.Key(rec.Name), state.Run{RunID: "run-x", Status: "succeeded"}); err != nil {

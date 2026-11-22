@@ -18,7 +18,7 @@ func createForList(t *testing.T, ctx context.Context, s state.Stores, name, conv
 	rec.ConversationID = conversationID
 	rec.PipelineRef = pipelineRef
 	rec.Phase = phase
-	if _, err := s.Conversations.Create(ctx, state.Key(name), rec); err != nil {
+	if _, _, err := s.Conversations.Create(ctx, state.Key(name), rec); err != nil {
 		t.Fatalf("Create %q: %v", name, err)
 	}
 }

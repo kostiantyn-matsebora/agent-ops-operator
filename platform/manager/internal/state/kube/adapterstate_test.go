@@ -64,7 +64,7 @@ func TestAdapterStateWrittenThroughTheCollectionReadsBackThroughTheHandlerPath(t
 	newChannel(t, ns, "tg")
 	key := state.AdapterStateKey(state.SurfaceChannel, "tg", "offset")
 
-	if _, err := s.AdapterState.Create(ctx, key, "12345"); err != nil {
+	if _, _, err := s.AdapterState.Create(ctx, key, "12345"); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if got := handlerRead(t, ns, "tg", "offset"); got != "12345" {
@@ -126,10 +126,10 @@ func TestAdapterStateOfTwoSurfacesNeverShareAKey(t *testing.T) {
 
 	chKey := state.AdapterStateKey(state.SurfaceChannel, "same", "k")
 	srcKey := state.AdapterStateKey(state.SurfaceSignalSource, "same", "k")
-	if _, err := s.AdapterState.Create(ctx, chKey, "channel-value"); err != nil {
+	if _, _, err := s.AdapterState.Create(ctx, chKey, "channel-value"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AdapterState.Create(ctx, srcKey, "source-value"); err != nil {
+	if _, _, err := s.AdapterState.Create(ctx, srcKey, "source-value"); err != nil {
 		t.Fatal(err)
 	}
 	if v, _, err := s.AdapterState.Get(ctx, chKey); err != nil || v != "channel-value" {
@@ -153,18 +153,18 @@ func TestAdapterStateEdges(t *testing.T) {
 	newChannel(t, ns, "tg")
 	key := state.AdapterStateKey(state.SurfaceChannel, "tg", "k")
 
-	if _, err := s.AdapterState.Create(ctx, state.AdapterStateKey(state.SurfaceChannel, "gone", "k"), "v"); !errors.Is(err, state.ErrNotFound) {
+	if _, _, err := s.AdapterState.Create(ctx, state.AdapterStateKey(state.SurfaceChannel, "gone", "k"), "v"); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Create on a Channel that does not exist = %v, want ErrNotFound", err)
 	}
-	if _, err := s.AdapterState.Create(ctx, key, "v"); err != nil {
+	if _, _, err := s.AdapterState.Create(ctx, key, "v"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AdapterState.Create(ctx, key, "again"); !errors.Is(err, state.ErrAlreadyExists) {
+	if _, _, err := s.AdapterState.Create(ctx, key, "again"); !errors.Is(err, state.ErrAlreadyExists) {
 		t.Fatalf("second Create = %v, want ErrAlreadyExists", err)
 	}
 	_, rev, _ := s.AdapterState.Get(ctx, key)
 	// Another key on the same object moves its revision: this Update is stale.
-	if _, err := s.AdapterState.Create(ctx, state.AdapterStateKey(state.SurfaceChannel, "tg", "other"), "o"); err != nil {
+	if _, _, err := s.AdapterState.Create(ctx, state.AdapterStateKey(state.SurfaceChannel, "tg", "other"), "o"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.AdapterState.Update(ctx, key, rev, "late"); !errors.Is(err, state.ErrConflict) {
@@ -194,7 +194,7 @@ func TestAdapterStateEdges(t *testing.T) {
 		if _, _, err := s.AdapterState.Get(ctx, bad); !errors.Is(err, state.ErrNotFound) {
 			t.Errorf("Get(%q) = %v, want ErrNotFound", strings.ReplaceAll(string(bad), "\x00", "/"), err)
 		}
-		if _, err := s.AdapterState.Create(ctx, bad, "v"); err == nil || errors.Is(err, state.ErrNotFound) {
+		if _, _, err := s.AdapterState.Create(ctx, bad, "v"); err == nil || errors.Is(err, state.ErrNotFound) {
 			t.Errorf("Create(%q) = %v, want a descriptive refusal", strings.ReplaceAll(string(bad), "\x00", "/"), err)
 		}
 	}

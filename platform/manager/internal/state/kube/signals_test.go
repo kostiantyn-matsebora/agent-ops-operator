@@ -39,7 +39,7 @@ func TestSignalsCollectionWritesTheObjectPublicationAlwaysWrote(t *testing.T) {
 		SignalID: "id-1", Kind: "alert", Title: "t", Severity: "warning",
 		Labels: map[string]string{"a": "b"}, Reader: "r", Payload: "body",
 	}
-	if _, err := store.Create(ctx, "sig-new", rec); err != nil {
+	if _, _, err := store.Create(ctx, "sig-new", rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -87,7 +87,7 @@ func TestSignalExpiryIsTheOneAnnotationAndOnlyOnTheWriteThatSetsIt(t *testing.T)
 	newSignalSource(t, ns, "src")
 	store := openSignals(t, wwClient, ns, DefaultSweepInterval)
 	rec := state.SignalRecord{Name: "sig-x", SourceRef: "src", Adapter: "cron", InitiationID: "i"}
-	rev, err := store.Create(ctx, "sig-x", rec)
+	_, rev, err := store.Create(ctx, "sig-x", rec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestCooldownLivesOnTheSourceStatusAndAGoneSourceIsNotFound(t *testing.T) {
 	if _, _, err := store.Cooldowns.Get(ctx, "src"); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Get of a source with no window = %v, want ErrNotFound", err)
 	}
-	rev, err := store.Cooldowns.Create(ctx, "src", state.CooldownWindow{Entries: []state.CooldownEntry{{InitiationID: "i1", At: at}}})
+	_, rev, err := store.Cooldowns.Create(ctx, "src", state.CooldownWindow{Entries: []state.CooldownEntry{{InitiationID: "i1", At: at}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestCooldownLivesOnTheSourceStatusAndAGoneSourceIsNotFound(t *testing.T) {
 	if len(src.Status.Cooldown) != 1 || src.Status.Cooldown[0].InitiationID != "i1" || !src.Status.Cooldown[0].At.Time.Equal(at) {
 		t.Fatalf("status.cooldown = %+v, want the one entry", src.Status.Cooldown)
 	}
-	if _, err := store.Cooldowns.Create(ctx, "src", state.CooldownWindow{}); !errors.Is(err, state.ErrAlreadyExists) {
+	if _, _, err := store.Cooldowns.Create(ctx, "src", state.CooldownWindow{}); !errors.Is(err, state.ErrAlreadyExists) {
 		t.Fatalf("second Create = %v, want ErrAlreadyExists", err)
 	}
 	got, gotRev, err := store.Cooldowns.Get(ctx, "src")
@@ -147,7 +147,7 @@ func TestCooldownLivesOnTheSourceStatusAndAGoneSourceIsNotFound(t *testing.T) {
 	if _, _, err := store.Cooldowns.Get(ctx, "gone"); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Get of a gone source = %v, want ErrNotFound", err)
 	}
-	if _, err := store.Cooldowns.Create(ctx, "gone", state.CooldownWindow{Entries: got.Entries}); !errors.Is(err, state.ErrNotFound) {
+	if _, _, err := store.Cooldowns.Create(ctx, "gone", state.CooldownWindow{Entries: got.Entries}); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Create on a gone source error = %v, want ErrNotFound", err)
 	}
 	if err := store.Cooldowns.Delete(ctx, "gone"); err != nil {
@@ -178,7 +178,7 @@ func TestSignalSweepDeletesTheExpiredObjectAndKeepsTheLiveOne(t *testing.T) {
 		"sig-past": now.Add(-time.Minute), "sig-soon": now.Add(2 * time.Second), "sig-later": now.Add(time.Hour),
 	} {
 		at := at
-		if _, err := store.Create(ctx, state.Key(name), state.SignalRecord{Name: name, SourceRef: "src", Adapter: "cron", InitiationID: name, ExpiresAt: &at}); err != nil {
+		if _, _, err := store.Create(ctx, state.Key(name), state.SignalRecord{Name: name, SourceRef: "src", Adapter: "cron", InitiationID: name, ExpiresAt: &at}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -215,7 +215,7 @@ func TestReceiptsWriteTheStatusTheRouterAlwaysWrote(t *testing.T) {
 	ns, store := newTestNamespace(t)
 	newSignalSource(t, ns, "src")
 	at := time.Now().UTC().Truncate(time.Second)
-	if _, err := store.Receipts.Create(ctx, "src", state.Received{Total: 1, Last: &at}); err != nil {
+	if _, _, err := store.Receipts.Create(ctx, "src", state.Received{Total: 1, Last: &at}); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
@@ -234,7 +234,7 @@ func TestReceiptsWriteTheStatusTheRouterAlwaysWrote(t *testing.T) {
 	if src.Status.ReceivedTotal != 3 || src.Status.LastReceived == nil || !src.Status.LastReceived.Time.Equal(at) {
 		t.Fatalf("source status = total %d last %v, want 3 at %v", src.Status.ReceivedTotal, src.Status.LastReceived, at)
 	}
-	if _, err := store.Receipts.Create(ctx, "gone", state.Received{Total: 1, Last: &at}); !errors.Is(err, state.ErrNotFound) {
+	if _, _, err := store.Receipts.Create(ctx, "gone", state.Received{Total: 1, Last: &at}); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Create on a gone source error = %v, want ErrNotFound", err)
 	}
 	if _, _, err := store.Receipts.Get(ctx, "gone"); !errors.Is(err, state.ErrNotFound) {

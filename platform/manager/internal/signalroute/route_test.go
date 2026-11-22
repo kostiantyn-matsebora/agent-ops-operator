@@ -73,7 +73,7 @@ func TestInputDeliveredReadsTheQueueAndTheRunHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	conv := &state.ConversationRecord{Name: "conv"}
-	if _, err := store.Create(ctx, "conv", *conv); err != nil {
+	if _, _, err := store.Create(ctx, "conv", *conv); err != nil {
 		t.Fatal(err)
 	}
 	if delivered, err := inputDelivered(ctx, runs, conv, "in-a"); err != nil || delivered {

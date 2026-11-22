@@ -107,7 +107,7 @@ func testNoMultiRecordAtomicity(t *testing.T, open func() state.Stores) {
 	ctx := context.Background()
 	s := open()
 	key := state.Key("crash-between-writes")
-	if _, err := s.Conversations.Create(ctx, key, conversationFixture.New()); err != nil {
+	if _, _, err := s.Conversations.Create(ctx, key, conversationFixture.New()); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 

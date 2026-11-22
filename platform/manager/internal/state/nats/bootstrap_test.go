@@ -70,7 +70,7 @@ func TestAnExpiredRecordWhoseDeleteFailsIsLeftForTheNextSweep(t *testing.T) {
 		t.Fatalf("newExpiring with no interval = %v, %v, want the default", exp.sweepInterval, err)
 	}
 	past := time.Now().Add(-time.Hour)
-	if _, err := b.Stores.Signals.Create(ctx, "stale", state.SignalRecord{SourceRef: "s", ExpiresAt: &past}); err != nil {
+	if _, _, err := b.Stores.Signals.Create(ctx, "stale", state.SignalRecord{SourceRef: "s", ExpiresAt: &past}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	eventually(t, "the mirror saw the signal", func() bool { _, ok := signals.mirror.snapshot()["stale"]; return ok })

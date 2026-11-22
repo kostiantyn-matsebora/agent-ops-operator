@@ -29,10 +29,10 @@ func TestEnumerateAdapterStateListsBothSurfaces(t *testing.T) {
 	}
 	channelKey := state.AdapterStateKey(state.SurfaceChannel, "chan-a", "cursor")
 	sourceKey := state.AdapterStateKey(state.SurfaceSignalSource, "src-a", "offset")
-	if _, err := collection.Create(ctx, channelKey, "42"); err != nil {
+	if _, _, err := collection.Create(ctx, channelKey, "42"); err != nil {
 		t.Fatalf("Create (channel): %v", err)
 	}
-	if _, err := collection.Create(ctx, sourceKey, "7"); err != nil {
+	if _, _, err := collection.Create(ctx, sourceKey, "7"); err != nil {
 		t.Fatalf("Create (source): %v", err)
 	}
 

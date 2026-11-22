@@ -37,7 +37,7 @@ func PutCooldownWindow(ctx context.Context, c state.Collection[state.CooldownWin
 	}
 	_, err := state.Mutate(ctx, c, key, replace)
 	if errors.Is(err, state.ErrNotFound) {
-		_, err = c.Create(ctx, key, state.CooldownWindow{Entries: entries})
+		_, _, err = c.Create(ctx, key, state.CooldownWindow{Entries: entries})
 		if errors.Is(err, state.ErrAlreadyExists) { // another writer created it first
 			_, err = state.Mutate(ctx, c, key, replace)
 		}
@@ -61,7 +61,7 @@ func CountReceipt(ctx context.Context, c state.Collection[state.Received], sourc
 	}
 	_, err := state.Mutate(ctx, c, key, bump)
 	if errors.Is(err, state.ErrNotFound) {
-		_, err = c.Create(ctx, key, state.Received{Total: 1, Last: &last})
+		_, _, err = c.Create(ctx, key, state.Received{Total: 1, Last: &last})
 		if errors.Is(err, state.ErrAlreadyExists) {
 			_, err = state.Mutate(ctx, c, key, bump)
 		}

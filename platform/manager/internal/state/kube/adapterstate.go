@@ -147,10 +147,10 @@ func (a *adapterState) Get(ctx context.Context, key state.Key) (string, state.Re
 	return c.Get(ctx, key)
 }
 
-func (a *adapterState) Create(ctx context.Context, key state.Key, v string) (state.Revision, error) {
+func (a *adapterState) Create(ctx context.Context, key state.Key, v string) (string, state.Revision, error) {
 	c, err := a.route(key)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	return c.Create(ctx, key, v)
 }

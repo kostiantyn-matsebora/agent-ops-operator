@@ -34,7 +34,7 @@ func TestSignalFeedDeliversTheLifecycleInOrder(t *testing.T) {
 	defer cancel()
 
 	mk := func(name string) state.Revision {
-		rev, err := store.Create(ctx, state.Key(name), state.SignalRecord{SourceRef: "src", InitiationID: name})
+		_, rev, err := store.Create(ctx, state.Key(name), state.SignalRecord{SourceRef: "src", InitiationID: name})
 		if err != nil {
 			t.Fatal(err)
 		}

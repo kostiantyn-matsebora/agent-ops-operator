@@ -296,7 +296,7 @@ func TestImportSkipsARecordThatVanishedBetweenTheListAndTheRead(t *testing.T) {
 func TestImportSkipsABlobTheSourceNoLongerHasAndOneWithNoReference(t *testing.T) {
 	ctx := context.Background()
 	s := newSeeded(t)
-	if _, err := s.im.Source.Conversations.Create(ctx, "no-refs", state.ConversationRecord{
+	if _, _, err := s.im.Source.Conversations.Create(ctx, "no-refs", state.ConversationRecord{
 		ProfileRef: "p", Inputs: []state.InputItem{{ID: "in-inline", Type: "task"}},
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -331,7 +331,7 @@ func TestImportLeavesABlobTheDestinationAlreadyHolds(t *testing.T) {
 func TestImportGrowsARunTheDestinationAlreadyHasAndToleratesItAgingOut(t *testing.T) {
 	ctx := context.Background()
 	s := newSeeded(t)
-	if _, err := s.dest.Stores.Conversations.Create(ctx, s.conv, state.ConversationRecord{ProfileRef: "p"}); err != nil {
+	if _, _, err := s.dest.Stores.Conversations.Create(ctx, s.conv, state.ConversationRecord{ProfileRef: "p"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := s.dest.Stores.Runs.Append(ctx, s.conv, state.Run{RunID: "run-1", Status: "succeeded"}); err != nil {
@@ -345,7 +345,7 @@ func TestImportGrowsARunTheDestinationAlreadyHasAndToleratesItAgingOut(t *testin
 	}
 	// Any other failure of the grow is.
 	s2 := newSeeded(t)
-	if _, err := s2.dest.Stores.Conversations.Create(ctx, s2.conv, state.ConversationRecord{ProfileRef: "p"}); err != nil {
+	if _, _, err := s2.dest.Stores.Conversations.Create(ctx, s2.conv, state.ConversationRecord{ProfileRef: "p"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := s2.dest.Stores.Runs.Append(ctx, s2.conv, state.Run{RunID: "run-1", Status: "succeeded"}); err != nil {
@@ -516,7 +516,7 @@ func TestCopyRecordNeverOverwritesWhatTheLiveManagerWrote(t *testing.T) {
 func TestCopyRecordWithNoMarkLeavesAnExistingRecordAlone(t *testing.T) {
 	ctx := context.Background()
 	b := openMarks(t)
-	if _, err := b.Stores.Cooldowns.Create(ctx, "k", state.CooldownWindow{Entries: []state.CooldownEntry{{InitiationID: "pre"}}}); err != nil {
+	if _, _, err := b.Stores.Cooldowns.Create(ctx, "k", state.CooldownWindow{Entries: []state.CooldownEntry{{InitiationID: "pre"}}}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := copyRecord(ctx, b, "cooldowns", "k", "1", state.CooldownWindow{}, b.Stores.Cooldowns); err != nil {

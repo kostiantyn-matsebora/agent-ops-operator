@@ -116,23 +116,26 @@ func (c *collection[T]) Get(ctx context.Context, key state.Key) (T, state.Revisi
 // Create writes a new entry. The backend mints ID and CreatedAt regardless
 // of what rec carries; Finalizers is read from rec first (caller-owned, and
 // a caller may create an already-held record, as the conformance fixtures
-// do) then cleared from the value stored under "record" (design D-3).
-func (c *collection[T]) Create(ctx context.Context, key state.Key, rec T) (state.Revision, error) {
+// do) then cleared from the value stored under "record" (design D-3). The
+// returned record is decorated from the envelope just written, so it carries
+// exactly the minted ID and CreatedAt, never a copy of rec.
+func (c *collection[T]) Create(ctx context.Context, key state.Key, rec T) (T, state.Revision, error) {
+	var zero T
 	finalizers := c.layout.finalizersOf(&rec)
 	c.layout.clear(&rec)
 	e := envelope[T]{ID: nuid.Next(), CreatedAt: time.Now().UTC(), Finalizers: finalizers, Record: rec}
 	data, err := e.encode()
 	if err != nil {
-		return "", err
+		return zero, "", err
 	}
 	seq, err := c.kv.Create(ctx, wireKey(string(key)), data)
 	if err != nil {
 		if isWrongLastSequence(err) {
-			return "", state.ErrAlreadyExists
+			return zero, "", state.ErrAlreadyExists
 		}
-		return "", fmt.Errorf("nats: create %s %q: %w", c.layout.Decl.Name, key, err)
+		return zero, "", fmt.Errorf("nats: create %s %q: %w", c.layout.Decl.Name, key, err)
 	}
-	return formatRevision(seq), nil
+	return c.decorated(key, &e), formatRevision(seq), nil
 }
 
 // Update writes rec in place of the record at rev (design D-2's CAS: the

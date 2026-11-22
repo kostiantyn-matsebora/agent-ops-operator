@@ -32,7 +32,7 @@ func TestUpdateReturnsConflictWhenAStatusWriterRacesTheStatusWrite(t *testing.T)
 	ns, plain := newTestNamespace(t)
 	ctx := context.Background()
 	rec := fixtureRecord("conv-race")
-	rev, err := plain.Conversations.Create(ctx, "conv-race", rec)
+	_, rev, err := plain.Conversations.Create(ctx, "conv-race", rec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestUpdateRetriesStatusWriteAcrossARunAppend(t *testing.T) {
 	ns, plain := newTestNamespace(t)
 	ctx := context.Background()
 	rec := fixtureRecord("conv-append")
-	rev, err := plain.Conversations.Create(ctx, "conv-append", rec)
+	_, rev, err := plain.Conversations.Create(ctx, "conv-append", rec)
 	if err != nil {
 		t.Fatal(err)
 	}

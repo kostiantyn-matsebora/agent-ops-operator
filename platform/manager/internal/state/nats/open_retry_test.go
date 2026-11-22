@@ -56,7 +56,7 @@ func TestOpenStoresWhenReadyWaitsOutAServerThatCannotYetPlaceABucket(t *testing.
 	if time.Since(start) < 250*time.Millisecond {
 		t.Fatal("it opened before the blocker was lifted")
 	}
-	if _, err := b.Stores.Signals.Create(ctx, "after-the-wait", signalFixtureForRetry()); err != nil {
+	if _, _, err := b.Stores.Signals.Create(ctx, "after-the-wait", signalFixtureForRetry()); err != nil {
 		t.Fatalf("the opened backend does not work: %v", err)
 	}
 }

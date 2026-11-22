@@ -34,7 +34,7 @@ func (e *cascadeEnv) children() *children {
 
 func (e *cascadeEnv) conversation(t *testing.T, name string, finalizers ...string) {
 	t.Helper()
-	if _, err := e.b.Stores.Conversations.Create(e.ctx, state.Key(name), state.ConversationRecord{ProfileRef: "default", Finalizers: finalizers}); err != nil {
+	if _, _, err := e.b.Stores.Conversations.Create(e.ctx, state.Key(name), state.ConversationRecord{ProfileRef: "default", Finalizers: finalizers}); err != nil {
 		t.Fatalf("create conversation %q: %v", name, err)
 	}
 }
@@ -186,7 +186,7 @@ func TestOrphanSweepRemovesWhatNoConversationOwns(t *testing.T) {
 
 	// A crash between deleting the record and deleting its children: write the
 	// children of a conversation that never existed.
-	if _, err := e.b.runsKV.Create(e.ctx, runsItemKey("ghost", "u1"), mustEnvelope(t)); err != nil {
+	if _, _, err := e.b.runsKV.Create(e.ctx, runsItemKey("ghost", "u1"), mustEnvelope(t)); err != nil {
 		t.Fatalf("seed orphan run: %v", err)
 	}
 	e.blob(t, "ghost-input", "ghost")
@@ -223,7 +223,7 @@ func TestOrphanSweepRunsOnItsInterval(t *testing.T) {
 	b := openBackend(t, conn, newScope(t), WithOrphanSweepInterval(20*time.Millisecond))
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	if _, err := b.runsKV.Create(ctx, runsItemKey("ghost", "u1"), mustEnvelope(t)); err != nil {
+	if _, _, err := b.runsKV.Create(ctx, runsItemKey("ghost", "u1"), mustEnvelope(t)); err != nil {
 		t.Fatalf("seed orphan run: %v", err)
 	}
 	go b.Run(ctx)

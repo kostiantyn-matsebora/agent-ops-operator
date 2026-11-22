@@ -28,7 +28,7 @@ func TestGetWithItemsIsOneApiserverRead(t *testing.T) {
 	ns, _ := newTestNamespace(t)
 	cc := &countingClient{WithWatch: wwClient}
 	store := openBackend(t, cc, ns).Stores
-	if _, err := store.Conversations.Create(ctx, "c1", state.ConversationRecord{Name: "c1", ProfileRef: "p"}); err != nil {
+	if _, _, err := store.Conversations.Create(ctx, "c1", state.ConversationRecord{Name: "c1", ProfileRef: "p"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Runs.Append(ctx, "c1", state.Run{RunID: "r1"}); err != nil {

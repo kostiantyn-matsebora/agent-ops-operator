@@ -66,7 +66,7 @@ func TestTheBackendRecoversWhenTheServerRestarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := state.Key("survivor")
-	if _, err := b.Stores.Conversations.Create(ctx, key, state.ConversationRecord{Name: "survivor", Phase: "Active"}); err != nil {
+	if _, _, err := b.Stores.Conversations.Create(ctx, key, state.ConversationRecord{Name: "survivor", Phase: "Active"}); err != nil {
 		t.Fatal(err)
 	}
 	waitPut(t, ctx, feed, key, "Active")

@@ -67,7 +67,7 @@ func seededStore(t *testing.T, recs ...*state.ConversationRecord) state.Collecti
 		t.Fatalf("open: %v", err)
 	}
 	for _, r := range recs {
-		if _, err := store.Create(context.Background(), state.Key(r.Name), *r); err != nil {
+		if _, _, err := store.Create(context.Background(), state.Key(r.Name), *r); err != nil {
 			t.Fatalf("seed %s: %v", r.Name, err)
 		}
 	}

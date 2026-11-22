@@ -56,7 +56,7 @@ func TestSweepSkipsTheNamespaceListUntilAnExpiryIsArmed(t *testing.T) {
 	// A future expiry arms the sweep without handing it a record to delete
 	// between the create and its status write.
 	rec := expiredSignal("sig-arm", time.Now().Add(time.Hour))
-	if _, err := s.Create(ctx, state.Key(rec.Name), rec); err != nil {
+	if _, _, err := s.Create(ctx, state.Key(rec.Name), rec); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)

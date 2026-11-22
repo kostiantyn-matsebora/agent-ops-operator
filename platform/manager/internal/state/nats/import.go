@@ -107,7 +107,7 @@ func copyRecord[T any](ctx context.Context, b *Backend, kind string, key state.K
 	_, destRev, err := dest.Get(ctx, key)
 	switch {
 	case errors.Is(err, state.ErrNotFound):
-		newRev, cerr := dest.Create(ctx, key, rec)
+		_, newRev, cerr := dest.Create(ctx, key, rec)
 		if cerr != nil {
 			if errors.Is(cerr, state.ErrAlreadyExists) {
 				return nil // another pass, or the live manager, got there first

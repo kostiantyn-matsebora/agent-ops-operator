@@ -30,7 +30,7 @@ func Bench[T any](b *testing.B, open func() state.Collection[T], decl state.Decl
 	s := open()
 
 	key := fx.Key("bench")
-	if _, err := s.Create(ctx, key, fx.New()); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.New()); err != nil {
 		b.Fatalf("Create: %v", err)
 	}
 	recJSON, err := json.Marshal(fx.New())
@@ -50,7 +50,7 @@ func Bench[T any](b *testing.B, open func() state.Collection[T], decl state.Decl
 		probe := fx.New()
 		if v, listed := idx.Value(&probe); listed {
 			for i := 0; i < benchResidentScale; i++ {
-				if _, err := s.Create(ctx, fx.Key(fmt.Sprintf("resident-%d", i)), fx.New()); err != nil {
+				if _, _, err := s.Create(ctx, fx.Key(fmt.Sprintf("resident-%d", i)), fx.New()); err != nil {
 					b.Fatalf("Create resident %d: %v", i, err)
 				}
 			}
@@ -80,7 +80,7 @@ func BenchAppended[P, T any](b *testing.B, open func() AppendedOpen[P, T], fx Ap
 	o := open()
 
 	key := state.Key("bench-parent")
-	if _, err := o.Parent.Create(ctx, key, fx.NewParent()); err != nil {
+	if _, _, err := o.Parent.Create(ctx, key, fx.NewParent()); err != nil {
 		b.Fatalf("Create parent: %v", err)
 	}
 	item := fx.NewItem("bench-item")
@@ -98,7 +98,7 @@ func BenchAppended[P, T any](b *testing.B, open func() AppendedOpen[P, T], fx Ap
 	var resident int
 	if fx.AllIndex.Name() != "" {
 		for i := 0; i < benchResidentScale; i++ {
-			if _, err := o.Parent.Create(ctx, state.Key(fmt.Sprintf("bench-resident-%d", i)), fx.NewParent()); err != nil {
+			if _, _, err := o.Parent.Create(ctx, state.Key(fmt.Sprintf("bench-resident-%d", i)), fx.NewParent()); err != nil {
 				b.Fatalf("Create resident %d: %v", i, err)
 			}
 		}

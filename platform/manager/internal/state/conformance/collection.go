@@ -71,7 +71,7 @@ func Run[T any](t *testing.T, open func() state.Collection[T], decl state.Decl[T
 func testCASTwoActorsRace[T any](t *testing.T, s state.Collection[T], fx Fixture[T]) {
 	ctx := context.Background()
 	key := fx.Key("cas-race")
-	rev, err := s.Create(ctx, key, fx.New())
+	_, rev, err := s.Create(ctx, key, fx.New())
 	if err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
@@ -116,7 +116,7 @@ func testCASTwoActorsRace[T any](t *testing.T, s state.Collection[T], fx Fixture
 func testCASStaleClaimNeverMerged[T any](t *testing.T, s state.Collection[T], fx Fixture[T]) {
 	ctx := context.Background()
 	key := fx.Key("cas-stale")
-	staleRev, err := s.Create(ctx, key, fx.New())
+	_, staleRev, err := s.Create(ctx, key, fx.New())
 	if err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
@@ -141,11 +141,11 @@ func testCASStaleClaimNeverMerged[T any](t *testing.T, s state.Collection[T], fx
 func testCreateRefusedOnExistingKey[T any](t *testing.T, s state.Collection[T], fx Fixture[T]) {
 	ctx := context.Background()
 	key := fx.Key("create-twice")
-	if _, err := s.Create(ctx, key, fx.Edit(fx.New(), 1)); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.Edit(fx.New(), 1)); err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
 
-	if _, err := s.Create(ctx, key, fx.Edit(fx.New(), 2)); !errors.Is(err, state.ErrAlreadyExists) {
+	if _, _, err := s.Create(ctx, key, fx.Edit(fx.New(), 2)); !errors.Is(err, state.ErrAlreadyExists) {
 		t.Fatalf("second Create error = %v, want ErrAlreadyExists", err)
 	} else if errors.Is(err, state.ErrConflict) {
 		t.Fatalf("ErrAlreadyExists must be distinguishable from ErrConflict")
@@ -168,7 +168,7 @@ func testEveryDeclaredIndex[T any](t *testing.T, s state.Collection[T], decl sta
 	}
 	ctx := context.Background()
 	for _, kv := range fx.Indexed {
-		if _, err := s.Create(ctx, kv.Key, kv.Record); err != nil {
+		if _, _, err := s.Create(ctx, kv.Key, kv.Record); err != nil {
 			t.Fatalf("Create %q: %v", kv.Key, err)
 		}
 	}
@@ -226,7 +226,7 @@ func testFeedEventShape[T any](t *testing.T, s state.Collection[T], fx Fixture[T
 	}
 
 	key := fx.Key("feed-shape")
-	rev, err := s.Create(ctx, key, fx.Edit(fx.New(), 1))
+	_, rev, err := s.Create(ctx, key, fx.Edit(fx.New(), 1))
 	if err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
@@ -248,7 +248,7 @@ func testFeedResumeContinuity[T any](t *testing.T, s state.Collection[T], fx Fix
 		t.Fatalf(fmtWatch, err)
 	}
 	key := fx.Key("resume-leader")
-	if _, err := s.Create(ctx, key, fx.New()); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.New()); err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
 	createEvt := mustRecvEvent(t, formerLeaderEvents, 5*time.Second)
@@ -282,7 +282,7 @@ func testFeedNoGapAcrossDisconnect[T any](t *testing.T, s state.Collection[T], f
 		t.Fatalf(fmtWatch, err)
 	}
 	key := fx.Key("no-gap")
-	if _, err := s.Create(ctx, key, fx.Edit(fx.New(), 0)); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.Edit(fx.New(), 0)); err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
 	firstEvt := mustRecvEvent(t, events, 5*time.Second)
@@ -338,7 +338,7 @@ func testFeedStaleSnapshotCaughtByCAS[T any](t *testing.T, s state.Collection[T]
 		t.Fatalf(fmtWatch, err)
 	}
 	key := fx.Key("stale-snapshot")
-	if _, err := s.Create(ctx, key, fx.Edit(fx.New(), 1)); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.Edit(fx.New(), 1)); err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
 	snapshot := mustRecvEvent(t, events, 5*time.Second)
@@ -370,7 +370,7 @@ func testDeleteWithoutFinalizer[T any](t *testing.T, s state.Collection[T], fx F
 		t.Fatalf(fmtWatch, err)
 	}
 	key := fx.Key("delete-plain")
-	if _, err := s.Create(ctx, key, fx.New()); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.New()); err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
 
@@ -396,7 +396,7 @@ func testDeleteHeldRecordMarked[T any](t *testing.T, s state.Collection[T], fx F
 		t.Fatalf(fmtWatch, err)
 	}
 	key := fx.Key("delete-held")
-	if _, err := s.Create(ctx, key, fx.Hold.Hold(fx.New())); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.Hold.Hold(fx.New())); err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
 
@@ -436,7 +436,7 @@ func testReleaseLastFinalizerRemoves[T any](t *testing.T, s state.Collection[T],
 	}
 	key := fx.Key("release")
 	held := fx.Hold.AddSecond(fx.Hold.Hold(fx.New()))
-	if _, err := s.Create(ctx, key, held); err != nil {
+	if _, _, err := s.Create(ctx, key, held); err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
 	if err := s.Delete(ctx, key); err != nil {
@@ -472,7 +472,7 @@ func testReleaseLastFinalizerRemoves[T any](t *testing.T, s state.Collection[T],
 func testFinalizerAddRefusedWhenDeleting[T any](t *testing.T, s state.Collection[T], fx Fixture[T]) {
 	ctx := context.Background()
 	key := fx.Key("no-new-hold")
-	if _, err := s.Create(ctx, key, fx.Hold.Hold(fx.New())); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.Hold.Hold(fx.New())); err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
 	if err := s.Delete(ctx, key); err != nil {
@@ -497,13 +497,13 @@ func testFinalizerAddRefusedWhenDeleting[T any](t *testing.T, s state.Collection
 func testCreateRefusedWhileDeleting[T any](t *testing.T, s state.Collection[T], fx Fixture[T]) {
 	ctx := context.Background()
 	key := fx.Key("still-held")
-	if _, err := s.Create(ctx, key, fx.Hold.Hold(fx.New())); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.Hold.Hold(fx.New())); err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
 	if err := s.Delete(ctx, key); err != nil {
 		t.Fatalf(fmtDelete, err)
 	}
-	if _, err := s.Create(ctx, key, fx.New()); !errors.Is(err, state.ErrAlreadyExists) {
+	if _, _, err := s.Create(ctx, key, fx.New()); !errors.Is(err, state.ErrAlreadyExists) {
 		t.Fatalf("Create over a marked record error = %v, want ErrAlreadyExists", err)
 	}
 }
@@ -513,7 +513,7 @@ func testCreateRefusedWhileDeleting[T any](t *testing.T, s state.Collection[T], 
 func testDeleteAtStaleRevision[T any](t *testing.T, s state.Collection[T], fx Fixture[T]) {
 	ctx := context.Background()
 	key := fx.Key("deleteat-stale")
-	stale, err := s.Create(ctx, key, fx.Edit(fx.New(), 1))
+	_, stale, err := s.Create(ctx, key, fx.Edit(fx.New(), 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +534,7 @@ func testDeleteAtStaleRevision[T any](t *testing.T, s state.Collection[T], fx Fi
 func testDeleteAtCurrentRevision[T any](t *testing.T, s state.Collection[T], fx Fixture[T]) {
 	ctx := context.Background()
 	key := fx.Key("deleteat-current")
-	if _, err := s.Create(ctx, key, fx.New()); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.New()); err != nil {
 		t.Fatal(err)
 	}
 	_, rev, err := s.Get(ctx, key)
@@ -559,7 +559,7 @@ func testDeleteAtAbsentKey[T any](t *testing.T, s state.Collection[T], fx Fixtur
 func testDeleteAtHeldRecordMarked[T any](t *testing.T, s state.Collection[T], fx Fixture[T]) {
 	ctx := context.Background()
 	key := fx.Key("deleteat-finalizer")
-	if _, err := s.Create(ctx, key, fx.Hold.Hold(fx.New())); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.Hold.Hold(fx.New())); err != nil {
 		t.Fatal(err)
 	}
 	_, rev, _ := s.Get(ctx, key)
@@ -578,7 +578,7 @@ func testIdentityStableAndRenewed[T any](t *testing.T, s state.Collection[T], fx
 	ctx := context.Background()
 	key := fx.Key("identity")
 	before := time.Now().UTC().Add(-time.Minute)
-	if _, err := s.Create(ctx, key, fx.New()); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.New()); err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
 
@@ -608,7 +608,7 @@ func testIdentityStableAndRenewed[T any](t *testing.T, s state.Collection[T], fx
 	if err := s.Delete(ctx, key); err != nil {
 		t.Fatalf(fmtDelete, err)
 	}
-	if _, err := s.Create(ctx, key, fx.New()); err != nil {
+	if _, _, err := s.Create(ctx, key, fx.New()); err != nil {
 		t.Fatalf("Create (recreate): %v", err)
 	}
 	third, _, err := s.Get(ctx, key)
@@ -624,7 +624,7 @@ func testIdentityCallerSuppliedIgnored[T any](t *testing.T, s state.Collection[T
 	ctx := context.Background()
 	key := fx.Key("identity-ignored")
 	id := fx.Identity
-	if _, err := s.Create(ctx, key, id.Forge(fx.New())); err != nil {
+	if _, _, err := s.Create(ctx, key, id.Forge(fx.New())); err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
 
@@ -656,7 +656,7 @@ func testScopeIsolation[T any](t *testing.T, openA, openB func() state.Collectio
 
 	a, b := openA(), openB()
 	key := fx.Key("shared-name")
-	if _, err := a.Create(ctx, key, fx.New()); err != nil {
+	if _, _, err := a.Create(ctx, key, fx.New()); err != nil {
 		t.Fatalf("Create on A: %v", err)
 	}
 

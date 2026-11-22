@@ -112,25 +112,32 @@ func (c *collection[T]) Get(ctx context.Context, key state.Key) (T, state.Revisi
 // subresource lands whatever status the record carries, the same two-call
 // shape Update uses. The apiserver's create is the single arbiter of a
 // duplicate: AlreadyExists is state.ErrAlreadyExists, with no lookup first.
-func (c *collection[T]) Create(ctx context.Context, key state.Key, rec T) (state.Revision, error) {
+// The returned record is read back from obj, so it carries exactly what the
+// apiserver minted (ID, CreatedAt and the rest), never a copy of rec.
+func (c *collection[T]) Create(ctx context.Context, key state.Key, rec T) (T, state.Revision, error) {
+	var zero T
 	obj := c.l.New()
 	obj.SetName(string(key))
 	obj.SetNamespace(c.namespace)
 	c.arm(rec)
 	c.l.Init(obj, rec)
 	if err := c.createOrReplaceExpired(ctx, key, obj); err != nil {
-		return "", err
+		return zero, "", err
 	}
 	if c.l.WriteStatus != nil {
 		before := obj.DeepCopyObject()
 		c.l.WriteStatus(obj, rec)
 		if !equality.Semantic.DeepEqual(before, obj) {
 			if err := c.client.Status().Update(ctx, obj); err != nil {
-				return "", fmt.Errorf("kube: create %s %q status: %w", c.l.Decl.Name, key, err)
+				return zero, "", fmt.Errorf("kube: create %s %q status: %w", c.l.Decl.Name, key, err)
 			}
 		}
 	}
-	return state.Revision(obj.GetResourceVersion()), nil
+	stored, ok := c.l.Read(obj)
+	if !ok {
+		return zero, "", fmt.Errorf("kube: create %s %q: stored object is not visible", c.l.Decl.Name, key)
+	}
+	return stored, state.Revision(obj.GetResourceVersion()), nil
 }
 
 // createOrReplaceExpired creates obj, treating an existing object whose expiry

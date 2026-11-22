@@ -247,7 +247,7 @@ func TestCorruptStoredValuesAreRefusedNotGuessed(t *testing.T) {
 
 func mustConversation(t *testing.T, b *Backend, name string) state.Key {
 	t.Helper()
-	if _, err := b.Stores.Conversations.Create(shortCtx(t), state.Key(name), state.ConversationRecord{ProfileRef: "p"}); err != nil {
+	if _, _, err := b.Stores.Conversations.Create(shortCtx(t), state.Key(name), state.ConversationRecord{ProfileRef: "p"}); err != nil {
 		t.Fatalf("create %q: %v", name, err)
 	}
 	return state.Key(name)
@@ -416,7 +416,7 @@ func TestDeleteAndReleaseReportWhatGoesWrong(t *testing.T) {
 	}
 
 	held := state.Key("held")
-	if _, err := c.Create(ctx, held, state.ConversationRecord{ProfileRef: "p", Finalizers: []string{finalizerHold}}); err != nil {
+	if _, _, err := c.Create(ctx, held, state.ConversationRecord{ProfileRef: "p", Finalizers: []string{finalizerHold}}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	c.kv = &scriptedKV{KeyValue: realKV, update: always(jetstream.ErrKeyExists)}
@@ -471,7 +471,7 @@ func TestReadsAndCreatesReportAServerThatAnswersBadly(t *testing.T) {
 		t.Fatalf("Delete = %v", err)
 	}
 	c.kv = &scriptedKV{KeyValue: realKV, create: always(errInjected)}
-	if _, err := c.Create(ctx, "fresh", state.ConversationRecord{}); !errors.Is(err, errInjected) {
+	if _, _, err := c.Create(ctx, "fresh", state.ConversationRecord{}); !errors.Is(err, errInjected) {
 		t.Fatalf("Create = %v", err)
 	}
 }
@@ -480,7 +480,7 @@ func TestAnExpiredRecordIsGoneToWriters(t *testing.T) {
 	b := openBackend(t, sharedTestConn(t), newScope(t))
 	ctx := shortCtx(t)
 	past := time.Now().Add(-time.Hour)
-	if _, err := b.Stores.Signals.Create(ctx, "old", state.SignalRecord{SourceRef: "s", ExpiresAt: &past}); err != nil {
+	if _, _, err := b.Stores.Signals.Create(ctx, "old", state.SignalRecord{SourceRef: "s", ExpiresAt: &past}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if _, err := b.Stores.Signals.Update(ctx, "old", "1", state.SignalRecord{}); !errors.Is(err, state.ErrNotFound) {
@@ -639,7 +639,7 @@ func TestTheFeedWithItemsEndsRatherThanLoseAnEventItCannotBuild(t *testing.T) {
 	// The parent cannot be read for a moment: delivering a delete would evict a
 	// record that still exists, and skipping would lose the change.
 	a.parent.kv = &scriptedKV{KeyValue: inner, get: always(errInjected)}
-	if _, err := a.itemsKV.Create(ctx, runsItemKey(string(parent), "u1"), mustEnvelope(t)); err != nil {
+	if _, _, err := a.itemsKV.Create(ctx, runsItemKey(string(parent), "u1"), mustEnvelope(t)); err != nil {
 		t.Fatalf("seed item: %v", err)
 	}
 	for {
@@ -701,7 +701,7 @@ func TestTheFeedWithItemsSkipsEntriesItCannotDecodeAndStopsWithItsCaller(t *test
 func TestTheOrphanSweepReportsWhatItCannotRemove(t *testing.T) {
 	b := openBackend(t, sharedTestConn(t), newScope(t))
 	ctx := shortCtx(t)
-	if _, err := b.runsKV.Create(ctx, runsItemKey("ghost", "u"), mustEnvelope(t)); err != nil {
+	if _, _, err := b.runsKV.Create(ctx, runsItemKey("ghost", "u"), mustEnvelope(t)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	inner := b.owned.runsKV

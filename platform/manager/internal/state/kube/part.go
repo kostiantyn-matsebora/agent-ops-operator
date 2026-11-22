@@ -75,28 +75,35 @@ func (p *partCollection[T]) Get(ctx context.Context, key state.Key) (T, state.Re
 }
 
 // Create sets the part under the object's current revision: ErrNotFound when
-// the object is absent, ErrAlreadyExists when the part already holds a record.
-func (p *partCollection[T]) Create(ctx context.Context, key state.Key, rec T) (state.Revision, error) {
+// the object is absent, ErrAlreadyExists when the part already holds a
+// record. The returned record is read back from obj, consistent with the
+// whole-object collection's Create.
+func (p *partCollection[T]) Create(ctx context.Context, key state.Key, rec T) (T, state.Revision, error) {
+	var zero T
 	for attempt := 0; attempt < statusUpdateMaxAttempts; attempt++ {
 		obj, field, _, held, err := p.fetch(ctx, key)
 		if err != nil {
-			return "", err
+			return zero, "", err
 		}
 		if held {
-			return "", state.ErrAlreadyExists
+			return zero, "", state.ErrAlreadyExists
 		}
 		orig := obj.DeepCopyObject().(client.Object)
 		p.l.Part.Write(obj, field, rec)
 		err = p.patch(ctx, obj, orig, true)
 		switch {
 		case err == nil:
-			return state.Revision(obj.GetResourceVersion()), nil
+			stored, ok := p.l.Part.Read(obj, field)
+			if !ok {
+				return zero, "", fmt.Errorf("kube: create %s %q: stored part is not visible", p.l.Decl.Name, key)
+			}
+			return stored, state.Revision(obj.GetResourceVersion()), nil
 		case apierrors.IsConflict(err):
 			continue // the object moved: look again, it may now hold one
 		}
-		return "", writeError("create "+p.l.Decl.Name, string(key), err)
+		return zero, "", writeError("create "+p.l.Decl.Name, string(key), err)
 	}
-	return "", fmt.Errorf("kube: create %s %q: conflict after %d attempts", p.l.Decl.Name, key, statusUpdateMaxAttempts)
+	return zero, "", fmt.Errorf("kube: create %s %q: conflict after %d attempts", p.l.Decl.Name, key, statusUpdateMaxAttempts)
 }
 
 // Update replaces the part under rev, the object's revision. ErrNotFound when

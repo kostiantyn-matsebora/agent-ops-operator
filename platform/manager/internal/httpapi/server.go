@@ -1808,7 +1808,7 @@ func putAdapterState(ctx context.Context, coll state.Collection[string], key sta
 	if !errors.Is(err, state.ErrNotFound) {
 		return err
 	}
-	_, err = coll.Create(ctx, key, v)
+	_, _, err = coll.Create(ctx, key, v)
 	if errors.Is(err, state.ErrAlreadyExists) {
 		// Lost a race against another writer's first Create: it exists now,
 		// so Mutate can get-modify-CAS it.
