@@ -38,4 +38,6 @@ while unticked — see `.claude/rules/documentation.md`.
 **CONTAINERS: `docker` OR `nerdctl`** — either runs the system pack (Rancher
 Desktop ships both under `~/.rd/bin`, and `nerdctl` answers only while the
 application is running). Check for BOTH, never for `docker` alone. The pack's
-`lookPath("docker")` falls back to `nerdctl`.
+`lookPath("docker")` falls back to `nerdctl`. k3d needs a real Docker API
+(Rancher Desktop's `moby` engine, `DOCKER_HOST=unix://$HOME/.rd/docker.sock`);
+the `containerd` engine's socket resets every connection.

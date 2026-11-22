@@ -12,7 +12,7 @@
 - [x] 2.3 Build the operator with `-cover` for the system run, point `GOCOVERDIR` at a node directory through a Helm post-renderer, stop the manager gracefully and collect, and verify the post-renderer's unit tests pass
 - [x] 2.4 Fail the tier when a run produced no coverage data, and verify with a fixture of an empty directory
 - [x] 2.5 Collect browser coverage for `platform/console/ui/src` into lcov behind `E2E_COVERAGE=1` (istanbul-instrumented build of the mocked suite, `npm run test:e2e:coverage`), and verify the specs yield mapped lines: 154 files, verified
-- [ ] 2.6 Run the instrumented system pack once and verify it writes `system-coverage.out` (needs Docker and k3d)
+- [x] 2.6 Run the instrumented system pack once and verify it writes `system-coverage.out` (needs a container runtime and k3d; ran against Rancher Desktop on moby, Helm 4: 8595-line profile, 6 of 7 lines of a sampled range mapped)
 
 ## 3. The testing session
 
@@ -44,7 +44,7 @@
 
 ## 6. System tests
 
-- [ ] 6.1 Run the instrumented smoke pack in an environment with Docker and verify the operator's coverage comes back
+- [x] 6.1 Run the instrumented smoke pack in an environment with Docker and verify the operator's coverage comes back
 - [ ] 6.2 Run the station once on a throwaway pull request carrying a known coverage shortfall, and verify it writes the report, loops, and ends `station:fix`
 - [ ] 6.3 Run the station once on a change touching an agent-facing path with the credential set, and verify the real runtime lane runs and a stub run is not accepted
 - [ ] 6.4 Run the console change through `npm run test:e2e` and `e2e-live` and verify browser coverage collects

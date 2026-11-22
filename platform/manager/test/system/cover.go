@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // The system tier's COVERAGE run, behind SYSTEM_COVER=1.
@@ -57,7 +58,34 @@ func buildRenderer(ctx context.Context) (string, error) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("build covrender: %v\n%s", err, out)
 	}
-	return bin, nil
+	return rendererRef(bin)
+}
+
+// rendererRef is what --post-renderer is given. Helm 3 takes the executable's path. Helm 4 takes only the
+// NAME of an installed postrenderer plugin, so the binary is wrapped in a throwaway one found through
+// HELM_PLUGINS.
+func rendererRef(bin string) (string, error) {
+	out, err := exec.Command(lookPath("helm"), "version", "--short").Output()
+	if err != nil {
+		return "", fmt.Errorf("helm version: %v", err)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(string(out)), "v4") {
+		return bin, nil
+	}
+	plugins := filepath.Join(filepath.Dir(bin), "plugins")
+	dir := filepath.Join(plugins, "covrender")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	manifest := "apiVersion: v1\nname: covrender\ntype: postrenderer/v1\nruntime: subprocess\nversion: 0.1.0\n" +
+		"runtimeConfig:\n  platformCommand:\n    - command: " + bin + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "plugin.yaml"), []byte(manifest), 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Setenv("HELM_PLUGINS", plugins); err != nil {
+		return "", err
+	}
+	return "covrender", nil
 }
 
 // CollectCover stops the manager so it flushes its counters, copies them off the
