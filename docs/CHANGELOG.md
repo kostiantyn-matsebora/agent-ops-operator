@@ -10,6 +10,10 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+## [24.0.0] — 2026-11-22
+
+Images: manager 0.66.0, console 0.46.0, runtime-pi 0.2.0, runtime-ollama 0.2.0. Every other image is unchanged.
+
 ### Added
 
 - **`maxActiveMembers` (`MAX_ACTIVE_MEMBERS`, default `5`) bounds Coordinator
@@ -23,6 +27,12 @@ for the source and the reference material beside this file.
   of `numCtx` and sends `maxOutputTokens` as `num_predict`. `claude`,
   `claude-cli` and `copilot` have no setting and refuse the value on their own
   bundle. `0` leaves a runtime's own behaviour.
+- **`global.agentops.platformNodeSelector` places every platform pod.** The
+  manager, NATS, the Telegram gateway and every MCP server take it as their
+  `nodeSelector`, and a component's own `nodeSelector` replaces it for that
+  component. The default is empty, so nothing about an install changes until it
+  is set. Adapters, signals and the console are not covered, because the
+  manager builds their pods from their own resources.
 
 ### Changed
 
@@ -35,29 +45,6 @@ for the source and the reference material beside this file.
   The `agentops_runtime_slots_in_use` and `agentops_runtime_slots_max`
   gauges gain a `pool` label (`conversations`, `members`), and the old
   unlabelled series are retired in this same change.
-
-### Fixed
-
-- A turn that stops on `length` with no text now fails the run naming the token
-  counts, on `pi` and `ollama`, instead of "no answer".
-- `pi` reports `tokensIn` as the contract defines it, cache parts included, so
-  the console's "Fresh" column is no longer negative, and reports each tool
-  call's `resultBytes`, so "Result size" is filled.
-
-## [24.0.0] — 2026-11-21
-
-Images: manager 0.65.1, console 0.45.0. Manager 0.65.0 was never published. Every other image is unchanged.
-
-### Added
-
-- **`global.agentops.platformNodeSelector` places every platform pod.** The
-  manager, NATS, the Telegram gateway and every MCP server take it as their
-  `nodeSelector`, and a component's own `nodeSelector` replaces it for that
-  component. The default is empty, so nothing about an install changes until it
-  is set. Adapters, signals and the console are not covered, because the
-  manager builds their pods from their own resources.
-
-### Changed
 
 - **The command bus delivers with plain JetStream and a sequential convoy.**
   A message is stored once and its task is a record. Order per key comes from
@@ -79,6 +66,11 @@ Images: manager 0.65.1, console 0.45.0. Manager 0.65.0 was never published. Ever
 
 ### Fixed
 
+- A turn that stops on `length` with no text now fails the run naming the token
+  counts, on `pi` and `ollama`, instead of "no answer".
+- `pi` reports `tokensIn` as the contract defines it, cache parts included, so
+  the console's "Fresh" column is no longer negative, and reports each tool
+  call's `resultBytes`, so "Result size" is filled.
 - **A closed conversation no longer serves work, so it stays closed.** A runtime
   pod still polling when `/close` landed, with an input queued before it, was
   handed that input, and dispatching it wrote `Working` over `Closed`. Closed is

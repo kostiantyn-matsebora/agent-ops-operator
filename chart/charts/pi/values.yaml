@@ -31,7 +31,7 @@ default: true
 
 # The runtime image, and the one place its tag is written. NO domain tooling in
 # it: what an agent may reach is wiring — see docs/concepts.md#runtime-images-are-generic.
-image: ghcr.io/kostiantyn-matsebora/agentops-runtime-pi:0.1.0
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-pi:0.2.0
 
 # ONE secret with the credential pi's model provider needs. Projected as env via
 # valueFrom; the manager reads no Secrets.
