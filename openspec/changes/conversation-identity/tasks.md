@@ -34,26 +34,26 @@
 
 ## 6. Unit tests
 
-- [ ] 6.1 Run `go build ./... && go vet ./... && go test ./...` in `platform/manager` with `KUBEBUILDER_ASSETS` set, and `go test -tags conformance -count=1 ./test/conformance/`.
-- [ ] 6.2 Run the same Go gates in `platform/console`, `channels/telegram` and `runtimes/ollama`, and `node --test` in the Node runtimes.
-- [ ] 6.3 Run the chart render tests and the script suite touched by the release wiring. The console UI is not changed, so the browser tiers are not owed.
+- [x] 6.1 Run `go build ./... && go vet ./... && go test ./...` in `platform/manager` with `KUBEBUILDER_ASSETS` set, and `go test -tags conformance -count=1 ./test/conformance/`.
+- [x] 6.2 Run the same Go gates in `platform/console`, `channels/telegram` and `runtimes/ollama`, and `node --test` in the Node runtimes.
+- [x] 6.3 Run the chart render tests and the script suite touched by the release wiring. The console UI is not changed, so the browser tiers are not owed.
 
 ## 7. System tests
 
-- [ ] 7.1 Extend a lane in `platform/manager/test/system/` that deletes a conversation and creates another that reuses its name, and asserts a different workspace directory, a different pod label and no op collision. Verify with `go test -tags system -count=1 -timeout 45m -v ./test/system/` against this working copy's tree, or dispatch `system-smoke.yml` on this branch if k3d is unavailable.
-- [ ] 7.2 Assert in the same lane that a signal-originated conversation still routes by `correlationId` and that a typed name reaches the newest live conversation.
+- [x] 7.1 Extend a lane in `platform/manager/test/system/` that deletes a conversation and creates another that reuses its name, and asserts a different workspace directory, a different pod label and no op collision. Verify with `go test -tags system -count=1 -timeout 45m -v ./test/system/` against this working copy's tree, or dispatch `system-smoke.yml` on this branch if k3d is unavailable.
+- [x] 7.2 Assert in the same lane that a signal-originated conversation still routes by `correlationId` and that a typed name reaches the newest live conversation.
 
 ## 8. Documentation
 
 ### 8.1 Reference docs
 
-- [ ] 8.1.1 Update `docs/contracts/channel-adapter.md` and `docs/contracts/signal-adapter.md` for the rename, the new wire field and the version, and `docs/contracts/runtime.md` and `docs/contracts.md` for `CONVO_ID` and the `ID`.
-- [ ] 8.1.2 Update `docs/concepts.md`, `docs/crds/conversation.md` through its markers, `docs/gotchas.md` and `docs/CHANGELOG.md` with the breaking change and the delete-before-upgrade step.
-- [ ] 8.1.3 Update `.claude/rules/terminology.md` and `.claude/rules/invariants.md` for the three identifiers.
-- [ ] 8.1.4 Re-run `python3 .github/scripts/docs-generate.py` and commit the generated blocks.
+- [x] 8.1.1 Update `docs/contracts/channel-adapter.md` and `docs/contracts/signal-adapter.md` for the rename, the new wire field and the version, and `docs/contracts/runtime.md` and `docs/contracts.md` for `CONVO_ID` and the `ID`.
+- [x] 8.1.2 Update `docs/concepts.md`, `docs/crds/conversation.md` through its markers, `.claude/rules/gotchas.md` and `docs/CHANGELOG.md` with the breaking change and the delete-before-upgrade step.
+- [x] 8.1.3 Update `.claude/rules/terminology.md` and `.claude/rules/invariants.md` for the three identifiers.
+- [x] 8.1.4 Re-run `python3 .github/scripts/docs-generate.py` and commit the generated blocks.
 
 ### 8.2 Adopter site
 
-- [ ] 8.2.1 Update `docs/guides/signal-adapter.md` and `docs/guides/channel-adapter.md` for `correlationId` and the wire field.
-- [ ] 8.2.2 Update `docs/installation.md` for the delete-before-upgrade step, and any page still showing `conversationId`.
-- [ ] 8.2.3 Run `python3 .claude/scripts/rules_compliance.py` over the touched pages and `python3 .github/scripts/publication-guard.py --counts`.
+- [x] 8.2.1 Update `docs/guides/signal-adapter.md` and `docs/guides/channel-adapter.md` for `correlationId` and the wire field.
+- [x] 8.2.2 Update `docs/installation.md` for the delete-before-upgrade step, and any page still showing `conversationId`.
+- [x] 8.2.3 Run `python3 .claude/scripts/rules_compliance.py` over the touched pages and `python3 .github/scripts/publication-guard.py --counts`.
