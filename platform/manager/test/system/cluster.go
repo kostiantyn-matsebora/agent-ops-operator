@@ -96,6 +96,7 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 			"--wait", "--timeout", "180s",
 			"--no-lb",
 		}
+		args = append(args, clusterCAArgs(os.Getenv(buildCAEnv))...)
 		if out, err := exec.CommandContext(ctx, lookPath("k3d"), args...).CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("k3d cluster create: %v\n%s", err, out)
 		}

@@ -47,3 +47,15 @@ func TestNothingRunsWithoutTheVariable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTheNodeGetsTheBundleAndTheTrustSetting(t *testing.T) {
+	got := strings.Join(clusterCAArgs("/etc/ssl/certs/ca-certificates.crt"), " ")
+	for _, want := range []string{"--volume /etc/ssl/certs/ca-certificates.crt:" + nodeBundle + "@server:*", "--env SSL_CERT_FILE=" + nodeBundle + "@server:*"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+	if clusterCAArgs("") != nil {
+		t.Error("with no bundle configured the cluster must be created exactly as before")
+	}
+}
