@@ -29,9 +29,11 @@ STUB
     chmod +x "$BIN/$i"
   done
   if [ "$1" = present ]; then
-    for t in helm openspec serena k3d kubectl docker; do printf '#!/bin/sh\nexit 0\n' > "$BIN/$t"; chmod +x "$BIN/$t"; done
+    for t in helm openspec serena k3d kubectl docker npx; do printf '#!/bin/sh\nexit 0\n' > "$BIN/$t"; chmod +x "$BIN/$t"; done
     printf '#!/bin/sh\necho "go version go1.25.1 linux/amd64"\n' > "$BIN/go"; chmod +x "$BIN/go"
-    mkdir -p "$FAKEHOME/envtest/k8s/1.31.0-linux-amd64"
+    mkdir -p "$FAKEHOME/ui/node_modules/.bin" "$FAKEHOME/browsers/chromium-1" "$FAKEHOME/envtest/k8s/1.31.0-linux-amd64"
+    : > "$FAKEHOME/ui/node_modules/.bin/playwright"; chmod +x "$FAKEHOME/ui/node_modules/.bin/playwright"
+    touch "$FAKEHOME/ui/package-lock.json"
     touch "$FAKEHOME/envtest/k8s/1.31.0-linux-amd64/kube-apiserver"
   else
     # Go is present but OLD, so its own section is the one that must act.
@@ -41,6 +43,7 @@ STUB
 
 run_bootstrap() {  # run_bootstrap [args...]
   PATH="$BIN:/usr/bin:/bin" HOME="$FAKEHOME" ENVTEST_DIR="$FAKEHOME/envtest" \
+    UI_DIR="${UI_DIR:-$FAKEHOME/ui}" PLAYWRIGHT_BROWSERS_PATH="$FAKEHOME/browsers" \
     bash "$S" "$@" 2>&1
 }
 
@@ -113,6 +116,19 @@ out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap)
 assert_contains "$out" "docker running"
 assert_not_contains "$out" "starting dockerd"
 
+it "playwright's dependencies are installed from the lockfile when the UI has none, and a failure names it"
+make_env absent
+UI=$(mktemp -d); touch "$UI/package-lock.json"
+out=$(CLAUDE_CODE_REMOTE=1 UI_DIR="$UI" run_bootstrap); status=$?
+assert_status 0 "$status"
+assert_contains "$(cat "$CALLS")" "npm ci"
+assert_contains "$out" "playwright"
+
+it "a missing lockfile names playwright rather than guessing"
+make_env absent
+out=$(CLAUDE_CODE_REMOTE=1 UI_DIR="$(mktemp -d)" run_bootstrap)
+assert_contains "$out" "could not install"
+
 # --- verify ------------------------------------------------------------------
 
 it "--verify installs nothing and answers present or missing for every tool"
@@ -124,7 +140,7 @@ assert_equals "" "$(cat "$CALLS")"
 # calling `pass` unconditionally after the loop printed an ok line beside the
 # failure, so the case read as green in the summary.
 missing_line=""
-for tool in helm openspec pyyaml envtest serena k3d kubectl docker go; do
+for tool in helm openspec pyyaml envtest serena k3d kubectl docker playwright go; do
   case "$out" in *"$tool "*) ;; *) missing_line="$tool" ;; esac
 done
 [ -z "$missing_line" ] && pass || fail "no --verify line for $missing_line"

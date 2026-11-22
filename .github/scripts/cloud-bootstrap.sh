@@ -26,6 +26,8 @@
 #   k3d       the system pack's cluster, with kubectl beside it. The testing
 #   kubectl   station runs that tier ITSELF, so a session without them can only
 #             dispatch it. dockerd is STARTED when it is not answering.
+#   playwright  the e2e tier: the console UI's node_modules and Chromium with its
+#             system libraries. Without them `npm run test:e2e` cannot start.
 #   Go 1.25   platform/manager and runtimes/ollama declare it; the image's own
 #             version is unstated, so it is checked rather than assumed.
 #
@@ -83,6 +85,7 @@ verify() {
   printf 'serena %s\n'    "$(have serena && echo present || echo missing)"
   printf 'k3d %s\n'       "$(have k3d && echo present || echo missing)"
   printf 'kubectl %s\n'   "$(have kubectl && echo present || echo missing)"
+  printf 'playwright %s\n' "$(playwright_ready && echo present || echo missing)"
   printf 'docker %s\n'    "$(docker_answers && echo running || echo "not running")"
   printf 'go %s\n'        "$(go_at_least "$GO_FLOOR" && echo "present ($go_version)" || echo "missing (need >= $GO_FLOOR, have $go_version)")"
 }
@@ -208,6 +211,33 @@ start_docker() {
   missing "docker (dockerd would not start)"
 }
 
+## playwright — the e2e tier. Dependencies come from the lockfile (`npm ci`), then the
+## one browser the specs use. `--with-deps` also installs the system libraries, which
+## needs root: a sandbox without it leaves the browser installed but unable to launch,
+## and the verify line says so by trying to launch it.
+UI_DIR="${UI_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/platform/console/ui}"
+
+playwright_ready() {
+  [ -x "$UI_DIR/node_modules/.bin/playwright" ] || return 1
+  (cd "$UI_DIR" && npx --no-install playwright --version >/dev/null 2>&1) || return 1
+  [ -n "$(find "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" -maxdepth 1 -name 'chromium*' 2>/dev/null | head -1)" ]
+}
+
+install_playwright() {
+  playwright_ready && { note "playwright present"; return; }
+  [ -f "$UI_DIR/package-lock.json" ] || { missing playwright; return; }
+  note "installing the console UI's dependencies and chromium"
+  if (cd "$UI_DIR" && npm ci --ignore-scripts >/dev/null 2>&1) \
+     && (cd "$UI_DIR" && { if have sudo; then sudo -E env "PATH=$PATH" npx --no-install playwright install --with-deps chromium; \
+                          else npx --no-install playwright install --with-deps chromium; fi; } >/dev/null 2>&1 \
+         || npx --no-install playwright install chromium >/dev/null 2>&1) \
+     && playwright_ready; then
+    note "playwright installed"
+  else
+    missing playwright
+  fi
+}
+
 ## Go — platform/manager and runtimes/ollama declare 1.25. The image's version
 ## is unstated, so this VERIFIES and only installs when what is there is older.
 install_go() {
@@ -267,6 +297,7 @@ main() {
   install_serena
   install_k3d
   install_kubectl
+  install_playwright
   start_docker
 
   if [ ${#MISSING[@]} -gt 0 ]; then
