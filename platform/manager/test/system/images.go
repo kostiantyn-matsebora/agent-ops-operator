@@ -99,6 +99,9 @@ func BuildAndImport(ctx context.Context, c *Cluster, need map[string]bool) error
 	sort.Strings(skipped)
 	fmt.Fprintf(os.Stderr, "building %d images: %s\nNOT built for this tier (not installed by it): %s\n",
 		len(chosen), strings.Join(build, " "), strings.Join(skipped, " "))
+	if err := prepareBuildCA(ctx, chosen); err != nil {
+		return err
+	}
 	for _, img := range chosen {
 		if err := dockerBuild(ctx, img); err != nil {
 			return err
@@ -106,21 +109,6 @@ func BuildAndImport(ctx context.Context, c *Cluster, need map[string]bool) error
 		tags = append(tags, img.Tag)
 	}
 	return c.Import(ctx, tags...)
-}
-
-// proxyBuildArgs passes a build host's egress proxy into the image build. A sandbox that reaches the
-// network only through a proxy (a cloud session does) has it in the environment of the build CLIENT, and a
-// build container does not inherit that: `npm ci` inside it then fails. The names are Docker's predefined
-// build arguments, so no Dockerfile declares them and they are not kept in the image's history. Only the
-// NAME goes on the command line: the value is read from the environment by Docker itself.
-func proxyBuildArgs() []string {
-	var out []string
-	for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"} {
-		if os.Getenv(name) != "" {
-			out = append(out, "--build-arg", name)
-		}
-	}
-	return out
 }
 
 func dockerBuild(ctx context.Context, img Image) error {
@@ -132,7 +120,6 @@ func dockerBuild(ctx context.Context, img Image) error {
 	if coverEnabled() && img.Component == "manager" {
 		args = append(args, "--build-arg", "GOCOVER=1")
 	}
-	args = append(args, proxyBuildArgs()...)
 	args = append(args, filepath.Join(root, img.Context))
 	cmd := exec.CommandContext(ctx, lookPath("docker"), args...)
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr

@@ -74,6 +74,9 @@ For each round, in order:
    SYSTEM_COVER=1 SYSTEM_ARTIFACT_DIR=<dir> go test -tags system -count=1 -timeout 55m -v ./test/system/
    ```
 
+   - **In a cloud session set `SYSTEM_BUILD_CA=/etc/ssl/certs/ca-certificates.crt` too.** The sandbox
+     re-signs HTTPS with its own CA, which a build container does not trust, so `npm ci` in an image
+     build hangs and crashes. The pack bakes that bundle into local copies of its base images.
    - It needs a container runtime (`docker` or `nerdctl`, check for both and that it answers: `docker info || nerdctl info`), k3d, helm and kubectl. **If one is missing or not running, say which, set nothing
      passed, and end the station.** A tier you could not run is not a tier that passed.
    - **Real model required:** `SYSTEM_TIER=full` with the credential in the environment.
