@@ -44,6 +44,9 @@ type Cluster struct {
 	Name       string
 	Kubeconfig string
 	reused     bool
+	// PostRenderer is a Helm post-renderer every install and upgrade passes,
+	// set only by the coverage run (cover.go).
+	PostRenderer string
 }
 
 // EnsureCluster creates the cluster, or adopts a running one when reuse is

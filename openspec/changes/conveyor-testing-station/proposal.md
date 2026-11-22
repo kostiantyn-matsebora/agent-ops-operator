@@ -10,8 +10,14 @@ added, with a merge conflict, or behind its base.
 - A new station, `station:testing`, between `implement` and the fixing loop.
 - The station checks coverage of the CHANGED lines against a floor per tier.
   Unit holds 90%, system 70%, e2e 50%.
+- The station is a SESSION, not a CI job. It runs the unit, system and e2e tiers itself,
+  in its own environment, and measures the coverage there.
+- Tests that depend on the agent's behaviour run against a REAL model, with the
+  credential read from an environment variable. The session judges, per change,
+  whether the model's behaviour affects the functionality. A stub run never stands in
+  for a real one where it does.
 - A separate model writes the missing tests, never the model that wrote the code.
-- The station loops: run the tiers, fix or write per the result, run again. It has
+- The session loops: run the tiers, fix or write per the result, run again. It has
   its own budget of 5 rounds, extended by `conveyor:keep-going`.
 - One comment on the tracking issue reports the numbers, edited in place each round.
 - The fixing loop ends `mergeable` only when the pull request can merge: no failed
@@ -34,8 +40,8 @@ added, with a merge conflict, or behind its base.
 ## Impact
 
 - `.github/scripts/conveyor.py` and `conveyor.test.py`: station states, events, decisions.
-- New scripts for coverage collection, the diff intersection and the report.
-- New workflow for the station, and `ci.yml` jobs that emit per-tier coverage.
+- New scripts for the diff intersection, the verdict and the report.
+- A routine file for the testing session, a tester agent definition, and the workflow step that fires the session.
 - `.github/conveyor-model/` labels and workflow model.
 - `platform/manager/test/system/` runs against an instrumented manager binary.
 - `platform/console/ui/e2e*` collects V8 coverage.

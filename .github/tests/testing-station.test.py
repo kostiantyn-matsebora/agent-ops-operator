@@ -144,6 +144,25 @@ class TheMeasure(unittest.TestCase):
         r = cd.measure({"f.go": {1, 2}}, [a, b], ["**/*.go"], [], [])
         self.assertEqual((2, 2), (r["covered"], r["total"]))
 
+    def test_a_prefix_anchors_a_report_written_relative_to_a_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            lcov = pathlib.Path(d, "l.info"); lcov.write_text("SF:src/a.tsx\nDA:1,1\nDA:2,0\nend_of_record\n")
+            diff = pathlib.Path(d, "d.diff"); diff.write_text(DIFF)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                cd.main(["--tier", "e2e", "--lcov", f"{lcov}@platform/console/ui", "--diff-file", str(diff)])
+        j = json.loads(out.getvalue())
+        self.assertEqual((1, 2, []), (j["covered"], j["total"], j["unmeasured"]))
+
+    def test_every_go_module_in_the_tree_maps_its_import_path_to_its_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            (root / "a/b").mkdir(parents=True)
+            (root / "a/b/go.mod").write_text("module example.test/x/a/b\n\ngo 1.22\n")
+            (root / "go.mod").write_text("module example.test/x\n")
+            maps = dict(cd.module_maps(root))
+        self.assertEqual({"example.test/x/a/b": "a/b", "example.test/x": ""}, maps)
+
     def test_the_command_line_reads_files_and_prints_json(self):
         with tempfile.TemporaryDirectory() as d:
             diff, prof = pathlib.Path(d, "d.diff"), pathlib.Path(d, "p.out")

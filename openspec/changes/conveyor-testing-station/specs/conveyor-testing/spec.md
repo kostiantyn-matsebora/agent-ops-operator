@@ -6,6 +6,54 @@ numbers on the change's tracking issue.
 
 ## ADDED Requirements
 
+### Requirement: A session runs the tests, and CI is not the runner
+
+The testing station SHALL be one session started for the change's issue. It SHALL run
+the unit, system and e2e tiers itself, in its own environment, and SHALL measure their
+coverage there. CI MAY run the same suites for its own gate. The station SHALL NOT read
+its numbers from CI's runs.
+
+#### Scenario: The session measures its own run
+
+- **WHEN** the station runs a tier
+- **THEN** the coverage it judges comes from that run in the session's environment
+
+#### Scenario: An environment that cannot run a tier
+
+- **WHEN** the session's environment cannot run a tier the change needs
+- **THEN** the station stops with the reason named in the report, and no tier reads as passed
+
+### Requirement: Behaviour that depends on the model is tested against a real model
+
+The session SHALL judge, for the change, whether the behaviour of the real model affects
+the functionality it adds or changes. The judgement SHALL be recorded in the report with
+its reason. Where it does, the system and e2e tiers SHALL run on a real runtime, with the
+credential read from the `CLAUDE_CODE_OAUTH_TOKEN` environment variable. A run on the
+stub runtime SHALL NOT count as passing for such a change.
+
+A path list SHALL name the code that is agent-facing by default, as a floor the judgement
+may extend and SHALL NOT shrink. Assertions on a real model SHALL tolerate its
+nondeterminism and SHALL NOT assert exact wording. A failing real-model test SHALL be
+re-run once before it is work.
+
+The session SHALL NOT read, print or store the credential. When it is required and
+absent, the station SHALL stop and say so.
+
+#### Scenario: A change to the dispatch prompt
+
+- **WHEN** the diff changes a prompt the runtime sends to the model
+- **THEN** the report records real-model testing as required, and the system and e2e tiers run on a real runtime
+
+#### Scenario: A change no model output reaches
+
+- **WHEN** the diff touches only a chart template's labels
+- **THEN** the report records real-model testing as not required, with the reason, and the stub runtime suffices
+
+#### Scenario: The credential is absent
+
+- **WHEN** real-model testing is required and `CLAUDE_CODE_OAUTH_TOKEN` is unset
+- **THEN** the station stops and no tier reads as passed
+
 ### Requirement: The testing station sits between implement and the fixing loop
 
 When the implement session opens the change's pull request, the issue's station
@@ -16,7 +64,7 @@ Passing moves the line to the fixing loop. Exhausting the budget moves it to
 #### Scenario: Implement hands over to testing
 
 - **WHEN** the implement session opens the pull request
-- **THEN** the issue carries `station:testing` and no other station label
+- **THEN** the issue carries `station:testing` and no other station label, and the testing session starts
 
 #### Scenario: Passing moves the line on
 
@@ -60,8 +108,8 @@ but yielded no coverage data SHALL fail, never read as zero changed lines.
 
 ### Requirement: Missing tests are written by a model that did not write the code
 
-A shortfall of coverage SHALL be answered by a separate session, a different
-model from the one that implemented the change. That session SHALL read the
+A shortfall of coverage SHALL be answered by a separate agent, a different model from
+the one that implemented the change, running with its own context. That agent SHALL read the
 change's specs, its design and the public interfaces. It SHALL NOT read the
 implementing session's transcript. It SHALL write only test files, and a patch
 touching any other path SHALL be refused.

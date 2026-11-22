@@ -10,7 +10,10 @@ INPUTS (any mix, repeated)
   --go FILE       a Go cover profile (`go test -coverprofile`, or `go tool covdata textfmt`)
   --lcov FILE     an lcov file (vitest, `node --test`, Playwright via V8)
   --cobertura F   a coverage.py XML report
-  --map P=D       a Go import-path prefix P that lives in directory D (else a path suffix match)
+                  `--lcov` and `--cobertura` take `FILE@PREFIX` when the report names files relative
+                  to a directory (vitest relative to `platform/console/ui/`): PREFIX is put before each.
+  --map P=D       a Go import-path prefix P that lives in directory D. Every `go.mod` in the tree adds
+                  its own module path automatically, so this is for the odd one out.
 
 THE DIFF      --diff-file F (a unified diff, `git diff -U0`) or --base REF (diffs REF...HEAD)
 THE DOMAIN    --tier NAME reads `testing.domains.<NAME>` and `testing.excluded_from_coverage`
@@ -102,6 +105,35 @@ def parse_cobertura(text: str) -> dict:
     return out
 
 
+def with_prefix(record: dict, prefix: str) -> dict:
+    if not prefix:
+        return record
+    return {prefix.rstrip("/") + "/" + name.lstrip("./"): lines for name, lines in record.items()}
+
+
+def split_prefix(arg: str) -> tuple:
+    path, _, prefix = arg.partition("@")
+    return path, prefix
+
+
+def module_maps(root: pathlib.Path = pathlib.Path(".")) -> list:
+    """(module path, directory) for every go.mod under `root`: what a Go profile's import paths mean."""
+    out = []
+    try:
+        files = subprocess.run(["git", "ls-files", "--", "go.mod", "**/go.mod"], capture_output=True, text=True,
+                               cwd=root, check=True).stdout.split()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        files = []
+    if not files:   # not a git checkout, or nothing tracked: read the tree
+        files = [str(p.relative_to(root)) for p in root.glob("**/go.mod") if "node_modules" not in p.parts]
+    for f in files:
+        m = re.search(r"^module\s+(\S+)", (root / f).read_text(), re.M)
+        if m:
+            parent = pathlib.PurePosixPath(f).parent.as_posix()
+            out.append((m.group(1), "" if parent == "." else parent))
+    return out
+
+
 def resolve(name: str, changed, maps) -> str | None:
     """The changed path a coverage file name stands for, or None."""
     name = name.replace("\\", "/")
@@ -177,11 +209,13 @@ def main(argv=None) -> int:
     records = []
     for f in args.go:
         records.append(parse_go(pathlib.Path(f).read_text()) if pathlib.Path(f).exists() else {})
-    for f in args.lcov:
-        records.append(parse_lcov(pathlib.Path(f).read_text()) if pathlib.Path(f).exists() else {})
-    for f in args.cobertura:
-        records.append(parse_cobertura(pathlib.Path(f).read_text()) if pathlib.Path(f).exists() else {})
-    maps = [tuple(m.split("=", 1)) for m in args.map]
+    for arg in args.lcov:
+        f, prefix = split_prefix(arg)
+        records.append(with_prefix(parse_lcov(pathlib.Path(f).read_text()), prefix) if pathlib.Path(f).exists() else {})
+    for arg in args.cobertura:
+        f, prefix = split_prefix(arg)
+        records.append(with_prefix(parse_cobertura(pathlib.Path(f).read_text()), prefix) if pathlib.Path(f).exists() else {})
+    maps = [tuple(m.split("=", 1)) for m in args.map] + module_maps()
     result = measure(parse_diff(read_diff(args)), records, vocab["domains"][args.tier],
                      vocab["excluded_from_coverage"], maps)
     result["tier"] = args.tier
