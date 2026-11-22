@@ -952,7 +952,8 @@ class TheRealModelGate(unittest.TestCase):
         self.assertEqual("not_required", self.gate(["docs/x.md"], cred=False).action)
 
     def test_the_credential_variable_is_named_once_in_the_vocabulary(self):
-        self.assertEqual("CLAUDE_CODE_OAUTH_TOKEN", TEST["credential_env"])
+        self.assertEqual("AGENTOPS_REAL_MODEL_TOKEN", TEST["credential_env"])
+        self.assertEqual("CLAUDE_CODE_OAUTH_TOKEN", TEST["credential_env_fallback"])
 
     def test_the_cli_decides_it(self):
         rc, out = TheCommandLine.run_cli(None, "decide", "real_model_gate",

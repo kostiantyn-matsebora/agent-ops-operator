@@ -20,6 +20,12 @@ S="$ROOT/.github/scripts/cloud-bootstrap.sh"
 make_env() {  # make_env <mode: present|absent>
   BIN=$(mktemp -d); FAKEHOME=$(mktemp -d); CALLS="$FAKEHOME/calls"
   : > "$CALLS"
+  # HERMETIC: the script sees only the system tools it needs, linked in by name, never /usr/bin as a
+  # whole. A runner ships docker, kubectl and more there, and "this tool is absent" must mean absent.
+  for t in bash sh env cat sed awk grep head tail sort find mktemp mkdir rm ln install chmod tar tr \
+           dirname basename printf sleep date uname cut wc xargs python3 setsid nohup; do
+    p=$(command -v "$t" 2>/dev/null) && [ -x "$p" ] && ln -sf "$p" "$BIN/$t"
+  done
   for i in curl npm pip uv tar go_install; do
     cat > "$BIN/$i" <<STUB
 #!/bin/sh
@@ -42,7 +48,7 @@ STUB
 }
 
 run_bootstrap() {  # run_bootstrap [args...]
-  PATH="$BIN:/usr/bin:/bin" HOME="$FAKEHOME" ENVTEST_DIR="$FAKEHOME/envtest" \
+  PATH="$BIN" HOME="$FAKEHOME" ENVTEST_DIR="$FAKEHOME/envtest" \
     UI_DIR="${UI_DIR:-$FAKEHOME/ui}" PLAYWRIGHT_BROWSERS_PATH="$FAKEHOME/browsers" \
     bash "$S" "$@" 2>&1
 }
@@ -53,9 +59,9 @@ for marker in "" 0 false; do
   make_env absent
   it "the marker ${marker:-<unset>} is a workstation: nothing is installed and it exits 0"
   if [ -z "$marker" ]; then
-    out=$(PATH="$BIN:/usr/bin:/bin" HOME="$FAKEHOME" bash "$S" 2>&1); status=$?
+    out=$(PATH="$BIN" HOME="$FAKEHOME" bash "$S" 2>&1); status=$?
   else
-    out=$(PATH="$BIN:/usr/bin:/bin" HOME="$FAKEHOME" CLAUDE_CODE_REMOTE="$marker" bash "$S" 2>&1); status=$?
+    out=$(PATH="$BIN" HOME="$FAKEHOME" CLAUDE_CODE_REMOTE="$marker" bash "$S" 2>&1); status=$?
   fi
   assert_status 0 "$status"
   assert_equals "" "$(cat "$CALLS")"
@@ -64,7 +70,7 @@ done
 
 it "--verify on a workstation prints nothing, so a local session's context is untouched"
 make_env present
-out=$(PATH="$BIN:/usr/bin:/bin" HOME="$FAKEHOME" bash "$S" --verify 2>&1)
+out=$(PATH="$BIN" HOME="$FAKEHOME" bash "$S" --verify 2>&1)
 assert_equals "" "$out"
 
 # --- remote, everything already there ---------------------------------------
