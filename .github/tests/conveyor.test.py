@@ -708,5 +708,249 @@ class TheCommandLine(unittest.TestCase):
             self.run_cli("decide", "fire", stdin=json.dumps({"label": RUN, "line": {"nonsense": 1}, "placer": {"login": "x"}}))
 
 
+# ==== the testing station =======================================================================
+
+TEST = V["testing"]
+FLOORS = TEST["floors"]
+TESTING = V["station_labels"]["testing"]
+
+
+def R(passed=True, covered=0, total=0, ran=True, collected=True):
+    return c.TierResult(ran=ran, passed=passed, covered=covered, total=total, collected=collected)
+
+
+class TheTestingStationMachine(unittest.TestCase):
+    def test_implement_hands_over_to_testing_and_passing_moves_the_line_to_fix(self):
+        self.assertEqual("testing", c.station_next("implement", "testing:start"))
+        self.assertEqual("fix", c.station_next("testing", "testing:passed"))
+
+    def test_a_spent_budget_stalls_the_line(self):
+        self.assertEqual("stalled", c.station_next("testing", "testing:capped"))
+
+    def test_nothing_but_passing_leaves_testing_for_fix(self):
+        """A fixing round or a green head must not skip the station."""
+        self.assertIsNone(c.station_next("testing", "round:start"))
+        self.assertIsNone(c.station_next("testing", "pr:green"))
+
+    def test_the_testing_events_move_no_other_state(self):
+        for s in c.STATION_STATES:
+            if s != "implement":
+                self.assertIsNone(c.station_next(s, "testing:start"), s)
+            if s != "testing":
+                self.assertIsNone(c.station_next(s, "testing:passed"), s)
+                self.assertIsNone(c.station_next(s, "testing:capped"), s)
+
+    def test_the_line_walks_implement_testing_fix_merge_archive_done(self):
+        walk = [("none", "fire:implement", "implement"), ("implement", "testing:start", "testing"),
+                ("testing", "testing:passed", "fix"), ("fix", "pr:green", "merge"),
+                ("merge", "merge:finished_carried", "archive"), ("archive", "merge:archive_pr", "done")]
+        for start, event, want in walk:
+            self.assertEqual(want, c.station_next(start, event), (start, event))
+
+    def test_a_merge_or_a_restart_still_ends_a_testing_station(self):
+        self.assertEqual("done", c.station_next("testing", "merge:plain"))
+        self.assertEqual("implement", c.station_next("testing", "fire:implement"))
+
+    def test_a_fixing_round_does_not_start_while_the_station_runs(self):
+        pr = c.PullRequest(True, "OPEN", frozenset({FIX}), refs=7)
+        line = c.Line(frozenset({RUN, TESTING}))
+        d = c.gate(V, c.Trigger("dispatch", WRITER, mode="all"), pr, line, WRITER)
+        self.assertEqual("none", d.action)
+        d = c.gate(V, c.Trigger("dispatch", WRITER, mode="all"), pr, c.Line(frozenset({RUN})), WRITER)
+        self.assertEqual("round", d.action)
+
+    def test_a_carry_waits_for_the_testing_station(self):
+        pr = c.PullRequest(True, "OPEN", frozenset(), refs=7, ci_conclusion="success")
+        self.assertEqual("nothing", c.carry_fix(V, pr, c.Line(frozenset({RUN, TESTING})), WRITER).action)
+        self.assertEqual("carry", c.carry_fix(V, pr, c.Line(frozenset({RUN})), WRITER).action)
+
+
+class TheCoverageFloors(unittest.TestCase):
+    def test_the_floors_are_the_stated_ones(self):
+        self.assertEqual({"unit": 90, "system": 70, "e2e": 50}, FLOORS)
+
+    def test_a_tier_holds_its_floor_at_the_floor_and_fails_below_it(self):
+        for tier, floor in FLOORS.items():
+            self.assertEqual("pass", c.judge_tier(tier, floor, R(covered=floor, total=100)).status)
+            self.assertEqual("under_floor", c.judge_tier(tier, floor, R(covered=floor - 1, total=100)).status)
+
+    def test_85_percent_fails_the_unit_floor(self):
+        v = c.judge_tier("unit", 90, R(covered=85, total=100))
+        self.assertEqual(("under_floor", 85.0), (v.status, v.percent))
+
+    def test_a_tier_with_no_changed_line_in_its_domain_is_not_applicable(self):
+        for tier, floor in FLOORS.items():
+            self.assertEqual("not_applicable", c.judge_tier(tier, floor, R(covered=0, total=0)).status)
+
+    def test_a_tier_that_ran_and_wrote_no_data_fails_instead_of_reading_as_nothing_changed(self):
+        v = c.judge_tier("system", 70, R(covered=0, total=0, collected=False))
+        self.assertEqual("collection_failed", v.status)
+
+    def test_a_failing_test_outranks_the_coverage_number(self):
+        self.assertEqual("tests_failed", c.judge_tier("unit", 90, R(passed=False, covered=100, total=100)).status)
+
+    def test_a_tier_that_did_not_run_is_not_judged_on_coverage(self):
+        self.assertEqual("not_run", c.judge_tier("e2e", 50, R(ran=False, covered=100, total=100)).status)
+
+    def test_an_unknown_tier_is_an_error(self):
+        with self.assertRaises(ValueError):
+            c.judge_tier("smoke", 10, R())
+
+    def test_the_percent_is_covered_over_changed(self):
+        self.assertIsNone(c.diff_percent(0, 0))
+        self.assertEqual(66.7, c.diff_percent(2, 3))
+
+
+class TheTestingWork(unittest.TestCase):
+    def verdicts(self, **by_tier):
+        return [c.judge_tier(t, FLOORS[t], by_tier.get(t, R())) for t in c.TIERS]
+
+    def test_every_result_maps_to_its_work_and_its_session(self):
+        v = self.verdicts(unit=R(passed=False, covered=1, total=1), system=R(covered=1, total=10),
+                          e2e=R(ran=True, collected=False))
+        got = {(w.kind, w.tier, w.session) for w in c.testing_work(v)}
+        self.assertEqual({("failing_tests", "unit", "fixer"), ("missing_tests", "system", "tester"),
+                          ("collection", "e2e", "fixer")}, got)
+
+    def test_nothing_is_work_when_every_tier_passes_or_does_not_apply(self):
+        v = self.verdicts(unit=R(covered=95, total=100), system=R(), e2e=R())
+        self.assertEqual([], c.testing_work(v))
+
+    def test_a_shortfall_is_always_the_testers_and_a_red_always_the_fixers(self):
+        for status, session in (("under_floor", "tester"), ("tests_failed", "fixer"), ("collection_failed", "fixer"),
+                                ("not_run", "fixer")):
+            w = c.testing_work([c.TierVerdict("unit", status)])
+            self.assertEqual(session, w[0].session)
+
+
+class TheTestingEnding(unittest.TestCase):
+    W = [c.WorkItem("failing_tests", "unit", "fixer")]
+
+    def test_no_work_passes_the_station(self):
+        d = c.testing_ending([], 3, 5)
+        self.assertEqual(("passed", "testing:passed"), (d.action, d.station_event))
+
+    def test_work_below_the_cap_goes_on(self):
+        d = c.testing_ending(self.W, 2, 5)
+        self.assertEqual(("continue", True), (d.action, d.counted))
+
+    def test_the_fifth_round_with_a_tier_still_failing_caps_the_station(self):
+        d = c.testing_ending(self.W, 5, 5)
+        self.assertEqual(("capped", "testing:capped"), (d.action, d.station_event))
+
+    def test_keep_going_extends_the_budget_by_a_full_set(self):
+        self.assertEqual(10, c.testing_cap(5, 1))
+        self.assertEqual("continue", c.testing_ending(self.W, 5, c.testing_cap(5, 1)).action)
+
+    def test_a_round_that_changed_nothing_ends_the_station_early(self):
+        self.assertEqual("capped", c.testing_ending(self.W, 1, 5, changed=False).action)
+
+    def test_a_round_in_which_no_model_ran_spends_nothing(self):
+        d = c.testing_ending(self.W, 5, 5, model_ran=False)
+        self.assertEqual(("continue", False), (d.action, d.counted))
+
+    def test_the_budget_is_apart_from_the_fixing_loops(self):
+        self.assertEqual(5, TEST["max_rounds"])
+        self.assertNotEqual(TEST["round_marker"], V["round_marker"])
+        self.assertNotEqual(TEST["grant_marker"], V["grant_marker"])
+
+
+class TheTester(unittest.TestCase):
+    def test_the_tester_must_be_another_model_than_the_author(self):
+        self.assertTrue(c.models_independent(TEST["tester_model"], "some-other-model"))
+        self.assertFalse(c.models_independent(TEST["tester_model"], TEST["tester_model"]))
+        self.assertFalse(c.models_independent("Claude-Sonnet-5 ", "claude-sonnet-5"))
+
+    def test_an_unset_model_fails_closed(self):
+        self.assertFalse(c.models_independent(TEST["tester_model"], ""))
+        self.assertFalse(c.models_independent("", "x"))
+
+    def test_the_tester_may_write_test_files_only(self):
+        paths = TEST["test_paths"]
+        ok = ["platform/manager/internal/x/y_test.go", "runtimes/claude/a.test.js", ".github/tests/x.test.sh",
+              "platform/console/ui/src/a.test.tsx", "platform/console/ui/e2e/a.spec.ts"]
+        self.assertEqual([], c.tester_patch_refusals(ok, paths))
+        self.assertEqual(["platform/manager/internal/x/y.go"],
+                         c.tester_patch_refusals(ok + ["platform/manager/internal/x/y.go"], paths))
+
+    def test_a_fixer_may_not_edit_what_the_tester_wrote(self):
+        self.assertEqual(["a_test.go"], c.fixer_patch_refusals(["a_test.go", "a.go"], ["a_test.go"]))
+        self.assertEqual([], c.fixer_patch_refusals(["a.go"], ["a_test.go"]))
+
+    def test_the_tester_is_shown_no_transcript(self):
+        self.assertFalse(c.tester_may_see("x/transcript-1.jsonl"))
+        self.assertFalse(c.tester_may_see("dispatch/report.json"))
+        self.assertTrue(c.tester_may_see("openspec/changes/x/design.md"))
+
+    def test_a_glob_double_star_crosses_directories_and_single_star_does_not(self):
+        self.assertTrue(c.path_matches("a/b/c_test.go", ["**/*_test.go"]))
+        self.assertTrue(c.path_matches("c_test.go", ["**/*_test.go"]))
+        self.assertFalse(c.path_matches("a/b/c.go", ["**/*_test.go"]))
+        self.assertFalse(c.path_matches("a/b/c.txt", ["a/*"]))
+
+
+class TheMergeState(unittest.TestCase):
+    GEN = TEST["generated_paths"]
+
+    def ready(self, state, **kw):
+        return c.merge_ready(state, generated_paths=self.GEN, **kw)
+
+    def test_every_merge_state_has_an_answer(self):
+        for st in c.MERGE_STATES:
+            self.assertIn(self.ready(st, conflicted=["x.go"]).action,
+                          {"mergeable", "update", "ask", "defer", "regenerate"})
+
+    def test_only_a_clean_head_is_mergeable(self):
+        for st in ("CLEAN", "HAS_HOOKS", "UNSTABLE"):
+            self.assertEqual("mergeable", self.ready(st).action)
+        for st in ("BEHIND", "DIRTY", "BLOCKED", "DRAFT", "UNKNOWN"):
+            self.assertNotEqual("mergeable", self.ready(st).action)
+
+    def test_a_failed_build_is_work_and_outranks_a_clean_state(self):
+        self.assertEqual("work", self.ready("CLEAN", checks_failed=1).action)
+
+    def test_a_head_behind_its_base_is_updated(self):
+        d = self.ready("BEHIND")
+        self.assertEqual(("update", "end:continue"), (d.action, d.loop_event))
+
+    def test_a_conflict_in_only_generated_files_is_regenerated(self):
+        d = self.ready("DIRTY", conflicted=["chart/crds/agentops.dev_pipelines.yaml", "platform/manager/api/v1alpha1/zz_generated.deepcopy.go"])
+        self.assertEqual("regenerate", d.action)
+
+    def test_a_conflict_in_a_hand_written_file_is_asked_and_never_resolved(self):
+        d = self.ready("DIRTY", conflicted=["chart/crds/a.yaml", "platform/manager/main.go"])
+        self.assertEqual(("ask", "end:waiting"), (d.action, d.loop_event))
+
+    def test_a_conflict_whose_files_are_unknown_is_asked(self):
+        self.assertEqual("ask", self.ready("DIRTY").action)
+
+    def test_an_open_thread_or_unpassed_tests_hold_a_clean_head(self):
+        self.assertEqual("defer", self.ready("CLEAN", thread_open=True).action)
+        self.assertEqual("testing", self.ready("CLEAN", testing_passed=False).action)
+
+    def test_an_unknown_state_is_an_error(self):
+        with self.assertRaises(ValueError):
+            c.merge_ready("MERGED")
+
+    def test_a_clean_round_ends_mergeable_only_on_a_mergeable_head(self):
+        self.assertEqual("mergeable", c.ending("clean", 1, 5).action)
+        self.assertEqual("continue", c.ending("clean", 1, 5, merge_state="BEHIND").action)
+        d = c.ending("clean", 1, 5, merge_state="DIRTY", conflicted=["a.go"], generated_paths=self.GEN)
+        self.assertEqual(("waiting", "end:waiting"), (d.action, d.loop_event))
+        self.assertEqual("continue", c.ending("clean", 1, 5, checks_failed=1).action)
+        self.assertNotEqual("mergeable", c.ending("clean", 1, 5, testing_passed=False).action)
+
+    def test_a_carry_marks_a_head_green_only_when_it_can_merge(self):
+        for st, green in (("CLEAN", True), ("BEHIND", False), ("DIRTY", False), ("UNKNOWN", False)):
+            pr = c.PullRequest(True, "OPEN", frozenset(), refs=7, ci_conclusion="success", merge_state=st)
+            d = c.carry_fix(V, pr, c.Line(frozenset({RUN})), WRITER)
+            self.assertEqual("ci:green_clean" if green else "", d.loop_event, st)
+
+    def test_the_cli_decides_the_new_decisions(self):
+        facts = {"merge_state": "DIRTY", "conflicted": ["x.go"], "generated_paths": self.GEN}
+        rc, out = TheCommandLine.run_cli(None, "decide", "merge_ready", stdin=json.dumps(facts))
+        self.assertEqual("ask", json.loads(out)["action"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

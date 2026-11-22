@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+"""coverage-diff.py, testing-report.py and merge-sync.py, with no network and no real repository."""
+from __future__ import annotations
+
+import importlib.util
+import io
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+
+SCRIPTS = pathlib.Path(__file__).resolve().parents[1] / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+import conveyor  # noqa: E402
+
+V = json.loads((SCRIPTS.parent / "review-triage.json").read_text())
+
+
+def load(name):
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), SCRIPTS / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+cd = load("coverage-diff")
+tr = load("testing-report")
+ms = load("merge-sync")
+
+DIFF = """diff --git a/platform/manager/internal/x/x.go b/platform/manager/internal/x/x.go
+--- a/platform/manager/internal/x/x.go
++++ b/platform/manager/internal/x/x.go
+@@ -1,0 +2,4 @@
++a
++b
++c
++d
+@@ -20 +30 @@
+-old
++new
+diff --git a/platform/console/ui/src/a.tsx b/platform/console/ui/src/a.tsx
+--- a/platform/console/ui/src/a.tsx
++++ b/platform/console/ui/src/a.tsx
+@@ -0,0 +1,2 @@
++x
++y
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+-a
++b
+diff --git a/old.go b/old.go
+--- a/old.go
++++ /dev/null
+@@ -1,3 +0,0 @@
+-a
+"""
+
+GOPROF = """mode: atomic
+github.com/o/r/platform/manager/internal/x/x.go:2.1,3.5 2 1
+github.com/o/r/platform/manager/internal/x/x.go:4.1,5.5 2 0
+github.com/o/r/platform/manager/internal/x/x.go:30.1,30.9 1 1
+"""
+
+
+class TheDiff(unittest.TestCase):
+    def test_added_lines_per_file_and_deletions_and_deleted_files_are_ignored(self):
+        d = cd.parse_diff(DIFF)
+        self.assertEqual({2, 3, 4, 5, 30}, d["platform/manager/internal/x/x.go"])
+        self.assertEqual({1, 2}, d["platform/console/ui/src/a.tsx"])
+        self.assertNotIn("old.go", d)
+
+    def test_a_single_line_hunk_has_an_implied_count_of_one(self):
+        self.assertEqual({30}, cd.parse_diff("+++ b/f.go\n@@ -20 +30 @@\n")["f.go"])
+
+
+class TheParsers(unittest.TestCase):
+    def test_go_blocks_cover_every_line_they_span_and_any_run_block_covers_a_line(self):
+        g = cd.parse_go(GOPROF)["github.com/o/r/platform/manager/internal/x/x.go"]
+        self.assertEqual({2: True, 3: True, 4: False, 5: False, 30: True}, g)
+        g2 = cd.parse_go("mode: set\nf.go:1.1,2.2 1 0\nf.go:2.1,3.2 1 1\n")["f.go"]
+        self.assertTrue(g2[2])
+
+    def test_lcov(self):
+        r = cd.parse_lcov("SF:ui/src/a.tsx\nDA:1,3\nDA:2,0\nend_of_record\n")
+        self.assertEqual({1: True, 2: False}, r["ui/src/a.tsx"])
+
+    def test_cobertura(self):
+        xml = '<coverage><packages><package><classes><class filename="a/b.py"><lines>' \
+              '<line number="1" hits="2"/><line number="2" hits="0"/></lines></class></classes></package></packages></coverage>'
+        self.assertEqual({1: True, 2: False}, cd.parse_cobertura(xml)["a/b.py"])
+
+
+class TheMeasure(unittest.TestCase):
+    T = V["testing"]
+
+    def run_tier(self, tier, records, maps=()):
+        return cd.measure(cd.parse_diff(DIFF), records, self.T["domains"][tier], self.T["excluded_from_coverage"], list(maps))
+
+    def test_only_executable_changed_lines_in_the_domain_count(self):
+        r = self.run_tier("unit", [cd.parse_go(GOPROF)])
+        self.assertEqual((3, 7), (r["covered"], r["total"]))   # 5 measured lines in x.go, 2 unmeasured in a.tsx
+        self.assertEqual({"platform/manager/internal/x/x.go": [4, 5]}, {k: v for k, v in r["files"].items() if "manager" in k})
+
+    def test_a_changed_file_no_input_mentions_counts_as_uncovered(self):
+        r = self.run_tier("unit", [cd.parse_go(GOPROF)])
+        self.assertIn("platform/console/ui/src/a.tsx", r["unmeasured"])
+        self.assertEqual([1, 2], r["files"]["platform/console/ui/src/a.tsx"])
+
+    def test_a_file_outside_the_tiers_domain_is_not_its_to_measure(self):
+        r = self.run_tier("system", [cd.parse_go(GOPROF)])
+        self.assertEqual(1, r["domain_files"])
+        self.assertEqual((3, 5), (r["covered"], r["total"]))
+
+    def test_a_backend_only_change_has_no_e2e_domain(self):
+        d = {"platform/manager/internal/x/x.go": {1, 2}}
+        r = cd.measure(d, [], self.T["domains"]["e2e"], self.T["excluded_from_coverage"], [])
+        self.assertEqual((0, 0), (r["domain_files"], r["total"]))
+
+    def test_inputs_that_hold_no_record_are_not_collected(self):
+        self.assertFalse(self.run_tier("system", [{}])["collected"])
+        self.assertFalse(self.run_tier("system", [])["collected"])
+        self.assertTrue(self.run_tier("system", [cd.parse_go(GOPROF)])["collected"])
+
+    def test_test_files_and_generated_files_are_never_measured(self):
+        d = {"a/b_test.go": {1}, "a/zz_generated.deepcopy.go": {1}, "a/b.go": {1}}
+        r = cd.measure(d, [{"a/b.go": {1: True}}], self.T["domains"]["unit"], self.T["excluded_from_coverage"], [])
+        self.assertEqual((1, 1, 1), (r["covered"], r["total"], r["domain_files"]))
+
+    def test_an_explicit_map_resolves_a_module_path_that_names_no_directory(self):
+        prof = cd.parse_go("mode: set\nagentops/manager/internal/x/x.go:2.1,3.5 2 1\n")
+        r = self.run_tier("system", [prof], maps=[("agentops/manager", "platform/manager")])
+        self.assertEqual([], r["unmeasured"])
+
+    def test_two_inputs_union_their_coverage(self):
+        a = {"f.go": {1: False, 2: True}}
+        b = {"f.go": {1: True}}
+        r = cd.measure({"f.go": {1, 2}}, [a, b], ["**/*.go"], [], [])
+        self.assertEqual((2, 2), (r["covered"], r["total"]))
+
+    def test_the_command_line_reads_files_and_prints_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            diff, prof = pathlib.Path(d, "d.diff"), pathlib.Path(d, "p.out")
+            diff.write_text(DIFF); prof.write_text(GOPROF)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                rc = cd.main(["--tier", "system", "--go", str(prof), "--diff-file", str(diff)])
+        j = json.loads(out.getvalue())
+        self.assertEqual((0, "system", True), (rc, j["tier"], j["collected"]))
+
+    def test_a_missing_input_file_is_an_empty_record_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as d:
+            diff = pathlib.Path(d, "d.diff"); diff.write_text(DIFF)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                cd.main(["--tier", "e2e", "--lcov", str(pathlib.Path(d, "absent.lcov")), "--diff-file", str(diff)])
+        self.assertFalse(json.loads(out.getvalue())["collected"])
+
+
+def cov(covered, total, files=None, collected=True, domain=1):
+    return {"covered": covered, "total": total, "collected": collected, "domain_files": domain,
+            "files": files or {}, "unmeasured": []}
+
+
+class TheVerdict(unittest.TestCase):
+    def test_every_tier_green_passes(self):
+        j = tr.judge(V, {"unit": cov(95, 100), "system": cov(8, 10), "e2e": cov(0, 0, domain=0)}, {})
+        self.assertEqual(["pass", "pass", "not_applicable"], [v["status"] for v in j["verdicts"]])
+        self.assertEqual([], j["work"])
+
+    def test_a_shortfall_is_work_for_the_tester(self):
+        j = tr.judge(V, {"unit": cov(85, 100), "system": cov(0, 0, domain=0), "e2e": cov(0, 0, domain=0)}, {})
+        self.assertEqual([("missing_tests", "unit", "tester")], [(w["kind"], w["tier"], w["session"]) for w in j["work"]])
+
+    def test_a_failed_tier_is_work_for_the_fixer(self):
+        j = tr.judge(V, {"unit": cov(95, 100), "system": cov(1, 1), "e2e": None}, {"system": "failed", "e2e": "skipped"})
+        self.assertEqual({("failing_tests", "system", "fixer"), ("not_run", "e2e", "fixer")},
+                         {(w["kind"], w["tier"], w["session"]) for w in j["work"]})
+
+    def test_a_ran_tier_with_no_coverage_file_fails_collection(self):
+        j = tr.judge(V, {"unit": cov(95, 100), "system": None, "e2e": cov(0, 0, domain=0)}, {})
+        self.assertEqual("collection_failed", j["verdicts"][1]["status"])
+
+    def test_a_tier_with_no_domain_file_never_fails_on_coverage(self):
+        j = tr.judge(V, {"unit": cov(0, 0, collected=False, domain=0), "system": None, "e2e": None},
+                     {"system": "passed"})
+        self.assertEqual("not_applicable", j["verdicts"][0]["status"])
+
+
+class TheReport(unittest.TestCase):
+    J = tr.judge(V, {"unit": cov(85, 100, {"platform/manager/internal/x/x.go": [4, 5, 6, 9]}),
+                     "system": cov(8, 10, {"platform/manager/internal/y/y.go": [1]}),
+                     "e2e": cov(0, 0, domain=0)}, {})
+
+    def test_the_report_carries_the_marker_the_round_and_each_tier(self):
+        md = tr.render(V, self.J, 2, 5)
+        self.assertTrue(md.startswith(V["testing"]["coverage_marker"]))
+        self.assertIn("Round 2 of 5", md)
+        for tier in ("unit", "system", "e2e"):
+            self.assertIn(f"| {tier} |", md)
+        self.assertIn("85.0% (85 of 100)", md)
+        self.assertIn("| e2e | none | n/a | not applicable |", md)
+
+    def test_the_report_names_files_and_line_ranges_and_quotes_no_source(self):
+        md = tr.render(V, self.J, 1, 5)
+        self.assertIn("`platform/manager/internal/x/x.go` (unit): lines 4-6, 9", md)
+        self.assertNotIn("```", md)
+
+    def test_the_verdict_line_follows_the_state(self):
+        self.assertIn("holds its floor", tr.render(V, tr.judge(V, {"unit": cov(1, 1), "system": cov(0, 0, domain=0),
+                                                                    "e2e": cov(0, 0, domain=0)}, {}), 1, 5, "passed"))
+        self.assertIn("A person decides", tr.render(V, self.J, 5, 5, "capped"))
+
+    def test_ranges(self):
+        self.assertEqual("1-3, 7, 9-10", tr.ranges([1, 2, 3, 7, 9, 10]))
+        self.assertTrue(tr.ranges(range(1, 100, 2)).endswith("more"))
+
+    def test_a_rendered_report_holds_no_host_and_no_person(self):
+        md = tr.render(V, self.J, 1, 5)
+        for needle in ("@", "http", "://"):
+            self.assertNotIn(needle, md)
+
+
+class ThePost(unittest.TestCase):
+    def test_no_marked_comment_creates_one_and_a_marked_one_is_edited(self):
+        calls = []
+
+        def fake(*args, stdin=None):
+            calls.append((args, stdin))
+            if args[:2] == ("api", "--paginate"):
+                return json.dumps(fake.comments)
+            return ""
+        real = tr._gh
+        tr._gh = fake
+        try:
+            fake.comments = [[{"id": 1, "body": "hello"}]]
+            self.assertEqual("created the comment", tr.post(V, 9, "body", repo="o/r"))
+            self.assertEqual("POST", calls[-1][0][2])
+            fake.comments = [[{"id": 1, "body": "hello"}, {"id": 7, "body": V["testing"]["coverage_marker"] + "\nold"}]]
+            self.assertEqual("edited comment 7", tr.post(V, 9, "new", repo="o/r"))
+            self.assertEqual(("api", "--method", "PATCH", "repos/o/r/issues/comments/7"), calls[-1][0][:4])
+        finally:
+            tr._gh = real
+
+
+def sh(cwd, *args):
+    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True,
+                          env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+                               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}).stdout
+
+
+class TheSync(unittest.TestCase):
+    """A bare `origin` and a clone, so `origin/master` is the base exactly as in a pull request."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = pathlib.Path(self.tmp.name)
+        sh(root, "git", "init", "-q", "--bare", "-b", "master", "origin.git")
+        sh(root, "git", "clone", "-q", "origin.git", "work")
+        self.w = root / "work"
+        (self.w / "chart/crds").mkdir(parents=True)
+        for f, t in (("a.go", "one\n"), ("chart/crds/c.yaml", "base: 1\n")):
+            (self.w / f).write_text(t)
+        sh(self.w, "git", "add", "-A"); sh(self.w, "git", "commit", "-qm", "base")
+        sh(self.w, "git", "push", "-q", "origin", "HEAD:master")
+        sh(self.w, "git", "checkout", "-qb", "change/x")
+        self.v = json.loads(json.dumps(V))
+        self.cwd = os.getcwd()
+        os.chdir(self.w)
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+        self.tmp.cleanup()
+
+    def base_commit(self, f, text):
+        sh(self.w, "git", "checkout", "-q", "master")
+        pathlib.Path(self.w, f).write_text(text)
+        sh(self.w, "git", "add", "-A"); sh(self.w, "git", "commit", "-qm", "base moves")
+        sh(self.w, "git", "push", "-q", "origin", "master")
+        sh(self.w, "git", "checkout", "-q", "change/x")
+
+    def branch_commit(self, f, text):
+        pathlib.Path(self.w, f).write_text(text)
+        sh(self.w, "git", "add", "-A"); sh(self.w, "git", "commit", "-qm", "branch moves")
+
+    def test_a_branch_that_has_the_base_is_uptodate(self):
+        self.assertEqual("uptodate", ms.sync("master", self.v, "m")["action"])
+
+    def test_a_behind_branch_merges_clean_and_commits(self):
+        self.branch_commit("b.go", "mine\n")
+        self.base_commit("c.go", "theirs\n")
+        r = ms.sync("master", self.v, "merge base")
+        self.assertEqual(("updated", []), (r["action"], r["files"]))
+        self.assertTrue((self.w / "c.go").exists() and (self.w / "b.go").exists())
+        self.assertEqual("merge base", sh(self.w, "git", "log", "-1", "--format=%s").strip())
+
+    def test_a_hand_written_conflict_is_asked_and_leaves_the_tree_untouched(self):
+        self.branch_commit("a.go", "mine\n")
+        self.base_commit("a.go", "theirs\n")
+        head = sh(self.w, "git", "rev-parse", "HEAD").strip()
+        r = ms.sync("master", self.v, "m")
+        self.assertEqual(("asked", ["a.go"]), (r["action"], r["files"]))
+        self.assertEqual(head, sh(self.w, "git", "rev-parse", "HEAD").strip())
+        self.assertEqual("mine\n", (self.w / "a.go").read_text())
+        self.assertEqual("", sh(self.w, "git", "status", "--porcelain").strip())
+
+    def test_a_generated_only_conflict_is_regenerated_by_the_repositorys_script(self):
+        self.v["testing"]["regenerators"] = [{"paths": ["chart/crds/**"], "run": "echo regenerated > chart/crds/c.yaml"}]
+        self.branch_commit("chart/crds/c.yaml", "branch: 1\n")
+        self.base_commit("chart/crds/c.yaml", "base: 2\n")
+        r = ms.sync("master", self.v, "m")
+        self.assertEqual(("regenerated", ["chart/crds/c.yaml"]), (r["action"], r["files"]))
+        self.assertEqual("regenerated\n", (self.w / "chart/crds/c.yaml").read_text())
+        self.assertEqual("", sh(self.w, "git", "status", "--porcelain").strip())
+
+    def test_a_failing_regenerator_asks_and_commits_nothing(self):
+        self.v["testing"]["regenerators"] = [{"paths": ["chart/crds/**"], "run": "false"}]
+        self.branch_commit("chart/crds/c.yaml", "branch: 1\n")
+        self.base_commit("chart/crds/c.yaml", "base: 2\n")
+        head = sh(self.w, "git", "rev-parse", "HEAD").strip()
+        r = ms.sync("master", self.v, "m")
+        self.assertEqual("asked", r["action"])
+        self.assertEqual(head, sh(self.w, "git", "rev-parse", "HEAD").strip())
+
+    def test_a_mixed_conflict_is_asked_whole(self):
+        self.branch_commit("a.go", "mine\n"); self.branch_commit("chart/crds/c.yaml", "branch: 1\n")
+        self.base_commit("a.go", "theirs\n"); self.base_commit("chart/crds/c.yaml", "base: 2\n")
+        r = ms.sync("master", self.v, "m")
+        self.assertEqual(("asked", ["a.go", "chart/crds/c.yaml"]), (r["action"], r["files"]))
+
+    def test_the_command_line_exits_3_when_it_asks(self):
+        self.branch_commit("a.go", "mine\n"); self.base_commit("a.go", "theirs\n")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = ms.main(["--base", "master"])
+        self.assertEqual((3, "asked"), (rc, json.loads(out.getvalue())["action"]))
+
+    def test_regenerators_cover_only_the_files_they_name(self):
+        rg = [{"paths": ["a/**"], "run": "x"}, {"paths": ["b/**"], "run": "y"}, {"paths": ["a/**"], "run": "x"}]
+        self.assertEqual(["x"], ms.regenerators_for(["a/f"], rg))
+        self.assertEqual(["x", "y"], ms.regenerators_for(["a/f", "b/g"], rg))
+
+    def test_a_marker_in_a_resolved_file_is_detected(self):
+        (self.w / "m.txt").write_text("<<<<<<< ours\nx\n=======\ny\n>>>>>>> theirs\n")
+        self.assertTrue(ms.has_marker("m.txt"))
+        self.assertFalse(ms.has_marker("a.go"))
+        self.assertFalse(ms.has_marker("absent"))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)
