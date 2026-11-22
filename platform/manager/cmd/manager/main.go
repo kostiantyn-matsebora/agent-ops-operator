@@ -136,6 +136,18 @@ func maxActiveConversations() (n int, deprecated bool) {
 	return 5, false
 }
 
+// maxActiveMembers resolves the cap on simultaneously ACTIVE Coordinator
+// members — a conversation an `invoke` created, CausedBy set — independent
+// of maxActiveConversations (separate-member-slot-pool design D-5). Unset or
+// invalid falls back to 5, exactly like the conversations pool. MAX_RUNTIMES,
+// the conversations pool's own deprecated alias, never feeds this pool.
+func maxActiveMembers() int {
+	if v, err := strconv.Atoi(os.Getenv("MAX_ACTIVE_MEMBERS")); err == nil && v > 0 {
+		return v
+	}
+	return 5
+}
+
 // bootstrapContextClaim is the release-wide context claim, the bottom of the
 // persistence chain.
 //
@@ -392,6 +404,9 @@ func main() {
 		setupLog.Info("MAX_RUNTIMES is deprecated and is removed after one release — "+
 			"set MAX_ACTIVE_CONVERSATIONS (chart: maxActiveConversations) instead", "cap", maxActive)
 	}
+	// Independent of maxActive: a Coordinator member draws from its own pool,
+	// never the conversations one (separate-member-slot-pool).
+	maxMembers := maxActiveMembers()
 	// ONE breaker, both edges. The HTTP API feeds it runs that could not reach
 	// their context; the reconciler feeds it pods that could not attach their
 	// volume. Two instances would be two judgements about whether storage is
@@ -405,6 +420,7 @@ func main() {
 		Namespaces:             namespaces,
 		Scheme:                 mgr.GetScheme(),
 		MaxActiveConversations: maxActive,
+		MaxActiveMembers:       maxMembers,
 		// Under nats a conversation is a record, not a Kubernetes object: an
 		// owner reference to it points at nothing and the garbage collector
 		// deletes the pod and ConfigMap the moment they are created.
@@ -593,6 +609,7 @@ func main() {
 		MaxQueuedConversations: envIntNonNegative("MAX_QUEUED_CONVERSATIONS", 50),
 		StorageBreaker:         breaker,
 		MaxActiveConversations: maxActive,
+		MaxActiveMembers:       maxMembers,
 		AdapterToken:           os.Getenv("ADAPTER_TOKEN"),
 		// /control-plane/*'s own dedicated secret — deliberately a distinct
 		// env var from ADAPTER_TOKEN, never derived from it (design.md).

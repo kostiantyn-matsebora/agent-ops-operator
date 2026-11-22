@@ -59,6 +59,11 @@ type statusResponse struct {
 	Now    string `json:"now"`
 
 	RuntimeSlots runtimeSlots `json:"runtimeSlots"`
+	// MemberSlots is the members pool's own sibling of RuntimeSlots, same
+	// shape, additive (separate-member-slot-pool design D-6): a Coordinator
+	// member — a conversation an `invoke` created, CausedBy set — draws from
+	// its own independent ceiling, never RuntimeSlots'.
+	MemberSlots runtimeSlots `json:"members"`
 	// Queues are per-adapter op depths with the identity of the oldest stuck
 	// item — the "which one" that a metric label must never carry.
 	Queues    []chat.QueueStat `json:"queues"`
@@ -100,7 +105,7 @@ type cooldownStat struct {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	slots, err := s.runtimeSlots(ctx)
+	convSlots, memberSlots, err := s.runtimeSlots(ctx)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -109,7 +114,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Version:      s.Version,
 		Leader:       s.leaderIdentity(ctx),
 		Now:          time.Now().UTC().Format(time.RFC3339Nano),
-		RuntimeSlots: slots,
+		RuntimeSlots: convSlots,
+		MemberSlots:  memberSlots,
 		Queues:       []chat.QueueStat{},
 		Cooldowns:    []cooldownStat{},
 	}
@@ -230,29 +236,34 @@ func (s *Server) listenPort() string {
 	return ":8080"
 }
 
-// runtimeSlots counts capacity the way admission does: live pods against the
-// ceiling, and conversations that want a pod and have none.
-func (s *Server) runtimeSlots(ctx context.Context) (runtimeSlots, error) {
+// runtimeSlots counts capacity the way admission does: live pods against
+// each pool's own ceiling, and conversations that want a pod and have none —
+// split into the same two independent pools admission uses
+// (separate-member-slot-pool design D-1/D-6): a Coordinator member, CausedBy
+// set, counts against members; everything else, including a conversation
+// this call could not read, counts against conversations.
+func (s *Server) runtimeSlots(ctx context.Context) (conversations, members runtimeSlots, err error) {
 	var pods corev1.PodList
 	if err := s.Client.List(ctx, &pods, client.InNamespace(s.Namespaces.Conversations),
 		client.MatchingLabels{runtimepod.LabelApp: runtimepod.LabelAppValue}); err != nil {
-		return runtimeSlots{}, err
+		return runtimeSlots{}, runtimeSlots{}, err
 	}
 	hasPod := map[string]bool{}
-	inUse := 0
+	inUse := map[bool]int{}
 	for i := range pods.Items {
 		p := &pods.Items[i]
 		if p.Status.Phase != corev1.PodRunning && p.Status.Phase != corev1.PodPending {
 			continue
 		}
-		inUse++
-		hasPod[p.Labels[runtimepod.LabelConversation]] = true
+		name := p.Labels[runtimepod.LabelConversation]
+		hasPod[name] = true
+		inUse[s.isMemberConversation(ctx, name)]++
 	}
 	convs, err := s.Conversations.List(ctx, state.ByAll, "")
 	if err != nil {
-		return runtimeSlots{}, err
+		return runtimeSlots{}, runtimeSlots{}, err
 	}
-	waiting := 0
+	waiting := map[bool]int{}
 	for i := range convs {
 		c := &convs[i]
 		if c.DeletionRequestedAt != nil || hasPod[c.Name] {
@@ -269,10 +280,21 @@ func (s *Server) runtimeSlots(ctx context.Context) (runtimeSlots, error) {
 			continue
 		}
 		if len(dispatch.PendingInputs(c)) > 0 || c.Inflight != nil {
-			waiting++
+			waiting[c.CausedBy != nil]++
 		}
 	}
-	return runtimeSlots{InUse: inUse, Max: s.MaxActiveConversations, Waiting: waiting}, nil
+	conversations = runtimeSlots{InUse: inUse[false], Max: s.MaxActiveConversations, Waiting: waiting[false]}
+	members = runtimeSlots{InUse: inUse[true], Max: s.MaxActiveMembers, Waiting: waiting[true]}
+	return conversations, members, nil
+}
+
+// isMemberConversation looks up the conversation a live pod's label names
+// and reports whether it is a Coordinator member — the same conservative
+// reading admission's poolOf uses: a record this call cannot read counts as
+// a plain conversation, never a member.
+func (s *Server) isMemberConversation(ctx context.Context, name string) bool {
+	conv, _, err := s.Conversations.Get(ctx, state.Key(name))
+	return err == nil && conv.CausedBy != nil
 }
 
 // MetricsSample renders the same in-memory state /status reports into the
@@ -293,8 +315,11 @@ func (s *Server) MetricsSample() metrics.Sample {
 			})
 		}
 	}
-	if slots, err := s.runtimeSlots(ctx); err == nil {
-		out.RuntimeSlotsInUse, out.RuntimeSlotsMax = slots.InUse, slots.Max
+	if conv, mem, err := s.runtimeSlots(ctx); err == nil {
+		out.RuntimeSlots = []metrics.SlotSample{
+			{Pool: "conversations", InUse: conv.InUse, Max: conv.Max},
+			{Pool: "members", InUse: mem.InUse, Max: mem.Max},
+		}
 	}
 	for _, st := range s.Cooldowns.Stats() {
 		out.CooldownsActive[st.Source] = st.Suppressed

@@ -6,7 +6,7 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../components/States'
 import { Crumbs } from '../components/Crumbs'
-import { STUCK, queueAge, useQueuesPage } from '../../../model/queues'
+import { STUCK, queueAge, useQueuesPage, workQueueTitle } from '../../../model/queues'
 import { PlainText } from '../components/Text'
 import { PipelineName } from '../components/PipelineName'
 import type { StuckReason } from '../../../api/types'
@@ -57,10 +57,7 @@ export function QueuesPage() {
           <Grid hasGutter>
             <GridItem md={6}>
               <Card>
-                <CardTitle>
-                  Work queue — {data.capacity.inUse}/{data.capacity.max} slots,{' '}
-                  {data.capacity.waiting} waiting
-                </CardTitle>
+                <CardTitle>{workQueueTitle(data)}</CardTitle>
                 <CardBody>
                   {data.work.length === 0 ? (
                     <Empty title="Nothing is waiting">

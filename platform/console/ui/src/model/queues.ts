@@ -1,11 +1,16 @@
 import { useQueues } from '../api/hooks'
-import type { DeliveryRow, StuckReason, WorkRow } from '../api/types'
+import type { DeliveryRow, PoolStat, Queues, StuckReason, WorkRow } from '../api/types'
 
 // THE QUEUES PAGE'S FACTS: the view that separates "queued" from "stalled".
 //
 // An agent has not replied — is it queued, or is it stuck? Every row carries
 // an age, and a flag names the CAUSE, because each cause has a different fix.
 // Every look draws these words; none writes its own.
+//
+// TWO POOLS, now that a Coordinator member counts against its own ceiling
+// rather than the conversations pool (separate-member-slot-pool): the
+// conversations pool (`capacity`) always renders, the members pool
+// (`members`) is additive and renders beside it once the backend reports it.
 
 /** The work and delivery queues and the cooldowns, pushed by the stream after a first read. */
 export function useQueuesPage() {
@@ -23,12 +28,34 @@ export const STUCK: Readonly<Record<StuckReason, { title: string; detail: string
   },
   'at-runtime-ceiling': {
     title: 'at runtime ceiling',
-    detail: 'capacity-bound, not broken — raise MAX_ACTIVE_CONVERSATIONS or shed load',
+    detail: 'capacity-bound, not broken — raise MAX_ACTIVE_CONVERSATIONS (conversations) or '
+      + 'MAX_ACTIVE_MEMBERS (members), or shed load',
   },
   'runtime-hung': {
     title: 'runtime hung',
     detail: 'inflight far beyond a typical run — the runtime is hung, not queued',
   },
+}
+
+/** Is this pool at its ceiling — in use at or past its max. A zero max never reads as full. */
+export function atCeiling(pool: PoolStat): boolean {
+  return pool.max > 0 && pool.inUse >= pool.max
+}
+
+/** One pool's reading: "Conversations 2/5 slots, 1 waiting", "— at ceiling" appended when full. */
+export function poolReading(label: string, pool: PoolStat): string {
+  return `${label} ${pool.inUse}/${pool.max} slots, ${pool.waiting} waiting${atCeiling(pool) ? ' — at ceiling' : ''}`
+}
+
+/**
+ * The work queue card's title: the conversations pool, always; the members
+ * pool beside it once the backend reports it (D-6's additive `members`
+ * sibling, mirrored here — absent reads as "not reported yet", never zero).
+ */
+export function workQueueTitle(data: Pick<Queues, 'capacity' | 'members'>): string {
+  const parts = [poolReading('Conversations', data.capacity)]
+  if (data.members) parts.push(poolReading('Members', data.members))
+  return `Work queue — ${parts.join(' · ')}`
 }
 
 /** A queue age: 42s, 7m, 1.5h — or an em dash where there is none. */
