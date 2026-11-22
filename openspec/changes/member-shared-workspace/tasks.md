@@ -1,7 +1,7 @@
 ## 1. API types and snapshot — api-architect
 
 - [ ] 1.1 Add optional `workspace` (`own` default, `shared`) and `repoContext` (`load` default, `omit`) to `CoordinatorAgentEntry` in `platform/manager/api/v1alpha1/`, with enums and doc comments, then regenerate deepcopy and `chart/crds/` with the two `controller-gen` commands from `build-test.md` and verify the generated diff is only those fields
-- [ ] 1.2 Add the owner field (`WorkspaceOwnerID`, name settled in 1.3) and `RepoContext` to `state.ConversationRecord` and the kube and NATS mappings, and verify an absent value round-trips as `own` and `load` through both backends with the state conformance suite
+- [ ] 1.2 Add the owner field `WorkspaceOwnerID` (the name `design.md` proposes, and 1.3 settles only its `/state/conversations` JSON key) and `RepoContext` to `state.ConversationRecord` and the kube and NATS mappings, and verify an absent value round-trips as `own` and `load` through both backends with the state conformance suite
 - [ ] 1.3 Expose the owner field on the `/state/conversations` response in `internal/httpapi/state.go` and verify a conversation without sharing reads as its own owner
 
 ## 2. Owner resolution, readiness and snapshot — backend-developer
