@@ -230,7 +230,7 @@ def cmd_models(args, vocab) -> int:
     tester = args.tester or vocab["testing"]["tester_model"]
     if not conveyor.models_independent(tester, args.author):
         print(f"refused: the tester model ({tester or 'unset'}) is not independent of the author model "
-              f"({args.author or 'unset'}). Set the repository variable AUTHOR_MODEL to the model that writes the code.")
+              f"({args.author or 'unset'}). Set AUTHOR_MODEL, in the cloud environment, to the model the implement routine runs on.")
         return 5
     print(f"the tester ({tester}) is not the author ({args.author})")
     return 0
