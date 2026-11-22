@@ -133,6 +133,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
           ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+          ROUTINE_FIRE_URL_TESTING: ${{ vars.ROUTINE_FIRE_URL_TESTING }}
+          ROUTINE_FIRE_TOKEN_TESTING: ${{ secrets.ROUTINE_FIRE_TOKEN_TESTING }}
+          ROUTINE_FIRE_URL_ARCHIVE: ${{ vars.ROUTINE_FIRE_URL_ARCHIVE }}
+          ROUTINE_FIRE_TOKEN_ARCHIVE: ${{ secrets.ROUTINE_FIRE_TOKEN_ARCHIVE }}
         run: python3 .github/scripts/remote-implement.py
 
   # THE OPEN TRANSITION: a session's own pull request just appeared, carrying
@@ -230,6 +234,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
           ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+          ROUTINE_FIRE_URL_TESTING: ${{ vars.ROUTINE_FIRE_URL_TESTING }}
+          ROUTINE_FIRE_TOKEN_TESTING: ${{ secrets.ROUTINE_FIRE_TOKEN_TESTING }}
+          ROUTINE_FIRE_URL_ARCHIVE: ${{ vars.ROUTINE_FIRE_URL_ARCHIVE }}
+          ROUTINE_FIRE_TOKEN_ARCHIVE: ${{ secrets.ROUTINE_FIRE_TOKEN_ARCHIVE }}
           ISSUE: ${{ steps.testing.outputs.issue }}
           RESUMED: ${{ steps.testing.outputs.resumed }}
         run: |
@@ -318,6 +326,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
           ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+          ROUTINE_FIRE_URL_TESTING: ${{ vars.ROUTINE_FIRE_URL_TESTING }}
+          ROUTINE_FIRE_TOKEN_TESTING: ${{ secrets.ROUTINE_FIRE_TOKEN_TESTING }}
+          ROUTINE_FIRE_URL_ARCHIVE: ${{ vars.ROUTINE_FIRE_URL_ARCHIVE }}
+          ROUTINE_FIRE_TOKEN_ARCHIVE: ${{ secrets.ROUTINE_FIRE_TOKEN_ARCHIVE }}
           ISSUE: ${{ steps.testing.outputs.issue }}
           RESUMED: ${{ steps.testing.outputs.resumed }}
         run: |
@@ -395,6 +407,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
           ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+          ROUTINE_FIRE_URL_TESTING: ${{ vars.ROUTINE_FIRE_URL_TESTING }}
+          ROUTINE_FIRE_TOKEN_TESTING: ${{ secrets.ROUTINE_FIRE_TOKEN_TESTING }}
+          ROUTINE_FIRE_URL_ARCHIVE: ${{ vars.ROUTINE_FIRE_URL_ARCHIVE }}
+          ROUTINE_FIRE_TOKEN_ARCHIVE: ${{ secrets.ROUTINE_FIRE_TOKEN_ARCHIVE }}
           ISSUE: ${{ steps.carry.outputs.fire_issue }}
           LABEL: ${{ steps.carry.outputs.fire_label }}
         run: |

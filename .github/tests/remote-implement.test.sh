@@ -382,6 +382,22 @@ assert_status 0 "$status"
 assert_contains "$out" "fired the testing station for #51"
 unset GH_COMMENTS
 
+it "a station with its OWN routine fires that one: its url and its token, both or neither"
+setup; stub_gh_carried "$BIN" "$TESTING_STANDING" "$PLACED" write; pending_change 51
+event "$EVENT" conveyor:run 51 "github-actions[bot]"
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(ROUTINE_FIRE_URL_TESTING="http://127.0.0.1:$ENDPOINT_PORT/own" ROUTINE_FIRE_TOKEN_TESTING=own-token run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_contains "$out" "fired the testing station for #51"
+assert_contains "$(cat "$RECORD")" "own-token"
+
+it "an own url without its own token is NOT used: the shared routine fires instead"
+setup; stub_gh_carried "$BIN" "$TESTING_STANDING" "$PLACED" write; pending_change 51
+event "$EVENT" conveyor:run 51 "github-actions[bot]"
+out=$(ROUTINE_FIRE_URL_TESTING="http://127.0.0.1:1/own-never" run_it --fire-url "http://127.0.0.1:1/shared-never"); status=$?
+assert_not_contains "$out" "own-never"
+
 it "the implement station's own marker already on the issue does NOT stop the archive station firing"
 setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write; finished_change 51
 printf '<!-- remote-implement:fired -->\nImplementing this issue: started.\n' > "$DIR/comments"; export GH_COMMENTS="$DIR/comments"

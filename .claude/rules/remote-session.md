@@ -55,6 +55,14 @@ is removed. The session opens its PR with NO LABEL and `Refs #<n>`, never
   re-checks and carries the label instead, on `workflow_run` after `ci`.
 - One session at a time. The platform's own auto-fix stays OFF.
 
+**A SESSION IS TITLED AFTER ITS ROUTINE, AND NOTHING ELSE.** The fire request has
+no title field, so every session of one routine reads `agent-ops-operator:
+implement issue` in History. A station with its OWN routine is the only way a
+session names its station: set `ROUTINE_FIRE_URL_<STATION>` (variable) and
+`ROUTINE_FIRE_TOKEN_<STATION>` (secret), `TESTING` or `ARCHIVE`, both or neither.
+Absent, the shared pair fires and the routine's prompt routes by label. The issue
+number cannot be in the title: the issue's comment carries the session link.
+
 **WORKSTATION-ONLY:** local cluster/`helmfile sync`/deploy, the visual
 check, the system pack by hand. A remote session records these as not
 performed, not done. Cluster tier is DISPATCHED

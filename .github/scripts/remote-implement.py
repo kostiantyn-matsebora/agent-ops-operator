@@ -166,6 +166,13 @@ def main() -> int:
 
     fire_url = (args.fire_url or "").strip()
     token = os.environ.get("ROUTINE_FIRE_TOKEN", "").strip()
+    # A STATION MAY HAVE ITS OWN ROUTINE. The platform titles a session after its routine and the fire
+    # request has no field for a title, so a routine per station is the only way History can say which
+    # station a session is. Both halves must be set, and either absent falls back to the shared pair.
+    own_url = os.environ.get(f"ROUTINE_FIRE_URL_{station.upper()}", "").strip()
+    own_token = os.environ.get(f"ROUTINE_FIRE_TOKEN_{station.upper()}", "").strip()
+    if own_url and own_token:
+        fire_url, token = own_url, own_token
     if fire_url and (any(c in fire_url for c in "\r\n\t ")
                      or not fire_url.lower().startswith(("http://", "https://"))):
         comment(args.repo, number,
