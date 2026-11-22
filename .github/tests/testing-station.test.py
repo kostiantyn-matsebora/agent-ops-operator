@@ -633,6 +633,15 @@ class TheRoutine(unittest.TestCase):
         impl = (SCRIPTS.parents[1] / ".github/routines/implement-issue.md").read_text()
         self.assertIn("`station:testing` | testing | `.github/routines/test-change.md`", impl)
 
+    def test_a_cloud_session_dispatches_the_system_tier_with_coverage_on(self):
+        self.assertIn("gh workflow run system-full.yml", self.TEXT)
+        self.assertIn("-f cover=true", self.TEXT)
+        for wf in ("system-full.yml", "system-smoke.yml"):
+            text = (SCRIPTS.parents[1] / ".github/workflows" / wf).read_text()
+            self.assertIn("cover:", text)
+            self.assertIn("cover: ${{ inputs.cover", text)
+        self.assertIn("SYSTEM_COVER: ${{ inputs.cover }}", (SCRIPTS.parents[1] / ".github/workflows/system.yml").read_text())
+
     def test_it_never_asks_the_session_to_read_ci(self):
         self.assertIn("CI IS NOT YOUR RUNNER", self.TEXT)
 

@@ -4,8 +4,10 @@
 and archive stations. A change to the process is a pull request to this file.
 
 **YOU RUN THE TESTS. CI IS NOT YOUR RUNNER.** CI runs the same suites for its own
-gate, and you never read your numbers from it. You run each tier in this
-environment, measure the coverage here, fix, run again, and report.
+gate, and you never read your numbers from its gate. You run each tier, measure the
+coverage yourself, fix, run again, and report. The ONE exception is a cluster a cloud
+session cannot start: there you dispatch the system tier to a CI run YOU start, with
+coverage on, and read its artifact. You still judge it, fix, and loop.
 
 ## What you were handed
 
@@ -67,23 +69,44 @@ For each round, in order:
    | Node runtimes | `node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage.lcov` | `coverage.lcov` |
    | scripts | `.github/tests/run.sh` under the coverage hook CI uses | `coverage.xml` |
 
-3. **Run the system tier** against a cluster you spawn:
+3. **Run the system tier.** Where it runs depends on where you are:
+
+   | You are on | Run it |
+   |---|---|
+   | a cloud session (`CLAUDE_CODE_REMOTE=1`) | **dispatch it to CI**, below |
+   | a workstation with a container runtime, k3d, helm and kubectl | locally, below |
+
+   **A cloud session cannot run the cluster.** It builds the images and starts k3s, and then every pod
+   sandbox fails (runc cannot write `oom_score_adj` in this sandbox). Do not spend rounds on it.
+   `docs/gotchas` records what was tried. Dispatch instead:
+
+   ```sh
+   gh workflow run system-full.yml --ref "$(git branch --show-current)" -f cover=true
+   run=$(gh run list --workflow system-full.yml --branch "$(git branch --show-current)" --limit 1 --json databaseId -q '.[0].databaseId')
+   gh run watch "$run" --exit-status || true
+   gh run download "$run" -n "system-full-$run" -D <dir>
+   ```
+
+   `system-full.yml` is the full tier, with the real credential CI already holds, so a real-model change
+   is tested on a real runtime. Use `system-smoke.yml` (same `-f cover=true`) when
+   `real-model` said `not_required`. The artifact holds `system-coverage.out` and the diagnostics.
+   **Fix the cause if the run is red. A run that did not finish is a tier that did not pass.**
+
+   Locally:
 
    ```sh
    cd platform/manager
    SYSTEM_COVER=1 SYSTEM_ARTIFACT_DIR=<dir> go test -tags system -count=1 -timeout 55m -v ./test/system/
    ```
 
-   - **Wait for the daemon first.** The session-start hook only starts `dockerd`, detached, and does
-     not wait for it. If `docker info` still fails, run `bash .github/scripts/cloud-bootstrap.sh --verify`
-     once (it starts the daemon), then wait: `for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 2; done`.
-   - **In a cloud session set `SYSTEM_BUILD_CA=/etc/ssl/certs/ca-certificates.crt` too.** The sandbox
-     re-signs HTTPS with its own CA, which a build container does not trust, so `npm ci` in an image
-     build hangs and crashes. The pack bakes that bundle into local copies of its base images.
-   - It needs a container runtime (`docker` or `nerdctl`, check for both and that it answers: `docker info || nerdctl info`), k3d, helm and kubectl. **If one is missing or not running, say which, set nothing
-     passed, and end the station.** A tier you could not run is not a tier that passed.
-   - **Real model required:** `SYSTEM_TIER=full` with the credential in the environment.
-     The real-runtime lane then runs instead of skipping. Give it the credential under the vendor's name, for that process only (see above). A run on the stub does not count.
+   - It needs a container runtime (`docker` or `nerdctl`, check for both and that it answers:
+     `docker info || nerdctl info`), k3d, helm and kubectl. **If one is missing or not running, say
+     which, set nothing passed, and end the station.** A tier you could not run is not a tier that passed.
+   - **Real model required:** `SYSTEM_TIER=full` with the credential in the environment. The
+     real-runtime lane then runs instead of skipping. Give it the credential under the vendor's name,
+     for that process only (see above). A run on the stub does not count.
+   - **Behind an intercepting proxy** set `SYSTEM_BUILD_CA=<the CA bundle>`: the pack then bakes it
+     into the base images and the k3s node.
    - The instrumented operator writes `system-coverage.out` when the pack ends. **No file
      is a collection failure, never "nothing changed".**
 

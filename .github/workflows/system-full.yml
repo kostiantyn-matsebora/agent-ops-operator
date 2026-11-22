@@ -32,6 +32,12 @@ on:
         type: choice
         options: ["", nats, kube]
         default: ""
+      cover:
+        description: >-
+          instrument the manager and keep system-coverage.out in the diagnostics artifact
+          (the testing station dispatches with this on)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -77,4 +83,5 @@ jobs:
     with:
       tier: full
       stateBackend: ${{ inputs.state_backend }}
+      cover: ${{ inputs.cover && '1' || '' }}
     secrets: inherit
