@@ -71,6 +71,8 @@ STATION_EVENTS = (
     "fire:implement",            # the implement station's session starts
     "fire:archive",              # the archive station's session starts
     "testing:start",             # the implement session opened the pull request: the testing station starts
+    "testing:restart",           # the base was merged into the branch: the tests judged an earlier head
+    "testing:resume",            # a person's `conveyor:keep-going` granted another set of testing rounds
     "testing:passed",            # every tier passes and holds its floor on the head
     "testing:capped",            # the testing station spent its budget with a tier still failing
     "round:start",               # a fixing round starts on the change's pull request
@@ -108,6 +110,9 @@ def _station_table() -> dict:
         # station: the fire decision refuses it, and the label must agree.
         t[(s, "fire:implement")] = SKIP if s == "archive" else "implement"
     t[("implement", "testing:start")] = "testing"
+    t[("stalled", "testing:resume")] = "testing"
+    t[("fix", "testing:restart")] = "testing"
+    t[("merge", "testing:restart")] = "testing"
     t[("testing", "testing:passed")] = "fix"
     t[("testing", "testing:capped")] = "stalled"
     return t
@@ -703,7 +708,8 @@ def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_
         if m.action == "ask":
             return Decision("waiting", m.reason, loop_event="end:waiting")
         if m.action in ("update", "regenerate", "work", "testing"):
-            return Decision("continue", m.reason, loop_event="end:continue", dispatch_round=m.action != "testing")
+            # NO ROUND IS STARTED HERE: an update or a regeneration is a push, and the push starts CI and the review.
+            return Decision("continue", m.reason, loop_event="end:continue")
         return Decision("waiting", m.reason, loop_event="end:waiting")
     if kind == "disputed":
         return Decision("waiting", "every item left is a dispute, and a person is owed an answer",

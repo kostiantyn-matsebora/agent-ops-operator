@@ -727,10 +727,20 @@ class TheTestingStationMachine(unittest.TestCase):
     def test_a_spent_budget_stalls_the_line(self):
         self.assertEqual("stalled", c.station_next("testing", "testing:capped"))
 
+    def test_keep_going_resumes_a_stalled_line_into_testing_and_nothing_else(self):
+        self.assertEqual("testing", c.station_next("stalled", "testing:resume"))
+        for s in c.STATION_STATES:
+            if s != "stalled":
+                self.assertIsNone(c.station_next(s, "testing:resume"), s)
+
     def test_nothing_but_passing_leaves_testing_for_fix(self):
         """A fixing round or a green head must not skip the station."""
         self.assertIsNone(c.station_next("testing", "round:start"))
         self.assertIsNone(c.station_next("testing", "pr:green"))
+
+    def test_a_merge_of_the_base_sends_a_fix_or_merge_station_back_to_testing(self):
+        for s in c.STATION_STATES:
+            self.assertEqual("testing" if s in ("fix", "merge") else None, c.station_next(s, "testing:restart"), s)
 
     def test_the_testing_events_move_no_other_state(self):
         for s in c.STATION_STATES:

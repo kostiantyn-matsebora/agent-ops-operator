@@ -222,5 +222,6 @@
         "run": "python3 .github/scripts/docs-generate.py"
       }
     ]
-  }
+  },
+  "conflict_marker": "<!-- conveyor:conflict -->"
 }

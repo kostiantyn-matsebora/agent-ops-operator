@@ -38,6 +38,7 @@ import conveyor_io  # noqa: E402  -- the dispute-thread walk: the archive guard 
 
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
 WORKFLOW = "review-dispatch.yml"
+TESTING_WORKFLOW = "conveyor-testing.yml"
 
 
 class Unreadable(Exception):
@@ -79,7 +80,45 @@ def unanswered(repo: str, pr: int, marker: str) -> list[str]:
         raise Unreadable(str(exc))
 
 
+def unanswered_conflict(repo: str, pr: int, marker: str) -> bool:
+    """The loop asked a person about a merge conflict and nobody has answered. The marker comment is
+    the loop's own, as a dispute's is, and the same reading decides whether a person spoke after it."""
+    try:
+        thread = conveyor_io.parse_paginated(gh("api", f"repos/{repo}/issues/{pr}/comments", "--paginate"))
+    except (Unreadable, ValueError) as exc:
+        raise Unreadable(str(exc))
+    return conveyor_io.conveyor.unanswered_after_marker(thread, marker)
+
+
+def keep_going_pull_requests(repo: str, keep: str) -> list[int]:
+    rows = gh_json("pr", "list", "--repo", repo, "--state", "open", "--limit", "200",
+                   "--label", keep, "--json", "number,headRefName") or []
+    return sorted(int(r["number"]) for r in rows if str(r.get("headRefName", "")).startswith("change/"))
+
+
+def resume_testing(repo: str, vocab: dict, dry_run: bool = False) -> None:
+    """A pull request carrying `conveyor:keep-going` may belong to a testing station that spent its
+    budget. Placing a label under a workflow token starts nothing, so the sweep dispatches the
+    station, which re-reads the budget itself and consumes the label only if it takes effect."""
+    keep = vocab["keep_going_label"]
+    try:
+        prs = keep_going_pull_requests(repo, keep)
+    except Unreadable as exc:
+        print(f"::notice::the `{keep}` pull requests could not be listed ({exc}); no testing station resumed")
+        return
+    for pr in prs:
+        if dry_run:
+            print(f"#{pr}: carries `{keep}`; the testing station would be asked to resume (dry run)")
+            continue
+        try:
+            gh("workflow", "run", TESTING_WORKFLOW, "--repo", repo, "-f", f"pr={pr}")
+            print(f"#{pr}: carries `{keep}`; asked the testing station to resume")
+        except Unreadable as exc:
+            print(f"::notice::#{pr}: the testing station could not be asked ({exc}); the next sweep tries again")
+
+
 def sweep(repo: str, vocab: dict, dry_run: bool = False) -> int:
+    resume_testing(repo, vocab, dry_run)
     fix, waiting = vocab["approve_label"], vocab["loop_labels"]["waiting"]
     marker = vocab["dispute_marker"]
     try:
@@ -98,6 +137,13 @@ def sweep(repo: str, vocab: dict, dry_run: bool = False) -> int:
             continue
         if left:
             print(f"#{pr}: still waiting on {len(left)} unanswered dispute(s): {', '.join(left)}")
+            continue
+        try:
+            if unanswered_conflict(repo, pr, vocab["conflict_marker"]):
+                print(f"#{pr}: still waiting on a person to answer a merge conflict")
+                continue
+        except Unreadable as exc:
+            print(f"::notice::#{pr}: could not read its conflict question ({exc}); left waiting")
             continue
         if dry_run:
             print(f"#{pr}: every dispute is answered or resolved; a round would start (dry run)")

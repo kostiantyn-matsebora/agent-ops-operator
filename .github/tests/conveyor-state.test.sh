@@ -76,7 +76,7 @@ assert_contains "$(grep '^issue edit' "$GH_CALLS")" "--add-label station:archive
 
 it "reads the names from the vocabulary, never from its own text"
 names=$(python3 -c 'import json;v=json.load(open("'"$ROOT"'/.github/review-triage.json"));print(" ".join(sorted(v["station_labels"].values())+sorted(v["loop_labels"].values())))')
-assert_equals "station:archive station:done station:fix station:implement station:merge station:stalled loop:capped loop:mergeable loop:running loop:stalled loop:waiting" "$names"
+assert_equals "station:archive station:done station:fix station:implement station:merge station:stalled station:testing loop:capped loop:mergeable loop:running loop:stalled loop:waiting" "$names"
 
 it "an unknown event is a notice and exit 0, and nothing is edited"
 has "station:fix"

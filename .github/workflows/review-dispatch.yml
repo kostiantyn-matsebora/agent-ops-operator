@@ -658,7 +658,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch -q origin "$SOURCE"
-          for s in land-dispatch.py resolve-review-threads.py conveyor-state.py conveyor.py review-not-clean.py; do
+          for s in land-dispatch.py resolve-review-threads.py conveyor-state.py conveyor.py review-not-clean.py merge-sync.py; do
             git show "origin/$SOURCE:.github/scripts/$s" > "$RUNNER_TEMP/$s"
           done
           git show "origin/$SOURCE:.github/review-triage.json" > "$RUNNER_TEMP/review-triage.json"

@@ -30,6 +30,7 @@ def load(name):
 cd = load("coverage-diff")
 tr = load("testing-report")
 ms = load("merge-sync")
+ts = load("testing-station")
 
 DIFF = """diff --git a/platform/manager/internal/x/x.go b/platform/manager/internal/x/x.go
 --- a/platform/manager/internal/x/x.go
@@ -350,6 +351,155 @@ class TheSync(unittest.TestCase):
         self.assertTrue(ms.has_marker("m.txt"))
         self.assertFalse(ms.has_marker("a.go"))
         self.assertFalse(ms.has_marker("absent"))
+
+
+class TheAdapter(unittest.TestCase):
+    """testing-station.py with the platform replaced: what it reads, writes and labels."""
+
+    def setUp(self):
+        self.io = ts.io
+        self.saved = {k: getattr(self.io, k) for k in ("gh", "comment", "apply_events", "issue_labels", "write_output")}
+        self.events, self.posted, self.outputs, self.gh_calls = [], [], {}, []
+        self.pr = {"isCrossRepository": False, "headRefName": "change/x", "body": "Refs #9", "state": "OPEN", "labels": []}
+        self.labels = frozenset({"conveyor:run", "station:implement"})
+        self.thread = []
+        io = self.io
+
+        def gh(*a, check=True):
+            self.gh_calls.append(a)
+            if a[:2] == ("pr", "view"):
+                return json.dumps(self.pr)
+            if a[0] == "api":
+                return json.dumps(self.thread)
+            return ""
+        io.gh = gh
+        io.comment = lambda repo, target, body: (self.posted.append(body), self.thread.append({"body": body}))
+        io.apply_events = lambda repo, target, station_event="", loop_event="", vocabulary_path=None: self.events.append(station_event)
+        io.issue_labels = lambda repo, issue: self.labels
+        io.write_output = lambda k, v: self.outputs.__setitem__(k, v)
+        self.cwd = os.getcwd()
+        self.tmp = tempfile.TemporaryDirectory()
+        os.chdir(self.tmp.name)
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            setattr(self.io, k, v)
+        os.chdir(self.cwd)
+        self.tmp.cleanup()
+
+    def begin(self):
+        return ts.main(["begin", "--repo", "o/r", "--pr", "5"])
+
+    def round_marker(self, n):
+        return {"body": f"{V['testing']['round_marker']} {n} -->"}
+
+    def test_the_implement_session_opening_its_pull_request_starts_the_station(self):
+        self.assertEqual(0, self.begin())
+        self.assertEqual(["testing:start"], self.events)
+        self.assertEqual(("true", "9", "1", "5"), tuple(self.outputs[k] for k in ("active", "issue", "round", "cap")))
+
+    def test_no_standing_instruction_means_no_station(self):
+        self.labels = frozenset({"station:implement"})
+        self.begin()
+        self.assertEqual(("false", []), (self.outputs["active"], self.events))
+
+    def test_a_fork_or_a_non_change_branch_or_a_closed_pull_request_is_ignored(self):
+        for patch in ({"isCrossRepository": True}, {"headRefName": "feature/x"}, {"state": "MERGED"}, {"body": "no issue"}):
+            self.pr = {**self.pr, **patch}
+            self.outputs.clear(); self.begin()
+            self.assertEqual("false", self.outputs["active"], patch)
+
+    def test_a_station_already_running_is_not_started_again(self):
+        self.labels = frozenset({"conveyor:run", "station:testing"})
+        self.thread = [self.round_marker(1), self.round_marker(2)]
+        self.begin()
+        self.assertEqual(([], "3"), (self.events, self.outputs["round"]))
+
+    def test_the_budget_counts_only_the_stations_own_markers(self):
+        self.labels = frozenset({"conveyor:run", "station:testing"})
+        self.thread = [{"body": V["round_marker"] + " 1 -->"}] * 7
+        self.begin()
+        self.assertEqual("1", self.outputs["round"])
+
+    def test_a_spent_budget_with_no_keep_going_is_exhausted(self):
+        self.labels = frozenset({"conveyor:run", "station:testing"})
+        self.thread = [self.round_marker(i) for i in range(5)]
+        self.begin()
+        self.assertEqual("true", self.outputs["exhausted"])
+
+    def test_keep_going_on_a_stalled_station_is_consumed_and_resumes_it(self):
+        self.labels = frozenset({"conveyor:run", "station:stalled"})
+        self.thread = [self.round_marker(i) for i in range(5)]
+        self.pr["labels"] = [{"name": "conveyor:keep-going"}]
+        self.begin()
+        self.assertEqual(["testing:resume"], self.events)
+        self.assertIn(("issue", "edit", "5", "--repo", "o/r", "--remove-label", "conveyor:keep-going"), self.gh_calls)
+        self.assertEqual(("10", "6", "false"), (self.outputs["cap"], self.outputs["round"], self.outputs["exhausted"]))
+
+    def test_a_stalled_line_without_keep_going_stays_stalled(self):
+        self.labels = frozenset({"conveyor:run", "station:stalled"})
+        self.begin()
+        self.assertEqual(("false", []), (self.outputs["active"], self.events))
+
+    def judge(self, tiers, outcomes=(), rnd=1, cap=5, extra=()):
+        files = []
+        for t, c_ in tiers.items():
+            f = pathlib.Path(f"{t}.json"); f.write_text(json.dumps(c_)); files += ["--tier-file", f"{t}={f}"]
+        ts.report._gh = lambda *a, stdin=None: json.dumps([[]]) if a[:2] == ("api", "--paginate") else ""
+        return ts.main(["judge", "--repo", "o/r", "--issue", "9", "--round", str(rnd), "--cap", str(cap), *files,
+                        *[x for o in outcomes for x in ("--outcome", o)], *extra])
+
+    GOOD = {"unit": cov(95, 100), "system": cov(0, 0, domain=0), "e2e": cov(0, 0, domain=0)}
+
+    def test_a_passing_round_posts_the_report_and_moves_the_line_to_fix(self):
+        self.judge(self.GOOD)
+        self.assertEqual(("passed", ["testing:passed"]), (self.outputs["ending"], self.events))
+        self.assertTrue(pathlib.Path("coverage-report/report.md").read_text().startswith(V["testing"]["coverage_marker"]))
+
+    def test_a_shortfall_asks_the_tester_and_a_red_asks_the_fixer(self):
+        self.judge({**self.GOOD, "unit": cov(50, 100)})
+        self.assertEqual(("continue", "true", "false"), tuple(self.outputs[k] for k in ("ending", "tester_work", "fixer_work")))
+        self.outputs.clear()
+        self.judge(self.GOOD, outcomes=["unit=failed"])
+        self.assertEqual(("continue", "false", "true"), tuple(self.outputs[k] for k in ("ending", "tester_work", "fixer_work")))
+
+    def test_the_last_round_with_work_left_stalls_the_line_and_says_how_to_extend(self):
+        self.judge({**self.GOOD, "unit": cov(50, 100)}, rnd=5)
+        self.assertEqual(("capped", ["testing:capped"]), (self.outputs["ending"], self.events))
+        self.assertIn("conveyor:keep-going", self.posted[-1])
+
+    def test_a_round_that_changed_nothing_ends_the_station(self):
+        self.judge({**self.GOOD, "unit": cov(50, 100)}, extra=["--no-change"])
+        self.assertEqual("capped", self.outputs["ending"])
+
+    def test_record_round_posts_the_budgets_marker(self):
+        ts.main(["record-round", "--repo", "o/r", "--issue", "9", "--round", "3"])
+        self.assertTrue(self.posted[0].startswith(V["testing"]["round_marker"] + " 3"))
+
+    def test_models_fail_closed(self):
+        self.assertEqual(0, ts.main(["models", "--author", "claude-opus-x"]))
+        self.assertEqual(5, ts.main(["models", "--author", V["testing"]["tester_model"]]))
+        self.assertEqual(5, ts.main(["models", "--author", ""]))
+
+    def test_check_patch_refuses_a_tester_patch_that_touches_production_code(self):
+        self.assertEqual(0, self.patch_check("tester", "x_test.go"))
+        self.assertEqual(4, self.patch_check("tester", "x.go"))
+
+    def patch_check(self, role, path):
+        repo = pathlib.Path(self.tmp.name, "r")
+        repo.mkdir(exist_ok=True)
+        sh(repo, "git", "init", "-q")
+        (repo / path).write_text("a\n")
+        sh(repo, "git", "add", "-A")
+        patch = pathlib.Path(self.tmp.name, "p.patch")
+        patch.write_text(sh(repo, "git", "diff", "--cached", "--binary"))
+        sh(repo, "git", "rm", "-q", "-f", "--cached", path)
+        (repo / path).unlink()
+        os.chdir(repo)
+        try:
+            return ts.main(["check-patch", "--role", role, "--patch", str(patch)])
+        finally:
+            os.chdir(self.tmp.name)
 
 
 if __name__ == "__main__":
