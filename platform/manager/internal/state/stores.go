@@ -70,10 +70,20 @@ func AdapterStateKey(surface, name, key string) Key {
 // The conversation indexes. Each is the equality lookup a manager path
 // performs on a record's own field; the value is what a caller passes to List.
 var (
-	// ByConversationID looks up the equality match every signal re-delivery,
+	// ByID looks up a conversation by its own backend-minted identity — the
+	// one index a cross-reference such as CausedBy.Parent resolves through,
+	// so a deleted parent stays deleted when a new conversation takes its
+	// name (conversation-identity design D-6). Value: the ID.
+	ByID = NewIndex("id", func(r *ConversationRecord) (string, bool) {
+		return r.ID, r.ID != ""
+	})
+	// ByCorrelationID looks up the equality match every signal re-delivery,
 	// reopen's at-most-one-open check and member reuse perform on a
-	// conversation's own correlation id. Value: the id.
-	ByConversationID = NewIndex("conversationId", func(r *ConversationRecord) (string, bool) {
+	// conversation's own correlation id — an opaque, sender-minted key many
+	// conversations may share over time, never the identity (renamed from
+	// ByConversationID/"conversationId", conversation-identity design D-10).
+	// Value: the correlation id.
+	ByCorrelationID = NewIndex("correlationId", func(r *ConversationRecord) (string, bool) {
 		return r.ConversationID, r.ConversationID != ""
 	})
 	// ByPipelineAndPhase looks up a Pipeline's own conversations in one
@@ -141,7 +151,7 @@ const RunHistoryLimit = 10
 var StoreDeclarations = Declarations{
 	Conversations: Decl[ConversationRecord]{
 		Name:    "conversations",
-		Indexes: []Index[ConversationRecord]{ByConversationID, ByPipelineAndPhase, ByPhase, ByCausedBy, ByNameBase, ByAll},
+		Indexes: []Index[ConversationRecord]{ByID, ByCorrelationID, ByPipelineAndPhase, ByPhase, ByCausedBy, ByNameBase, ByAll},
 	},
 	Runs: Decl[Run]{
 		Name:  "runs",

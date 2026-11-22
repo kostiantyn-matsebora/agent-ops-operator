@@ -113,7 +113,7 @@ func TestEveryOperationFailsLoudlyWhenTheServerIsGone(t *testing.T) {
 	conv := state.ConversationRecord{ProfileRef: "p"}
 	ops := map[string]func() error{
 		"conversations Get":    func() error { _, _, e := b.Stores.Conversations.Get(ctx, "k"); return e },
-		"conversations Create": func() error { _, e := b.Stores.Conversations.Create(ctx, "k", conv); return e },
+		"conversations Create": func() error { _, _, e := b.Stores.Conversations.Create(ctx, "k", conv); return e },
 		"conversations Update": func() error { _, e := b.Stores.Conversations.Update(ctx, "k", "1", conv); return e },
 		"conversations Delete": func() error { return b.Stores.Conversations.Delete(ctx, "k") },
 		"conversations DeleteAt": func() error {
@@ -639,7 +639,7 @@ func TestTheFeedWithItemsEndsRatherThanLoseAnEventItCannotBuild(t *testing.T) {
 	// The parent cannot be read for a moment: delivering a delete would evict a
 	// record that still exists, and skipping would lose the change.
 	a.parent.kv = &scriptedKV{KeyValue: inner, get: always(errInjected)}
-	if _, _, err := a.itemsKV.Create(ctx, runsItemKey(string(parent), "u1"), mustEnvelope(t)); err != nil {
+	if _, err := a.itemsKV.Create(ctx, runsItemKey(string(parent), "u1"), mustEnvelope(t)); err != nil {
 		t.Fatalf("seed item: %v", err)
 	}
 	for {
@@ -701,7 +701,7 @@ func TestTheFeedWithItemsSkipsEntriesItCannotDecodeAndStopsWithItsCaller(t *test
 func TestTheOrphanSweepReportsWhatItCannotRemove(t *testing.T) {
 	b := openBackend(t, sharedTestConn(t), newScope(t))
 	ctx := shortCtx(t)
-	if _, _, err := b.runsKV.Create(ctx, runsItemKey("ghost", "u"), mustEnvelope(t)); err != nil {
+	if _, err := b.runsKV.Create(ctx, runsItemKey("ghost", "u"), mustEnvelope(t)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	inner := b.owned.runsKV

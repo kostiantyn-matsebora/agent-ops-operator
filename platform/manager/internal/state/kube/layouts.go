@@ -46,7 +46,10 @@ func ConversationLayout() Layout[state.ConversationRecord] {
 		StatusDrift: conversationStatusDrift,
 		Finalizers:  func(rec state.ConversationRecord) []string { return rec.Finalizers },
 		Prefilter: map[string]func(client.Object, string) bool{
-			state.ByConversationID.Name(): func(obj client.Object, v string) bool {
+			state.ByID.Name(): func(obj client.Object, v string) bool {
+				return string(asConversation(obj).UID) == v
+			},
+			state.ByCorrelationID.Name(): func(obj client.Object, v string) bool {
 				return asConversation(obj).Spec.ConversationID == v
 			},
 			state.ByPipelineAndPhase.Name(): func(obj client.Object, v string) bool {

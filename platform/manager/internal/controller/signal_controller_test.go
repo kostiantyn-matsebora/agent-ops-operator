@@ -1266,10 +1266,10 @@ func (w *windowStore) Update(ctx context.Context, key state.Key, rev state.Revis
 	return w.Collection.Update(ctx, key, rev, rec)
 }
 
-func (w *windowStore) Create(ctx context.Context, key state.Key, rec state.CooldownWindow) (state.Revision, error) {
+func (w *windowStore) Create(ctx context.Context, key state.Key, rec state.CooldownWindow) (state.CooldownWindow, state.Revision, error) {
 	w.puts++
 	if w.putErr != nil {
-		return "", w.putErr
+		return state.CooldownWindow{}, "", w.putErr
 	}
 	return w.Collection.Create(ctx, key, rec)
 }

@@ -23,6 +23,10 @@ func Run[T any](t *testing.T, open func() state.Collection[T], decl state.Decl[T
 		t.Run("CreateRefusedWhenKeyAlreadyExists", func(t *testing.T) { testCreateRefusedOnExistingKey(t, open(), fx) })
 	})
 
+	t.Run("CreateReturnsTheStoredRecord", func(t *testing.T) {
+		t.Run("ReturnedRecordMatchesASubsequentGet", func(t *testing.T) { testCreateReturnsStoredRecord(t, open(), fx) })
+	})
+
 	t.Run("LookupByKeyOrDeclaredIndex", func(t *testing.T) {
 		t.Run("EveryDeclaredIndexReturnsExactlyMatchingSet", func(t *testing.T) { testEveryDeclaredIndex(t, open(), decl, fx) })
 		t.Run("QueryOutsideIndexSetRefused", func(t *testing.T) { testUnknownIndexRefused(t, open(), fx) })
@@ -160,6 +164,45 @@ func testCreateRefusedOnExistingKey[T any](t *testing.T, s state.Collection[T], 
 	}
 }
 
+// testCreateReturnsStoredRecord proves Create hands back the record it just
+// stored, not a copy of what the caller passed in: its content matches a
+// Get right after, and for a kind that mints an identity (fx.Identity),
+// Create's own ID and CreatedAt already equal Get's — a caller never needs a
+// second round trip to learn them (design D-2 of conversation-identity).
+func testCreateReturnsStoredRecord[T any](t *testing.T, s state.Collection[T], fx Fixture[T]) {
+	ctx := context.Background()
+	key := fx.Key("create-returns-record")
+	created, _, err := s.Create(ctx, key, fx.Edit(fx.New(), 7))
+	if err != nil {
+		t.Fatalf(fmtCreate, err)
+	}
+	if fx.Marker(created) != 7 {
+		t.Fatalf("Create's returned record has marker %d, want 7", fx.Marker(created))
+	}
+
+	got, _, err := s.Get(ctx, key)
+	if err != nil {
+		t.Fatalf(fmtGet, err)
+	}
+	if fx.Marker(got) != 7 {
+		t.Fatalf("Get after Create has marker %d, want 7", fx.Marker(got))
+	}
+
+	if fx.Identity == nil {
+		return
+	}
+	id := fx.Identity
+	if id.ID(created) == "" {
+		t.Fatalf("Create's returned record has an empty ID, want the backend-minted identity")
+	}
+	if id.ID(created) != id.ID(got) {
+		t.Fatalf("Create returned ID %q, Get right after returned %q", id.ID(created), id.ID(got))
+	}
+	if !id.CreatedAt(created).Equal(id.CreatedAt(got)) {
+		t.Fatalf("Create returned CreatedAt %v, Get right after returned %v", id.CreatedAt(created), id.CreatedAt(got))
+	}
+}
+
 // --- Requirement: Lookup is by key or by a declared index ---
 
 func testEveryDeclaredIndex[T any](t *testing.T, s state.Collection[T], decl state.Decl[T], fx Fixture[T]) {
@@ -167,13 +210,21 @@ func testEveryDeclaredIndex[T any](t *testing.T, s state.Collection[T], decl sta
 		t.Skip("this kind declares no index")
 	}
 	ctx := context.Background()
-	for _, kv := range fx.Indexed {
-		if _, _, err := s.Create(ctx, kv.Key, kv.Record); err != nil {
+	// Built from what Create actually stored, never the fixture's own local
+	// copy: an index over a backend-minted field (ByID) lists nothing on the
+	// pre-create value, which carries no ID yet.
+	stored := make([]Keyed[T], len(fx.Indexed))
+	for i, kv := range fx.Indexed {
+		created, _, err := s.Create(ctx, kv.Key, kv.Record)
+		if err != nil {
 			t.Fatalf("Create %q: %v", kv.Key, err)
 		}
+		stored[i] = Keyed[T]{Key: kv.Key, Record: created}
 	}
+	storedFx := fx
+	storedFx.Indexed = stored
 	for _, idx := range decl.Indexes {
-		checkIndex(t, ctx, s, idx, fx)
+		checkIndex(t, ctx, s, idx, storedFx)
 	}
 }
 

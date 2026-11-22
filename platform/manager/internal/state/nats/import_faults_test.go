@@ -36,9 +36,10 @@ func (f *faultColl[T]) Get(ctx context.Context, k state.Key) (T, state.Revision,
 	return f.Collection.Get(ctx, k)
 }
 
-func (f *faultColl[T]) Create(ctx context.Context, k state.Key, rec T) (state.Revision, error) {
+func (f *faultColl[T]) Create(ctx context.Context, k state.Key, rec T) (T, state.Revision, error) {
 	if f.createErr != nil {
-		return "", f.createErr
+		var zero T
+		return zero, "", f.createErr
 	}
 	return f.Collection.Create(ctx, k, rec)
 }
@@ -270,9 +271,9 @@ func (f *faultExpiring) Get(ctx context.Context, k state.Key) (state.SignalRecor
 	return f.Expiring.Get(ctx, k)
 }
 
-func (f *faultExpiring) Create(ctx context.Context, k state.Key, r state.SignalRecord) (state.Revision, error) {
+func (f *faultExpiring) Create(ctx context.Context, k state.Key, r state.SignalRecord) (state.SignalRecord, state.Revision, error) {
 	if f.createErr != nil {
-		return "", f.createErr
+		return state.SignalRecord{}, "", f.createErr
 	}
 	return f.Expiring.Create(ctx, k, r)
 }

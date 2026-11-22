@@ -1,10 +1,10 @@
 ## 1. Store contract — backend-developer
 
-- [ ] 1.1 Change `Collection[T].Create` to return the stored record with its backend-minted `ID` and `CreatedAt`, update the doc comment in `internal/state/store.go`, and adapt `kube/store.go`, `kube/part.go`, `kube/adapterstate.go` and `nats/collection.go`. Verify `go build ./...` in `platform/manager`.
-- [ ] 1.2 Adapt the 34 non-test `Create` callers. Verify `go vet ./...` is clean and no caller discards a record it later needs.
-- [ ] 1.3 Extend `internal/state/conformance` to assert, for every kind of `Stores`, that `Create` returns the stored record. Verify both backends pass the suite.
-- [ ] 1.4 Add the `ByID` index for conversations in both backends and the `correlationId` index rename. Verify with conformance cases for lookup by `ID` and by correlation id.
-- [ ] 1.5 Make `namewords.AllocateName` return the created record and update its three callers (`chat/router.go`, `chat/coordinate.go`, `signalroute/conversation.go`). Verify a test asserts each returned record carries a non-empty `ID`.
+- [x] 1.1 Change `Collection[T].Create` to return the stored record with its backend-minted `ID` and `CreatedAt`, update the doc comment in `internal/state/store.go`, and adapt `kube/store.go`, `kube/part.go`, `kube/adapterstate.go` and `nats/collection.go`. Verify `go build ./...` in `platform/manager`.
+- [x] 1.2 Adapt the 34 non-test `Create` callers. Verify `go vet ./...` is clean and no caller discards a record it later needs.
+- [x] 1.3 Extend `internal/state/conformance` to assert, for every kind of `Stores`, that `Create` returns the stored record. Verify both backends pass the suite.
+- [x] 1.4 Add the `ByID` index for conversations in both backends and the `correlationId` index rename. Verify with conformance cases for lookup by `ID` and by correlation id.
+- [x] 1.5 Make `namewords.AllocateName` return the created record and update its three callers (`chat/router.go`, `chat/coordinate.go`, `signalroute/conversation.go`). Verify a test asserts each returned record carries a non-empty `ID`.
 
 ## 2. The rename — api-architect
 

@@ -91,7 +91,7 @@ func TestSweepTrimsAConversationHoldingMoreRunsThanTheLimit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := e.b.runsKV.Create(e.ctx, runsItemKey("heavy", runName(i)), data); err != nil {
+		if _, err := e.b.runsKV.Create(e.ctx, runsItemKey("heavy", runName(i)), data); err != nil {
 			t.Fatal(err)
 		}
 	}

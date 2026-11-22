@@ -87,7 +87,7 @@ func messageOf(sig *state.SignalRecord) (text string, addressed bool) {
 // directly (never a cache): a pass repeated after a crash between create and
 // the status write must find the conversation it just made.
 func findReusableConversation(ctx context.Context, conversations state.Collection[state.ConversationRecord], claimant chat.Claimant, initiationID string) (*state.ConversationRecord, error) {
-	list, err := conversations.List(ctx, state.ByConversationID, initiationID)
+	list, err := conversations.List(ctx, state.ByCorrelationID, initiationID)
 	if err != nil {
 		return nil, err
 	}

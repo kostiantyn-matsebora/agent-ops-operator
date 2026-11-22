@@ -138,17 +138,20 @@ func TestSignalIndexesPartitionByPhaseAndSource(t *testing.T) {
 }
 
 func TestConversationIndexesReadTheRecordsOwnFields(t *testing.T) {
-	r := &ConversationRecord{ConversationID: "cid", PipelineRef: "p", Phase: PhaseIdle, NameBase: "base", CausedBy: &Provenance{Parent: "root"}}
+	r := &ConversationRecord{ID: "the-id", ConversationID: "cid", PipelineRef: "p", Phase: PhaseIdle, NameBase: "base", CausedBy: &Provenance{Parent: "root"}}
 	for _, tc := range []struct {
 		idx  Index[ConversationRecord]
 		want string
 	}{
-		{ByConversationID, "cid"}, {ByPipelineAndPhase, IndexValue("p", PhaseIdle)},
+		{ByID, "the-id"}, {ByCorrelationID, "cid"}, {ByPipelineAndPhase, IndexValue("p", PhaseIdle)},
 		{ByPhase, PhaseIdle}, {ByCausedBy, "root"}, {ByNameBase, "base"}, {ByAll, ""},
 	} {
 		if v, ok := tc.idx.Value(r); !ok || v != tc.want {
 			t.Errorf("%s: got (%q, %v), want %q", tc.idx.Name(), v, ok, tc.want)
 		}
+	}
+	if _, ok := ByID.Value(&ConversationRecord{}); ok {
+		t.Error("a record with no minted ID is not listed under id")
 	}
 	if _, ok := ByCausedBy.Value(&ConversationRecord{}); ok {
 		t.Error("a root conversation is not listed under causedBy")

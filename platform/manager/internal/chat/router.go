@@ -513,7 +513,7 @@ func (r *Router) refuseReopenBehindOpenSuccessor(ctx context.Context, conv *stat
 	if conv.ConversationID == "" {
 		return nil
 	}
-	list, err := r.Conversations.List(ctx, state.ByConversationID, conv.ConversationID)
+	list, err := r.Conversations.List(ctx, state.ByCorrelationID, conv.ConversationID)
 	if err != nil {
 		return err
 	}
