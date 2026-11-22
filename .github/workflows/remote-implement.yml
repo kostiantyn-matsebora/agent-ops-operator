@@ -96,7 +96,15 @@ on:
     inputs:
       pr:
         description: "Merged pull request number to replay the archive carry for (e.g. a merge that predates this recovery path)"
-        required: true
+        required: false
+        type: string
+      testing_pr:
+        description: "Pull request whose testing station asked for more rounds (conveyor:keep-going): the sweep dispatches this"
+        required: false
+        type: string
+      carry_fix_pr:
+        description: "Pull request whose testing station just passed: carry the standing instruction onto it as the fixing loop's grant"
+        required: false
         type: string
 
 permissions: {}
@@ -152,10 +160,11 @@ jobs:
   # disputes each failing check rather than blindly patching.
   open:
     if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      (github.event.workflow_run.conclusion == 'success' ||
-       github.event.workflow_run.conclusion == 'failure')
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'pull_request' &&
+       (github.event.workflow_run.conclusion == 'success' ||
+        github.event.workflow_run.conclusion == 'failure')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.carry_fix_pr != '')
     runs-on: ubuntu-latest
     # PULL-REQUESTS: write -- MEASURED, NOT ASSUMED. `gh issue edit <pr>
     # --add-label` accepts a pull request's number (the REST shape is
@@ -191,14 +200,64 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.repository.default_branch }}
+      # THE TESTING STATION STARTS HERE, BEFORE THE CARRY, AND THAT ORDER IS THE POINT. The
+      # implement session opens its pull request and CI completes on it. `begin` moves the
+      # issue from implement to testing (and does nothing once the station has passed), so
+      # the carry below finds `station:testing` and carries nothing. Run the other way round,
+      # the carry would hand the pull request to the fixing loop before a single test ran.
+      # The session is fired once: the fire record refuses a second, and only a granted
+      # `conveyor:keep-going` (the resume job below) starts another.
+      - id: testing
+        name: Start the testing station
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if ! api_out=$(gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" \
+            --jq '.[] | select(.state == "open") | .number'); then
+            echo "::error::could not look up pull requests for ${HEAD_SHA:0:7}"
+            exit 1
+          fi
+          pr=$(printf '%s\n' "$api_out" | head -1)
+          [ -n "$pr" ] || { echo "no open pull request for ${HEAD_SHA:0:7}; no testing station"; exit 0; }
+          python3 .github/scripts/testing-station.py begin --repo "$GITHUB_REPOSITORY" --pr "$pr"
+      - name: Fire the testing session
+        if: steps.testing.outputs.active == 'true' && steps.testing.outputs.exhausted == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
+          ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+          ISSUE: ${{ steps.testing.outputs.issue }}
+          RESUMED: ${{ steps.testing.outputs.resumed }}
+        run: |
+          set -euo pipefail
+          RUN_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["run_label"])')
+          payload=$(mktemp)
+          printf '{"label":{"name":"%s"},"issue":{"number":%s},"sender":{"login":"github-actions[bot]"},"restart":%s}' \
+            "$RUN_LABEL" "$ISSUE" "$RESUMED" > "$payload"
+          python3 .github/scripts/remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"
       - id: carry
         name: Carry the standing instruction onto the pull request
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CARRY_FIX_PR: ${{ inputs.carry_fix_pr }}
         run: |
           set -euo pipefail
+          if [ -n "${CARRY_FIX_PR:-}" ]; then
+            # THE TESTING STATION PASSED and asked for the carry. There is no CI run to read the head from, so the
+            # head's own latest CI conclusion stands in for it.
+            head=$(gh pr view "$CARRY_FIX_PR" --json headRefOid --jq .headRefOid)
+            conclusion=$(gh run list --workflow ci.yml --commit "$head" --json conclusion --jq '[.[] | select(.conclusion != "")] | .[0].conclusion // "success"')
+            echo "pr=$CARRY_FIX_PR" >> "$GITHUB_OUTPUT"
+            python3 .github/scripts/carry.py --repo "$GITHUB_REPOSITORY" --pr "$CARRY_FIX_PR" --station fix \
+              --ci-conclusion "$conclusion"
+            exit 0
+          fi
           # A workflow_run payload carries no pull_request.body directly, so the pull
           # request is resolved from the run's head sha. carry.py takes it from there:
           # it gathers the facts, asks the state machine (`conveyor.py`) what the
@@ -232,6 +291,43 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh workflow run review-dispatch.yml --repo "$GITHUB_REPOSITORY" -f "pr=${{ steps.carry.outputs.pr }}" -f mode=all
 
+  # A STALLED TESTING STATION ASKED FOR MORE ROUNDS. Placing a label through a workflow token starts
+  # nothing, so `conveyor-sweep.yml` dispatches this for a pull request carrying `conveyor:keep-going`.
+  # `begin` consumes the label only if the station was out of rounds, moves the line back to testing,
+  # and this fires one more session. A pull request whose station is not stalled is left alone.
+  testing-resume:
+    if: github.event_name == 'workflow_dispatch' && inputs.testing_pr != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - id: testing
+        name: Grant the rounds
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ inputs.testing_pr }}
+        run: python3 .github/scripts/testing-station.py begin --repo "$GITHUB_REPOSITORY" --pr "$PR"
+      - name: Fire the testing session
+        if: steps.testing.outputs.active == 'true' && steps.testing.outputs.exhausted == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
+          ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+          ISSUE: ${{ steps.testing.outputs.issue }}
+          RESUMED: ${{ steps.testing.outputs.resumed }}
+        run: |
+          set -euo pipefail
+          RUN_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["run_label"])')
+          payload=$(mktemp)
+          printf '{"label":{"name":"%s"},"issue":{"number":%s},"sender":{"login":"github-actions[bot]"},"restart":%s}' \
+            "$RUN_LABEL" "$ISSUE" "$RESUMED" > "$payload"
+          python3 .github/scripts/remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"
+
   archive:
     # `ci`'s own `push:` trigger is already scoped to `branches: [master]`,
     # so a `push`-event workflow_run for it is a push to the default branch
@@ -243,7 +339,7 @@ jobs:
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && inputs.pr != '')
     runs-on: ubuntu-latest
     # ISSUES: write TO CARRY -- carry.py --station archive labels and
     # comments the ISSUE alone through gh issue edit / gh issue comment.

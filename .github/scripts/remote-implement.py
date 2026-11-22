@@ -49,7 +49,8 @@ MARKER = "<!-- remote-implement:fired -->"
 # PER STATION. The implement marker keeps its original text so every issue
 # already carrying it still reads as fired; the archive station records its
 # own, or the archive would never fire on an issue the implement did.
-STATION_MARKER = {"implement": MARKER, "archive": "<!-- remote-implement:fired:archive -->"}
+STATION_MARKER = {"implement": MARKER, "archive": "<!-- remote-implement:fired:archive -->",
+                  "testing": "<!-- remote-implement:fired:testing -->"}
 BETA = "experimental-cc-routine-2026-04-01"
 API_VERSION = "2023-06-01"
 
@@ -215,6 +216,15 @@ def main() -> int:
                 f"carries `{vocab['run_label']}` forward as `{vocab['approve_label']}` onto that pull "
                 f"request, and a person merges it. Nothing merges without a person.")
         print(f"fired the archive station for #{number}" + (f": {url}" if url else ""))
+        return 0
+    if station == "testing":
+        comment(args.repo, number,
+                f"{STATION_MARKER['testing']}\n"
+                f"Testing this change: {where} started, approved by {approver}.\n\n"
+                f"It runs the unit, system and e2e tiers itself, writes the tests the change is missing "
+                f"through a separate model, and keeps one coverage report on this issue. When every tier "
+                f"passes and holds its floor, the line moves to the fixing loop.")
+        print(f"fired the testing station for #{number}" + (f": {url}" if url else ""))
         return 0
     carries = vocab["run_label"] in {l.get("name") for l in issue.get("labels") or [] if l.get("name")}
     what = (f"a workflow reads `{vocab['run_label']}` again and carries it forward as "

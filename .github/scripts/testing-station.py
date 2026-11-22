@@ -12,6 +12,9 @@ these steps.
   record-round  one marker comment on the ISSUE per round in which a model ran: the budget's counter.
   check-patch   a session's patch against its role (tester: test files only, fixer: no
                 tester-authored file). Exits 4 on a refusal.
+  check-tree    the same refusals over the working tree, for an agent that edits in place. Exits 4.
+  real-model    whether the change needs a real model (the path floor and the session's judgement),
+                and whether the credential is set. Exits 6 when it is needed and absent.
   models        the tester's model against the author's. Exits 5 when they are not independent.
 
 THE BUDGET IS COUNTED FROM THE ISSUE'S COMMENTS, as the fixing loop's is counted from the
@@ -105,6 +108,7 @@ def cmd_begin(args, vocab) -> int:
         print(f"#{issue} is not at the testing station")
         io.write_output("active", "false")
         return 0
+    resumed = False
     thread = comments(args.repo, issue)
     used, cap = budget(vocab, thread)
     keep = vocab["keep_going_label"]
@@ -117,6 +121,7 @@ def cmd_begin(args, vocab) -> int:
         if state["stalled"] in labels:
             io.apply_events(args.repo, issue, station_event="testing:resume", vocabulary_path=args.vocabulary)
         used, cap = budget(vocab, comments(args.repo, issue))
+        resumed = True
     elif state["stalled"] in labels:
         print(f"#{issue} is stalled, and no `{keep}` asks for more testing rounds")
         io.write_output("active", "false")
@@ -126,6 +131,7 @@ def cmd_begin(args, vocab) -> int:
     io.write_output("round", str(used + 1))
     io.write_output("cap", str(cap))
     io.write_output("exhausted", "true" if used >= cap else "false")
+    io.write_output("resumed", "true" if resumed else "false")
     print(f"#{issue}: testing round {used + 1} of {cap}")
     return 0
 
@@ -153,6 +159,10 @@ def cmd_judge(args, vocab) -> int:
                    f"The testing station is stalled: {d.reason}. The report above names what is left. "
                    f"Place `{vocab['keep_going_label']}` on the pull request to grant another "
                    f"{vocab['testing']['max_rounds']} rounds, or take it from here.")
+    if d.action == "passed" and args.pr:
+        # THE FIXING LOOP STARTS ON THE HEAD THAT PASSED. A pass that pushes nothing fires no CI completion,
+        # so nothing would carry the grant: ask for it explicitly.
+        io.gh("workflow", "run", "remote-implement.yml", "--repo", args.repo, "-f", f"carry_fix_pr={args.pr}", check=False)
     io.write_output("ending", d.action)
     io.write_output("tester_work", "true" if any(w.session == "tester" for w in work) else "false")
     io.write_output("fixer_work", "true" if any(w.session == "fixer" for w in work) else "false")
@@ -181,6 +191,41 @@ def cmd_check_patch(args, vocab) -> int:
     return 0
 
 
+def changed_paths(base: str) -> list:
+    out = subprocess.run(["git", "diff", "--name-only", f"origin/{base}...HEAD"], capture_output=True, text=True, check=False).stdout
+    return [p for p in out.splitlines() if p]
+
+
+def cmd_check_tree(args, vocab) -> int:
+    """After an agent has edited the working tree: which uncommitted paths its role refuses.
+    A role is judged by what it TOUCHED, since the agent edits in place and writes no patch."""
+    out = subprocess.run(["git", "status", "--porcelain", "-z", "-uall"], capture_output=True, text=True, check=True).stdout
+    paths = sorted({rec[3:] for rec in out.split("\0") if len(rec) > 3})
+    if args.role == "tester":
+        bad = conveyor.tester_patch_refusals(paths, vocab["testing"]["test_paths"])
+        why = "the tester writes test files only"
+    else:
+        bad = conveyor.fixer_patch_refusals(paths, tester_authored(args.base))
+        why = "a test the tester wrote is disputed, never edited"
+    if bad:
+        print(f"refused: {why}. Paths: {', '.join(bad)}")
+        return 4
+    print(f"the {args.role} touched {len(paths)} path(s), all allowed")
+    return 0
+
+
+def cmd_real_model(args, vocab) -> int:
+    """Whether this change needs a real model, from the diff and the session's judgement. Exits 6 on `stop`.
+    The credential is only ever tested for PRESENCE: its value is never read into this program's output."""
+    import os
+    t = vocab["testing"]
+    present = bool(os.environ.get(t["credential_env"], "").strip())
+    d = conveyor.real_model_gate(changed_paths(args.base), t["agent_facing_paths"], args.session_requires, present)
+    io.write_output("real_model", d.action)
+    print(f"real model: {d.action}: {d.reason}")
+    return 6 if d.action == "stop" else 0
+
+
 def cmd_models(args, vocab) -> int:
     tester = args.tester or vocab["testing"]["tester_model"]
     if not conveyor.models_independent(tester, args.author):
@@ -202,6 +247,7 @@ def main(argv=None) -> int:
     j = sub.add_parser("judge")
     j.add_argument("--repo", required=True); j.add_argument("--issue", type=int, required=True)
     j.add_argument("--round", type=int, required=True); j.add_argument("--cap", type=int, required=True)
+    j.add_argument("--pr", type=int, default=0, help="the pull request: a passing station asks for the fixing loop's carry on it")
     j.add_argument("--tier-file", action="append", default=[], metavar="TIER=FILE")
     j.add_argument("--outcome", action="append", default=[], metavar="TIER=passed|failed|skipped")
     j.add_argument("--no-change", dest="changed", action="store_false")
@@ -216,6 +262,15 @@ def main(argv=None) -> int:
     c.add_argument("--patch", type=pathlib.Path, required=True)
     c.add_argument("--base", default="master")
 
+    t = sub.add_parser("check-tree")
+    t.add_argument("--role", choices=["tester", "fixer"], required=True)
+    t.add_argument("--base", default="master")
+
+    rm = sub.add_parser("real-model")
+    rm.add_argument("--base", default="master")
+    rm.add_argument("--session-requires", action="store_true",
+                    help="the session judged the model's behaviour relevant beyond the path floor")
+
     m = sub.add_parser("models")
     m.add_argument("--author", default="")
     m.add_argument("--tester", default="")
@@ -223,7 +278,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     vocab = io.vocabulary(args.vocabulary)
     return {"begin": cmd_begin, "judge": cmd_judge, "record-round": cmd_record_round,
-            "check-patch": cmd_check_patch, "models": cmd_models}[args.cmd](args, vocab)
+            "check-patch": cmd_check_patch, "check-tree": cmd_check_tree, "real-model": cmd_real_model,
+            "models": cmd_models}[args.cmd](args, vocab)
 
 
 if __name__ == "__main__":

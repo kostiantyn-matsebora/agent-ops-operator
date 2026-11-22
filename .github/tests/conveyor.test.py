@@ -899,6 +899,67 @@ class TheTester(unittest.TestCase):
         self.assertFalse(c.path_matches("a/b/c.txt", ["a/*"]))
 
 
+class TheTestingFire(unittest.TestCase):
+    def line(self, labels=(RUN, TESTING), fired=(), open_pr=False):
+        return c.Line(frozenset(labels), "opsx", False, frozenset(fired), open_pr)
+
+    def test_run_on_an_issue_at_the_testing_station_starts_the_testing_session_with_no_event_of_its_own(self):
+        d = c.fire(V, RUN, self.line(), BOT, WRITER)
+        self.assertEqual(("fire", "testing", ""), (d.action, d.station, d.station_event))
+
+    def test_a_second_fire_is_skipped_while_the_session_is_at_work(self):
+        d = c.fire(V, RUN, self.line(fired=("testing",), open_pr=True), BOT, WRITER)
+        self.assertEqual("skip", d.action)
+
+    def test_a_keep_going_resume_may_fire_again(self):
+        d = c.fire(V, RUN, self.line(fired=("testing",), open_pr=True), BOT, WRITER, restart_ok=True)
+        self.assertEqual(("fire", "testing"), (d.action, d.station))
+
+    def test_the_label_decides_nothing_without_the_station_label(self):
+        d = c.fire(V, RUN, self.line(labels=(RUN,)), BOT, WRITER)
+        self.assertNotEqual("testing", d.station)
+
+    def test_a_carried_fire_still_needs_a_standing_run_label(self):
+        d = c.fire(V, RUN, self.line(labels=(TESTING,)), BOT, WRITER)
+        self.assertEqual("refuse", d.action)
+
+
+class TheRealModelGate(unittest.TestCase):
+    PATHS = TEST["agent_facing_paths"]
+
+    def gate(self, paths, requires=False, cred=True):
+        return c.real_model_gate(paths, self.PATHS, requires, cred)
+
+    def test_a_prompt_or_dispatch_or_runtime_change_requires_a_real_model(self):
+        for p in ("runtimes/claude/runtime.js", "platform/manager/internal/dispatch/dispatch.go",
+                  "platform/manager/internal/dispatch/templates/format.md", "platform/manager/internal/runtimepod/pod.go"):
+            self.assertEqual("run", self.gate([p]).action, p)
+
+    def test_a_change_no_model_output_reaches_does_not(self):
+        self.assertEqual("not_required", self.gate(["chart/templates/service.yaml", "docs/concepts.md"]).action)
+
+    def test_the_session_may_require_a_real_model_for_other_code(self):
+        self.assertEqual("run", self.gate(["platform/manager/internal/ingest/x.go"], requires=True).action)
+
+    def test_the_session_cannot_waive_the_floor(self):
+        self.assertEqual("run", self.gate(["runtimes/pi/x.js"], requires=False).action)
+
+    def test_a_required_real_model_with_no_credential_stops_the_station(self):
+        self.assertEqual("stop", self.gate(["runtimes/pi/x.js"], cred=False).action)
+        self.assertEqual("stop", self.gate(["other.go"], requires=True, cred=False).action)
+
+    def test_no_credential_is_fine_where_none_is_required(self):
+        self.assertEqual("not_required", self.gate(["docs/x.md"], cred=False).action)
+
+    def test_the_credential_variable_is_named_once_in_the_vocabulary(self):
+        self.assertEqual("CLAUDE_CODE_OAUTH_TOKEN", TEST["credential_env"])
+
+    def test_the_cli_decides_it(self):
+        rc, out = TheCommandLine.run_cli(None, "decide", "real_model_gate",
+                                         stdin=json.dumps({"paths": ["runtimes/pi/x.js"], "credential_present": False}))
+        self.assertEqual("stop", json.loads(out)["action"])
+
+
 class TheMergeState(unittest.TestCase):
     GEN = TEST["generated_paths"]
 

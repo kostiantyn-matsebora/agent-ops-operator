@@ -23,7 +23,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import conveyor  # noqa: E402
 
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
-FIRE_MARKERS = {"implement": "<!-- remote-implement:fired -->", "archive": "<!-- remote-implement:fired:archive -->"}
+FIRE_MARKERS = {"implement": "<!-- remote-implement:fired -->", "archive": "<!-- remote-implement:fired:archive -->",
+                "testing": "<!-- remote-implement:fired:testing -->"}
 
 # The unresolved review threads of a pull request, paginated, with just enough
 # shape for `conveyor.unanswered_after_marker`: WHO commented and WHAT they

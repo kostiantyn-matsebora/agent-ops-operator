@@ -38,7 +38,7 @@ import conveyor_io  # noqa: E402  -- the dispute-thread walk: the archive guard 
 
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
 WORKFLOW = "review-dispatch.yml"
-TESTING_WORKFLOW = "conveyor-testing.yml"
+TESTING_WORKFLOW = "remote-implement.yml"
 
 
 class Unreadable(Exception):
@@ -98,8 +98,8 @@ def keep_going_pull_requests(repo: str, keep: str) -> list[int]:
 
 def resume_testing(repo: str, vocab: dict, dry_run: bool = False) -> None:
     """A pull request carrying `conveyor:keep-going` may belong to a testing station that spent its
-    budget. Placing a label under a workflow token starts nothing, so the sweep dispatches the
-    station, which re-reads the budget itself and consumes the label only if it takes effect."""
+    budget. Placing a label under a workflow token starts nothing, so the sweep dispatches
+    `remote-implement.yml`'s testing-resume job, which re-reads the budget itself and consumes the label only if it takes effect."""
     keep = vocab["keep_going_label"]
     try:
         prs = keep_going_pull_requests(repo, keep)
@@ -111,7 +111,7 @@ def resume_testing(repo: str, vocab: dict, dry_run: bool = False) -> None:
             print(f"#{pr}: carries `{keep}`; the testing station would be asked to resume (dry run)")
             continue
         try:
-            gh("workflow", "run", TESTING_WORKFLOW, "--repo", repo, "-f", f"pr={pr}")
+            gh("workflow", "run", TESTING_WORKFLOW, "--repo", repo, "-f", f"testing_pr={pr}")
             print(f"#{pr}: carries `{keep}`; asked the testing station to resume")
         except Unreadable as exc:
             print(f"::notice::#{pr}: the testing station could not be asked ({exc}); the next sweep tries again")

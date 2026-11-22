@@ -221,7 +221,24 @@
         ],
         "run": "python3 .github/scripts/docs-generate.py"
       }
-    ]
+    ],
+    "agent_facing_paths": [
+      "runtimes/**",
+      "platform/manager/internal/dispatch/**",
+      "platform/manager/internal/runtimepod/**",
+      "platform/manager/internal/chat/**",
+      "platform/manager/internal/mcpcompile/**",
+      "platform/mcp-aops/**",
+      "platform/egress-proxy/**",
+      "platform/context-sync/**",
+      "chart/charts/*/templates/*profile*",
+      "chart/templates/runtime*.yaml",
+      "**/templates/format.md",
+      "**/*.prompt.md",
+      "**/systemPrompt*",
+      "docs/contracts/runtime.md"
+    ],
+    "credential_env": "CLAUDE_CODE_OAUTH_TOKEN"
   },
   "conflict_marker": "<!-- conveyor:conflict -->"
 }

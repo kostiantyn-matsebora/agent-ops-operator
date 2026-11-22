@@ -15,6 +15,7 @@ cat > "$tmp/bin/gh" <<'STUB'
 printf '%s\n' "${*//$'\n'/ }" >> "$GH_CALLS"
 num() { printf '%s' "$*" | sed -n 's#.*issues/\([0-9]*\)/.*#\1#p'; }
 case "$*" in
+  "pr list "*"conveyor:keep-going"*) cat "$FX/keep" 2>/dev/null || echo '[]' ;;
   "pr list "*) cat "$FX/prs" 2>/dev/null || echo '[]' ;;
   "api graphql"*) n=$(printf '%s' "$*" | sed -n 's/.*number=\([0-9]*\).*/\1/p'); cat "$FX/threads-$n" 2>/dev/null || echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}' ;;
   "api repos/o/r/issues/"*"/comments"*) cat "$FX/comments-$(num "$@")" 2>/dev/null || echo '[]' ;;
@@ -36,6 +37,7 @@ threads() {  # threads <pr> <resolved:true|false> <answered:yes|no>
 prs() { python3 -c 'import json,sys;print(json.dumps([{"number":int(n)} for n in sys.argv[1:]]))' "$@" > "$FX/prs"; }
 reset() { rm -f "${FX:?}"/*; : > "$GH_CALLS"; }
 run() { python3 "$S" --repo o/r "$@" 2>&1; }
+resumed() { grep -c '^workflow run remote-implement.yml --repo o/r -f testing_pr=' "$GH_CALLS"; }
 dispatched() { grep -c '^workflow run review-dispatch.yml --repo o/r -f pr=' "$GH_CALLS"; }
 
 it "lists only the pull requests carrying BOTH the fix label and loop:waiting"
@@ -104,6 +106,42 @@ assert_equals "{'contents': 'read', 'pull-requests': 'read', 'actions': 'write'}
 it "checks out the default branch, never a pull request's tree, and runs the sweep program"
 assert_contains "$(py 'print(d["jobs"]["sweep"]["steps"][0]["with"]["ref"])')" "default_branch"
 assert_contains "$(py 'print(d["jobs"]["sweep"]["steps"][-1]["run"])')" "conveyor-sweep.py"
+
+CONFLICT='<!-- conveyor:conflict -->'
+comments() {  # comments <pr> <json array>
+  printf '%s' "$2" > "$FX/comments-$1"
+}
+
+it "a pull request carrying conveyor:keep-going asks the testing station to resume, through remote-implement.yml's testing_pr input"
+reset; echo '[{"number":9,"headRefName":"change/x"}]' > "$FX/keep"
+out=$(run); assert_status 0 "$?"
+assert_equals "1" "$(resumed)"
+
+it "a keep-going on a branch that is not change/* is left alone"
+reset; echo '[{"number":9,"headRefName":"feature/x"}]' > "$FX/keep"
+out=$(run); assert_equals "0" "$(resumed)"
+
+it "a keep-going dispatch that fails is a notice and exit 0, tried again by the next sweep"
+reset; echo '[{"number":9,"headRefName":"change/x"}]' > "$FX/keep"
+out=$(DISPATCH_FAILS=1 run); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "::notice::"
+
+it "a dry run says it would resume the station and starts nothing"
+reset; echo '[{"number":9,"headRefName":"change/x"}]' > "$FX/keep"
+out=$(run --dry-run); assert_equals "0" "$(resumed)"
+assert_contains "$out" "dry run"
+
+it "a waiting loop that asked about a merge conflict stays waiting until a PERSON has answered"
+reset; prs 220; threads 220 true yes
+comments 220 "[{\"body\":\"$CONFLICT\\nThis branch conflicts.\",\"author\":$BOT}]"
+out=$(run); assert_equals "0" "$(dispatched)"
+assert_contains "$out" "merge conflict"
+
+it "a person's comment after the conflict question starts the round"
+reset; prs 220; threads 220 true yes
+comments 220 "[{\"body\":\"$CONFLICT\\nThis branch conflicts.\",\"author\":$BOT},{\"body\":\"take theirs\",\"author\":$PERSON}]"
+out=$(run); assert_equals "1" "$(dispatched)"
 
 rm -rf "$tmp"
 summary

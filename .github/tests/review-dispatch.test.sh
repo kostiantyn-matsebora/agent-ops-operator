@@ -290,9 +290,9 @@ assert_equals "['labeled']" "$(rpy 'print(d[True]["issues"]["types"])')"
 assert_equals "['ci']" "$(rpy 'print(d[True]["workflow_run"]["workflows"])')"
 assert_equals "['completed']" "$(rpy 'print(d[True]["workflow_run"]["types"])')"
 
-it "the manual dispatch takes a required pr input, and nothing else — recovery only, never a routine trigger"
-assert_equals "['pr']" "$(rpy 'print(list(d[True]["workflow_dispatch"]["inputs"]))')"
-assert_equals "True" "$(rpy 'print(d[True]["workflow_dispatch"]["inputs"]["pr"]["required"])')"
+it "the manual dispatch takes three optional pull request inputs, one per recovery or hand-off, never a routine trigger"
+assert_equals "['pr', 'testing_pr', 'carry_fix_pr']" "$(rpy 'print(list(d[True]["workflow_dispatch"]["inputs"]))')"
+assert_equals "False False False" "$(rpy 'i=d[True]["workflow_dispatch"]["inputs"]; print(" ".join(str(i[k]["required"]) for k in i))')"
 
 it "never triggers on pull_request or pull_request_target directly — the token those events carry has no write access here"
 assert_not_contains "$(rpy 'print(d[True])')" "pull_request_target"
@@ -300,7 +300,7 @@ assert_not_contains "$(rpy 'print(list(d[True]))')" "pull_request"
 
 it "remote-implement grants nothing at the top level, and each job only what it uses"
 assert_equals "{}" "$(rpy 'print(d["permissions"])')"
-assert_equals "archive fire open" "$(rpy 'print(" ".join(sorted(d["jobs"])))')"
+assert_equals "archive fire open testing-resume" "$(rpy 'print(" ".join(sorted(d["jobs"])))')"
 # `contents: read` for the checkout, `issues: write` to comment and to remove
 # the label from somebody who may not push. Nothing else — in particular no
 # `contents: write`: this job starts a session, it never writes to the tree.

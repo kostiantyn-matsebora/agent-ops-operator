@@ -318,6 +318,12 @@ def _carried_by_a_person_or_a_bot(placer: Placer | None) -> bool:
 
 # ---- the fire: a label on the issue ----------------------------------------------------------
 
+def _fire_event(station: str) -> str:
+    """The station event a fire moves the line by. The testing station has none: `testing-station.py begin`
+    already moved the line (implement -> testing, or stalled -> testing on a grant), and a fire only starts the session."""
+    return "" if station == "testing" else f"fire:{station}"
+
+
 def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Placer | None = None,
          restart_ok: bool = False) -> Decision:
     """A label landed on the issue. Which station starts, if any.
@@ -365,7 +371,10 @@ def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Plac
         return Decision("refuse", f"`{label}` starts a session that writes to this repository, which needs "
                         f"write access, and @{placer.login} has `{placer.permission}`", remove_label=strip)
 
-    if label == vocab["archive_label"] or (label == vocab["run_label"] and line.lane == "opsx" and line.change_finished):
+    if vocab["station_labels"]["testing"] in line.issue_labels and label == vocab["run_label"]:
+        # THE TESTING STATION: the label on the issue says the line is there, and `conveyor:run` stands for it.
+        station = "testing"
+    elif label == vocab["archive_label"] or (label == vocab["run_label"] and line.lane == "opsx" and line.change_finished):
         station = "archive"
     else:
         station = "implement"
@@ -380,6 +389,14 @@ def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Plac
                             "is implement, not archive", remove_label=keep)
 
     if station in line.fired:
+        if station == "testing":
+            # THE PULL REQUEST IS ALWAYS OPEN at this station, so "is a session still at work" cannot be read
+            # from it. A second session starts only on a consumed `conveyor:keep-going` (`restart_ok`).
+            if not restart_ok:
+                return Decision("skip", "the testing station already fired: a session is at work, and only a "
+                                "granted `conveyor:keep-going` starts another", station=station)
+            return Decision("fire", "a granted `conveyor:keep-going` starts another testing session",
+                            station=station, station_event="")
         if placer.bot and not restart_ok:
             return Decision("skip", f"the {station} station already carries a fire record and a carry never "
                             "fires twice", station=station)
@@ -390,8 +407,8 @@ def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Plac
               "the merge that just landed is proof the previous session finished its phase")
         return Decision("fire", f"the {station} station fired before but nothing is open from the change's "
                         f"branch, so {why}",
-                        station=station, station_event=f"fire:{station}")
-    return Decision("fire", f"the {station} station starts", station=station, station_event=f"fire:{station}")
+                        station=station, station_event=_fire_event(station))
+    return Decision("fire", f"the {station} station starts", station=station, station_event=_fire_event(station))
 
 
 # ---- the carries -----------------------------------------------------------------------------
@@ -891,6 +908,29 @@ def fixer_patch_refusals(paths, tester_authored) -> list:
     return [p for p in paths if p in owned]
 
 
+def agent_facing(paths, patterns) -> list:
+    """The changed paths a model's output flows through. A FLOOR: the session may require real-model
+    testing for more, and may never waive it for one of these. The list is `testing.agent_facing_paths`."""
+    return [p for p in paths if path_matches(p, patterns)]
+
+
+def real_model_gate(paths, patterns, session_requires: bool, credential_present: bool) -> Decision:
+    """Does this change need a REAL model, and may the station go on without one.
+
+    Actions: `not_required`, `run` (real-model testing is required and the credential is set), `stop`
+    (it is required and the credential is absent: no tier reads as passed).
+
+    A STUB PROVES PLUMBING. A change to a prompt, the dispatch or a runtime can pass every stub
+    test and still break what the agent does, so the floor is not the session's to waive."""
+    floor = agent_facing(paths, patterns)
+    if not floor and not session_requires:
+        return Decision("not_required", "no changed path is agent-facing and the session found the model's behaviour irrelevant")
+    why = (f"{len(floor)} changed path(s) are agent-facing" if floor else "the session judged the model's behaviour relevant")
+    if not credential_present:
+        return Decision("stop", f"{why}, and the credential is not set in the environment: no tier can read as passed")
+    return Decision("run", f"{why}: the system and e2e tiers run on a real runtime")
+
+
 def tester_may_see(path: str) -> bool:
     """What the tester is shown: specs, the design, the proposal and the diff's code. Never
     a transcript or a report an implementing session left behind."""
@@ -1013,6 +1053,10 @@ def _decide(vocab: dict, name: str, facts: dict) -> dict:
     elif name == "merge_ready":
         d = merge_ready(facts["merge_state"], facts.get("checks_failed", 0), facts.get("thread_open", False),
                         facts.get("testing_passed", True), facts.get("conflicted", ()), facts.get("generated_paths", ()))
+    elif name == "real_model_gate":
+        vocab_t = vocab["testing"]
+        d = real_model_gate(facts.get("paths", ()), vocab_t["agent_facing_paths"], facts.get("session_requires", False),
+                            facts.get("credential_present", False))
     elif name == "round_may_start":
         d = round_may_start(facts.get("ci", "none"), facts.get("review", "none"))
     else:
@@ -1027,7 +1071,7 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("decide", help="read facts as JSON on stdin, print the Decision as JSON")
     d.add_argument("decision", choices=["fire", "carry_fix", "carry_archive", "gate", "guard", "ending", "round_may_start",
-                                          "judge_tiers", "testing_ending", "merge_ready"])
+                                          "judge_tiers", "testing_ending", "merge_ready", "real_model_gate"])
     n = sub.add_parser("next", help="print the state after an event, or the state unchanged when the event skips")
     n.add_argument("machine", choices=["station", "loop"])
     n.add_argument("state")

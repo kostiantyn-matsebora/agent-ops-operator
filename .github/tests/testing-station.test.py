@@ -475,6 +475,14 @@ class TheAdapter(unittest.TestCase):
         self.assertEqual(("passed", ["testing:passed"]), (self.outputs["ending"], self.events))
         self.assertTrue(pathlib.Path("coverage-report/report.md").read_text().startswith(V["testing"]["coverage_marker"]))
 
+    def test_a_pass_asks_for_the_fixing_loops_carry_on_the_pull_request(self):
+        self.judge(self.GOOD, extra=["--pr", "5"])
+        self.assertIn(("workflow", "run", "remote-implement.yml", "--repo", "o/r", "-f", "carry_fix_pr=5"), self.gh_calls)
+
+    def test_no_carry_is_asked_for_while_work_is_left(self):
+        self.judge({**self.GOOD, "unit": cov(50, 100)}, extra=["--pr", "5"])
+        self.assertFalse([c for c in self.gh_calls if c[:2] == ("workflow", "run")])
+
     def test_a_shortfall_asks_the_tester_and_a_red_asks_the_fixer(self):
         self.judge({**self.GOOD, "unit": cov(50, 100)})
         self.assertEqual(("continue", "true", "false"), tuple(self.outputs[k] for k in ("ending", "tester_work", "fixer_work")))
@@ -503,6 +511,73 @@ class TheAdapter(unittest.TestCase):
     def test_check_patch_refuses_a_tester_patch_that_touches_production_code(self):
         self.assertEqual(0, self.patch_check("tester", "x_test.go"))
         self.assertEqual(4, self.patch_check("tester", "x.go"))
+
+
+    def repo_with_changes(self, *paths):
+        repo = pathlib.Path(self.tmp.name, "tree")
+        repo.mkdir(exist_ok=True)
+        sh(repo, "git", "init", "-q")
+        (repo / "seed").write_text("x")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "seed")
+        for p in paths:
+            (repo / p).parent.mkdir(parents=True, exist_ok=True)
+            (repo / p).write_text("changed\n")
+        return repo
+
+    def check_tree(self, role, *paths):
+        repo = self.repo_with_changes(*paths)
+        os.chdir(repo)
+        try:
+            return ts.main(["check-tree", "--role", role])
+        finally:
+            os.chdir(self.tmp.name)
+
+    def test_check_tree_lets_the_tester_touch_tests_and_refuses_anything_else(self):
+        self.assertEqual(0, self.check_tree("tester", "a/x_test.go", ".github/tests/y.test.sh"))
+        self.assertEqual(4, self.check_tree("tester", "a/x_test.go", "a/x.go"))
+
+    def real_model(self, paths, token):
+        repo = self.repo_with_changes(*paths)
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "change")
+        sh(repo, "git", "update-ref", "refs/remotes/origin/master", "HEAD~1")
+        os.chdir(repo)
+        saved = os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        if token is not None:
+            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token
+        out = io.StringIO()
+        try:
+            with redirect_stdout(out):
+                rc = ts.main(["real-model"])
+        finally:
+            os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+            if saved is not None:
+                os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = saved
+            os.chdir(self.tmp.name)
+        return rc, out.getvalue()
+
+    def test_an_agent_facing_change_without_the_credential_stops_the_station(self):
+        rc, out = self.real_model(["runtimes/pi/runtime.js"], None)
+        self.assertEqual((6, "stop"), (rc, self.outputs["real_model"]))
+
+    def test_an_agent_facing_change_with_the_credential_runs_and_never_prints_it(self):
+        rc, out = self.real_model(["runtimes/pi/runtime.js"], "sk-ant-oat-secret-value")
+        self.assertEqual((0, "run"), (rc, self.outputs["real_model"]))
+        self.assertNotIn("sk-ant-oat-secret-value", out)
+
+    def test_a_blank_credential_is_absent(self):
+        rc, _ = self.real_model(["runtimes/pi/runtime.js"], "   ")
+        self.assertEqual(6, rc)
+
+    def test_a_change_the_model_does_not_reach_needs_no_credential(self):
+        rc, _ = self.real_model(["docs/concepts.md"], None)
+        self.assertEqual((0, "not_required"), (rc, self.outputs["real_model"]))
+
+    def test_the_tester_agent_names_the_vocabularys_model(self):
+        text = (SCRIPTS.parents[1] / ".claude/agents/conveyor-tester.md").read_text()
+        front = text.split("---")[1]
+        model = [l.split(":", 1)[1].strip() for l in front.splitlines() if l.startswith("model:")][0]
+        self.assertEqual(V["testing"]["tester_model"], model)
+        self.assertNotIn("Edit production", "".join(l for l in front.splitlines() if l.startswith("tools:")))
 
     def patch_check(self, role, path):
         repo = pathlib.Path(self.tmp.name, "r")
