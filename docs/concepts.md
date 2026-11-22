@@ -190,7 +190,7 @@ the Pipeline still cannot re-wire a conversation already running.
 
 **It exists because [sources are shareable](#sharing-a-source).** Two Pipelines
 listing one source both open a conversation per signal, and those conversations
-carry the same `conversationId`.
+carry the same `correlationId`.
 
 Without the ref, the second Pipeline's next signal would be absorbed by the
 first Pipeline's conversation and run under the wrong profile with the wrong
@@ -292,7 +292,7 @@ names them all, and a signal opens a conversation on each — see
 propagated verbatim on a round trip.
 
 The manager only compares it for equality. An open conversation whose
-`conversationId` matches gets the signal as a recurrence, resuming the
+`correlationId` matches gets the signal as a recurrence, resuming the
 session. It parses no label and owns no grouping policy of its own.
 
 **Every signal type is adapter-served** — the manager hosts no signal
@@ -1531,8 +1531,8 @@ time.** No field names the root directly, so a viewer or a budget check
 follows the chain rather than reading it as already resolved.
 
 **Reuse is scoped by `causedBy`, at one hop.** Two uncaused conversations with
-one `conversationId` stay two conversations. Two members invoked by the same
-parent through the same entry, with one `conversationId`, attach to the same
+one `correlationId` stay two conversations. Two members invoked by the same
+parent through the same entry, with one `correlationId`, attach to the same
 conversation.
 
 ### The loop: invoke, result, close
@@ -1820,7 +1820,7 @@ no dispatch.
 
 - **Suppressing the topic is the point.** It is what stops a thousand signals
   becoming a thousand chat threads before anyone has read the first one.
-- **Its inputs, `conversationId` and pipeline wiring snapshot are kept**, so
+- **Its inputs, `correlationId` and pipeline wiring snapshot are kept**, so
   equality routing treats it exactly like an admitted conversation — a
   matching signal recurs onto it rather than opening a second one.
 - **The Conversation CR *is* the queue**, so the backlog survives a manager

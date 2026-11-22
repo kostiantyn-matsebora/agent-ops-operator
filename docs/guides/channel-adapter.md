@@ -25,16 +25,16 @@ Write one for conversations on a surface nothing here serves. Review [the specif
 
 ## 1. Read an operation, then acknowledge it
 
-Long-poll [GET /channel/ops]({{ '/contracts/channel-adapter/' | relative_url }}#get-channelops) with `contract=2` (`204` = nothing queued, `200` = [operation envelope]({{ '/contracts/channel-adapter/' | relative_url }}#the-operation-envelope)). **Acknowledge before you act** (`OPS-18`). Retry `204`/`503` at once (`OPS-1`, `OPS-2`).
+Long-poll [GET /channel/ops]({{ '/contracts/channel-adapter/' | relative_url }}#get-channelops) with `contract=3` (`204` = nothing queued, `200` = [operation envelope]({{ '/contracts/channel-adapter/' | relative_url }}#the-operation-envelope)). **Acknowledge before you act** (`OPS-18`). Retry `204`/`503` at once (`OPS-1`, `OPS-2`).
 
 ```sh
 curl -H "Authorization: Bearer $ADAPTER_TOKEN" \
-  "$MANAGER_URL/channel/ops?adapter=$ADAPTER_NAME&contract=2&wait=25"
+  "$MANAGER_URL/channel/ops?adapter=$ADAPTER_NAME&contract=3&wait=25"
 ```
 
 ```powershell
 curl -H "Authorization: Bearer $env:ADAPTER_TOKEN" `
-  "$env:MANAGER_URL/channel/ops?adapter=$env:ADAPTER_NAME&contract=2&wait=25"
+  "$env:MANAGER_URL/channel/ops?adapter=$env:ADAPTER_NAME&contract=3&wait=25"
 ```
 
 ```sh

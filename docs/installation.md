@@ -37,13 +37,13 @@ read-only demo on your cluster in fifteen minutes.
    ```sh
    helm install agent-ops \
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     --version 24.0.0 -n agent-ops
+     --version 25.0.0 -n agent-ops
    ```
 
    ```powershell
    helm install agent-ops `
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     --version 24.0.0 -n agent-ops
+     --version 25.0.0 -n agent-ops
    ```
 
 3. **Create the model credential.** The chart has created the conversations

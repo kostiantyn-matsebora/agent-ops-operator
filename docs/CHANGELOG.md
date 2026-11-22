@@ -8,7 +8,9 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
-## [Unreleased]
+## [25.0.0] — 2026-11-22
+
+Images: manager 0.66.0, console 0.46.0, channel-telegram 0.28.0.
 
 ### Added
 
@@ -21,6 +23,22 @@ for the source and the reference material beside this file.
   `claude-cli` and `copilot` have no setting and refuse the value on their own
   bundle. `0` leaves a runtime's own behaviour.
 
+### Changed
+
+- **BREAKING.** A conversation's `ID` is now its system identity, minted once
+  by the backend at `Create` and never reused. `Name` stays the readable
+  word-chain — the store key and the pod name — reusable once a prior life
+  under that name is deleted. Every internal reference moves to `ID`: the
+  workspace subpath, `CONVO_ID`, the runtime pod's
+  `agentops.dev/conversation-id` label, op ids and `causedBy.Parent`. The
+  signal and chat correlation key, formerly `ConversationID`/`conversationId`,
+  is renamed to `CorrelationID`/`correlationId` throughout the API types, the
+  CRD and both contract pages. The channel adapter wire field
+  `conversationId` is repurposed to carry the new system identity instead of
+  the correlation key — the correlation key moves to a new `correlationId`
+  field on the same operation. The channel adapter contract moves to wire
+  `contract=3`, and an adapter still declaring `contract=2` is refused `400`.
+
 ### Fixed
 
 - A turn that stops on `length` with no text now fails the run naming the token
@@ -28,6 +46,18 @@ for the source and the reference material beside this file.
 - `pi` reports `tokensIn` as the contract defines it, cache parts included, so
   the console's "Fresh" column is no longer negative, and reports each tool
   call's `resultBytes`, so "Result size" is filled.
+
+### Upgrade
+
+1. **Delete every `Conversation` before upgrading.** The old CRD has no
+   `correlationId` field, and `kubectl apply` would prune it from any object
+   still carrying the renamed one.
+2. **Apply the CRDs before running `helm upgrade`**:
+   `kubectl apply -f chart/crds/`. Helm never upgrades an existing CRD on its
+   own.
+3. **Rolling back** to the previous chart version needs the same step in
+   reverse: delete every `Conversation` again first, since the old CRD would
+   otherwise prune `spec.correlationId` from each one.
 
 ## [24.0.0] — 2026-11-21
 
