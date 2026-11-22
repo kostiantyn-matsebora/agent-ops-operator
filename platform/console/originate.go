@@ -80,13 +80,13 @@ type signalResponse struct {
 // request is its own aggregation unit, by construction — the contract's
 // "minted" case. A continuation into a conversation the console already
 // displays is the "propagated" case instead: the caller passes that
-// conversation's own conversationId to Start verbatim, never one of these.
+// conversation's own correlationId to Start verbatim, never one of these.
 func FreshInitiationID() string {
 	return "console-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 }
 
 // Start emits one chat signal carrying initiationID verbatim — minted fresh
-// by the caller for a new task, or a conversation's own stamped conversationId
+// by the caller for a new task, or a conversation's own stamped correlationId
 // for a continuation. Start never mints or derives one itself: which case
 // applies is the caller's decision, not something to infer from the
 // arguments. It returns the manager's drop reason when the source is not

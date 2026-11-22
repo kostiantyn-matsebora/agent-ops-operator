@@ -271,11 +271,11 @@ type convView struct {
 		ChannelRefs []Ref `json:"channelRefs,omitempty"`
 		ProfileRef  Ref   `json:"profileRef"`
 		PipelineRef *Ref  `json:"pipelineRef,omitempty"`
-		// ConversationID is the manager-issued correlation id this conversation
-		// was opened or recurred under (api/v1alpha1's spec.conversationId).
+		// CorrelationID is the manager-issued correlation id this conversation
+		// was opened or recurred under (api/v1alpha1's spec.correlationId).
 		// OPAQUE here too — the console compares and displays it, never parses
 		// it. Empty on a conversation created before the field existed.
-		ConversationID string `json:"conversationId,omitempty"`
+		CorrelationID string `json:"correlationId,omitempty"`
 		// CoordinatorRef: this conversation is itself a Coordinator's ROOT.
 		// CausedBy: this conversation was itself INVOKED as a member. The two
 		// are independent — a nested Coordinator's root carries both.

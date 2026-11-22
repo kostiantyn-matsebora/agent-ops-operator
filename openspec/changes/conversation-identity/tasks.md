@@ -23,9 +23,9 @@
 
 ## 4. Consumers — backend-developer
 
-- [ ] 4.1 Move `platform/console` to `correlationId` and the new wire field. Verify `go test ./...` in `platform/console`.
-- [ ] 4.2 Move `channels/telegram` the same way. Verify `go test ./...` in `channels/telegram`.
-- [ ] 4.3 Confirm the runtimes need no change by reading `CONVO_ID` as opaque. Verify `node --test` in each Node runtime and `go test ./...` in `runtimes/ollama`.
+- [x] 4.1 Move `platform/console` to `correlationId` and the new wire field. Verify `go test ./...` in `platform/console`.
+- [x] 4.2 Move `channels/telegram` the same way. Verify `go test ./...` in `channels/telegram`.
+- [x] 4.3 Confirm the runtimes need no change by reading `CONVO_ID` as opaque. Verify `node --test` in each Node runtime and `go test ./...` in `runtimes/ollama`.
 
 ## 5. Chart and release wiring — deployment-engineer
 

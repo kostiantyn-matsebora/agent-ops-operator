@@ -486,17 +486,22 @@ func TestOnlyQuoteErrorsLatchTheFeatureOff(t *testing.T) {
 
 // THE BLOCK GRAMMAR IS NOT A WIRE VERSION.
 //
-// This adapter gained a parser and the contract did not move, because no field
-// was added and none changed meaning: a body that was markdown is now markdown
-// plus a grammar, read by the component that already read the markdown.
+// This adapter gained a parser and the contract did not move FOR THAT REASON,
+// because no field was added and none changed meaning: a body that was
+// markdown is now markdown plus a grammar, read by the component that already
+// read the markdown. The contract has since moved to 3 for an unrelated
+// reason (conversation-identity's correlationId rename) — this test pins
+// only that the grammar itself never forced a bump, not a frozen version
+// number.
 //
-// A version bump would only mean something if the manager could serve the older
-// shape, which would mean the manager parsing — the thing this design removed.
-// Compatibility is `AgentProfile.spec.outputFormat`, a required field with no
-// default — a profile declares `none` until its adapters understand the grammar.
+// A version bump for the grammar alone would only mean something if the
+// manager could serve the older shape, which would mean the manager
+// parsing — the thing this design removed. Compatibility is
+// `AgentProfile.spec.outputFormat`, a required field with no default — a
+// profile declares `none` until its adapters understand the grammar.
 func TestTheGrammarIsNotAWireVersion(t *testing.T) {
-	if ContractVersion != "2" {
-		t.Fatalf("contract moved to %q — parsing a body needs no new version", ContractVersion)
+	if ContractVersion != "3" {
+		t.Fatalf("contract is %q — the grammar itself owes no version bump; conversation-identity moved it to 3 for an unrelated reason", ContractVersion)
 	}
 }
 

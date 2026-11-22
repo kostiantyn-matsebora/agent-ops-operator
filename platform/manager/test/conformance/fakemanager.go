@@ -110,7 +110,10 @@ type SignalPost struct {
 // FakeManager is the manager's adapter-facing surface, recording everything.
 type FakeManager struct {
 	Token string
-	// ContractVersion is what /channel/ops requires; "2" today.
+	// ContractVersion is what /channel/ops requires; "3" today
+	// (conversation-identity bumped it from "2" — this fake must move in
+	// lockstep with every shipped adapter it stands in for, or every
+	// adapter now declaring "3" is refused here instead of exercised).
 	ContractVersion string
 
 	srv *httptest.Server
@@ -199,7 +202,7 @@ func (f *FakeManager) RejectOpsAsNonLeader(n int) {
 // process still holds a long-poll blocks forever.
 func NewFakeManager(t *testing.T, token string) *FakeManager {
 	t.Helper()
-	f := &FakeManager{Token: token, ContractVersion: "2", state: map[string]string{}, listed: map[string]int{}, deliveryTTLSeconds: 600, receiptAdapters: map[string]bool{"console": true},
+	f := &FakeManager{Token: token, ContractVersion: "3", state: map[string]string{}, listed: map[string]int{}, deliveryTTLSeconds: 600, receiptAdapters: map[string]bool{"console": true},
 		workState: map[string]workLatest{}}
 	t.Cleanup(func() { f.Close() })
 	f.cond = sync.NewCond(&f.mu)
