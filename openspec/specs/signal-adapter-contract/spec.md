@@ -33,7 +33,7 @@ Every signal adapter MUST supply its own `initiationId`, one rule for every lane
 | Way | Means |
 |---|---|
 | minted | where the sender's aggregation happens — one id per "one problem" as the sender defines it, the same recurring problem reusing the same id |
-| propagated | a round trip handed back a manager-issued `conversationId` — the sender or external system carries it, and the adapter passes it on VERBATIM, no re-derivation, no transformation |
+| propagated | a round trip handed back a manager-issued `correlationId` — the sender or external system carries it, and the adapter passes it on VERBATIM, no re-derivation, no transformation |
 
 The manager never determines an id and MUST treat every `initiationId` opaquely, whatever its provenance: pure equality, no parsing, no branch on the lane.
 
@@ -41,12 +41,12 @@ Chat is an instance of this rule, not a special lane. A fresh human request is i
 
 #### Scenario: A chat reply routes by the propagated id
 
-- **WHEN** a `chat` signal carries as `initiationId` the `conversationId` the manager stamped on an open conversation's thread binding
+- **WHEN** a `chat` signal carries as `initiationId` the `correlationId` the manager stamped on an open conversation's thread binding
 - **THEN** equality routing appends it to that conversation, through the same rule every other signal routes by
 
 #### Scenario: An external system's round-trip response lands on its conversation
 
-- **WHEN** an adapter forwards its external system's response under an id that system attached, one that originated as a `conversationId` carried out to it
+- **WHEN** an adapter forwards its external system's response under an id that system attached, one that originated as a `correlationId` carried out to it
 - **THEN** the adapter propagates the id unchanged and equality routing appends the response to that open conversation, with no new addressing mode and no manager-side parsing
 
 #### Scenario: The grouping decision is never the manager's
@@ -65,8 +65,8 @@ A signal carrying any other value SHALL be refused with `400` naming the four ac
 
 Accepting a signal SHALL mean durably ENQUEUEING it for the `in.signal` consumer, which stores it as a `Signal` (`signal-persistence`), never routing it. The consumer makes no routing decision. The manager's signal routing, which reads each `Signal` after the consumer stores it, routes it afterwards by pure id equality:
 
-- an OPEN conversation whose `conversationId` equals the signal's `initiationId`, originated by the claiming pipeline, receives the signal appended as a recurrence
-- otherwise a new conversation is created, adopting the `initiationId` as its `conversationId`
+- an OPEN conversation whose `correlationId` equals the signal's `initiationId`, originated by the claiming pipeline, receives the signal appended as a recurrence
+- otherwise a new conversation is created, adopting the `initiationId` as its `correlationId`
 
 The manager hosts no signal transports of its own. Every signal reaches it through this endpoint, which SHALL be the ONLY way work originates from outside a chat surface.
 
@@ -90,12 +90,12 @@ Delivery is at-least-once.
 - **THEN** the response reports it queued with no routing reason, no conversation is created, and its `Signal` records `Dropped` with reason `unclaimed`
 
 #### Scenario: A repeated id lands on its open conversation
-- **WHEN** a signal arrives whose `initiationId` equals an open conversation's `conversationId` for the claiming pipeline, outside the source's cooldown
+- **WHEN** a signal arrives whose `initiationId` equals an open conversation's `correlationId` for the claiming pipeline, outside the source's cooldown
 - **THEN** the signal is appended to that conversation as a recurrence, and no new conversation is created
 
 #### Scenario: A fresh id opens a fresh conversation
 - **WHEN** a signal arrives whose `initiationId` matches no open conversation for the claiming pipeline
-- **THEN** a new conversation is created with `conversationId` set to that id
+- **THEN** a new conversation is created with `correlationId` set to that id
 
 #### Scenario: Distinct ids never merge
 - **WHEN** two signals with different `initiationId` values arrive on one source while both conversations are open
@@ -194,7 +194,7 @@ The manager's provisions SHALL include at least:
 |---|---|
 | one inbound endpoint | `POST /signal/inbound` accepts every normalized signal, and it is the only way work originates from outside a chat surface |
 | type-scoped derived-token auth | the master adapter token or a per-`SignalAdapter` derived token scoped to the adapter's name, with a derivation context distinct from channel adapters |
-| id-equality routing and cooldown | an open conversation whose `conversationId` equals the signal's `initiationId` for the claiming pipeline receives a recurrence, else a new conversation adopts the id — and cooldown keys on `initiationId`, both manager-side |
+| id-equality routing and cooldown | an open conversation whose `correlationId` equals the signal's `initiationId` for the claiming pipeline receives a recurrence, else a new conversation adopts the id — and cooldown keys on `initiationId`, both manager-side |
 | no Kubernetes access required | source listing, cursor state and status reporting reach the adapter through the contract's own endpoints |
 
 The adapter's obligations SHALL include at least: normalize its transport into

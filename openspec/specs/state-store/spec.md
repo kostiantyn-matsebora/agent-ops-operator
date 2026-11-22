@@ -30,7 +30,7 @@ else:
 
 | Collection | Record | Capabilities | Declared indexes | `kube` location |
 |---|---|---|---|---|
-| conversations | conversation control record | collection | by `initiationId`, by `pipelineRef`+phase, by phase, by parent, by word-chain, whole set | `Conversation` |
+| conversations | conversation control record | collection | by `correlationId`, by `ID`, by `pipelineRef`+phase, by phase, by parent, by word-chain, whole set | `Conversation` |
 | runs | run, appended to a conversation | appended, grow-only edit, combined read with the parent | — | `Conversation.status.runs[]` |
 | signals | signal | collection, expiring | whole set, one source's non-terminal, one source's non-terminal of one initiation id, one source's in any phase | `Signal` |
 | cooldown windows | one source's window | collection | — | `SignalSource.status.cooldown` |
@@ -90,7 +90,8 @@ A create SHALL be refused when the key already exists.
 The contract SHALL offer lookup by key and listing by a declared, closed set
 of indexes. A conversation SHALL be listable:
 
-- by `initiationId`
+- by `correlationId`, the `initiationId` the conversation adopted at creation
+- by `ID`, the identity the backend minted for it
 - by `pipelineRef` and phase
 - by phase
 - by the parent that invoked it (its direct members)
@@ -103,9 +104,13 @@ The contract SHALL NOT accept a free-form selector. Adding an index SHALL be
 a contract change with a conformance scenario, never a per-backend feature.
 
 #### Scenario: Equality routing finds the open conversation
-- **WHEN** a signal arrives whose `initiationId` matches a conversation that
+- **WHEN** a signal arrives whose `initiationId` matches the `correlationId` of a conversation that
   is not Closed
 - **THEN** the index returns that conversation and no other
+
+#### Scenario: A conversation is found by its identity
+- **WHEN** two conversations were created one after the other under the same name, the first was deleted, and a caller lists by the first one's `ID`
+- **THEN** the index returns nothing, and listing by the second one's `ID` returns the second and no other
 
 #### Scenario: Members are found by their parent
 - **WHEN** a conversation invoked two members and one of those members
@@ -127,6 +132,36 @@ a contract change with a conformance scenario, never a per-backend feature.
 - **WHEN** a caller names a lookup the index set does not declare
 - **THEN** the store refuses it as an unknown index, and the index set is
   extended by a change rather than worked around
+
+### Requirement: A create returns the record as stored
+
+`Create` on a collection SHALL return the record as the backend stored it, with the identity and creation instant the backend minted, and its revision. The caller SHALL NOT have to read the record back to learn them.
+
+A create refused because the key exists SHALL return no record and the existing conflict error.
+
+This SHALL hold for every collection of the inventory and every backend, asserted by the conformance suite over every field of the inventory. A backend that returns the caller's own input unchanged fails it.
+
+A collection whose record carries no identity SHALL return it as stored, which is the input.
+
+#### Scenario: The minted identity is in the returned record
+
+- **WHEN** a conversation is created with no identity
+- **THEN** the returned record carries a non-empty `ID` and the `CreatedAt` the store holds, and a `Get` of the same key returns the same two values
+
+#### Scenario: A caller-supplied identity is not echoed
+
+- **WHEN** a create carries an `ID` and a `CreatedAt`
+- **THEN** the returned record carries the backend's own values
+
+#### Scenario: A conflicting create returns no record
+
+- **WHEN** a create is refused because the key exists
+- **THEN** the conflict error is returned and no record is, and the existing record is unchanged
+
+#### Scenario: Every kind of state is covered
+
+- **WHEN** a collection is added to the inventory
+- **THEN** the conformance suite asserts its create returns the stored record, with no per-kind test written for it
 
 ### Requirement: The change feed is at-least-once and resumable
 The contract SHALL offer a change feed over state records. A consumer SHALL

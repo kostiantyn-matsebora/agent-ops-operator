@@ -91,11 +91,11 @@ in the pending backlog.
 
 It SHALL take part in no pipeline and SHALL be excluded from id-equality
 routing: a signal whose `initiationId` equals a closed conversation's
-`conversationId` SHALL open a new conversation rather than landing on the
+`correlationId` SHALL open a new conversation rather than landing on the
 closed one. A closed conversation is not somewhere work can land.
 
 Everything that makes it a record SHALL be retained: its spec, its materialized
-profile, channel, toolset and MCP references, its `conversationId`, its runtime
+profile, channel, toolset and MCP references, its `correlationId`, its runtime
 context handle, its recorded runs and their results, and its state on any
 volume. The moment of closing SHALL be recorded on the conversation, because it
 is the origin of the delete window.
@@ -105,7 +105,7 @@ is the origin of the delete window.
 - **THEN** its runtime pod and MCP ConfigMap are gone, no work unit is dispatched for it, and the capacity it held admits a waiting conversation
 
 #### Scenario: A matching signal does not land on a closed conversation
-- **WHEN** a signal arrives whose `initiationId` equals a closed conversation's `conversationId`
+- **WHEN** a signal arrives whose `initiationId` equals a closed conversation's `correlationId`
 - **THEN** a new conversation is opened adopting that id, and the closed one is untouched
 
 #### Scenario: The record survives the close
@@ -299,7 +299,7 @@ conversation's ending belong to the manager.
 - **THEN** it renders no Role and no RoleBinding for it and mounts no ServiceAccount token
 
 ### Requirement: An orphan directory is identified by ordering, not by a timeout
-Workspace directories SHALL be reclaimed only when no `Conversation` of that name
+Workspace directories SHALL be reclaimed only when no conversation with that `ID`
 exists, determined by scanning directory entries BEFORE listing conversations and
 deleting only entries absent from the later listing.
 
@@ -308,6 +308,8 @@ kubelet mounting a subPath for a runtime pod, and that pod exists only for a
 conversation created earlier, so a conversation always predates its directory. A
 listing taken after the scan therefore contains every conversation whose directory
 was seen, and an absence is a deletion rather than a race.
+
+A workspace directory is named by the conversation's `ID` (`runtime-workspace-persistence`), so a conversation created later under a reused name does not keep a deleted conversation's directory alive.
 
 The reverse order SHALL NOT be used, because a conversation created between the
 listing and the scan would appear to be an orphan.
@@ -319,6 +321,10 @@ listing and the scan would appear to be an orphan.
 #### Scenario: A deleted conversation's directory is reclaimed
 - **WHEN** a directory exists for a conversation that no longer exists
 - **THEN** the directory and its contents are removed
+
+#### Scenario: A reused name does not shield an orphan
+- **WHEN** a conversation was deleted, a new one was created under the same name, and the first one's directory remains
+- **THEN** the directory is reclaimed, because no conversation carries its `ID`
 
 ### Requirement: Session transcripts are reclaimed by reference and age together
 Transcripts on the context volume SHALL be reclaimed only when their session id
