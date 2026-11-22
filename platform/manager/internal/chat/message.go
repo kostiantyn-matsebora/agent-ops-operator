@@ -35,14 +35,20 @@ import (
 // Same posture as the retired `?type=` parameter: fail loudly, name the
 // replacement.
 //
-// IT DOES NOT MOVE FOR THE BLOCK GRAMMAR. A body that was markdown is now
+// IT DID NOT MOVE FOR THE BLOCK GRAMMAR. A body that was markdown is now
 // markdown PLUS a block grammar, and both are read by the ADAPTER — the same
 // component that already read the markdown. Nothing was added to the wire.
 //
 // The manager does not parse either one. Carrying a parsed representation beside
 // the body would be a second copy of text the message already has, and one the
 // manager cannot keep in step with a body it does not read.
-const ContractVersion = "2"
+//
+// Version 3 (conversation-identity): `conversationId` changes meaning from
+// the correlation key to the conversation's system identity, and the
+// correlation key moves to a new `correlationId` field. An adapter still
+// declaring 2 would be handed a `conversationId` that quietly means
+// something else, so it is refused rather than served.
+const ContractVersion = "3"
 
 // MessageKind names what the manager is saying. Four kinds cover everything it
 // ever says; an adapter that does not recognise one should render the body

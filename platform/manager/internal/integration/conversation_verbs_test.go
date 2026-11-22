@@ -426,20 +426,20 @@ func TestCloseTopicResumesOnceATopicArrives(t *testing.T) {
 	}
 }
 
-// mkCorrelatedConv creates a conversation carrying a conversationId and a
+// mkCorrelatedConv creates a conversation carrying a correlationId and a
 // pipelineRef directly — the two fields reopen's at-most-one-open check
 // (design: "Reopen keeps the at-most-one-open invariant") reads — without
 // going through the signal-ingest path, which is pinned separately in
 // correlation_test.go. No channel is bound: validateRefs only walks
 // ChannelRefs, so leaving it empty keeps these fixtures about reopen's own
 // successor check rather than about topic binding.
-func mkCorrelatedConv(t *testing.T, name, profile, pipeline, conversationID string, phase agentopsv1alpha1.ConversationPhase) *agentopsv1alpha1.Conversation {
+func mkCorrelatedConv(t *testing.T, name, profile, pipeline, correlationID string, phase agentopsv1alpha1.ConversationPhase) *agentopsv1alpha1.Conversation {
 	t.Helper()
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Name, conv.Namespace = name, ns
 	conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: profile}
 	conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: pipeline}
-	conv.Spec.ConversationID = conversationID
+	conv.Spec.CorrelationID = correlationID
 	if err := k8sClient.Create(context.Background(), conv); err != nil {
 		t.Fatal(err)
 	}
@@ -455,13 +455,13 @@ func mkCorrelatedConv(t *testing.T, name, profile, pipeline, conversationID stri
 }
 
 // Reopen's at-most-one-open invariant: a closed conversation MUST NOT reopen
-// while another OPEN conversation already carries the same conversationId
+// while another OPEN conversation already carries the same correlationId
 // for the same pipeline — design.md's "Reopen keeps the at-most-one-open
 // invariant", which the proposal's reopen-tiebreak decision states as a
 // SHALL. Without this refusal, two conversations would answer for one
 // correlation id — the bug this whole change exists to kill, in mirror
 // image on the reopen path rather than on ingest.
-func TestReopenRefusedWhileOpenSuccessorSharesConversationID(t *testing.T) {
+func TestReopenRefusedWhileOpenSuccessorSharesCorrelationID(t *testing.T) {
 	mkProfile(t, "profile-reopen-guard")
 	closed := mkCorrelatedConv(t, "reopen-guard-closed", "profile-reopen-guard", "pipe-reopen-guard", "reopen-guard-1", agentopsv1alpha1.ConversationClosed)
 	successor := mkCorrelatedConv(t, "reopen-guard-open", "profile-reopen-guard", "pipe-reopen-guard", "reopen-guard-1", agentopsv1alpha1.ConversationIdle)
@@ -470,7 +470,7 @@ func TestReopenRefusedWhileOpenSuccessorSharesConversationID(t *testing.T) {
 	srv := apiServer()
 	err := srv.Router.ReopenConversation(context.Background(), recOf(t, closed.Name))
 	if err == nil {
-		t.Fatal("reopen must be refused while an open successor shares the conversationId")
+		t.Fatal("reopen must be refused while an open successor shares the correlationId")
 	}
 	if !strings.Contains(err.Error(), successor.Name) {
 		t.Errorf("the refusal must NAME the successor, got: %v", err)
@@ -481,10 +481,10 @@ func TestReopenRefusedWhileOpenSuccessorSharesConversationID(t *testing.T) {
 }
 
 // The mirror of the refusal above: once no OPEN conversation carries the
-// same conversationId for the same pipeline, reopen proceeds exactly as it
+// same correlationId for the same pipeline, reopen proceeds exactly as it
 // always did — the successor check adds a refusal, never a NEW permission
 // requirement.
-func TestReopenPermittedOnceNoOpenSuccessorSharesConversationID(t *testing.T) {
+func TestReopenPermittedOnceNoOpenSuccessorSharesCorrelationID(t *testing.T) {
 	mkProfile(t, "profile-reopen-free")
 	closed := mkCorrelatedConv(t, "reopen-free-closed", "profile-reopen-free", "pipe-reopen-free", "reopen-free-1", agentopsv1alpha1.ConversationClosed)
 

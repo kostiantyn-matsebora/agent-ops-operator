@@ -237,7 +237,7 @@ type ConversationRecord struct {
 	PipelineRef           Ref
 	Signal                *SignalProvenance
 	Title                 string
-	ConversationID        string
+	CorrelationID         string
 	OriginReader          *OriginReader
 	Toolsets              *ToolsetBinding
 	MCPConfigs            *ToolingBinding

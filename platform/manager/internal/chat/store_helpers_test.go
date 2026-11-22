@@ -69,7 +69,7 @@ func crRec(c *agentopsv1alpha1.Conversation) *state.ConversationRecord {
 		return nil
 	}
 	rec := &state.ConversationRecord{
-		Name: c.Name, ID: string(c.UID), Title: c.Spec.Title, ConversationID: c.Spec.ConversationID,
+		Name: c.Name, ID: string(c.UID), Title: c.Spec.Title, CorrelationID: c.Spec.CorrelationID,
 		Phase: string(c.Status.Phase), Reopens: c.Status.Reopens,
 	}
 	if c.Spec.Signal != nil {

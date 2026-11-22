@@ -785,55 +785,60 @@ func TestFailedDeleteConversationRetriesThenResubmitsImmediatelyOnceDead(t *test
 	}
 }
 
-// Every op leaving the queue for a known conversation carries that
-// conversation's own conversationId BESIDE its name (channel-adapter-contract
-// OPS-9) — additive, so a conformant adapter that does not recognise the
-// field keeps working. Exercises the three distinct call shapes: a method
-// that already took the whole Conversation (EnsureTopic), one changed from a
-// bare name to the Conversation (CloseTopic), and EnqueueMessage's own nilable
-// conv, which must stay empty with no conversation to source it from.
-func TestOpsCarryTheOwningConversationID(t *testing.T) {
+// Every op leaving the queue for a known conversation carries, beside its
+// display name in Conversation, both its system identity in ConversationID
+// (conv.ID) and its correlation key in CorrelationID (conv.CorrelationID) —
+// channel-adapter-contract OPS-9/"Every outbound operation carries the
+// conversation's identity" — additive, so a conformant adapter that does not
+// recognise either field keeps working. Exercises the three distinct call
+// shapes: a method that already took the whole Conversation (EnsureTopic),
+// one changed from a bare name to the Conversation (CloseTopic), and
+// EnqueueMessage's own nilable conv, which must stay empty with no
+// conversation to source it from.
+func TestOpsCarryTheOwningIdentityAndCorrelationID(t *testing.T) {
 	ctx := context.Background()
 	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
 	ch := testChannel("c1", "slack")
 
 	withID := testConv("conv-with-id")
-	withID.Spec.ConversationID = "corr-77"
+	withID.Spec.CorrelationID = "corr-77"
+	wantID := string(withID.UID)
 
 	// Every one of the next three ops shares conv-with-id × c1 as its Key
 	// (design D-2: Key is conversation × channel, the SAME for every op
 	// kind on that pair) — each must settle before the next is claimable.
 	q.EnqueueEnsureTopic(ctx, ch, crRec(withID), TopicDescriptor{Source: "vm-alerts", Kind: "alert"})
 	op := q.Claim("slack")
-	if op == nil || op.ConversationID != "corr-77" {
-		t.Fatalf("ensure-topic must carry the conversationId: %+v", op)
+	if op == nil || op.ConversationID != wantID || op.CorrelationID != "corr-77" {
+		t.Fatalf("ensure-topic must carry both the identity and the correlationId: %+v", op)
 	}
 	settleClaimed(t, q, op.ID)
 
 	tid := "t-1"
 	q.EnqueueCloseTopic(ctx, ch, tid, crRec(withID))
 	op = q.Claim("slack")
-	if op == nil || op.ConversationID != "corr-77" || op.Conversation != "conv-with-id" {
-		t.Fatalf("close-topic must carry both the name and the conversationId: %+v", op)
+	if op == nil || op.ConversationID != wantID || op.CorrelationID != "corr-77" || op.Conversation != "conv-with-id" {
+		t.Fatalf("close-topic must carry the name, the identity and the correlationId: %+v", op)
 	}
 	settleClaimed(t, q, op.ID)
 
 	q.EnqueueMessage(ctx, ch, crRec(withID), &tid, Notice("hello"))
-	if op := q.Claim("slack"); op == nil || op.ConversationID != "corr-77" {
-		t.Fatalf("a message bound to a conversation must carry its conversationId: %+v", op)
+	if op := q.Claim("slack"); op == nil || op.ConversationID != wantID || op.CorrelationID != "corr-77" {
+		t.Fatalf("a message bound to a conversation must carry its identity and correlationId: %+v", op)
 	}
 
-	// no conversationId to adopt — legacy conversation, never backfilled
+	// no correlationId to adopt — legacy conversation, never backfilled. The
+	// identity is still carried: ID is always backend-minted.
 	legacy := testConv("conv-legacy")
 	q.EnqueueEnsureTopic(ctx, ch, crRec(legacy), TopicDescriptor{Source: "vm-alerts", Kind: "alert"})
-	if op := q.Claim("slack"); op == nil || op.ConversationID != "" {
-		t.Fatalf("a legacy conversation's op must carry no conversationId: %+v", op)
+	if op := q.Claim("slack"); op == nil || op.ConversationID != string(legacy.UID) || op.CorrelationID != "" {
+		t.Fatalf("a legacy conversation's op must carry its identity but no correlationId: %+v", op)
 	}
 
 	// no conversation at all — a general-surface notice
 	q.EnqueueMessage(ctx, ch, crRec(nil), nil, Notice("unwired source dropped a signal"))
-	if op := q.Claim("slack"); op == nil || op.ConversationID != "" || op.Conversation != "" {
-		t.Fatalf("a conversation-less notice must carry neither name nor conversationId: %+v", op)
+	if op := q.Claim("slack"); op == nil || op.ConversationID != "" || op.CorrelationID != "" || op.Conversation != "" {
+		t.Fatalf("a conversation-less notice must carry neither name, identity nor correlationId: %+v", op)
 	}
 }
 

@@ -27,7 +27,7 @@ func getVocabulary(t *testing.T, srv *httpapi.Server) chat.Vocabulary {
 
 func opsPoll(t *testing.T, srv *httpapi.Server) (int, string) {
 	t.Helper()
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token")
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=3&wait=0", nil, "test-adapter-token")
 	return rec.Code, rec.Header().Get(httpapi.VocabularyRevisionHeader)
 }
 
@@ -75,7 +75,7 @@ func TestOpsPollCarriesTheRevisionOnBothOutcomes(t *testing.T) {
 
 	// The 204 must stay bodyless: giving it a body would change what every
 	// adapter built before the vocabulary parses.
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token")
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Body.Len() != 0 {
 		t.Fatalf("204 grew a body: %q", rec.Body.String())
 	}
@@ -135,19 +135,21 @@ func TestReadyPipelineChangesTheObservedRevision(t *testing.T) {
 // An adapter that knows nothing of the vocabulary keeps working — every
 // addition there is optional.
 //
-// THE VERSION STILL HAS NOT MOVED, and structured-agent-output is why that is
-// worth restating: it briefly went to 3 to carry a parsed `blocks[]`, and the
-// field was removed when parsing moved into the adapters. A body that was
-// markdown is now markdown plus a block grammar, read by the component that
-// already read the markdown — nothing was added to the wire.
+// THE VERSION STILL HAS NOT MOVED FOR THIS REASON, and structured-agent-output
+// is why that is worth restating: it briefly went to 3 to carry a parsed
+// `blocks[]`, and the field was removed when parsing moved into the adapters.
+// A body that was markdown is now markdown plus a block grammar, read by the
+// component that already read the markdown — nothing was added to the wire.
+// conversation-identity moved it to 3 for an unrelated reason (the renamed
+// correlation id), so this guard now pins THAT value.
 func TestVocabularyIsPurelyAdditiveForOlderAdapters(t *testing.T) {
 	mkChannel(t, "old-chan", "telegram")
 	srv := apiServer()
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token")
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 204 {
 		t.Fatalf("older adapter refused: %d %s", rec.Code, rec.Body.String())
 	}
-	if chat.ContractVersion != "2" {
+	if chat.ContractVersion != "3" {
 		t.Fatalf("contract version moved to %q — update this guard deliberately, not incidentally",
 			chat.ContractVersion)
 	}
@@ -169,7 +171,7 @@ func hasName(hay []string, needle string) bool {
 // exercised end to end rather than asserted.
 //
 // It drives the contract EXACTLY as an adapter built before any of this
-// existed: contract=2, no vocabulary fetch, no header read, no choices
+// existed: contract=3, no vocabulary fetch, no header read, no choices
 // rendered. Every step must behave as it did, because that is what "additive"
 // has to mean for anyone who does not upgrade in step with the manager.
 func TestPreVocabularyAdapterIsUnaffected(t *testing.T) {
@@ -202,16 +204,17 @@ func TestPreVocabularyAdapterIsUnaffected(t *testing.T) {
 
 	assertOpsArriveInParsableShape(t, srv)
 
-	// The contract version did not move. An adapter pinning it keeps working.
-	if chat.ContractVersion != "2" {
-		t.Fatalf("contract version is now %q — this test drives %q", chat.ContractVersion, "2")
+	// The contract version is pinned deliberately (conversation-identity moved
+	// it to 3). An adapter pinning it keeps working.
+	if chat.ContractVersion != "3" {
+		t.Fatalf("contract version is now %q — this test drives %q", chat.ContractVersion, "3")
 	}
 }
 
-// assertHandshakeUnchanged: contract 2 is served, contract 1 refused.
+// assertHandshakeUnchanged: contract 3 is served, contract 1 refused.
 func assertHandshakeUnchanged(t *testing.T, srv *httpapi.Server) {
 	t.Helper()
-	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token"); rec.Code != 204 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=3&wait=0", nil, "test-adapter-token"); rec.Code != 204 {
 		t.Fatalf("empty poll: %d, want 204", rec.Code)
 	}
 	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=1&wait=0", nil, "test-adapter-token"); rec.Code != 400 {
@@ -226,7 +229,7 @@ func assertOpsArriveInParsableShape(t *testing.T, srv *httpapi.Server) {
 	t.Helper()
 	var sawSend bool
 	for i := 0; i < 8; i++ {
-		rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token")
+		rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=3&wait=0", nil, "test-adapter-token")
 		if rec.Code == 204 {
 			break
 		}
@@ -254,6 +257,6 @@ func assertSendOpHasRenderableMessage(t *testing.T, op chat.Op) {
 		t.Fatalf("send op lost its typed message: %+v", op)
 	}
 	if op.Message.Body == "" {
-		t.Fatalf("contract=2 adapter got a message with no body to render: %+v", op.Message)
+		t.Fatalf("contract=3 adapter got a message with no body to render: %+v", op.Message)
 	}
 }

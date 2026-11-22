@@ -84,7 +84,7 @@ var (
 	// ByConversationID/"conversationId", conversation-identity design D-10).
 	// Value: the correlation id.
 	ByCorrelationID = NewIndex("correlationId", func(r *ConversationRecord) (string, bool) {
-		return r.ConversationID, r.ConversationID != ""
+		return r.CorrelationID, r.CorrelationID != ""
 	})
 	// ByPipelineAndPhase looks up a Pipeline's own conversations in one
 	// phase, the queue a Pipeline-rooted dispatch sweep reads. Value:

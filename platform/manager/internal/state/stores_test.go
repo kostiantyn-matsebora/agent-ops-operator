@@ -138,7 +138,7 @@ func TestSignalIndexesPartitionByPhaseAndSource(t *testing.T) {
 }
 
 func TestConversationIndexesReadTheRecordsOwnFields(t *testing.T) {
-	r := &ConversationRecord{ID: "the-id", ConversationID: "cid", PipelineRef: "p", Phase: PhaseIdle, NameBase: "base", CausedBy: &Provenance{Parent: "root"}}
+	r := &ConversationRecord{ID: "the-id", CorrelationID: "cid", PipelineRef: "p", Phase: PhaseIdle, NameBase: "base", CausedBy: &Provenance{Parent: "root"}}
 	for _, tc := range []struct {
 		idx  Index[ConversationRecord]
 		want string

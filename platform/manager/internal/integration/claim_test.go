@@ -254,7 +254,7 @@ func TestChannelOpsAnswers204RegardlessOfLease(t *testing.T) {
 	srv.ReplicaIdentity = "replica-b"
 	// no Lease object exists at all — formerly "leader unknown", which used
 	// to refuse this poll outright. Now irrelevant to this endpoint.
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-leader&contract=2&wait=0", nil, testMasterToken)
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-leader&contract=3&wait=0", nil, testMasterToken)
 	if rec.Code != 204 {
 		t.Fatalf("an empty queue must answer 204 from any replica, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -301,7 +301,7 @@ func TestChannelOpsAnswersFromAnyReplicaSharingTheBus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := adapterReq(followerSrv, "GET", "/channel/ops?adapter=tg-shared&contract=2&wait=0", nil, testMasterToken)
+	rec := adapterReq(followerSrv, "GET", "/channel/ops?adapter=tg-shared&contract=3&wait=0", nil, testMasterToken)
 	if rec.Code != 200 {
 		t.Fatalf("a replica sharing the bus must answer the leader-enqueued op directly, got %d: %s", rec.Code, rec.Body.String())
 	}

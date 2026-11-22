@@ -50,7 +50,7 @@ func ConversationLayout() Layout[state.ConversationRecord] {
 				return string(asConversation(obj).UID) == v
 			},
 			state.ByCorrelationID.Name(): func(obj client.Object, v string) bool {
-				return asConversation(obj).Spec.ConversationID == v
+				return asConversation(obj).Spec.CorrelationID == v
 			},
 			state.ByPipelineAndPhase.Name(): func(obj client.Object, v string) bool {
 				c := asConversation(obj)

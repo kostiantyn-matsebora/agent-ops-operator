@@ -716,9 +716,9 @@ func TestInvokeMemberPropagatesABrokenAncestryChain(t *testing.T) {
 }
 
 // findReusableMember's reuse rule excludes a Closed conversation even when its
-// conversationId and (parent, entry) match — a stale closed member must never
+// correlationId and (parent, entry) match — a stale closed member must never
 // be reattached to.
-func TestInvokeMemberIgnoresAClosedMemberWithTheSameConversationID(t *testing.T) {
+func TestInvokeMemberIgnoresAClosedMemberWithTheSameCorrelationID(t *testing.T) {
 	entry := agentopsv1alpha1.CoordinatorAgentEntry{
 		Name: "worker", Description: "does the work",
 		CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
@@ -727,7 +727,7 @@ func TestInvokeMemberIgnoresAClosedMemberWithTheSameConversationID(t *testing.T)
 	caller := coordinatorRoot("root-1", "co-a")
 	closedMember := &agentopsv1alpha1.Conversation{}
 	closedMember.Name, closedMember.Namespace = "old-member", testNS
-	closedMember.Spec.ConversationID = "invoke:worker"
+	closedMember.Spec.CorrelationID = "invoke:worker"
 	closedMember.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: caller.Name, Entry: "worker"}
 	closedMember.Status.Phase = agentopsv1alpha1.ConversationClosed
 
@@ -738,7 +738,7 @@ func TestInvokeMemberIgnoresAClosedMemberWithTheSameConversationID(t *testing.T)
 		t.Fatalf("InvokeMember: %v", err)
 	}
 	if !result.Created || result.Member == closedMember.Name {
-		t.Fatalf("a closed member with the same conversationId must not be reused, got %+v", result)
+		t.Fatalf("a closed member with the same correlationId must not be reused, got %+v", result)
 	}
 }
 

@@ -145,7 +145,7 @@ func actDriveTopicAndDispatch(t *testing.T, ctx context.Context, srv *httpapi.Se
 		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: convName}}); err != nil {
 		t.Fatal(err)
 	}
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, testMasterToken)
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=3&wait=0", nil, testMasterToken)
 	if rec.Code != 200 {
 		t.Fatalf("ensure-topic op not queued: %d", rec.Code)
 	}

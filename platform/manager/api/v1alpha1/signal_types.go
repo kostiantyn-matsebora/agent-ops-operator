@@ -125,7 +125,7 @@ const (
 	// attempted and owed a retry.
 	ClaimantRouting ClaimantState = "Routing"
 	// ClaimantRouted: this claimant opened or appended to a conversation for
-	// this signal. Idempotent by equality reuse (conversationId ==
+	// this signal. Idempotent by equality reuse (correlationId ==
 	// initiationId) and by the input named for the Signal and claimant — a
 	// repeated pass never re-routes it.
 	ClaimantRouted ClaimantState = "Routed"

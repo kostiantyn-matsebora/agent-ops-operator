@@ -25,7 +25,7 @@ func drainOps(t *testing.T, srv *httpapi.Server, adapter string) []chat.Op {
 	t.Helper()
 	var out []chat.Op
 	for i := 0; i < 50; i++ {
-		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+adapter+"&contract=2&wait=0", nil, testMasterToken)
+		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+adapter+"&contract=3&wait=0", nil, testMasterToken)
 		if rec.Code != 200 {
 			return out
 		}

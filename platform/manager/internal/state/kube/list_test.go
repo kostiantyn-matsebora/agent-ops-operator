@@ -12,10 +12,10 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
-func createForList(t *testing.T, ctx context.Context, s state.Stores, name, conversationID, pipelineRef, phase string) {
+func createForList(t *testing.T, ctx context.Context, s state.Stores, name, correlationID, pipelineRef, phase string) {
 	t.Helper()
 	rec := fixtureRecord(name)
-	rec.ConversationID = conversationID
+	rec.CorrelationID = correlationID
 	rec.PipelineRef = pipelineRef
 	rec.Phase = phase
 	if _, _, err := s.Conversations.Create(ctx, state.Key(name), rec); err != nil {

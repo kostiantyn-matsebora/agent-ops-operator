@@ -541,7 +541,7 @@ func checkAttributeFilterOperator(t *testing.T, name string, requirement agentop
 		t.Fatalf("operator %s: want exactly 1 admitted Signal, got %d", name, len(convs.Items))
 	}
 	if convs.Items[0].Spec.InitiationID != "op-admit-1" {
-		t.Fatalf("operator %s: the routed conversation must be the ADMITTED signal, got conversationId %q",
+		t.Fatalf("operator %s: the routed conversation must be the ADMITTED signal, got correlationId %q",
 			name, convs.Items[0].Spec.InitiationID)
 	}
 }
@@ -579,7 +579,7 @@ func TestSignalInboundAttributeFilterMultipleRequirementsRequiresAll(t *testing.
 		t.Fatalf("a signal failing only the SECOND requirement must still be dropped — want 1 Signal, got %d", len(convs.Items))
 	}
 	if convs.Items[0].Spec.InitiationID != "and-both-1" {
-		t.Fatalf("the routed conversation must be the one satisfying BOTH requirements, got conversationId %q",
+		t.Fatalf("the routed conversation must be the one satisfying BOTH requirements, got correlationId %q",
 			convs.Items[0].Spec.InitiationID)
 	}
 }

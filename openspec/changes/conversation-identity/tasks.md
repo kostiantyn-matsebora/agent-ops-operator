@@ -8,8 +8,8 @@
 
 ## 2. The rename — api-architect
 
-- [ ] 2.1 Rename `ConversationID` to `CorrelationID` in `api/v1alpha1`, the record, the kube mapping and layouts, and the `Op` types, and regenerate deepcopy and CRDs. Verify `chart/crds/` shows `correlationId` and nothing still shows `conversationId` for the correlation key.
-- [ ] 2.2 Make the op's `conversationId` carry the conversation `ID`, move the correlation key to `correlationId`, and raise the contract version as the specs state. Verify an adapter declaring the old version gets the documented `400`.
+- [x] 2.1 Rename `ConversationID` to `CorrelationID` in `api/v1alpha1`, the record, the kube mapping and layouts, and the `Op` types, and regenerate deepcopy and CRDs. Verify `chart/crds/` shows `correlationId` and nothing still shows `conversationId` for the correlation key.
+- [x] 2.2 Make the op's `conversationId` carry the conversation `ID`, move the correlation key to `correlationId`, and raise the contract version as the specs state. Verify an adapter declaring the old version gets the documented `400`.
 
 ## 3. ID as the system identity — backend-developer
 

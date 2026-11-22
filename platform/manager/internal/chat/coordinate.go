@@ -500,8 +500,8 @@ func isHumanInitiated(c *state.ConversationRecord) bool {
 }
 
 // findReusableMember is conversation-provenance's reuse rule: a live
-// conversation with the same conversationId AND the same (parent, entry) —
-// depth plays no part. Reads the same conversationId index equality routing
+// conversation with the same correlationId AND the same (parent, entry) —
+// depth plays no part. Reads the same correlationId index equality routing
 // does (state.ByCorrelationID), never the removed
 // agentops.dev/signature-hash label.
 func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, initiationID string) (*state.ConversationRecord, error) {
@@ -571,7 +571,7 @@ func (r *Router) createMember(ctx context.Context, caller *state.ConversationRec
 		WorkspaceClaimName: snap.WorkspaceClaimName,
 		CausedBy:           &state.Provenance{Parent: caller.Name, Entry: entry.Name},
 		Title:              memberTitle(entry.Name, task),
-		ConversationID:     initiationID,
+		CorrelationID:      initiationID,
 	}
 	if nested != nil {
 		member.CoordinatorRef = entry.CoordinatorRef.Name

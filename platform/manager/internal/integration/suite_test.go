@@ -559,7 +559,7 @@ func TestConversationLifecycle(t *testing.T) {
 // batch shape: several signals in ONE POST that share a single sender-minted
 // initiationId (a sender's own aggregation, e.g. several readings under one
 // incident) collapse to ONE conversation with ONE combined input — adopting
-// that id as spec.conversationId, never a derived signature. A repeat of the
+// that id as spec.correlationId, never a derived signature. A repeat of the
 // SAME id outside cooldown lands on that same OPEN conversation as a
 // recurrence.
 func TestSignalBatchSharingOneInitiationIDCombines(t *testing.T) {
@@ -595,7 +595,7 @@ func postBatchAndFindCombinedConversation(t *testing.T, ctx context.Context, h h
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	var conv *agentopsv1alpha1.Conversation
 	for i := range list.Items {
-		if list.Items[i].Spec.ConversationID == "batch-a" {
+		if list.Items[i].Spec.CorrelationID == "batch-a" {
 			conv = &list.Items[i]
 		}
 	}
@@ -657,13 +657,13 @@ func assertRepeatOutsideCooldownBecomesRecurrence(t *testing.T, ctx context.Cont
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	count := 0
 	for i := range list.Items {
-		if list.Items[i].Spec.ConversationID == "batch-a" {
+		if list.Items[i].Spec.CorrelationID == "batch-a" {
 			count++
 			conv = &list.Items[i]
 		}
 	}
 	if count != 1 {
-		t.Fatalf("duplicate conversation created: %d for one conversationId", count)
+		t.Fatalf("duplicate conversation created: %d for one correlationId", count)
 	}
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Name}, conv)
 	if len(conv.Spec.Inputs) != 2 || conv.Spec.Inputs[1].Type != agentopsv1alpha1.InputRecurrence {

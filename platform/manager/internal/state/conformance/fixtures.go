@@ -84,7 +84,7 @@ func conversationIndexPool() []Keyed[state.ConversationRecord] {
 	key := func(label string) state.Key { return state.Key("conv-idx-" + label) }
 	rec := func(convID, pipeline, phase, nameBase string, causedBy *state.Provenance) state.ConversationRecord {
 		return state.ConversationRecord{
-			ProfileRef: profileDefault, ConversationID: convID, PipelineRef: pipeline,
+			ProfileRef: profileDefault, CorrelationID: convID, PipelineRef: pipeline,
 			Phase: phase, NameBase: nameBase, CausedBy: causedBy,
 		}
 	}

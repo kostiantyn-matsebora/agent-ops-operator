@@ -301,7 +301,7 @@ func TestSignalAuthScoping(t *testing.T) {
 	if rec := get("/signal/sources?adapter=auth-chan", chanTok); rec.Code != 401 {
 		t.Fatalf("channel token on signal surface: %d", rec.Code)
 	}
-	if rec := get("/channel/ops?adapter=auth-sig&contract=2&wait=0", sigTok); rec.Code != 401 {
+	if rec := get("/channel/ops?adapter=auth-sig&contract=3&wait=0", sigTok); rec.Code != 401 {
 		t.Fatalf("signal token on channel surface: %d", rec.Code)
 	}
 	// same-name adapters on both surfaces never share a token

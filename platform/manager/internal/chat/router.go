@@ -503,17 +503,17 @@ func (r *Router) ReopenConversation(ctx context.Context, conv *state.Conversatio
 // refuseReopenBehindOpenSuccessor is the ONE verb that could break equality
 // routing's at-most-one-open invariant (conversation-provenance: "Reopen
 // SHALL be refused while another open conversation carries the same
-// conversationId for that pipeline, with a reason naming the successor") —
-// reopening conv while a `-N` successor with the same conversationId is
+// correlationId for that pipeline, with a reason naming the successor") —
+// reopening conv while a `-N` successor with the same correlationId is
 // already open would let two conversations answer for one correlation id.
 //
-// A conversation carrying no conversationId (legacy, or never
+// A conversation carrying no correlationId (legacy, or never
 // signal-originated) has nothing to collide on and is never refused.
 func (r *Router) refuseReopenBehindOpenSuccessor(ctx context.Context, conv *state.ConversationRecord) error {
-	if conv.ConversationID == "" {
+	if conv.CorrelationID == "" {
 		return nil
 	}
-	list, err := r.Conversations.List(ctx, state.ByCorrelationID, conv.ConversationID)
+	list, err := r.Conversations.List(ctx, state.ByCorrelationID, conv.CorrelationID)
 	if err != nil {
 		return err
 	}
@@ -525,7 +525,7 @@ func (r *Router) refuseReopenBehindOpenSuccessor(ctx context.Context, conv *stat
 		if !conv.SameOrigin(successor) {
 			continue
 		}
-		return fmt.Errorf("cannot reopen %s: %s already carries the same conversationId and is open",
+		return fmt.Errorf("cannot reopen %s: %s already carries the same correlationId and is open",
 			conv.Name, successor.Name)
 	}
 	return nil

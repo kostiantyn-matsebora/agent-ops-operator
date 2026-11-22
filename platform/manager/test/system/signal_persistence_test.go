@@ -103,7 +103,7 @@ func assertClaimant(t *testing.T, sig *agentopsv1alpha1.Signal, name string, wan
 }
 
 // assertExactlyOneConversationPerClaimant asserts that exactly one
-// conversation in the namespace carries conversationId==id and names each
+// conversation in the namespace carries correlationId==id and names each
 // pipeline as its own PipelineRef — the idempotency claim a restart
 // mid-routing must hold: equality-reuse (already open before the restart)
 // and a genuinely fresh create (after resume) must never both leave a
@@ -117,7 +117,7 @@ func assertExactlyOneConversationPerClaimant(t *testing.T, ctx context.Context, 
 	counts := map[string]int{}
 	for i := range items {
 		c := &items[i]
-		if c.Spec.ConversationID != id || c.Spec.PipelineRef == nil {
+		if c.Spec.CorrelationID != id || c.Spec.PipelineRef == nil {
 			continue
 		}
 		counts[c.Spec.PipelineRef.Name]++
@@ -188,8 +188,8 @@ func TestSignalPersistenceReachesRoutedPhase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the conversation the claimant named must exist: %v", err)
 	}
-	if conv.Spec.ConversationID != id {
-		t.Fatalf("the routed conversation must carry the posted initiationId as its conversationId, got %q want %q", conv.Spec.ConversationID, id)
+	if conv.Spec.CorrelationID != id {
+		t.Fatalf("the routed conversation must carry the posted initiationId as its correlationId, got %q want %q", conv.Spec.CorrelationID, id)
 	}
 	t.Cleanup(func() {
 		_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
@@ -253,7 +253,7 @@ func TestSignalPersistenceResumesPartiallyRoutedAfterManagerRestart(t *testing.T
 			return
 		}
 		for i := range items {
-			if items[i].Spec.ConversationID == id {
+			if items[i].Spec.CorrelationID == id {
 				_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: items[i].Name}})
 			}
 		}
@@ -563,7 +563,7 @@ func TestSignalPersistenceLeaderRemovalFinishesPartiallyRouted(t *testing.T) {
 			return
 		}
 		for i := range items {
-			if items[i].Spec.ConversationID == id {
+			if items[i].Spec.CorrelationID == id {
 				_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: items[i].Name}})
 			}
 		}
