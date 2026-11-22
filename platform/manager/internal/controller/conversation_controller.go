@@ -1405,7 +1405,10 @@ func (r *ConversationReconciler) deliverMemberResults(ctx context.Context, conv 
 		if run.RoutedToParent {
 			continue
 		}
-		dedup := "member:" + conv.Name + ":" + run.RunID
+		// Keyed on conv.ID, not conv.Name (conversation-identity Decision 6),
+		// and must match internal/httpapi/server.go's fast-path dedup string
+		// exactly — this is that same append's backstop, not a second event.
+		dedup := "member:" + conv.ID + ":" + run.RunID
 		if err := r.Router.AppendMemberResult(ctx, conv.CausedBy, conv.ID, conv.Name, dedup, run.Result); err != nil {
 			if firstErr == nil {
 				firstErr = err

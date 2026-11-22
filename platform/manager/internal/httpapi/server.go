@@ -939,7 +939,11 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// nothing to route. The reconciler backstop re-derives a missed append from
 	// `causedBy and !RoutedToParent`.
 	if conv.CausedBy != nil && s.Router != nil {
-		dedup := "member:" + conv.Name + ":" + d.RunID
+		// Keyed on conv.ID, not conv.Name (conversation-identity Decision 6):
+		// a member deleted and recreated under the same name while its
+		// parent is still open must never have its first run's result
+		// skipped as a dup of its predecessor's.
+		dedup := "member:" + conv.ID + ":" + d.RunID
 		if err := s.Router.AppendMemberResult(ctx, conv.CausedBy, conv.ID, conv.Name, dedup, result); err != nil {
 			log.FromContext(ctx).Info("routing member result to parent (backstop will retry)",
 				"conversation", conv.Name, "parentId", conv.CausedBy.Parent, "error", err.Error())
