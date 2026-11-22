@@ -51,10 +51,16 @@ func dirExists(t *testing.T, path string) bool {
 }
 
 // A deleted conversation's directory is what this job is FOR.
+//
+// A workspace directory is named for the conversation's ID
+// (conversation-identity Decision 1/7), so "conv-live" below stands in for
+// an ID, not a display Name — ID == Name is this test's own trivial,
+// legitimate case; TestRecreatedNameDoesNotProtectTheOldDirectory below is
+// the one that cares about the two differing.
 func TestOrphanWorkspaceIsReclaimed(t *testing.T) {
 	root := t.TempDir()
 	mkDirs(t, root, "conv-live", "conv-gone")
-	lister := &stubLister{convs: []Conversation{{Name: "conv-live"}}}
+	lister := &stubLister{convs: []Conversation{{Name: "conv-live", ID: "conv-live"}}}
 
 	rep, err := ReclaimWorkspaces(context.Background(), root, lister, Options{})
 	if err != nil {
@@ -71,6 +77,33 @@ func TestOrphanWorkspaceIsReclaimed(t *testing.T) {
 	}
 }
 
+// A deleted conversation's directory is named for its OWN ID — a later,
+// unrelated conversation created under the SAME display Name must never
+// protect it: the new conversation's live record carries a DIFFERENT ID,
+// so it leaves the old directory's ID entirely unmatched, exactly as if no
+// conversation of that name had ever existed. Matching on Name instead
+// (the pre-conversation-identity behaviour) would have kept this directory
+// forever, under cover of a name both conversations happen to share.
+func TestRecreatedNameDoesNotProtectTheOldDirectory(t *testing.T) {
+	root := t.TempDir()
+	mkDirs(t, root, "old-life-id", "new-life-id")
+	lister := &stubLister{convs: []Conversation{{Name: "reused-name", ID: "new-life-id"}}}
+
+	rep, err := ReclaimWorkspaces(context.Background(), root, lister, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Removed) != 1 || rep.Removed[0] != "old-life-id" {
+		t.Fatalf("want only the old life's directory reclaimed, got %+v", rep.Removed)
+	}
+	if !dirExists(t, filepath.Join(root, "new-life-id")) {
+		t.Fatal("the new life's own workspace must survive")
+	}
+	if dirExists(t, filepath.Join(root, "old-life-id")) {
+		t.Fatal("a reused name must not protect the old life's directory")
+	}
+}
+
 // THE ordering test. A conversation created after the scan but before the
 // listing must never be reclaimed — its directory exists, but the listing that
 // decides is taken later, so it is seen.
@@ -80,7 +113,7 @@ func TestConversationCreatedMidScanIsNeverReclaimed(t *testing.T) {
 	lister := &stubLister{}
 	// The conversation appears only when the listing happens — i.e. strictly
 	// after the directory scan.
-	lister.onList = func() { lister.convs = []Conversation{{Name: "conv-racing"}} }
+	lister.onList = func() { lister.convs = []Conversation{{Name: "conv-racing", ID: "conv-racing"}} }
 
 	rep, err := ReclaimWorkspaces(context.Background(), root, lister, Options{})
 	if err != nil {
@@ -104,7 +137,7 @@ func TestClosedConversationKeepsItsWorkspaceAndTranscripts(t *testing.T) {
 
 	// A CLOSED conversation still has a CR and still carries its context
 	// handle. The lister returns it exactly as it returns a live one.
-	lister := &stubLister{convs: []Conversation{{Name: "conv-closed", ContextID: "ctx-closed"}}}
+	lister := &stubLister{convs: []Conversation{{Name: "conv-closed", ID: "conv-closed", ContextID: "ctx-closed"}}}
 
 	wsRep, err := ReclaimWorkspaces(context.Background(), wsRoot, lister, Options{})
 	if err != nil {

@@ -20,12 +20,30 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
+// assignUIDs gives every pre-seeded fixture a UID derived from its own Name
+// when it carries none — the fake client, unlike a real apiserver, never
+// mints one for an object seeded through WithRuntimeObjects. conversation-
+// identity moved CausedBy.Parent and the pod label agentops.dev/
+// conversation-id to the parent/conversation's ID, and most fixtures in
+// this package still write a CausedBy.Parent or build a pod keyed on the
+// other side's Name — the trivial, legitimate case the design permits,
+// where a test does not care whether the two differ. A test that DOES care
+// sets a distinct UID itself, which this never overrides.
+func assignUIDs(objs []runtime.Object) {
+	for _, o := range objs {
+		if mo, ok := o.(metav1.Object); ok && mo.GetUID() == "" {
+			mo.SetUID(types.UID(mo.GetName()))
+		}
+	}
+}
+
 func fakeClaimClient(t *testing.T, objs ...runtime.Object) *fake.ClientBuilder {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := agentopsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
+	assignUIDs(objs)
 	return fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).WithRuntimeObjects(objs...)
 }

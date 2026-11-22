@@ -39,7 +39,8 @@ func mkQueuedConv(t *testing.T, name, profile string, item agentopsv1alpha1.Inpu
 // consumed inputs are recorded.
 func runOne(t *testing.T, srv *httpapi.Server, conv string, result string) {
 	t.Helper()
-	rec := adapterReq(srv, "GET", "/work?convo="+conv+"&wait=0", nil, "")
+	id := convoID(t, conv)
+	rec := adapterReq(srv, "GET", "/work?convo="+id+"&wait=0", nil, "")
 	if rec.Code != 200 {
 		t.Fatalf("dispatch: %d %s", rec.Code, rec.Body.String())
 	}
@@ -50,7 +51,7 @@ func runOne(t *testing.T, srv *httpapi.Server, conv string, result string) {
 		t.Fatal(err)
 	}
 	rec = adapterReq(srv, "POST", "/work/done", map[string]any{
-		"convo": conv, "runId": unit.RunID, "status": "succeeded", "result": result,
+		"convo": id, "runId": unit.RunID, "status": "succeeded", "result": result,
 	}, "")
 	if rec.Code != 200 {
 		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())

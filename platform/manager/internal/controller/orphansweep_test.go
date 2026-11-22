@@ -74,10 +74,14 @@ func TestOrphanSweeperDeletesOnlyWorkloadsWhoseRecordIsGone(t *testing.T) {
 	old := metav1.NewTime(time.Now().Add(-time.Hour))
 	young := metav1.NewTime(time.Now())
 
+	// The pod sweep resolves by the conversation-ID label now
+	// (conversation-identity Decision 7), never by Name — "live"'s own
+	// UID (assignUIDs' trivial convention, ID == Name) is what its pod's
+	// label must carry for the sweep to recognize it as NOT orphaned.
 	pod := func(conv string, created metav1.Time) *corev1.Pod {
 		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 			Name: runtimepod.PodName(conv), Namespace: claimTestNS, CreationTimestamp: created,
-			Labels: map[string]string{runtimepod.LabelConversation: conv},
+			Labels: map[string]string{runtimepod.LabelConversationID: conv},
 		}}
 	}
 	cm := func(conv string, created metav1.Time) *corev1.ConfigMap {
@@ -87,9 +91,11 @@ func TestOrphanSweeperDeletesOnlyWorkloadsWhoseRecordIsGone(t *testing.T) {
 	}
 	other := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "unrelated", Namespace: claimTestNS, CreationTimestamp: old}}
 
+	live := claimTestConv("live")
+	assignUIDs([]runtime.Object{live})
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
-		WithRuntimeObjects(claimTestConv("live"),
+		WithRuntimeObjects(live,
 			pod("live", old), pod("gone", old), pod("fresh", young),
 			cm("live", old), cm("gone", old), cm("fresh", young), other).Build()
 

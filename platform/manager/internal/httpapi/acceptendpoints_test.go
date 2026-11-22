@@ -9,14 +9,30 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
+
+// markDeleting gives conv a finalizer and a DeletionTimestamp, the shape a
+// record held by a finalizer carries (design conversation-identity,
+// Decision 5): present in the store, but not a LIVE match. The fake client
+// honours a pre-seeded finalizer the same way the apiserver does — a bare
+// DeletionTimestamp with no finalizer would be removed outright, so the
+// finalizer is what keeps it readable at all.
+func markDeleting(conv *agentopsv1alpha1.Conversation) *agentopsv1alpha1.Conversation {
+	conv.Finalizers = []string{"test/hold"}
+	now := metav1.Now()
+	conv.DeletionTimestamp = &now
+	return conv
+}
 
 func acceptReq(s *Server, method, path string, body any) *httptest.ResponseRecorder {
 	var buf bytes.Buffer
@@ -81,6 +97,63 @@ func TestHandleConversationReopenAcceptsThenReopens(t *testing.T) {
 	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "conv-1"}, &got)
 	if got.Status.Phase != agentopsv1alpha1.ConversationIdle {
 		t.Fatalf("once processed, want Idle, got %s", got.Status.Phase)
+	}
+}
+
+// A Closed conversation is still a live match (Decision 5: "A Closed
+// conversation is live") — reopen is the one verb whose whole job is to act
+// on exactly that state, so a typed name landing on one must resolve, never
+// 404 as if the name were absent.
+func TestHandleConversationReopenOnAClosedMatchResolvesRatherThanNotFound(t *testing.T) {
+	conv := convTestBoundConv("conv-1", "c1", "t1")
+	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+	s, _, _ := busServer(t, convTestChannel("c1", "slack"), conv)
+	rec := acceptReq(s, "POST", "/channel/conversations/conv-1/reopen", map[string]any{"channel": "c1"})
+	if rec.Code != 202 {
+		t.Fatalf("a Closed match must resolve and accept, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A conversation a finalizer is still holding (DeletionRequestedAt set) is
+// NOT a live match (Decision 5) — reopening it would fight a delete already
+// in flight, so the typed name must answer exactly as an absent one does.
+func TestHandleConversationReopenOnADeletionMarkedConversationIsRefusedAsUnknown(t *testing.T) {
+	conv := markDeleting(convTestBoundConv("conv-1", "c1", "t1"))
+	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+	s, _, _ := busServer(t, convTestChannel("c1", "slack"), conv)
+	rec := acceptReq(s, "POST", "/channel/conversations/conv-1/reopen", map[string]any{"channel": "c1"})
+	if rec.Code != 404 {
+		t.Fatalf("a deletion-marked record must be treated as unknown, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// taskReopen's own re-check (Router.ReopenConversation), for the race accept
+// alone cannot close: the record was live when /reopen was accepted, and
+// gained its deletion marker before the task actually ran.
+func TestReopenConversationRefusesARecordMarkedForDeletionBetweenAcceptAndRun(t *testing.T) {
+	conv := markDeleting(convTestBoundConv("conv-1", "c1", "t1"))
+	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+	s, _, _ := busServer(t, convTestChannel("c1", "slack"), conv)
+	rec, _, err := s.Conversations.Get(context.Background(), state.Key("conv-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Router.ReopenConversation(context.Background(), &rec); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("want state.ErrNotFound, got %v", err)
+	}
+}
+
+func TestHandleConversationDeleteOfADeletionMarkedConversationSucceedsWithNoTask(t *testing.T) {
+	conv := markDeleting(convTestBoundConv("conv-1", "c1", "t1"))
+	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+	s, _, _ := busServer(t, convTestChannel("c1", "slack"), conv)
+	rec := acceptReq(s, "POST", "/channel/conversations/conv-1/delete", map[string]any{"channel": "c1"})
+	if rec.Code != 202 {
+		t.Fatalf("a target already on its way out is the outcome delete wanted, got %d: %s", rec.Code, rec.Body.String())
+	}
+	ids := acceptedIDs(t, rec)
+	if len(ids) != 0 {
+		t.Fatalf("nothing to do means no task, got %v", ids)
 	}
 }
 

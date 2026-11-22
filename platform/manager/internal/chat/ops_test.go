@@ -20,6 +20,7 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus"
 	commandbusmemory "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 func testChannel(name, typ string) *agentopsv1alpha1.Channel {
@@ -499,7 +500,7 @@ func TestCloseTopicOpIsEnqueuedPerChannelAndSettlesOnce(t *testing.T) {
 	q.EnqueueCloseTopic(ctx, slack, "9876", crRec(testConv("conv-1")))
 
 	op := q.Claim("slack")
-	if op == nil || op.ID != CloseTopicOpID("conv-1", "c1") || op.Kind != OpCloseTopic {
+	if op == nil || op.ID != CloseTopicOpID("conv-1", "uid-conv-1", "c1") || op.Kind != OpCloseTopic {
 		t.Fatalf("close-topic claim: %+v", op)
 	}
 	if op.ThreadID == nil || *op.ThreadID != "9876" || op.Conversation != "conv-1" {
@@ -509,7 +510,7 @@ func TestCloseTopicOpIsEnqueuedPerChannelAndSettlesOnce(t *testing.T) {
 		t.Fatalf("re-enqueue while pending must dedup: %+v", dup)
 	}
 	// delivery is by adapter name: the sibling channel's op is its own
-	if other := q.Claim("teams"); other == nil || other.ID != CloseTopicOpID("conv-1", "c2") {
+	if other := q.Claim("teams"); other == nil || other.ID != CloseTopicOpID("conv-1", "uid-conv-1", "c2") {
 		t.Fatalf("sibling channel op: %+v", other)
 	}
 
@@ -549,8 +550,61 @@ func TestFailedCloseTopicIsFinalAndReDerivableAfterTheCoolOff(t *testing.T) {
 	if again == nil {
 		t.Fatal("a failed close-topic must be re-derivable once the cool-off passes: the thread is still owed an archive")
 	}
-	if again.ID != CloseTopicOpID("conv-1", "c1") {
+	if again.ID != CloseTopicOpID("conv-1", "uid-conv-1", "c1") {
 		t.Fatalf("re-derived op must keep the stable id: %+v", again)
+	}
+}
+
+// A conversation named "conv-1" that already settled its close-topic and
+// delete-conversation ops must not suppress the SAME ops for a later,
+// different conversation that reuses the name after the first is deleted
+// (conversation-identity Decision 1/7) — the exact dedup-window hazard
+// EnsureTopic's own id was already fixed for (see its doc comment, and the
+// live incident it names). Without conv.ID in the id, the second
+// conversation's own farewell/deletion notice would be silently dropped.
+func TestCloseTopicAndDeleteConversationOpIDsDoNotCollideAcrossTwoLivesOfOneName(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry(), Bus: testBus()}
+	ctx := context.Background()
+	ch := testChannel("c1", "slack")
+
+	firstLife := crRec(testConv("conv-1")) // ID "uid-conv-1"
+	secondLife := &state.ConversationRecord{Name: "conv-1", ID: "uid-conv-1-reborn"}
+
+	q.EnqueueCloseTopic(ctx, ch, "T-1", firstLife)
+	first := q.Claim("slack")
+	q.Complete(ctx, first.ID, OpResult{})
+	if !q.Settled(first.ID) {
+		t.Fatal("first life's close-topic must settle")
+	}
+
+	q.EnqueueCloseTopic(ctx, ch, "T-2", secondLife)
+	second := q.Claim("slack")
+	if second == nil {
+		t.Fatal("second life's close-topic was suppressed by the first life's settled id — the name was reused, the conversation was not")
+	}
+	if second.ID == first.ID {
+		t.Fatalf("two lives of one name must not share a close-topic id: %q", second.ID)
+	}
+	// Settle it: the per-key convoy lane (one message in flight per
+	// conversation name, design D-17/the command bus's convoy queue) would
+	// otherwise block the delete-conversation op below, which is a separate
+	// concern from the id-collision this test is proving.
+	q.Complete(ctx, second.ID, OpResult{})
+
+	q.EnqueueDeleteConversation(ctx, ch, "T-1", firstLife)
+	firstGone := q.Claim("slack")
+	q.Complete(ctx, firstGone.ID, OpResult{})
+	if !q.Settled(firstGone.ID) {
+		t.Fatal("first life's delete-conversation must settle")
+	}
+
+	q.EnqueueDeleteConversation(ctx, ch, "T-2", secondLife)
+	secondGone := q.Claim("slack")
+	if secondGone == nil {
+		t.Fatal("second life's delete-conversation was suppressed by the first life's settled id")
+	}
+	if secondGone.ID == firstGone.ID {
+		t.Fatalf("two lives of one name must not share a delete-conversation id: %q", secondGone.ID)
 	}
 }
 

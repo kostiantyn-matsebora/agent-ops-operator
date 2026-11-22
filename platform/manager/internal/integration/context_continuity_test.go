@@ -27,11 +27,13 @@ func loadConversation(t *testing.T, name string) *agentopsv1alpha1.Conversation 
 	return &c
 }
 
-// reportRun completes a run, reporting the context handle under the CURRENT name.
+// reportRun completes a run, reporting the context handle under the CURRENT
+// name. convo is the conversation's display Name — reportRun resolves its
+// own CONVO_ID, same as a real runtime would from its own environment.
 func reportRun(t *testing.T, srv *httpapi.Server, convo, runID, contextID string) {
 	t.Helper()
 	rec := adapterReq(srv, "POST", "/work/done", map[string]any{
-		"convo": convo, "runId": runID, "status": "succeeded", "result": "ok",
+		"convo": convoID(t, convo), "runId": runID, "status": "succeeded", "result": "ok",
 		"runtimeContextId": contextID,
 	}, testMasterToken)
 	if rec.Code != 200 {
@@ -116,7 +118,7 @@ func TestAnOlderRuntimeStillReportingTheRetiredNameIsHonoured(t *testing.T) {
 	srv := apiServer()
 
 	rec := adapterReq(srv, "POST", "/work/done", map[string]any{
-		"convo": conv.Name, "runId": "r-1", "status": "succeeded", "result": "ok",
+		"convo": string(conv.UID), "runId": "r-1", "status": "succeeded", "result": "ok",
 		"sessionId": "ctx-from-old-runtime",
 	}, testMasterToken)
 	if rec.Code != 200 {

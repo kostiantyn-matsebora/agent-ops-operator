@@ -194,7 +194,7 @@ func mcpServerKeys(t *testing.T, cmName string) map[string]bool {
 // dispatchedAllowedTools runs one /work dispatch and returns its allowlist.
 func dispatchedAllowedTools(t *testing.T, convName string) string {
 	t.Helper()
-	rec := adapterReq(apiServer(), "GET", "/work?convo="+convName+"&wait=0", nil, "")
+	rec := adapterReq(apiServer(), "GET", "/work?convo="+convoID(t, convName)+"&wait=0", nil, "")
 	if rec.Code != 200 {
 		t.Fatalf("dispatch %s: %d %s", convName, rec.Code, rec.Body.String())
 	}
@@ -339,7 +339,7 @@ func matAssertMalformedOrUnknownSourceRejected(t *testing.T, srv *httpapi.Server
 // supplies the other half.
 func dispatchedTooling(t *testing.T, convName string) (tools, mode, agent string) {
 	t.Helper()
-	rec := adapterReq(apiServer(), "GET", "/work?convo="+convName+"&wait=0", nil, "")
+	rec := adapterReq(apiServer(), "GET", "/work?convo="+convoID(t, convName)+"&wait=0", nil, "")
 	if rec.Code != 200 {
 		t.Fatalf("dispatch %s: %d %s", convName, rec.Code, rec.Body.String())
 	}

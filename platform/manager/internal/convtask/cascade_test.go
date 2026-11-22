@@ -13,12 +13,16 @@ import (
 // pinned deleteCascadeOrder before it became a one-line delegate to this
 // function.
 func TestCascadeOrderIsDeepestFirstRootLast(t *testing.T) {
+	// CausedBy.Parent holds the parent's ID (conversation-identity Decision
+	// 6), and this pure-ordering test does not care whether ID and Name
+	// differ — the trivial convention, ID == Name, so "mid"/"root" below
+	// read as both at once.
 	descendants := []state.ConversationRecord{
-		{Name: "grandchild", CausedBy: &state.Provenance{Parent: "mid"}},
-		{Name: "mid", CausedBy: &state.Provenance{Parent: "root"}},
-		{Name: "other-grandchild", CausedBy: &state.Provenance{Parent: "mid"}},
+		{ID: "grandchild", Name: "grandchild", CausedBy: &state.Provenance{Parent: "mid"}},
+		{ID: "mid", Name: "mid", CausedBy: &state.Provenance{Parent: "root"}},
+		{ID: "other-grandchild", Name: "other-grandchild", CausedBy: &state.Provenance{Parent: "mid"}},
 	}
-	got := CascadeOrder("root", descendants)
+	got := CascadeOrder("root", "root", descendants)
 	if len(got) != 4 || got[len(got)-1] != "root" {
 		t.Fatalf("want 4 names ending with root, got %v", got)
 	}
@@ -39,10 +43,10 @@ func TestCascadeOrderIsDeepestFirstRootLast(t *testing.T) {
 // final request for rootName.
 func TestCloseMemberRequestsOrdersMembersBeforeTheRootAndSharesItsKey(t *testing.T) {
 	descendants := []state.ConversationRecord{
-		{Name: "mid", CausedBy: &state.Provenance{Parent: "root"}},
-		{Name: "leaf", CausedBy: &state.Provenance{Parent: "mid"}},
+		{ID: "mid", Name: "mid", CausedBy: &state.Provenance{Parent: "root"}},
+		{ID: "leaf", Name: "leaf", CausedBy: &state.Provenance{Parent: "mid"}},
 	}
-	reqs := CloseMemberRequests("root", "because", descendants)
+	reqs := CloseMemberRequests("root", "root", "because", descendants)
 	if len(reqs) != 2 {
 		t.Fatalf("want one task per descendant (2), got %d", len(reqs))
 	}
@@ -73,10 +77,10 @@ func TestCloseMemberRequestsOrdersMembersBeforeTheRootAndSharesItsKey(t *testing
 // nothing on /state/tasks.
 func TestCloseMemberRequestsSkipsAnAlreadyClosedDescendant(t *testing.T) {
 	descendants := []state.ConversationRecord{
-		{Name: "closed-already", CausedBy: &state.Provenance{Parent: "root"}, Phase: state.PhaseClosed},
-		{Name: "still-open", CausedBy: &state.Provenance{Parent: "root"}},
+		{ID: "closed-already", Name: "closed-already", CausedBy: &state.Provenance{Parent: "root"}, Phase: state.PhaseClosed},
+		{ID: "still-open", Name: "still-open", CausedBy: &state.Provenance{Parent: "root"}},
 	}
-	reqs := CloseMemberRequests("root", "", descendants)
+	reqs := CloseMemberRequests("root", "root", "", descendants)
 	if len(reqs) != 1 {
 		t.Fatalf("want a task only for the still-open descendant, got %d", len(reqs))
 	}
@@ -92,9 +96,27 @@ func TestCloseMemberRequestsSkipsAnAlreadyClosedDescendant(t *testing.T) {
 // rootName itself never gets a CascadeMember task from this function — the
 // caller's own top-level request occupies that slot.
 func TestCloseMemberRequestsExcludesTheRootItself(t *testing.T) {
-	descendants := []state.ConversationRecord{{Name: "root"}}
-	reqs := CloseMemberRequests("root", "", descendants)
+	descendants := []state.ConversationRecord{{ID: "root", Name: "root"}}
+	reqs := CloseMemberRequests("root", "root", "", descendants)
 	if len(reqs) != 0 {
 		t.Fatalf("want no task for the root itself, got %d", len(reqs))
+	}
+}
+
+// A decoy whose CausedBy.Parent names an ID from a PREVIOUS life of the
+// root's own name (conversation-identity Decision 6: a deleted parent's old
+// ID must never resolve to a same-named NEW conversation) is excluded from
+// the order entirely — nameOf only ever maps the CURRENT rootID and the
+// descendants actually passed in, so a stale ID that happens to collide
+// with no live record's ID is simply unknown, never silently reattributed
+// to the new root by matching on name instead.
+func TestCascadeOrderExcludesADecoyNamingAStaleParentID(t *testing.T) {
+	descendants := []state.ConversationRecord{
+		{ID: "live-child", Name: "live-child", CausedBy: &state.Provenance{Parent: "root-new-id"}},
+		{ID: "decoy", Name: "decoy", CausedBy: &state.Provenance{Parent: "root-old-id"}},
+	}
+	got := CascadeOrder("root-new-id", "root", descendants)
+	if len(got) != 2 || got[0] != "live-child" || got[1] != "root" {
+		t.Fatalf("want only the live child ordered under the new root, the decoy excluded entirely, got %v", got)
 	}
 }

@@ -161,8 +161,9 @@ func actDriveTopicAndDispatch(t *testing.T, ctx context.Context, srv *httpapi.Se
 // reports it succeeded.
 func actDispatchAndComplete(t *testing.T, h http.Handler, convName string) {
 	t.Helper()
+	id := convoID(t, convName)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/work?convo="+convName+"&wait=0", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/work?convo="+id+"&wait=0", nil))
 	if rec.Code != 200 {
 		t.Fatalf("work: %d %s", rec.Code, rec.Body.String())
 	}
@@ -172,7 +173,7 @@ func actDispatchAndComplete(t *testing.T, h http.Handler, convName string) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &unit)
 
 	done, _ := json.Marshal(map[string]any{
-		"convo": convName, "runId": unit.RunID, "status": "succeeded", "result": "cleaned up",
+		"convo": id, "runId": unit.RunID, "status": "succeeded", "result": "cleaned up",
 	})
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("POST", "/work/done", strings.NewReader(string(done))))
@@ -255,14 +256,14 @@ func TestActivityRecordsFailure(t *testing.T) {
 	h := srv.Handler()
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/work?convo=act-fail-1&wait=0", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/work?convo="+string(conv.UID)+"&wait=0", nil))
 	var unit struct {
 		RunID string `json:"runId"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &unit)
 
 	body, _ := json.Marshal(map[string]any{
-		"convo": "act-fail-1", "runId": unit.RunID, "status": "failed", "exitCode": 2,
+		"convo": string(conv.UID), "runId": unit.RunID, "status": "failed", "exitCode": 2,
 	})
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("POST", "/work/done", strings.NewReader(string(body))))
@@ -570,7 +571,7 @@ func TestPipelineResolvedMatchesDispatch(t *testing.T) {
 	}
 	t.Cleanup(func() { cleanupConversation(t, "resolved-conv") })
 	rec = httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/work?convo=resolved-conv&wait=0", nil))
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/work?convo="+string(conv.UID)+"&wait=0", nil))
 	if rec.Code != 200 {
 		t.Fatalf("work: %d %s", rec.Code, rec.Body.String())
 	}

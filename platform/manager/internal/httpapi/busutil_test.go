@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
@@ -16,6 +18,40 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/commandbus/memory"
 )
 
+// assignUIDs gives every pre-seeded fixture a UID derived from its own Name
+// when it carries none — the fake client, unlike a real apiserver, never
+// mints one for an object seeded through WithObjects. conversation-identity
+// moved CausedBy.Parent to the parent's ID, and most fixtures in this
+// package still write it as the parent's Name — the trivial, legitimate
+// case the design permits, where a test does not care whether the two
+// differ. A test that DOES care sets a distinct UID itself, which this
+// never overrides.
+func assignUIDs(objs []client.Object) {
+	for _, o := range objs {
+		if o.GetUID() == "" {
+			o.SetUID(types.UID(o.GetName()))
+		}
+	}
+}
+
+// withAutoUID extends an interceptor.Funcs' own Create (if any) with the
+// same convention assignUIDs applies to a pre-seeded fixture, for a test
+// that creates its CausedBy subtree through the client rather than seeding
+// it — a Create through the fake client never mints a UID either.
+func withAutoUID(funcs interceptor.Funcs) interceptor.Funcs {
+	inner := funcs.Create
+	funcs.Create = func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+		if obj.GetUID() == "" {
+			obj.SetUID(types.UID(obj.GetName()))
+		}
+		if inner != nil {
+			return inner(ctx, c, obj, opts...)
+		}
+		return c.Create(ctx, obj, opts...)
+	}
+	return funcs
+}
+
 // busServer builds a Server wired for the "conv" queue's accept-then-
 // process split: a fake client, the real Router over it, and a fresh
 // commandbus/memory Bus — the shape the hand-back report's own test
@@ -23,6 +59,7 @@ import (
 // function directly against a memory bus").
 func busServer(t *testing.T, objs ...client.Object) (*Server, client.Client, commandbus.Bus) {
 	t.Helper()
+	assignUIDs(objs)
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(objs...).Build()

@@ -123,7 +123,7 @@ func (r *Router) InvokeMember(ctx context.Context, caller *state.ConversationRec
 	// (parent, entry) by construction, so a different entry or a different
 	// caller never collides on it.
 	initiationID := "invoke:" + entry.Name
-	member, err := r.findReusableMember(ctx, caller.Name, entry.Name, initiationID)
+	member, err := r.findReusableMember(ctx, caller.ID, entry.Name, initiationID)
 	if err != nil {
 		return nil, err
 	}
@@ -226,16 +226,22 @@ func (r *Router) CoordinatorAgents(ctx context.Context, caller *state.Conversati
 	return co.Spec.Agents, nil
 }
 
-// Descendants lists every conversation in rootName's own subtree, at any
-// depth, DOWNWARD only — never rootName's ancestors or their other branches
+// Descendants lists every conversation in rootID's own subtree, at any
+// depth, DOWNWARD only — never the root's ancestors or their other branches
 // (aops-mcp-server's `get_tree` bound). BFS by LabelCausedBy, each hit
 // verified against the CausedBy field itself — the label is a hint, the same
 // pattern cascadeCloseMembers already uses to close a subtree. Bounded
 // defensively against a malformed causedBy graph, exactly as descendsFrom is.
-func (r *Router) Descendants(ctx context.Context, rootName string) ([]state.ConversationRecord, error) {
+//
+// rootID is the root's ID, not its Name (conversation-identity Decision 6):
+// CausedBy.Parent holds the ID, so a deleted root's subtree is never
+// adopted by a new conversation created under its old Name. An empty rootID
+// (an unresolved or already-gone root) returns no descendants — ByCausedBy
+// never indexes an empty Parent, so the walk is harmless rather than wrong.
+func (r *Router) Descendants(ctx context.Context, rootID string) ([]state.ConversationRecord, error) {
 	var out []state.ConversationRecord
-	seen := map[string]bool{rootName: true}
-	frontier := []string{rootName}
+	seen := map[string]bool{rootID: true}
+	frontier := []string{rootID}
 	for i := 0; i < 1000 && len(frontier) > 0; i++ {
 		var next []string
 		for _, parent := range frontier {
@@ -245,12 +251,12 @@ func (r *Router) Descendants(ctx context.Context, rootName string) ([]state.Conv
 			}
 			for j := range members {
 				m := members[j]
-				if m.CausedBy == nil || m.CausedBy.Parent != parent || seen[m.Name] {
+				if m.CausedBy == nil || m.CausedBy.Parent != parent || seen[m.ID] {
 					continue // the index is a hint; the field is the fact
 				}
-				seen[m.Name] = true
+				seen[m.ID] = true
 				out = append(out, m)
-				next = append(next, m.Name)
+				next = append(next, m.ID)
 			}
 		}
 		frontier = next
@@ -272,14 +278,32 @@ func (r *Router) causedByAncestry(ctx context.Context, conv *state.ConversationR
 		if cur.CausedBy == nil {
 			return chain, nil
 		}
-		parent, _, err := r.Conversations.Get(ctx, state.Key(cur.CausedBy.Parent))
+		// By ID, not by Get-by-name (conversation-identity Decision 6):
+		// CausedBy.Parent names the parent's ID, so a deleted parent stays
+		// deleted when a new conversation takes its old Name.
+		parent, err := r.conversationByID(ctx, cur.CausedBy.Parent)
 		if err != nil {
 			return nil, err
 		}
-		chain = append(chain, &parent)
-		cur = &parent
+		chain = append(chain, parent)
+		cur = parent
 	}
 	return nil, fmt.Errorf("causedBy chain from %s did not terminate", conv.Name)
+}
+
+// conversationByID resolves a conversation by its own backend-minted ID
+// (state.ByID), never by Get-by-name — the one lookup every stored
+// cross-reference (causedBy.Parent) resolves through. state.ErrNotFound
+// when no live record carries id.
+func (r *Router) conversationByID(ctx context.Context, id string) (*state.ConversationRecord, error) {
+	list, err := r.Conversations.List(ctx, state.ByID, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) == 0 {
+		return nil, state.ErrNotFound
+	}
+	return &list[0], nil
 }
 
 // coordinatorChain collects the calling conversation's OWN coordinatorRef,
@@ -400,7 +424,7 @@ func (r *Router) ListOpenRoots(ctx context.Context, caller *state.ConversationRe
 		if !isOpenSiblingRoot(c, scope) {
 			continue
 		}
-		members, err := r.directMemberEntries(ctx, c.Name)
+		members, err := r.directMemberEntries(ctx, c.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -429,12 +453,13 @@ func isOpenSiblingRoot(c *state.ConversationRecord, scope ActingCoordinator) boo
 	return c.Phase != state.PhaseClosed
 }
 
-// directMemberEntries lists the agents[] entry names of rootName's own DIRECT
+// directMemberEntries lists the agents[] entry names of rootID's own DIRECT
 // members only — one hop, never a grandchild — deduplicated so an entry
 // reattached to more than once (or re-invoked after its first member closed)
 // is named once. The reaper re-invokes exactly these entries to re-check them.
-func (r *Router) directMemberEntries(ctx context.Context, rootName string) ([]string, error) {
-	list, err := r.Conversations.List(ctx, state.ByCausedBy, rootName)
+// rootID is the root's ID, matching what CausedBy.Parent now holds.
+func (r *Router) directMemberEntries(ctx context.Context, rootID string) ([]string, error) {
+	list, err := r.Conversations.List(ctx, state.ByCausedBy, rootID)
 	if err != nil {
 		return nil, err
 	}
@@ -442,7 +467,7 @@ func (r *Router) directMemberEntries(ctx context.Context, rootName string) ([]st
 	var out []string
 	for i := range list {
 		m := &list[i]
-		if m.CausedBy == nil || m.CausedBy.Parent != rootName || seen[m.CausedBy.Entry] {
+		if m.CausedBy == nil || m.CausedBy.Parent != rootID || seen[m.CausedBy.Entry] {
 			continue // the index is a hint; the field is the fact
 		}
 		seen[m.CausedBy.Entry] = true
@@ -503,8 +528,10 @@ func isHumanInitiated(c *state.ConversationRecord) bool {
 // conversation with the same correlationId AND the same (parent, entry) —
 // depth plays no part. Reads the same correlationId index equality routing
 // does (state.ByCorrelationID), never the removed
-// agentops.dev/signature-hash label.
-func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, initiationID string) (*state.ConversationRecord, error) {
+// agentops.dev/signature-hash label. parentID is the caller's ID
+// (conversation-identity Decision 6): CausedBy.Parent holds the ID, never
+// the Name, so a reused name never reattaches to a prior life's member.
+func (r *Router) findReusableMember(ctx context.Context, parentID, entryName, initiationID string) (*state.ConversationRecord, error) {
 	list, err := r.Conversations.List(ctx, state.ByCorrelationID, initiationID)
 	if err != nil {
 		return nil, err
@@ -514,7 +541,7 @@ func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, 
 		if c.Phase == state.PhaseClosed {
 			continue
 		}
-		if c.CausedBy != nil && c.CausedBy.Parent == parentName && c.CausedBy.Entry == entryName {
+		if c.CausedBy != nil && c.CausedBy.Parent == parentID && c.CausedBy.Entry == entryName {
 			return c, nil
 		}
 	}
@@ -569,7 +596,7 @@ func (r *Router) createMember(ctx context.Context, caller *state.ConversationRec
 		ServiceAccountName: snap.ServiceAccountName,
 		ContextClaimName:   snap.ContextClaimName,
 		WorkspaceClaimName: snap.WorkspaceClaimName,
-		CausedBy:           &state.Provenance{Parent: caller.Name, Entry: entry.Name},
+		CausedBy:           &state.Provenance{Parent: caller.ID, Entry: entry.Name},
 		Title:              memberTitle(entry.Name, task),
 		CorrelationID:      initiationID,
 	}
@@ -621,15 +648,32 @@ func (r *Router) bumpAgentsInvoked(ctx context.Context, convName string) error {
 // per-run marker is the caller's job (RunStatus.RoutedToParent), since once
 // this input is processed and pruned there is nothing left here to compare
 // against.
-func (r *Router) AppendMemberResult(ctx context.Context, causedBy *state.Provenance, memberName, dedupID, result string) error {
-	if causedBy == nil || causedBy.Parent == memberName {
+// memberID is the member's own ID, checked against causedBy.Parent to guard
+// the provenance invariant ("never feed a conversation its own output") —
+// memberName is its display Name, carried into the input's Origin for a
+// person reading the parent's thread (chat.delivery.go renders it verbatim).
+func (r *Router) AppendMemberResult(ctx context.Context, causedBy *state.Provenance, memberID, memberName, dedupID, result string) error {
+	if causedBy == nil || causedBy.Parent == memberID {
 		return nil // no parent, or a provenance bug — never feed a conversation its own output
 	}
 	item := state.InputItem{
 		ID: dedupID, Type: state.InputTask, Payload: result, ReceivedAt: time.Now(),
 		Origin: &state.InputOrigin{Kind: state.OriginMember, Name: memberName, Entry: causedBy.Entry},
 	}
-	return r.appendInputIdempotent(ctx, causedBy.Parent, item)
+	return r.appendInputIdempotentByID(ctx, causedBy.Parent, item)
+}
+
+// appendInputIdempotentByID resolves parentID (CausedBy.Parent, the ID) to
+// its current Name — the store key, unchanged — before delegating to
+// appendInputIdempotent. A parent that no longer exists under any Name is a
+// no-op: the reconciler backstop re-derives a missed append, same as any
+// other failed delivery.
+func (r *Router) appendInputIdempotentByID(ctx context.Context, parentID string, item state.InputItem) error {
+	parent, err := r.conversationByID(ctx, parentID)
+	if err != nil {
+		return state.IgnoreNotFound(err)
+	}
+	return r.appendInputIdempotent(ctx, parent.Name, item)
 }
 
 // appendInputIdempotent appends one input to a NAMED conversation (not
@@ -681,7 +725,13 @@ func (r *Router) CloseCoordinated(ctx context.Context, caller *state.Conversatio
 	if err != nil {
 		return state.IgnoreNotFound(err)
 	}
-	if target.CausedBy != nil && target.CausedBy.Parent == caller.Name {
+	if !target.Live() {
+		// A deletion-marked target is not a live match (design
+		// conversation-identity, Decision 5) — already departing, so a
+		// close on it is a no-op, same as a target already gone.
+		return nil
+	}
+	if target.CausedBy != nil && target.CausedBy.Parent == caller.ID {
 		return r.closeWithCascade(ctx, &target, reason)
 	}
 	ok, err := r.isOwnCoordinatorSiblingRoot(ctx, caller, &target)
@@ -703,7 +753,7 @@ func (r *Router) CloseCoordinated(ctx context.Context, caller *state.Conversatio
 // separate close on it, since escalate already performs the one of two
 // outcomes that applies (D-D).
 func (r *Router) CloseBudgetExceeded(ctx context.Context, conv *state.ConversationRecord, digest string) error {
-	if err := r.cascadeCloseMembers(ctx, conv.Name, "budget-exceeded"); err != nil {
+	if err := r.cascadeCloseMembers(ctx, conv.ID, "budget-exceeded"); err != nil {
 		return err
 	}
 	return r.Escalate(ctx, conv, digest)
@@ -721,7 +771,7 @@ func (r *Router) CloseBudgetExceeded(ctx context.Context, conv *state.Conversati
 // The old order — ancestor first — left a closed root over open members that
 // nothing could reach any more.
 func (r *Router) closeWithCascade(ctx context.Context, conv *state.ConversationRecord, reason string) error {
-	if err := r.cascadeCloseMembers(ctx, conv.Name, reason); err != nil {
+	if err := r.cascadeCloseMembers(ctx, conv.ID, reason); err != nil {
 		return err
 	}
 	if err := r.closeConversationReason(ctx, conv, reason); err != nil {
@@ -730,16 +780,17 @@ func (r *Router) closeWithCascade(ctx context.Context, conv *state.ConversationR
 	// A run on the still-open ancestor may have invoked a member after the walk
 	// listed. A closed conversation can invoke nothing more, so this second
 	// sweep is the last word and finds only stragglers.
-	return r.cascadeCloseMembers(ctx, conv.Name, reason)
+	return r.cascadeCloseMembers(ctx, conv.ID, reason)
 }
 
-// cascadeCloseMembers closes every LIVE direct member of parentName, same
+// cascadeCloseMembers closes every LIVE direct member of parentID, same
 // reason verbatim, each recursively closing its own members before itself.
 // Returns on the first failure, before any later sibling and before the
 // parent — see closeWithCascade for why. An already-Closed member keeps its
-// own reason and is skipped.
-func (r *Router) cascadeCloseMembers(ctx context.Context, parentName, reason string) error {
-	list, err := r.Conversations.List(ctx, state.ByCausedBy, parentName)
+// own reason and is skipped. parentID is the parent's ID, matching what
+// CausedBy.Parent now holds.
+func (r *Router) cascadeCloseMembers(ctx context.Context, parentID, reason string) error {
+	list, err := r.Conversations.List(ctx, state.ByCausedBy, parentID)
 	if err != nil {
 		return err
 	}
@@ -748,7 +799,7 @@ func (r *Router) cascadeCloseMembers(ctx context.Context, parentName, reason str
 		if member.Phase == state.PhaseClosed {
 			continue
 		}
-		if member.CausedBy == nil || member.CausedBy.Parent != parentName {
+		if member.CausedBy == nil || member.CausedBy.Parent != parentID {
 			continue // the index is a hint; the field is the fact
 		}
 		if err := r.closeWithCascade(ctx, member, reason); err != nil {
@@ -822,7 +873,7 @@ func (r *Router) Escalate(ctx context.Context, conv *state.ConversationRecord, m
 		// dedup actually dedup rather than append the result twice. The bug
 		// this replaces: the old id embedded time.Now(), so every redelivery
 		// minted a fresh id and the dedup check never matched anything.
-		return r.AppendMemberResult(ctx, conv.CausedBy, conv.Name, "escalate:"+conv.Name, message)
+		return r.AppendMemberResult(ctx, conv.CausedBy, conv.ID, conv.Name, "escalate:"+conv.Name, message)
 	}
 	if conv.EscalatedAt != nil {
 		return nil // already escalated: no replayed digest

@@ -239,14 +239,16 @@ func TestDeleteReclaimsAClosedConversation(t *testing.T) {
 // mkCascadeConv builds a conversation for the delete-cascade test: a root
 // with no parent, or a member/grandchild naming one via causedBy — the same
 // label the cascade filters on, and the same field it confirms against.
-func mkCascadeConv(t *testing.T, name, parent string) *agentopsv1alpha1.Conversation {
+// parentID is the parent's own UID: CausedBy.Parent holds the parent's ID,
+// not its Name (conversation-identity Decision 6).
+func mkCascadeConv(t *testing.T, name, parentID string) *agentopsv1alpha1.Conversation {
 	t.Helper()
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Name, conv.Namespace = name, ns
 	conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "verb-profile"}
-	if parent != "" {
-		conv.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: parent, Entry: "worker"}
-		conv.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: parent}
+	if parentID != "" {
+		conv.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: parentID, Entry: "worker"}
+		conv.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: parentID}
 	} else {
 		conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "verb-ch-cascade"}}
 	}
@@ -271,9 +273,9 @@ func TestDeleteCascadesToDescendantsAtAnyDepth(t *testing.T) {
 	mkChannel(t, "verb-ch-cascade", "tg")
 
 	root := mkCascadeConv(t, "cascade-root", "")
-	mkCascadeConv(t, "cascade-member-a", root.Name)
-	memberB := mkCascadeConv(t, "cascade-member-b", root.Name)
-	mkCascadeConv(t, "cascade-grandchild", memberB.Name)
+	mkCascadeConv(t, "cascade-member-a", string(root.UID))
+	memberB := mkCascadeConv(t, "cascade-member-b", string(root.UID))
+	mkCascadeConv(t, "cascade-grandchild", string(memberB.UID))
 
 	rec := adapterReq(srv, "POST", "/channel/conversations/cascade-root/delete",
 		map[string]string{"channel": "verb-ch-cascade"}, "test-adapter-token")

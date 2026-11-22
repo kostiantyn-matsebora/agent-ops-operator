@@ -197,7 +197,7 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	}
 
 	// pending topic gates dispatch (inputs stay queued)
-	rec := adapterReq(srv, "GET", "/work?convo=topic-1&wait=0", nil, "")
+	rec := adapterReq(srv, "GET", "/work?convo="+string(conv.UID)+"&wait=0", nil, "")
 	if rec.Code != 204 {
 		t.Fatalf("dispatch must wait for the thread id: %d %s", rec.Code, rec.Body.String())
 	}
@@ -247,7 +247,7 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	}
 
 	// gate lifted — the unit dispatches with the string thread id
-	rec = adapterReq(srv, "GET", "/work?convo=topic-1&wait=0", nil, "")
+	rec = adapterReq(srv, "GET", "/work?convo="+string(conv.UID)+"&wait=0", nil, "")
 	if rec.Code != 200 {
 		t.Fatalf("dispatch after topic: %d %s", rec.Code, rec.Body.String())
 	}
@@ -263,7 +263,7 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	// finish the run so the conversation goes idle (keeps the shared pod pool
 	// evictable for later tests)
 	rec = adapterReq(srv, "POST", "/work/done",
-		map[string]any{"convo": "topic-1", "runId": unit.RunID, "status": "succeeded", "result": "ok"}, "")
+		map[string]any{"convo": string(conv.UID), "runId": unit.RunID, "status": "succeeded", "result": "ok"}, "")
 	if rec.Code != 200 {
 		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
 	}

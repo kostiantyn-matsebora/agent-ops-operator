@@ -68,7 +68,10 @@ func (s *Server) callerConversation(ctx context.Context, name, token string) (*s
 		return nil, errWrongToken
 	}
 	conv, _, err := s.Conversations.Get(ctx, state.Key(name))
-	if err != nil {
+	if err != nil || !conv.Live() {
+		// A deletion-marked record is not a live match (design
+		// conversation-identity, Decision 5) — a caller naming it fails
+		// identically to a caller naming nothing at all.
 		return nil, errWrongToken
 	}
 	if conv.CoordinatorRef == "" {
@@ -101,7 +104,8 @@ func (s *Server) callerActingForCoordinator(ctx context.Context, name, token str
 		return nil, errWrongToken
 	}
 	conv, _, err := s.Conversations.Get(ctx, state.Key(name))
-	if err != nil {
+	if err != nil || !conv.Live() {
+		// Same live-match exclusion as callerConversation above.
 		return nil, errWrongToken
 	}
 	scope, err := s.Router.ResolveActingCoordinator(ctx, &conv)
@@ -425,11 +429,14 @@ func (s *Server) handleCoordinateRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t, _, err := s.Conversations.Get(ctx, state.Key(target))
-	if err != nil {
+	if err != nil || !t.Live() {
+		// A deletion-marked target is not a live match (design
+		// conversation-identity, Decision 5) — read of it answers exactly as
+		// a name naming nothing would.
 		writeCoordinateError(w, 404, chat.ErrOutOfSubtree)
 		return
 	}
-	inScope, err := s.descendsFrom(ctx, &t, caller.Name)
+	inScope, err := s.descendsFrom(ctx, &t, caller.ID)
 	if err != nil {
 		writeCoordinateError(w, 500, err)
 		return
@@ -442,22 +449,29 @@ func (s *Server) handleCoordinateRead(w http.ResponseWriter, r *http.Request) {
 }
 
 // descendsFrom walks UP from a target conversation's `causedBy` chain,
-// reporting whether it reaches ancestorName — the "own subtree, at any depth"
+// reporting whether it reaches ancestorID — the "own subtree, at any depth"
 // bound aops-mcp-server states for `read`.
-func (s *Server) descendsFrom(ctx context.Context, target *state.ConversationRecord, ancestorName string) (bool, error) {
+//
+// CausedBy.Parent holds the parent's ID, not its Name (conversation-identity
+// Decision 6), so the chain is walked and compared on ID throughout — a
+// name resolves to an ID only ONCE, by the caller, before the walk starts.
+func (s *Server) descendsFrom(ctx context.Context, target *state.ConversationRecord, ancestorID string) (bool, error) {
 	cur := target
 	for i := 0; i < 1000; i++ {
 		if cur.CausedBy == nil {
 			return false, nil
 		}
-		if cur.CausedBy.Parent == ancestorName {
+		if cur.CausedBy.Parent == ancestorID {
 			return true, nil
 		}
-		parent, _, err := s.Conversations.Get(ctx, state.Key(cur.CausedBy.Parent))
+		parents, err := s.Conversations.List(ctx, state.ByID, cur.CausedBy.Parent)
 		if err != nil {
-			return false, state.IgnoreNotFound(err)
+			return false, err
 		}
-		cur = &parent
+		if len(parents) == 0 {
+			return false, nil
+		}
+		cur = &parents[0]
 	}
 	return false, errors.New("causedBy chain did not terminate")
 }
@@ -519,7 +533,7 @@ func buildTree(root *state.ConversationRecord, descendants []state.ConversationR
 	var build func(c *state.ConversationRecord) *treeNode
 	build = func(c *state.ConversationRecord) *treeNode {
 		n := &treeNode{conversationProjection: projectConversation(c)}
-		for _, child := range byParent[c.Name] {
+		for _, child := range byParent[c.ID] {
 			n.Members = append(n.Members, build(child))
 		}
 		return n
@@ -555,7 +569,7 @@ func (s *Server) handleCoordinateTree(w http.ResponseWriter, r *http.Request) {
 			writeCoordinateError(w, 404, chat.ErrOutOfSubtree)
 			return
 		}
-		inScope, err := s.descendsFrom(ctx, &t, caller.Name)
+		inScope, err := s.descendsFrom(ctx, &t, caller.ID)
 		if err != nil {
 			writeCoordinateError(w, 500, err)
 			return
@@ -566,7 +580,7 @@ func (s *Server) handleCoordinateTree(w http.ResponseWriter, r *http.Request) {
 		}
 		target = &t
 	}
-	descendants, err := s.Router.Descendants(ctx, target.Name)
+	descendants, err := s.Router.Descendants(ctx, target.ID)
 	if err != nil {
 		writeCoordinateError(w, 500, err)
 		return

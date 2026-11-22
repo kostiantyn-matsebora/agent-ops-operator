@@ -32,8 +32,10 @@ func memberWorkReportServer(t *testing.T, parent *agentopsv1alpha1.Conversation,
 	member.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r1", DispatchedAt: metav1.Now()}
 	member.Status.Budget = budget
 
+	objs := []client.Object{member, parent}
+	assignUIDs(objs)
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
-		WithObjects(member, parent).
+		WithObjects(objs...).
 		WithStatusSubresource(member, parent).Build()
 	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
 	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: memory.Open()}
@@ -145,8 +147,10 @@ func rootWorkReportServer(t *testing.T, root *agentopsv1alpha1.Conversation) *Se
 	co := &agentopsv1alpha1.Coordinator{}
 	co.Name, co.Namespace = "co-a", "agent-ops"
 	co.Spec.Agents = []agentopsv1alpha1.CoordinatorAgentEntry{{Name: "triage"}, {Name: "fixer"}}
+	objs := []client.Object{root, co}
+	assignUIDs(objs)
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
-		WithObjects(root, co).
+		WithObjects(objs...).
 		WithStatusSubresource(root).Build()
 	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
 	q := &chat.OpQueue{Conversations: store, Runs: runs, Registry: chat.NewRegistry(), Bus: memory.Open()}

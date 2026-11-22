@@ -106,7 +106,7 @@ func TestMissingToolsetRefFailsVisibly(t *testing.T) {
 	mkIdentityProfile(t, "prof-gone")
 	mkConv(t, "gone-conv", "prof-gone", bindTools("never-existed"), nil)
 
-	rec := adapterReq(apiServer(), "GET", "/work?convo=gone-conv&wait=0", nil, "")
+	rec := adapterReq(apiServer(), "GET", "/work?convo="+convoID(t, "gone-conv")+"&wait=0", nil, "")
 	if rec.Code != 500 || !strings.Contains(rec.Body.String(), "never-existed") {
 		t.Fatalf("missing toolset must fail the dispatch naming the ref: %d %s", rec.Code, rec.Body.String())
 	}

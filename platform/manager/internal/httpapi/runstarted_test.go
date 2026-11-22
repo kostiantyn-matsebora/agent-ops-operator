@@ -8,6 +8,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
@@ -28,8 +29,10 @@ func workReportServerAt(t *testing.T, dispatchedAt metav1.Time) *Server {
 	rt.Name, rt.Namespace = "claude", "agent-ops"
 	rt.Spec.Image = "example/runtime-claude:1"
 
+	objs := []client.Object{conv, rt}
+	assignUIDs(objs)
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
-		WithObjects(conv, rt).WithStatusSubresource(conv).Build()
+		WithObjects(objs...).WithStatusSubresource(conv).Build()
 	return &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Runs: testRuns(t, c, "agent-ops"), Client: c, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Activity: activity.New(64)}
 }
 

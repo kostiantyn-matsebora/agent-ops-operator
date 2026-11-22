@@ -67,12 +67,15 @@ func decodeCoordinateInvokeResponse(t *testing.T, rec *httptest.ResponseRecorder
 
 // assertMemberCausedByInvoke checks that a member conversation created by
 // /coordinate/invoke round-trips its provenance through the real schema.
-func assertMemberCausedByInvoke(t *testing.T, member *agentopsv1alpha1.Conversation, rootName string) {
+// rootID is the root's own UID: CausedBy.Parent holds the parent's ID, not
+// its Name (conversation-identity Decision 6), and the mirrored label
+// (kube/mapping.go's applySpecAndMeta) carries exactly what the field does.
+func assertMemberCausedByInvoke(t *testing.T, member *agentopsv1alpha1.Conversation, rootID string) {
 	t.Helper()
-	if member.Spec.CausedBy == nil || member.Spec.CausedBy.Parent != rootName || member.Spec.CausedBy.Entry != "worker" {
+	if member.Spec.CausedBy == nil || member.Spec.CausedBy.Parent != rootID || member.Spec.CausedBy.Entry != "worker" {
 		t.Fatalf("causedBy must round-trip through the real schema: %+v", member.Spec.CausedBy)
 	}
-	if member.Labels[agentopsv1alpha1.LabelCausedBy] != rootName {
+	if member.Labels[agentopsv1alpha1.LabelCausedBy] != rootID {
 		t.Fatalf("the caused-by label must be set for the close cascade to find it: %+v", member.Labels)
 	}
 	if len(member.Spec.Inputs) != 1 || member.Spec.Inputs[0].Origin == nil ||
@@ -110,7 +113,7 @@ func TestCoordinateInvokeCreatesAMemberAndRoutesItsResultBack(t *testing.T) {
 		map[string]any{"conversation": root.Name, "agent": "worker", "task": "look into the disk usage"})
 	out := decodeCoordinateInvokeResponse(t, rec)
 	member := getConv(t, out["member"])
-	assertMemberCausedByInvoke(t, member, root.Name)
+	assertMemberCausedByInvoke(t, member, string(root.UID))
 
 	// Report the member's work done, and the fast path in /work/done must route
 	// the result to the parent as an input, admitted by the real CRD schema.
@@ -119,7 +122,7 @@ func TestCoordinateInvokeCreatesAMemberAndRoutesItsResultBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec2 := adapterReq(srv, "POST", "/work/done", map[string]any{
-		"convo": member.Name, "runId": "r1", "status": "succeeded", "result": "disk is at 40%, nothing to worry about",
+		"convo": string(member.UID), "runId": "r1", "status": "succeeded", "result": "disk is at 40%, nothing to worry about",
 	}, srv.AdapterToken)
 	if rec2.Code != 200 {
 		t.Fatalf("work/done: %d %s", rec2.Code, rec2.Body.String())
@@ -154,8 +157,11 @@ func TestCoordinateReconcileBackstopRoutesAMissedMemberResult(t *testing.T) {
 	member := &agentopsv1alpha1.Conversation{}
 	member.Name, member.Namespace = "co-backstop-member", ns
 	member.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-backstop-co"}
-	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: root.Name, Entry: "worker"}
-	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
+	// CausedBy.Parent holds the parent's ID, not its Name
+	// (conversation-identity Decision 6) — root.UID, minted by the real
+	// apiserver on the Create just above.
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: string(root.UID), Entry: "worker"}
+	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: string(root.UID)}
 	if err := k8sClient.Create(context.Background(), member); err != nil {
 		t.Fatal(err)
 	}
@@ -202,16 +208,18 @@ func TestCoordinateCloseCascadesThroughTheRealAPI(t *testing.T) {
 	member := &agentopsv1alpha1.Conversation{}
 	member.Name, member.Namespace = "co-close-member", ns
 	member.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-close-co"}
-	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: root.Name, Entry: "worker"}
-	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
+	// CausedBy.Parent holds the parent's ID, not its Name
+	// (conversation-identity Decision 6).
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: string(root.UID), Entry: "worker"}
+	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: string(root.UID)}
 	if err := k8sClient.Create(context.Background(), member); err != nil {
 		t.Fatal(err)
 	}
 	grandchild := &agentopsv1alpha1.Conversation{}
 	grandchild.Name, grandchild.Namespace = "co-close-grandchild", ns
 	grandchild.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-close-co"}
-	grandchild.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: member.Name, Entry: "helper"}
-	grandchild.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: member.Name}
+	grandchild.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: string(member.UID), Entry: "helper"}
+	grandchild.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: string(member.UID)}
 	if err := k8sClient.Create(context.Background(), grandchild); err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +499,7 @@ func finishMemberRun(t *testing.T, srv *httpapi.Server, member, runID, result st
 		t.Fatal(err)
 	}
 	if rec := adapterReq(srv, "POST", "/work/done", map[string]any{
-		"convo": member, "runId": runID, "status": "succeeded", "result": result,
+		"convo": string(memberConv.UID), "runId": runID, "status": "succeeded", "result": result,
 	}, srv.AdapterToken); rec.Code != 200 {
 		t.Fatalf("work/done: %d %s", rec.Code, rec.Body.String())
 	}

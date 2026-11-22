@@ -36,6 +36,7 @@ const coordTestMasterKey = "master-key"
 // and never touch it.
 func coordServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	t.Helper()
+	assignUIDs(objs)
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(objs...).Build()
@@ -258,6 +259,42 @@ func TestHandleCoordinateReadRefusesOutOfScope(t *testing.T) {
 	}
 }
 
+// A Closed member is still a live match (Decision 5) — read must project
+// it, never answer as if the name resolved to nothing.
+func TestHandleCoordinateReadReachesAClosedMember(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	member := &agentopsv1alpha1.Conversation{}
+	member.Name, member.Namespace = "member-1", "agent-ops"
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "worker"}
+	member.Status.Phase = agentopsv1alpha1.ConversationClosed
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, member)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/read", token,
+		map[string]any{"conversation": "root-1", "target": "member-1"})
+	if rec.Code != 200 {
+		t.Fatalf("a Closed match must resolve, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A target a finalizer is still holding is not a live match (Decision 5) —
+// read of it answers exactly as a name naming nothing would, never a
+// projection of a record already on its way out.
+func TestHandleCoordinateReadRefusesADeletionMarkedTarget(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	member := markDeleting(&agentopsv1alpha1.Conversation{})
+	member.Name, member.Namespace = "member-1", "agent-ops"
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "worker"}
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, member)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/read", token,
+		map[string]any{"conversation": "root-1", "target": "member-1"})
+	if rec.Code != 404 {
+		t.Fatalf("a deletion-marked target must be treated as unknown, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // descendsFrom walks UP the causedBy chain, so a target more than one hop
 // below the caller must still resolve — the loop's "fetch the parent and
 // keep walking" branch, which a direct member or an unrelated conversation
@@ -437,6 +474,50 @@ func TestHandleCoordinateCloseRefusesAWrongToken(t *testing.T) {
 	}
 }
 
+// A Closed direct member is still a live match (Decision 5) — close must
+// resolve it, same as any other target, even though the verb itself then
+// has nothing further to do.
+func TestHandleCoordinateCloseOfAClosedMemberStillResolves(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	member := &agentopsv1alpha1.Conversation{}
+	member.Name, member.Namespace = "member-1", "agent-ops"
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "worker"}
+	member.Status.Phase = agentopsv1alpha1.ConversationClosed
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, member)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/close", token,
+		map[string]any{"conversation": "root-1", "target": "member-1", "reason": "already done"})
+	if rec.Code != 200 {
+		t.Fatalf("a Closed match must resolve and accept, got %d: %s", rec.Code, rec.Body.String())
+	}
+	drainCoordinateTasks(t, s, rec)
+}
+
+// A target a finalizer is still holding is not a live match (Decision 5) —
+// already departing, so a close on it is a no-op once the task runs, the
+// same outcome a target already fully gone gets.
+func TestHandleCoordinateCloseOfADeletionMarkedTargetIsANoOpOnceProcessed(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	member := markDeleting(&agentopsv1alpha1.Conversation{})
+	member.Name, member.Namespace = "member-1", "agent-ops"
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "worker"}
+	s, c := coordServer(t, coordCoordinator("co-a"), root, member)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/close", token,
+		map[string]any{"conversation": "root-1", "target": "member-1", "reason": "done"})
+	if rec.Code != 200 {
+		t.Fatalf("accept must still succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	drainCoordinateTasks(t, s, rec)
+	var got agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "member-1"}, &got)
+	if got.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		t.Fatal("a deletion-marked target must not be stamped Closed by a close racing its own delete")
+	}
+}
+
 func TestHandleCoordinateCloseDefaultsTargetToTheCaller(t *testing.T) {
 	root := coordRoot("root-1", "co-a")
 	root.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
@@ -452,6 +533,41 @@ func TestHandleCoordinateCloseDefaultsTargetToTheCaller(t *testing.T) {
 	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &got)
 	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
 		t.Fatal("omitting target must close the caller itself, once its task is processed")
+	}
+}
+
+// A Closed caller is still a live match (Decision 5) — escalate carries no
+// phase check of its own (Router.Escalate), so the accept step must resolve
+// it rather than answer as if the name were absent.
+func TestHandleCoordinateEscalateOnAClosedCallerStillResolves(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	root.Status.Phase = agentopsv1alpha1.ConversationClosed
+	s, c := coordServer(t, coordCoordinator("co-a"), root)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/escalate", token, map[string]any{"conversation": "root-1", "message": "still here"})
+	if rec.Code != 200 {
+		t.Fatalf("a Closed match must resolve and accept, got %d: %s", rec.Code, rec.Body.String())
+	}
+	drainCoordinateTasks(t, s, rec)
+	var got agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &got)
+	if got.Status.EscalatedAt == nil {
+		t.Fatal("once processed, the escalate must have run")
+	}
+}
+
+// A caller a finalizer is still holding is not a live match (Decision 5) —
+// the bearer token cannot be re-derived against a name that no longer
+// resolves, so it fails identically to a wrong token.
+func TestHandleCoordinateEscalateRefusesADeletionMarkedCaller(t *testing.T) {
+	root := markDeleting(coordRoot("root-1", "co-a"))
+	s, _ := coordServer(t, coordCoordinator("co-a"), root)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/escalate", token, map[string]any{"conversation": "root-1", "message": "help"})
+	if rec.Code != 401 {
+		t.Fatalf("want 401, a deletion-marked caller must not resolve, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

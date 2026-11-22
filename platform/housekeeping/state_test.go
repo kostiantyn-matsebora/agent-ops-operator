@@ -23,9 +23,9 @@ func TestStateListConversationsParsesAndDualReads(t *testing.T) {
 		gotPath = r.URL.Path
 		gotAccept = r.Header.Get("Accept")
 		fmt.Fprint(w, `{"revision":"42","items":[
-			{"name":"conv-new","status":{"runtimeContextId":"ctx-new"}},
-			{"name":"conv-old","status":{"sessionId":"ctx-old"}},
-			{"name":"conv-none","status":{}}
+			{"name":"conv-new","id":"id-new","status":{"runtimeContextId":"ctx-new"}},
+			{"name":"conv-old","id":"id-old","status":{"sessionId":"ctx-old"}},
+			{"name":"conv-none","id":"id-none","status":{}}
 		]}`)
 	}))
 	defer srv.Close()
@@ -47,12 +47,20 @@ func TestStateListConversationsParsesAndDualReads(t *testing.T) {
 	}
 
 	want := map[string]string{"conv-new": "ctx-new", "conv-old": "ctx-old", "conv-none": ""}
+	wantID := map[string]string{"conv-new": "id-new", "conv-old": "id-old", "conv-none": "id-none"}
 	if len(convs) != len(want) {
 		t.Fatalf("got %d conversations, want %d: %+v", len(convs), len(want), convs)
 	}
 	for _, c := range convs {
 		if got, ok := want[c.Name]; !ok || got != c.ContextID {
 			t.Errorf("conversation %+v: want ContextID %q", c, want[c.Name])
+		}
+		// ReclaimWorkspaces matches a workspace directory by ID, not Name
+		// (conversation-identity Decision 1/7) — this is the one place the
+		// manager's own `id` field is read off the wire, so a regression
+		// here would silently make every workspace look orphaned.
+		if got := wantID[c.Name]; got != c.ID {
+			t.Errorf("conversation %+v: want ID %q", c, got)
 		}
 	}
 }

@@ -17,14 +17,17 @@ import (
 )
 
 // mkMember creates a plain capabilityRef-shaped member: causedBy set, no
-// coordinatorRef of its own — the self-heal reaper's exact shape.
-func mkMember(t *testing.T, name, profile, parent, entry string) *agentopsv1alpha1.Conversation {
+// coordinatorRef of its own — the self-heal reaper's exact shape. parentID
+// is the parent's own UID: CausedBy.Parent holds the parent's ID, not its
+// Name (conversation-identity Decision 6), and the mirrored label carries
+// exactly what the field does.
+func mkMember(t *testing.T, name, profile, parentID, entry string) *agentopsv1alpha1.Conversation {
 	t.Helper()
 	m := &agentopsv1alpha1.Conversation{}
 	m.Name, m.Namespace = name, ns
 	m.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: profile}
-	m.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: parent, Entry: entry}
-	m.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: parent}
+	m.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: parentID, Entry: entry}
+	m.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: parentID}
 	if err := k8sClient.Create(context.Background(), m); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +50,7 @@ func TestCoordinateOpenRootsAuthenticatesAPlainMemberOverTheRealAPI(t *testing.T
 	if err := k8sClient.Create(context.Background(), root); err != nil {
 		t.Fatal(err)
 	}
-	reaper := mkMember(t, "co-oproots-reaper", "prof-oproots-co", root.Name, "reaper")
+	reaper := mkMember(t, "co-oproots-reaper", "prof-oproots-co", string(root.UID), "reaper")
 
 	sibling := &agentopsv1alpha1.Conversation{}
 	sibling.Name, sibling.Namespace = "co-oproots-incident", ns
@@ -89,7 +92,7 @@ func TestCoordinateCloseWidenedBoundOverTheRealAPI(t *testing.T) {
 	if err := k8sClient.Create(context.Background(), root); err != nil {
 		t.Fatal(err)
 	}
-	reaper := mkMember(t, "co-wclose-reaper", "prof-wclose-co", root.Name, "reaper")
+	reaper := mkMember(t, "co-wclose-reaper", "prof-wclose-co", string(root.UID), "reaper")
 
 	sibling := &agentopsv1alpha1.Conversation{}
 	sibling.Name, sibling.Namespace = "co-wclose-incident", ns
@@ -115,7 +118,7 @@ func TestCoordinateCloseWidenedBoundOverTheRealAPI(t *testing.T) {
 	if err := k8sClient.Create(context.Background(), secondSibling); err != nil {
 		t.Fatal(err)
 	}
-	siblingMember := mkMember(t, "co-wclose-incident-member", "prof-wclose-co", secondSibling.Name, "endpoint-check")
+	siblingMember := mkMember(t, "co-wclose-incident-member", "prof-wclose-co", string(secondSibling.UID), "endpoint-check")
 
 	srv := apiServer()
 	token := chat.DeriveCoordinatorToken(srv.AdapterToken, "co-wclose", reaper.Name)

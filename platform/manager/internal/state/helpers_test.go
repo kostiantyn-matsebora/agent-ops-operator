@@ -186,6 +186,21 @@ func TestThreadHelpersReadTheBindings(t *testing.T) {
 	}
 }
 
+// Live is Decision 5's whole definition in one call: present with no
+// deletion marker, regardless of Phase — a Closed record is still live,
+// only one a finalizer is holding on its way out is not.
+func TestLiveIsIndependentOfPhase(t *testing.T) {
+	r := ConversationRecord{Phase: PhaseClosed}
+	if !r.Live() {
+		t.Fatal("a Closed record with no deletion marker must be live")
+	}
+	deleting := time.Now()
+	r.DeletionRequestedAt = &deleting
+	if r.Live() {
+		t.Fatal("a deletion-marked record must not be live, whatever its Phase")
+	}
+}
+
 func TestWatermarksAreOpaqueStringsComparedAtFullPrecision(t *testing.T) {
 	at := "2026-10-31T10:00:00.123456789Z"
 	parsed, ok := ParseWatermark(at)

@@ -4,14 +4,19 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
+// idFor is the fixture's stand-in for a backend-minted ID, distinct from the
+// name so a test asserting on the ID cannot pass by accident against the name.
+func idFor(name string) string { return name + "-id" }
+
 func conversation(name string) *state.ConversationRecord {
-	return &state.ConversationRecord{Name: name}
+	return &state.ConversationRecord{Name: name, ID: idFor(name)}
 }
 
 func build(convName string, cfg Config) *corev1.Pod {
@@ -77,8 +82,11 @@ func TestWorkspaceClaimMountsWithConversationSubPath(t *testing.T) {
 	if m == nil || m.MountPath != "/data/workspace" {
 		t.Fatalf("mount path moved: %+v", m)
 	}
-	if m.SubPath != "conv-a" {
-		t.Fatalf("subPath = %q, want the conversation name", m.SubPath)
+	// The subPath is the conversation's ID, not its Name — a name is unique
+	// only among live conversations, so subPath'ing by Name would let a
+	// recreated name mount the previous conversation's tree.
+	if m.SubPath != idFor("conv-a") {
+		t.Fatalf("subPath = %q, want the conversation's ID", m.SubPath)
 	}
 }
 
@@ -115,9 +123,66 @@ func TestContextAndWorkspaceAreIndependent(t *testing.T) {
 	}
 }
 
+// The ID label must be LABEL-SAFE on every backend that could mint an ID
+// (design Decision 7): at most 63 characters, [A-Za-z0-9._-], alphanumeric
+// ends. NUID (22 chars) and a Kubernetes UID (36 chars) both fit; a value
+// that is not label-safe fails pod creation outright.
+func TestConversationIDLabelIsLabelSafe(t *testing.T) {
+	for _, id := range []string{
+		"nxK3v9f2QhT1Bz0mR7cJ8x",               // nuid shape, 22 chars
+		"550e8400-e29b-41d4-a716-446655440000", // uuid shape, 36 chars
+	} {
+		pod := Build(&state.ConversationRecord{Name: "conv-a", ID: id},
+			&agentopsv1alpha1.AgentProfile{}, mcpcompile.Result{}, "mcp-cm", Resolved{Config: Config{Image: "img"}}, "master-key")
+		if errs := validation.IsValidLabelValue(pod.Labels[LabelConversationID]); len(errs) != 0 {
+			t.Fatalf("ID %q is not a valid label value: %v", id, errs)
+		}
+	}
+}
+
+// A recreated conversation under a REUSED name must not mount the previous
+// conversation's workspace directory or carry its label — the hazard
+// design.md's Decision 1 names. Same Name, different ID.
+func TestRecreatedNameGetsADistinctWorkspaceAndLabel(t *testing.T) {
+	cfg := Config{Image: "img", WorkspacePVC: "agentops-workspace"}
+	deleted := &state.ConversationRecord{Name: "conv-a", ID: "id-1"}
+	recreated := &state.ConversationRecord{Name: "conv-a", ID: "id-2"}
+
+	podOne := Build(deleted, &agentopsv1alpha1.AgentProfile{}, mcpcompile.Result{}, "mcp-cm", Resolved{Config: cfg}, "master-key")
+	podTwo := Build(recreated, &agentopsv1alpha1.AgentProfile{}, mcpcompile.Result{}, "mcp-cm", Resolved{Config: cfg}, "master-key")
+
+	if s1, s2 := mount(podOne, "workspace").SubPath, mount(podTwo, "workspace").SubPath; s1 == s2 {
+		t.Fatalf("recreated name %q reused the deleted conversation's workspace subPath %q", "conv-a", s1)
+	}
+	if l1, l2 := podOne.Labels[LabelConversationID], podTwo.Labels[LabelConversationID]; l1 == l2 {
+		t.Fatalf("recreated name %q reused the deleted conversation's ID label %q", "conv-a", l1)
+	}
+	if podOne.Labels[LabelConversation] != podTwo.Labels[LabelConversation] {
+		t.Fatalf("the display label should still agree on the shared name")
+	}
+}
+
 // A runtime OVERLAY leaves both claims exactly as the conversation resolved
 // them. This is the whole of the move: an AgentRuntime declares neither volume,
 // so there is nothing of a runtime's for FromRuntime to apply.
+// CONVO_ID carries the conversation's ID, not its Name — the runtime passes
+// it back as `convo=` on its long poll, and /work must resolve it strictly by
+// ID (conversation-identity, Decision 1).
+func TestConvoIDEnvCarriesTheConversationID(t *testing.T) {
+	pod := build("conv-a", Config{Image: "img"})
+
+	w := pod.Spec.Containers[0]
+	got := ""
+	for _, e := range w.Env {
+		if e.Name == "CONVO_ID" {
+			got = e.Value
+		}
+	}
+	if got != idFor("conv-a") {
+		t.Fatalf("CONVO_ID = %q, want the conversation's ID %q", got, idFor("conv-a"))
+	}
+}
+
 func TestFromRuntimeLeavesBothVolumesAlone(t *testing.T) {
 	spec := &agentopsv1alpha1.AgentRuntimeSpec{Image: "img"}
 

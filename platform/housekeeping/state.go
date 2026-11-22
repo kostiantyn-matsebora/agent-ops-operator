@@ -35,22 +35,28 @@ func NewState(baseURL, token string) *State {
 }
 
 // Conversation is the slice of a Conversation this job reads. Deliberately
-// tiny: a name to match a directory against, and the context handle that keeps
-// a transcript referenced.
+// tiny: a name (display only now — see ReclaimWorkspaces), the ID a
+// workspace directory is actually named for, and the context handle that
+// keeps a transcript referenced.
 //
 // NOTE the absence of a phase field, and keep it absent. See ListConversations.
 type Conversation struct {
 	Name      string
+	ID        string
 	ContextID string
 }
 
 // stateConversationsEnvelope is the wire shape of GET /state/conversations:
-// {"revision", "items": [record]} — see design D-5. Only the two fields this
-// job reads are decoded; the rest of each record (spec, the run history) is
-// ignored.
+// {"revision", "items": [record]} — see design D-5. Only the fields this job
+// reads are decoded; the rest of each record (spec, the run history) is
+// ignored. `id` is the manager's own backend-minted system identity
+// (conversation-identity Decision 1/7) — a runtime pod's workspace subPath
+// is named for it, not for `name`, since a name can be reused across two
+// different lives of a conversation and the ID never is.
 type stateConversationsEnvelope struct {
 	Items []struct {
 		Name   string `json:"name"`
+		ID     string `json:"id"`
 		Status struct {
 			RuntimeContextID string `json:"runtimeContextId"`
 			SessionID        string `json:"sessionId"`
@@ -94,7 +100,7 @@ func (s *State) ListConversations(ctx context.Context) ([]Conversation, error) {
 		if id == "" {
 			id = it.Status.SessionID
 		}
-		out = append(out, Conversation{Name: it.Name, ContextID: id})
+		out = append(out, Conversation{Name: it.Name, ID: it.ID, ContextID: id})
 	}
 	return out, nil
 }

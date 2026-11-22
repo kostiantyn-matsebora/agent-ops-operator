@@ -284,9 +284,13 @@ func (r *ConversationReconciler) reconcile(ctx context.Context, req ctrl.Request
 	// it is closed here and left to the auto-delete clock. Only a definite
 	// not-found counts: a failed read says nothing about the parent.
 	if conv.CausedBy != nil && r.Router != nil {
-		if _, _, err := r.Conversations.Get(ctx, state.Key(conv.CausedBy.Parent)); errors.Is(err, state.ErrNotFound) {
+		// By ID, not by Get-by-name: CausedBy.Parent names the parent's ID, so a
+		// new conversation created under the parent's old Name is never mistaken
+		// for it still existing (conversation-identity, Decision 6).
+		parents, err := r.Conversations.List(ctx, state.ByID, conv.CausedBy.Parent)
+		if err == nil && len(parents) == 0 {
 			log.FromContext(ctx).Info("closing an orphaned member: its parent conversation no longer exists",
-				"conversation", conv.Name, "parent", conv.CausedBy.Parent)
+				"conversation", conv.Name, "parentId", conv.CausedBy.Parent)
 			return ctrl.Result{}, r.Router.CloseConversationReason(ctx, &conv, "its parent conversation no longer exists")
 		}
 	}
@@ -564,7 +568,7 @@ func (r *ConversationReconciler) closeBudgetExceeded(ctx context.Context, conv *
 			CloseKind: convtask.CloseBudgetExceeded, Reason: digest,
 		}.Encode(),
 	}
-	return r.submitCloseCascade(ctx, conv.Name, "budget-exceeded", rootReq)
+	return r.submitCloseCascade(ctx, conv.ID, conv.Name, "budget-exceeded", rootReq)
 }
 
 func (r *ConversationReconciler) autoCloseConversation(ctx context.Context, conv *state.ConversationRecord, idle time.Duration) error {
@@ -583,21 +587,24 @@ func (r *ConversationReconciler) autoCloseConversation(ctx context.Context, conv
 	// A plain auto-close's cascade members carry no reason verbatim either
 	// (closeConversation's own cascadeCloseMembers call never did) — "" to
 	// match.
-	return r.submitCloseCascade(ctx, conv.Name, "", rootReq)
+	return r.submitCloseCascade(ctx, conv.ID, conv.Name, "", rootReq)
 }
 
-// submitCloseCascade lists rootName's own causedBy subtree
+// submitCloseCascade lists rootID's own causedBy subtree
 // (chat.Router.Descendants) and submits one CascadeMember task per LIVE
 // descendant (convtask.CloseMemberRequests) ahead of rootReq, in order —
 // this reconciler's own analogue of httpapi's closeCascadeRequests, over
 // the same commandbus.Bus.Submit loop since there is no accept-time
 // invocationId to mint here (nothing is reporting back to an HTTP caller).
-func (r *ConversationReconciler) submitCloseCascade(ctx context.Context, rootName, reason string, rootReq commandbus.SubmitRequest) error {
-	descendants, err := r.Router.Descendants(ctx, rootName)
+// rootID resolves the subtree (conversation-identity Decision 6: causedBy
+// holds ID, not Name); rootName is still what the built tasks display and
+// key on, since every "conv" verb's Key/Payload stays Name throughout.
+func (r *ConversationReconciler) submitCloseCascade(ctx context.Context, rootID, rootName, reason string, rootReq commandbus.SubmitRequest) error {
+	descendants, err := r.Router.Descendants(ctx, rootID)
 	if err != nil {
 		return err
 	}
-	reqs := append(convtask.CloseMemberRequests(rootName, reason, descendants), rootReq)
+	reqs := append(convtask.CloseMemberRequests(rootID, rootName, reason, descendants), rootReq)
 	for _, req := range reqs {
 		if _, err := r.Bus.Submit(ctx, req); err != nil {
 			return err
@@ -911,7 +918,7 @@ func (r *ConversationReconciler) enqueueDeleteConversations(ctx context.Context,
 		dctx, cancel := context.WithTimeout(ctx, r.chatBudget())
 		r.Ops.EnqueueDeleteConversation(dctx, ch, t.ThreadID, conv)
 		cancel()
-		if r.Ops.Pending(chat.DeleteConversationOpID(conv.Name, t.Channel)) {
+		if r.Ops.Pending(chat.DeleteConversationOpID(conv.Name, conv.ID, t.Channel)) {
 			outstanding = true
 		}
 	}
@@ -1068,7 +1075,7 @@ func (r *ConversationReconciler) waitingFIFO(all []state.ConversationRecord, has
 	var waiting []state.ConversationRecord
 	for i := range all {
 		c := &all[i]
-		if c.DeletionRequestedAt != nil || hasPod[c.Name] || !dispatch.NeedsWorker(c) {
+		if c.DeletionRequestedAt != nil || hasPod[c.ID] || !dispatch.NeedsWorker(c) {
 			continue
 		}
 		// Closed is inert: it will never be given a pod, so leaving it in the
@@ -1113,9 +1120,14 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *state.Conversa
 	if err != nil {
 		return false, err
 	}
+	// Keyed by the pod's conversation-ID label, never its Name label: a pod
+	// outliving its deleted conversation must not be read as a same-named
+	// conversation's own pod (conversation-identity).
 	hasPod := map[string]bool{}
 	for _, p := range live {
-		hasPod[p.Labels[runtimepod.LabelConversation]] = true
+		if id := p.Labels[runtimepod.LabelConversationID]; id != "" {
+			hasPod[id] = true
+		}
 	}
 
 	if free <= 0 {
@@ -1140,15 +1152,32 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *state.Conversa
 	return len(waiting) < free, nil
 }
 
+// conversationForPod resolves a live runtime pod to its conversation through
+// the ID label, never the Name label — a pod of a deleted conversation must
+// not be adopted by a new one created under the same Name
+// (conversation-identity, Decision 7). ok is false when the label is absent
+// or no record carries that ID.
+func (r *ConversationReconciler) conversationForPod(ctx context.Context, p *corev1.Pod) (state.ConversationRecord, bool, error) {
+	id := p.Labels[runtimepod.LabelConversationID]
+	if id == "" {
+		return state.ConversationRecord{}, false, nil
+	}
+	list, err := r.Conversations.List(ctx, state.ByID, id)
+	if err != nil || len(list) == 0 {
+		return state.ConversationRecord{}, false, err
+	}
+	return list[0], true, nil
+}
+
 // evictableCount reports how many live pods could be freed for waiting work:
 // those whose conversation has nothing inflight and nothing queued. Eviction
 // deletes only the pod — the conversation and its session survive and it gets a
 // fresh pod on its next input.
 func (r *ConversationReconciler) evictableCount(ctx context.Context, live []corev1.Pod) int {
 	n := 0
-	for _, p := range live {
-		c, _, err := r.Conversations.Get(ctx, state.Key(p.Labels[runtimepod.LabelConversation]))
-		if err != nil {
+	for i := range live {
+		c, ok, err := r.conversationForPod(ctx, &live[i])
+		if err != nil || !ok {
 			continue
 		}
 		if !dispatch.NeedsWorker(&c) {
@@ -1377,7 +1406,7 @@ func (r *ConversationReconciler) deliverMemberResults(ctx context.Context, conv 
 			continue
 		}
 		dedup := "member:" + conv.Name + ":" + run.RunID
-		if err := r.Router.AppendMemberResult(ctx, conv.CausedBy, conv.Name, dedup, run.Result); err != nil {
+		if err := r.Router.AppendMemberResult(ctx, conv.CausedBy, conv.ID, conv.Name, dedup, run.Result); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -1506,12 +1535,12 @@ func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv strin
 		last time.Time
 	}
 	var cands []cand
-	for _, p := range live {
-		cn := p.Labels[runtimepod.LabelConversation]
-		c, _, err := r.Conversations.Get(ctx, state.Key(cn))
-		if err != nil {
+	for i := range live {
+		c, ok, err := r.conversationForPod(ctx, &live[i])
+		if err != nil || !ok {
 			continue
 		}
+		p := live[i]
 		if !dispatch.NeedsWorker(&c) {
 			last := c.CreatedAt
 			if c.LastActivity != nil {
@@ -1540,7 +1569,7 @@ func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv strin
 func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *state.ConversationRecord) (bool, error) {
 	logger := log.FromContext(ctx)
 
-	ok, release, err := r.reserveSlot(ctx, conv.Name)
+	ok, release, err := r.reserveSlot(ctx, conv.ID)
 	if !ok {
 		return false, err
 	}
@@ -1618,7 +1647,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *sta
 		return false, err
 	}
 	created = true
-	r.awaitVisible(ctx, conv.Name, release)
+	r.awaitVisible(ctx, conv.ID, release)
 	// The pod exists; everything from here until the agent's first /work is
 	// scheduling and boot, and used to be a silent gap in the sequence.
 	r.Activity.Emit(activity.Event{

@@ -37,7 +37,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/convtask"
 )
 
-// closeCascadeRequests lists rootName's own causedBy subtree
+// closeCascadeRequests lists rootID's own causedBy subtree
 // (chat.Router.Descendants: current state, any depth) and returns one
 // CascadeMember request per LIVE descendant (convtask.CloseMemberRequests),
 // deepest-first, with rootReq appended last — rootReq is the caller's own
@@ -48,11 +48,15 @@ import (
 // re-checks its descendants at run time and closes any open one" is this
 // unchanged recursive call's own existing behaviour, simply moved from an
 // inline call into a task rather than reimplemented here.
-func (s *Server) closeCascadeRequests(ctx context.Context, rootName, reason string, rootReq commandbus.SubmitRequest) ([]commandbus.SubmitRequest, error) {
-	descendants, err := s.Router.Descendants(ctx, rootName)
+//
+// rootID resolves the subtree (conversation-identity Decision 6: causedBy
+// holds ID, not Name); rootName is still what every built task displays
+// and keys on.
+func (s *Server) closeCascadeRequests(ctx context.Context, rootID, rootName, reason string, rootReq commandbus.SubmitRequest) ([]commandbus.SubmitRequest, error) {
+	descendants, err := s.Router.Descendants(ctx, rootID)
 	if err != nil {
 		return nil, err
 	}
-	reqs := convtask.CloseMemberRequests(rootName, reason, descendants)
+	reqs := convtask.CloseMemberRequests(rootID, rootName, reason, descendants)
 	return append(reqs, rootReq), nil
 }

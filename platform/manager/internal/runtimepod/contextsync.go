@@ -81,7 +81,7 @@ func contextSyncContainer(conv *state.ConversationRecord, cfg Config,
 		// The REAL manager. The agent's own CONTROL_URL points at this sidecar,
 		// so this is the only place the true address survives in the pod.
 		{Name: "CONTROL_URL_UPSTREAM", Value: cfg.ControlURL},
-		{Name: "CONVO_ID", Value: conv.Name},
+		{Name: "CONVO_ID", Value: conv.ID},
 		{Name: "CONTEXT_LIVE_DIR", Value: contextLiveMount},
 		{Name: "CONTEXT_STORE_DIR", Value: contextStoreMount},
 		{Name: "CONTEXT_SYNC_PATHS", Value: strings.Join(sync.Paths, "\n")},
@@ -121,13 +121,15 @@ func retainOrDefault(sync *agentopsv1alpha1.ContextSync) int32 {
 // contextSyncMounts are the sidecar's own mounts: the LIVE tree it copies from,
 // and the durable store it copies to.
 //
-// The store is subPath'd per conversation so concurrent pods cannot read or
-// overwrite one another's context — the same isolation the workspace claim has
-// always had, and a prerequisite rather than a nicety: without it, two pods
-// copying a shared tree back would each erase the other's writes.
+// The store is subPath'd per conversation's ID, not its Name, so concurrent
+// AND successive pods cannot read or overwrite one another's context — the
+// same isolation the workspace claim has, and a prerequisite rather than a
+// nicety: without it, two pods copying a shared tree back would each erase
+// the other's writes, and a recreated name would resume a deleted
+// conversation's context.
 func contextSyncMounts(conv *state.ConversationRecord) []corev1.VolumeMount {
 	return []corev1.VolumeMount{
 		{Name: "context", MountPath: contextLiveMount},
-		{Name: "context-store", MountPath: contextStoreMount, SubPath: conv.Name},
+		{Name: "context-store", MountPath: contextStoreMount, SubPath: conv.ID},
 	}
 }

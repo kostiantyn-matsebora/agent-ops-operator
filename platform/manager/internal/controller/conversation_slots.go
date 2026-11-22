@@ -20,9 +20,13 @@ const slotHoldTTL = 30 * time.Second
 // there room" and the act that uses the room must be one step, and a decision
 // taken moments ago must still count while the cached pod list cannot show it
 // yet.
+//
+// Keyed by the conversation's ID, not its Name: a pod lingering under a
+// deleted conversation's Name must never be read as the slot of a new
+// conversation created under that same Name (conversation-identity).
 type slots struct {
 	mu      sync.Mutex
-	claimed map[string]time.Time    // conversation -> a pod about to exist
+	claimed map[string]time.Time    // conversation ID -> a pod about to exist
 	evicted map[types.UID]time.Time // pod UID -> deleted, may still be listed
 }
 
@@ -31,15 +35,15 @@ type slots struct {
 func (s *slots) occupancy(live []corev1.Pod, now time.Time) (pods []corev1.Pod, claimedOnly int) {
 	listed := map[string]bool{}
 	for _, p := range live {
-		listed[p.Labels[runtimepod.LabelConversation]] = true
+		listed[p.Labels[runtimepod.LabelConversationID]] = true
 		if _, gone := s.evicted[p.UID]; gone {
 			continue
 		}
 		pods = append(pods, p)
 	}
-	for name, at := range s.claimed {
-		if listed[name] || now.Sub(at) > slotHoldTTL {
-			delete(s.claimed, name)
+	for id, at := range s.claimed {
+		if listed[id] || now.Sub(at) > slotHoldTTL {
+			delete(s.claimed, id)
 			continue
 		}
 		claimedOnly++
@@ -55,7 +59,8 @@ func (s *slots) occupancy(live []corev1.Pod, now time.Time) (pods []corev1.Pod, 
 // reserveSlot decides, atomically with recording the decision, whether this
 // conversation may take a slot, evicting an idle worker when that is what a
 // slot costs. release undoes the claim when the pod could not be made.
-func (r *ConversationReconciler) reserveSlot(ctx context.Context, conv string) (ok bool, release func(), err error) {
+// convID is the conversation's ID, matching the pod label occupancy reads.
+func (r *ConversationReconciler) reserveSlot(ctx context.Context, convID string) (ok bool, release func(), err error) {
 	r.slots.mu.Lock()
 	defer r.slots.mu.Unlock()
 	if r.slots.claimed == nil {
@@ -66,17 +71,17 @@ func (r *ConversationReconciler) reserveSlot(ctx context.Context, conv string) (
 		return false, nil, err
 	}
 	pods, claimed := r.slots.occupancy(live, time.Now())
-	if _, mine := r.slots.claimed[conv]; !mine && len(pods)+claimed >= r.MaxActiveConversations {
-		victim, made, err := r.evictIdleWorker(ctx, conv, pods)
+	if _, mine := r.slots.claimed[convID]; !mine && len(pods)+claimed >= r.MaxActiveConversations {
+		victim, made, err := r.evictIdleWorker(ctx, convID, pods)
 		if !made {
 			return false, nil, err
 		}
 		r.slots.evicted[victim] = time.Now()
 	}
-	r.slots.claimed[conv] = time.Now()
+	r.slots.claimed[convID] = time.Now()
 	return true, func() {
 		r.slots.mu.Lock()
-		delete(r.slots.claimed, conv)
+		delete(r.slots.claimed, convID)
 		r.slots.mu.Unlock()
 	}, nil
 }
@@ -99,8 +104,8 @@ func (r *ConversationReconciler) freeSlots(ctx context.Context) (live []corev1.P
 // awaitVisible waits, briefly, until the pod just created shows up in the
 // pod list, then drops the claim: from then on the list itself counts it, and a
 // pod deleted straight after must free its slot at once rather than linger as
-// a claim.
-func (r *ConversationReconciler) awaitVisible(ctx context.Context, conv string, release func()) {
+// a claim. convID is the conversation's ID, matching the pod's own label.
+func (r *ConversationReconciler) awaitVisible(ctx context.Context, convID string, release func()) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		live, err := r.liveRuntimePods(ctx, r.Namespaces.Conversations)
@@ -108,7 +113,7 @@ func (r *ConversationReconciler) awaitVisible(ctx context.Context, conv string, 
 			return // the claim ages out on its own
 		}
 		for _, p := range live {
-			if p.Labels[runtimepod.LabelConversation] == conv {
+			if p.Labels[runtimepod.LabelConversationID] == convID {
 				release()
 				return
 			}
