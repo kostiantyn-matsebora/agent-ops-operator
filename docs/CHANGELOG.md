@@ -71,7 +71,6 @@ Images: manager 0.66.0, console 0.46.0, runtime-pi 0.2.0, runtime-ollama 0.2.0. 
 - `pi` reports `tokensIn` as the contract defines it, cache parts included, so
   the console's "Fresh" column is no longer negative, and reports each tool
   call's `resultBytes`, so "Result size" is filled.
-
 - **A closed conversation no longer serves work, so it stays closed.** A runtime
   pod still polling when `/close` landed, with an input queued before it, was
   handed that input, and dispatching it wrote `Working` over `Closed`. Closed is
