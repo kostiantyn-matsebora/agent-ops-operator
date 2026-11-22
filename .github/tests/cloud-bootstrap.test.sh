@@ -29,7 +29,7 @@ STUB
     chmod +x "$BIN/$i"
   done
   if [ "$1" = present ]; then
-    for t in helm openspec serena; do printf '#!/bin/sh\nexit 0\n' > "$BIN/$t"; chmod +x "$BIN/$t"; done
+    for t in helm openspec serena k3d kubectl docker; do printf '#!/bin/sh\nexit 0\n' > "$BIN/$t"; chmod +x "$BIN/$t"; done
     printf '#!/bin/sh\necho "go version go1.25.1 linux/amd64"\n' > "$BIN/go"; chmod +x "$BIN/go"
     mkdir -p "$FAKEHOME/envtest/k8s/1.31.0-linux-amd64"
     touch "$FAKEHOME/envtest/k8s/1.31.0-linux-amd64/kube-apiserver"
@@ -91,6 +91,28 @@ assert_contains "$out" "helm"
 assert_contains "$out" "installing @fission-ai/openspec"
 assert_contains "$out" "installing serena"
 
+it "an absent k3d and kubectl are downloaded from their pinned releases, and a failed download names them"
+make_env absent
+out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap); status=$?
+assert_status 0 "$status"
+assert_contains "$(cat "$CALLS")" "k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64"
+assert_contains "$(cat "$CALLS")" "dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl"
+out=$(CLAUDE_CODE_REMOTE=1 STUB_EXIT=1 run_bootstrap); status=$?
+assert_status 0 "$status"
+assert_contains "$out" "k3d"
+assert_contains "$out" "kubectl"
+
+it "a container runtime that does not answer and has no dockerd is named, never fatal"
+make_env absent
+out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap --verify)
+assert_contains "$out" "docker not running"
+
+it "a runtime that answers is left alone: dockerd is not started"
+make_env present
+out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap)
+assert_contains "$out" "docker running"
+assert_not_contains "$out" "starting dockerd"
+
 # --- verify ------------------------------------------------------------------
 
 it "--verify installs nothing and answers present or missing for every tool"
@@ -102,7 +124,7 @@ assert_equals "" "$(cat "$CALLS")"
 # calling `pass` unconditionally after the loop printed an ok line beside the
 # failure, so the case read as green in the summary.
 missing_line=""
-for tool in helm openspec pyyaml envtest serena go; do
+for tool in helm openspec pyyaml envtest serena k3d kubectl docker go; do
   case "$out" in *"$tool "*) ;; *) missing_line="$tool" ;; esac
 done
 [ -z "$missing_line" ] && pass || fail "no --verify line for $missing_line"

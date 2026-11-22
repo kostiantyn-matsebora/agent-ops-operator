@@ -13,6 +13,7 @@ cd /home/user/agent-ops-operator && bash .github/scripts/cloud-bootstrap.sh
 | Installs | Absent, breaks |
 |---|---|
 | helm | chart render tests SKIP |
+| k3d, kubectl, a running docker | the system tier cannot run in the session, so the testing station dispatches it instead |
 | `@fission-ai/openspec` | no opsx command |
 | pyyaml | `docs-generate.py`/`docs-task-guard.py` |
 | envtest assets → `~/.envtest` | manager integration suite |

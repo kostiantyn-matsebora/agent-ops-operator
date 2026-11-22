@@ -23,6 +23,9 @@
 #   pyyaml    docs-generate.py and docs-task-guard.py import it.
 #   envtest   the manager's integration suite needs KUBEBUILDER_ASSETS.
 #   serena    the .mcp.json stdio server.
+#   k3d       the system pack's cluster, with kubectl beside it. The testing
+#   kubectl   station runs that tier ITSELF, so a session without them can only
+#             dispatch it. dockerd is STARTED when it is not answering.
 #   Go 1.25   platform/manager and runtimes/ollama declare it; the image's own
 #             version is unstated, so it is checked rather than assumed.
 #
@@ -40,6 +43,8 @@ OPENSPEC_VERSION="${OPENSPEC_VERSION:-1.10.0}"
 ENVTEST_K8S="${ENVTEST_K8S:-1.31.x}"
 ENVTEST_DIR="${ENVTEST_DIR:-$HOME/.envtest}"
 GO_FLOOR="${GO_FLOOR:-1.25}"
+K3D_VERSION="${K3D_VERSION:-v5.9.0}"
+KUBECTL_VERSION="${KUBECTL_VERSION:-v1.31.4}"
 
 MISSING=()
 VERIFY_ONLY=0
@@ -76,6 +81,9 @@ verify() {
   printf 'pyyaml %s\n'    "$(python3 -c 'import yaml' 2>/dev/null && echo present || echo missing)"
   printf 'envtest %s\n'   "$([ -n "$(find "$ENVTEST_DIR" -name kube-apiserver -type f 2>/dev/null | head -1)" ] && echo present || echo missing)"
   printf 'serena %s\n'    "$(have serena && echo present || echo missing)"
+  printf 'k3d %s\n'       "$(have k3d && echo present || echo missing)"
+  printf 'kubectl %s\n'   "$(have kubectl && echo present || echo missing)"
+  printf 'docker %s\n'    "$(docker_answers && echo running || echo "not running")"
   printf 'go %s\n'        "$(go_at_least "$GO_FLOOR" && echo "present ($go_version)" || echo "missing (need >= $GO_FLOOR, have $go_version)")"
 }
 
@@ -158,6 +166,48 @@ install_serena() {
   fi
 }
 
+## k3d and kubectl — the system pack creates its cluster with them.
+install_k3d() {
+  have k3d && { note "k3d $(k3d version 2>/dev/null | head -1 || echo present)"; return; }
+  note "installing k3d $K3D_VERSION"
+  if curl -fsSL "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" -o "$HOME/.local/bin/k3d" \
+     && chmod +x "$HOME/.local/bin/k3d"; then
+    note "k3d installed"
+  else
+    rm -f "$HOME/.local/bin/k3d"; missing k3d
+  fi
+}
+
+install_kubectl() {
+  have kubectl && { note "kubectl present"; return; }
+  note "installing kubectl $KUBECTL_VERSION"
+  if curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o "$HOME/.local/bin/kubectl" \
+     && chmod +x "$HOME/.local/bin/kubectl"; then
+    note "kubectl installed"
+  else
+    rm -f "$HOME/.local/bin/kubectl"; missing kubectl
+  fi
+}
+
+# `docker` or `nerdctl`: either answers when its engine runs.
+docker_answers() { { have docker && docker info; } >/dev/null 2>&1 || { have nerdctl && nerdctl info; } >/dev/null 2>&1; }
+
+## dockerd — the image HAS it, but a sandbox does not always start it. Started in the
+## background when nothing answers, and waited on briefly. A sandbox that forbids it
+## (no privileges) leaves it named as missing, and the station dispatches the tier instead.
+start_docker() {
+  docker_answers && { note "docker running"; return; }
+  have dockerd || { missing docker; return; }
+  note "starting dockerd"
+  if have sudo; then nohup sudo dockerd >/dev/null 2>&1 & else nohup dockerd >/dev/null 2>&1 & fi
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    docker_answers && { note "docker running"; return; }
+    sleep 2
+  done
+  missing "docker (dockerd would not start)"
+}
+
 ## Go — platform/manager and runtimes/ollama declare 1.25. The image's version
 ## is unstated, so this VERIFIES and only installs when what is there is older.
 install_go() {
@@ -215,6 +265,9 @@ main() {
   install_pyyaml
   install_envtest
   install_serena
+  install_k3d
+  install_kubectl
+  start_docker
 
   if [ ${#MISSING[@]} -gt 0 ]; then
     # NAMED, NEVER FATAL. The setup must exit 0 or the platform reports a
