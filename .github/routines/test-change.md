@@ -46,14 +46,17 @@ For each round, in order:
 
    - **`run`:** the system and e2e tiers run on a REAL runtime below.
    - **`not_required`:** the stub runtime suffices. Say why in the report.
-   - **`stop` (exit 6):** the change is agent-facing and `CLAUDE_CODE_OAUTH_TOKEN` is not set.
+   - **`stop` (exit 6):** the change is agent-facing and neither `AGENTOPS_REAL_MODEL_TOKEN` nor `CLAUDE_CODE_OAUTH_TOKEN` is set.
      Post the stop on the issue, set nothing passed, and end. Never run the stub in its place.
    - **You may require it for code the path list does not name.** If a change you read
      alters what the agent is told, which tools it holds, how its output is parsed or
      composed, or when a conversation opens or closes, add `--session-requires`.
      **You may never waive it for a listed path.**
    - **The credential is an environment variable.** Test for it, never print, log, echo,
-     write or commit it. A test receives it through the harness.
+     write or commit it. A cloud session STRIPS `CLAUDE_CODE_OAUTH_TOKEN` (the platform owns
+     that name), so the cloud environment stores it as `AGENTOPS_REAL_MODEL_TOKEN`, and the
+     tests get it under the vendor's name for their own process only:
+     `CLAUDE_CODE_OAUTH_TOKEN="${AGENTOPS_REAL_MODEL_TOKEN:-$CLAUDE_CODE_OAUTH_TOKEN}" go test ...`.
 
 2. **Run the unit tier** in every module the diff touches, with coverage:
 
@@ -74,7 +77,7 @@ For each round, in order:
    - It needs a container runtime (`docker` or `nerdctl`, check for both and that it answers: `docker info || nerdctl info`), k3d, helm and kubectl. **If one is missing or not running, say which, set nothing
      passed, and end the station.** A tier you could not run is not a tier that passed.
    - **Real model required:** `SYSTEM_TIER=full` with the credential in the environment.
-     The real-runtime lane then runs instead of skipping. A run on the stub does not count.
+     The real-runtime lane then runs instead of skipping. Give it the credential under the vendor's name, for that process only (see above). A run on the stub does not count.
    - The instrumented operator writes `system-coverage.out` when the pack ends. **No file
      is a collection failure, never "nothing changed".**
 

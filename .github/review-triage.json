@@ -238,7 +238,8 @@
       "**/systemPrompt*",
       "docs/contracts/runtime.md"
     ],
-    "credential_env": "CLAUDE_CODE_OAUTH_TOKEN"
+    "credential_env": "AGENTOPS_REAL_MODEL_TOKEN",
+    "credential_env_fallback": "CLAUDE_CODE_OAUTH_TOKEN"
   },
   "conflict_marker": "<!-- conveyor:conflict -->"
 }

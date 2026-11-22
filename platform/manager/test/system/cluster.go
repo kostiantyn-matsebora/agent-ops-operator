@@ -89,6 +89,9 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 		args := []string{"cluster", "create", name,
 			"--k3s-arg", "--disable=traefik@server:0",
 			"--k3s-arg", "--disable=servicelb@server:0",
+			// A cgroup v1 host (a Firecracker cloud session is one) makes k3s's kubelet refuse to start
+			// by default, and k3d then waits out its whole timeout. Harmless on a v2 host.
+			"--k3s-arg", "--kubelet-arg=fail-cgroupv1=false@server:0",
 			"--registry-config", regs,
 			"--wait", "--timeout", "180s",
 			"--no-lb",

@@ -536,24 +536,31 @@ class TheAdapter(unittest.TestCase):
         self.assertEqual(0, self.check_tree("tester", "a/x_test.go", ".github/tests/y.test.sh"))
         self.assertEqual(4, self.check_tree("tester", "a/x_test.go", "a/x.go"))
 
-    def real_model(self, paths, token):
+    def real_model(self, paths, token, name="CLAUDE_CODE_OAUTH_TOKEN"):
         repo = self.repo_with_changes(*paths)
         sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "change")
         sh(repo, "git", "update-ref", "refs/remotes/origin/master", "HEAD~1")
         os.chdir(repo)
-        saved = os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        names = ("CLAUDE_CODE_OAUTH_TOKEN", "AGENTOPS_REAL_MODEL_TOKEN")
+        saved = {n: os.environ.pop(n, None) for n in names}
         if token is not None:
-            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token
+            os.environ[name] = token
         out = io.StringIO()
         try:
             with redirect_stdout(out):
                 rc = ts.main(["real-model"])
         finally:
-            os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
-            if saved is not None:
-                os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = saved
+            for n in names:
+                os.environ.pop(n, None)
+                if saved[n] is not None:
+                    os.environ[n] = saved[n]
             os.chdir(self.tmp.name)
         return rc, out.getvalue()
+
+    def test_the_cloud_environments_own_name_for_the_credential_counts_as_present(self):
+        rc, out = self.real_model(["runtimes/pi/runtime.js"], "secret-value", name="AGENTOPS_REAL_MODEL_TOKEN")
+        self.assertEqual((0, "run"), (rc, self.outputs["real_model"]))
+        self.assertNotIn("secret-value", out)
 
     def test_an_agent_facing_change_without_the_credential_stops_the_station(self):
         rc, out = self.real_model(["runtimes/pi/runtime.js"], None)

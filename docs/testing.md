@@ -127,7 +127,7 @@ Where a change alters what the agent is told, which tools it holds, or how its
 output is read, the station runs the tests that drive a conversation against a
 real runtime. The path list is `testing.agent_facing_paths` in
 `.github/review-triage.json`; the session may add to it, never waive it. The
-credential is the environment variable `CLAUDE_CODE_OAUTH_TOKEN`, and without it
+credential is the environment variable `CLAUDE_CODE_OAUTH_TOKEN`. A cloud session strips that name, so the cloud environment stores it as `AGENTOPS_REAL_MODEL_TOKEN` and the station maps it for the test process. Without either
 the station stops. Tests written for the real model assert outcomes, never
 wording.
 

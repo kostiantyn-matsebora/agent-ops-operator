@@ -219,7 +219,11 @@ def cmd_real_model(args, vocab) -> int:
     The credential is only ever tested for PRESENCE: its value is never read into this program's output."""
     import os
     t = vocab["testing"]
-    present = bool(os.environ.get(t["credential_env"], "").strip())
+    # TWO NAMES, because a cloud session STRIPS `CLAUDE_CODE_OAUTH_TOKEN` (the platform owns that name for
+    # its own login), so the cloud environment stores the credential as `credential_env` instead.
+    # A workstation or CI has the vendor's own name. Presence of either is the whole of the test.
+    names = [t["credential_env"], t.get("credential_env_fallback", "")]
+    present = any(n and os.environ.get(n, "").strip() for n in names)
     d = conveyor.real_model_gate(changed_paths(args.base), t["agent_facing_paths"], args.session_requires, present)
     io.write_output("real_model", d.action)
     print(f"real model: {d.action}: {d.reason}")
