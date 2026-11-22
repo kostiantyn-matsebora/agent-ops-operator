@@ -1053,7 +1053,7 @@
     {
       "id": "signal-signature-hash-label",
       "pattern": "signature-hash\\b",
-      "says": "the agentops.dev/signature-hash label was removed with no successor label; equality routing reads an informer field index on spec.conversationId instead",
+      "says": "the agentops.dev/signature-hash label was removed with no successor label; equality routing reads an informer field index on spec.correlationId instead",
       "allow": [
         "removed",
         "retired",
@@ -1071,13 +1071,14 @@
         "history",
         "field index",
         "conversationId",
+        "correlationId",
         "gone"
       ]
     },
     {
       "id": "signal-signature",
       "pattern": "\\bsignatures?\\b",
-      "says": "a conversation's identity is spec.conversationId, the adopted initiationId; the manager-computed grouping signature (and Conversation.spec.signature) was removed",
+      "says": "a conversation's correlation key is spec.correlationId, the adopted initiationId; its system identity is a separate, backend-minted field (metadata.uid under the kube backend), never a spec value — the manager-computed grouping signature (and Conversation.spec.signature) was removed",
       "allow": [
         "removed",
         "retired",
@@ -1096,12 +1097,38 @@
         "history",
         "initiationId",
         "conversationId",
+        "correlationId",
         "verified",
         "HMAC",
         "chart attestation",
         "webhook signature",
         "X-Pulse",
         "signing secret",
+        "gone"
+      ]
+    },
+    {
+      "id": "conversation-id-correlation-claim",
+      "pattern": "conversationId.{0,80}(correlation|initiationId|adopted)|(correlation|initiationId|adopted).{0,80}conversationId",
+      "says": "conversationId is the conversation's system identity now (the backend-minted ID, conversation-identity); the signal's correlation key — the adopted initiationId — moved to correlationId",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "renamed",
+        "was named",
+        "used to",
+        "before the rename",
+        "predating",
+        "history",
+        "system identity",
+        "correlationId",
         "gone"
       ]
     },

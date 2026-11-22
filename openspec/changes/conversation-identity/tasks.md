@@ -29,8 +29,8 @@
 
 ## 5. Chart and release wiring — deployment-engineer
 
-- [ ] 5.1 Bump the manager, console and telegram channel image tags and the chart version consistently. Verify the chart render tests and `python3 .github/scripts/docs-generate.py --check`.
-- [ ] 5.2 Add the retired-vocabulary entries named in the design, with a pattern that matches `conversationId` only as the signal correlation key, since the same name now carries the identity on the wire. Verify `python3 .github/scripts/retired-vocabulary-guard.py` passes and flags a planted old use.
+- [x] 5.1 Bump the manager, console and telegram channel image tags and the chart version consistently. Verify the chart render tests and `python3 .github/scripts/docs-generate.py --check`.
+- [x] 5.2 Add the retired-vocabulary entries named in the design, with a pattern that matches `conversationId` only as the signal correlation key, since the same name now carries the identity on the wire. Verify `python3 .github/scripts/retired-vocabulary-guard.py` passes and flags a planted old use.
 
 ## 6. Unit tests
 
