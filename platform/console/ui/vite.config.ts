@@ -1,11 +1,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import istanbul from 'vite-plugin-istanbul'
+
+// The one Node global this file reads. The app's tsconfig loads no Node types, on purpose.
+declare const process: { env: Record<string, string | undefined> }
 
 // The build emits into `dist`, which the Go binary embeds with
 // `go:embed all:ui/dist`. npm exists at BUILD time only, inside this module and
 // its image — no other module and not the manager gains a build step.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // THE MOCKED BROWSER SUITE'S COVERAGE, and only that: with E2E_COVERAGE=1 the build counts what runs
+    // (e2e/support/coverage.ts collects it). A production build never sets it.
+    ...(process.env.E2E_COVERAGE === '1'
+      ? [istanbul({ include: 'src/**/*', exclude: ['**/*.test.*', '**/node_modules/**'], extension: ['.ts', '.tsx'], requireEnv: false, forceBuildInstrument: true })]
+      : []),
+  ],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

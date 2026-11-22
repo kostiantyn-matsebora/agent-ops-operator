@@ -12,6 +12,7 @@
     "test:coverage": "vitest run --coverage --coverage.reporter=lcov",
     "typecheck": "tsc -b --noEmit",
     "test:e2e": "playwright test",
+    "test:e2e:coverage": "E2E_COVERAGE=1 playwright test && node e2e/support/lcov.mjs",
     "screenshots": "npm run build && playwright test --config screenshots/playwright.config.ts",
     "demo": "npm run build && playwright test --config demo/playwright.config.ts"
   },
@@ -46,9 +47,13 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/coverage-v8": "^2.1.9",
+    "istanbul-lib-coverage": "^3.2.2",
+    "istanbul-lib-report": "^3.0.1",
+    "istanbul-reports": "^3.2.0",
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
+    "vite-plugin-istanbul": "^7.2.1",
     "vitest": "^2.1.8"
   }
 }

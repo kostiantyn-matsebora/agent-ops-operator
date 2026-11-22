@@ -23,7 +23,7 @@ flowchart TD
   end
   RUN -->|issues: labeled| FIRE
 
-  subgraph S2["Station 2 — fix, round after round"]
+  subgraph S2["Station 3 — fix, round after round"]
     CI["ci.yml + claude-review.yml run on the PR<br/>review-clean asks only: did the review run"]:::workflow
     THREAD["GitHub branch protection<br/>an open review thread blocks the merge, live —<br/>no workflow and no check carries it"]:::platform
     CARRY["remote-implement.yml · open (ci concluded)<br/>read Refs #n or Closes #n, re-read conveyor:run<br/>(or conveyor:archive on the issue), placer still a writer?<br/>carry.py asks conveyor.py, labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml;<br/>no review thread open → mergeable"]:::workflow
@@ -50,6 +50,16 @@ flowchart TD
     LAND --> STALLED
     LAND --> CAP
   end
+  subgraph ST["Station 2 — testing, a session"]
+    TFIRE["remote-implement.yml · open<br/>station:testing, conveyor:run carried:<br/>fire the session once, under its own marker"]:::workflow
+    TSESS["cloud session · test-change.md<br/>real-model gate · unit, system, e2e tiers<br/>coverage of the added lines · tester agent (another model)<br/>judge + one report comment, edited in place"]:::session
+    TPASS["passed: dispatch the carry on the pushed head"]:::workflow
+    TSTOP(["capped, or the real model needed and unset<br/>conveyor:keep-going: the sweep resumes it"]):::stop
+    TFIRE --> TSESS --> TPASS
+    TSESS --> TSTOP
+  end
+  OPEN --> TFIRE
+  TPASS -->|carry_fix_pr| CARRY
   OPEN -->|pull_request| CI
   ANSWER(["person answers a dispute in its thread"]):::person
   RESOLVE(["person resolves the disputed thread"]):::person

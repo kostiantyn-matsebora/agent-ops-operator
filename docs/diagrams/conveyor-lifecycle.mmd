@@ -1,5 +1,5 @@
 %% The conveyor line as openspec/specs/conveyor-lifecycle designs it: one
-%% standing instruction on the issue, three stations, a person deciding only
+%% standing instruction on the issue, four stations, a person deciding only
 %% at the merge. Render with any mermaid viewer.
 flowchart TD
   classDef person fill:#fff3cd,stroke:#b8860b,color:#000
@@ -12,7 +12,17 @@ flowchart TD
     IMPL["A session implements the issue<br/>and opens a pull request"]:::auto
   end
 
-  subgraph S2["2 · Fix, until mergeable"]
+  subgraph ST["2 · Test"]
+    TEST["A session runs unit, system and e2e tests,<br/>measures the coverage of the lines the pull request adds,<br/>and a different model writes what is missing"]:::auto
+    TOK(["Passed: 90 / 70 / 50 held,<br/>real model used where behaviour depends on it"]):::stop
+    TCAP(["Stopped: five rounds, or the real model<br/>is needed and its credential is not set"]):::stop
+    TEST --> TOK
+    TEST --> TCAP
+  end
+  TGRANT(["A person grants more rounds"]):::person
+  TCAP --> TGRANT --> TEST
+
+  subgraph S2["3 · Fix, until mergeable"]
     CHECK["CI and the review run"]:::auto
     LOOP["The fixer fixes or disputes<br/>every finding, analysis issue<br/>and failed check, and pushes"]:::auto
     CHECK --> LOOP --> CHECK
@@ -28,9 +38,10 @@ flowchart TD
   MERGE(["A person merges"]):::person
   OK --> MERGE
 
-  subgraph S3["3 · Archive (openspec lane only)"]
+  subgraph S3["4 · Archive (openspec lane only)"]
     ARCH["The change is archived<br/>and the issue closed"]:::auto
   end
 
-  START --> IMPL --> CHECK
+  START --> IMPL --> TEST
+  TOK --> CHECK
   MERGE --> ARCH

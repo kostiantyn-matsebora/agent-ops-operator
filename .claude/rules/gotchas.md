@@ -47,6 +47,15 @@
 | A `pull_request` run's `base.sha` freezes at opening | diff `origin/<base>...<head>`, `fetch-depth: 0` |
 | `t.Run` does NOT lower Sonar's `go:S3776` (closure charges the enclosing fn) | extract to a separate named top-level function |
 
+### The testing station
+
+| Gotcha | Fix |
+|---|---|
+| A tier that ran but left no coverage file reads as "0 lines changed" and passes | no data is `collection_failed`, never a pass |
+| A stub-runtime run proves plumbing only | an agent-facing diff needs a real-model run, else the station stops |
+| The tester's model equal to the author's tests the author's beliefs | `testing-station.py models` exits 5 on equal or unset |
+| The e2e-live specs run against an UNinstrumented console | browser coverage comes from the mocked suite (`npm run test:e2e:coverage`) only |
+
 ### The conveyor loop — one drifted rule per issue, now in `conveyor.py`
 
 | # | Was | Fixed by |

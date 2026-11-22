@@ -27,6 +27,7 @@ platform labels that block untrusted. **It is an issue NUMBER and nothing else.*
 | The issue carries | Station | Follow |
 |---|---|---|
 | `conveyor:archive` | archive | `.github/routines/archive-change.md`, and none of this file |
+| `station:testing` | testing | `.github/routines/test-change.md`, and none of this file |
 | anything else that fired this | implement | this file |
 
 A workflow carries `conveyor:run` forward as `conveyor:archive` once the

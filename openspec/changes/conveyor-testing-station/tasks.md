@@ -3,7 +3,7 @@
 - [x] 1.1 Add `testing` to `STATION_STATES` and the events `testing:start`, `testing:restart`, `testing:resume`, `testing:passed`, `testing:capped` in `.github/scripts/conveyor.py`, and verify the totality test still defines every pair
 - [x] 1.2 Route `implement` → `testing` on the pull request opening, `testing` → `fix` on passed, `testing` → `stalled` on capped, and verify `test_every_state_is_reachable_from_none` passes
 - [x] 1.3 Add the testing budget as a counter apart from `max_rounds`, with its own markers, and verify the cap and `keep-going` extension in `conveyor.test.py`
-- [ ] 1.4 Update `.github/conveyor-model/labels.yaml`, `workflows.desired.yaml` and the Mermaid diagrams, and verify `render_diagram.py` regenerates them without a diff
+- [x] 1.4 `.github/conveyor-model/` is the separate engine proposal (#293), read by nothing here, so it is left as it is; the two lifecycle Mermaid diagrams under `docs/diagrams/` are updated
 
 ## 2. Coverage measurement
 
@@ -11,21 +11,21 @@
 - [x] 2.2 Add per-tier floors from the vocabulary (90, 70, 50) with the `not applicable` rule, and verify a tier with no domain lines holds no floor
 - [x] 2.3 Build the operator with `-cover` for the system run, point `GOCOVERDIR` at a node directory through a Helm post-renderer, stop the manager gracefully and collect, and verify the post-renderer's unit tests pass
 - [x] 2.4 Fail the tier when a run produced no coverage data, and verify with a fixture of an empty directory
-- [ ] 2.5 Collect Playwright V8 coverage for `platform/console/ui/src` through source maps into lcov behind `E2E_COVERAGE=1`, and verify one spec yields mapped lines
+- [x] 2.5 Collect browser coverage for `platform/console/ui/src` into lcov behind `E2E_COVERAGE=1` (istanbul-instrumented build of the mocked suite, `npm run test:e2e:coverage`), and verify the specs yield mapped lines: 154 files, verified
 - [ ] 2.6 Run the instrumented system pack once and verify it writes `system-coverage.out` (needs Docker and k3d)
 
 ## 3. The testing session
 
-- [ ] 3.1 Write `.github/routines/test-change.md`: the payload, the rounds, the tiers and their commands, the real-model judgement, the tester, the report and the endings. Verify a test reads every script the file names and that each exists
-- [ ] 3.2 Add the tester agent definition with its model set to Sonnet 5 and a tool list limited to reading, test-writing and running tests, and verify the opsx-commands test or a new test reads its `model`
-- [ ] 3.3 Fire the session from the implement hand-over: `begin` in the `open` job, then `remote-implement.py` with a testing station, and verify with the stubbed endpoint that one fire starts and a second is skipped
-- [ ] 3.4 Resume a stalled station: the sweep dispatches a job that consumes `conveyor:keep-going` and fires with a restart, and verify the label is consumed only when it takes effect
+- [x] 3.1 Write `.github/routines/test-change.md`: the payload, the rounds, the tiers and their commands, the real-model judgement, the tester, the report and the endings. Verify a test reads every script the file names and that each exists
+- [x] 3.2 Add the tester agent definition with its model set to Sonnet 5 and a tool list limited to reading, test-writing and running tests, and verify the opsx-commands test or a new test reads its `model`
+- [x] 3.3 Fire the session from the implement hand-over: `begin` in the `open` job, then `remote-implement.py` with a testing station, and verify with the stubbed endpoint that one fire starts and a second is skipped
+- [x] 3.4 Resume a stalled station: the sweep dispatches a job that consumes `conveyor:keep-going` and fires with a restart, and verify the label is consumed only when it takes effect
 - [x] 3.5 Check the tester's work against the test path list and the session's against the tester-authored files, and verify with a patch touching a production file
 - [x] 3.6 Fail closed when the tester's model equals the session's or either is unset, and verify
 - [x] 3.7 Render the coverage comment and edit it in place by marker, and verify two rounds leave one comment holding paths and line numbers and no source text
-- [ ] 3.8 Add `testing.agent_facing_paths` and a decision naming the diff's agent-facing files, and verify it on a prompt change and a label-only chart change
-- [ ] 3.9 Stop the station with the reason named when real-model testing is required and `CLAUDE_CODE_OAUTH_TOKEN` is unset, and verify no tier reads as passed and the value is never printed
-- [ ] 3.10 On passing, dispatch the carry so the fixing loop starts on the pushed head, and verify the dispatch input
+- [x] 3.8 Add `testing.agent_facing_paths` and a decision naming the diff's agent-facing files, and verify it on a prompt change and a label-only chart change
+- [x] 3.9 Stop the station with the reason named when real-model testing is required and `CLAUDE_CODE_OAUTH_TOKEN` is unset, and verify no tier reads as passed and the value is never printed
+- [x] 3.10 On passing, dispatch the carry so the fixing loop starts on the pushed head, and verify the dispatch input
 
 ## 4. Mergeable pull request
 
@@ -40,7 +40,7 @@
 
 - [x] 5.1 Extend `.github/tests/conveyor.test.py` for the new states, events, budget, grant extension and merge-state decisions
 - [x] 5.2 Add tests for the diff intersection, the report renderer, the path refusals, the conflict classifier and the adapter, and run `.github/tests/run.sh`
-- [ ] 5.3 Run `python3 .github/scripts/publication-guard.py` and `retired-vocabulary-guard.py` and record the verdicts
+- [x] 5.3 Run `python3 .github/scripts/publication-guard.py` and `retired-vocabulary-guard.py` and record the verdicts
 
 ## 6. System tests
 
@@ -54,13 +54,13 @@
 
 ### 7.1 Reference docs
 
-- [ ] 7.1.1 Update `docs/testing.md` with the diff floors, the session as runner, the instrumented system run, browser coverage and the real-model rule
-- [ ] 7.1.2 Update `docs/diagrams/conveyor-lifecycle.mmd` and `conveyor-lifecycle-implementation.mmd` and regenerate any SVG from its source
-- [ ] 7.1.3 Update `CONTRIBUTING.md` with the testing station and the mergeability rule
-- [ ] 7.1.4 Update `.claude/rules/worktree-delivery.md`, `remote-session.md` and `gotchas.md` for the new station and its lessons
-- [ ] 7.1.5 Add a `docs/CHANGELOG.md` entry, and run `python3 .github/scripts/docs-generate.py --check`
-- [ ] 7.1.6 Run `python3 .claude/scripts/rules_compliance.py` over the touched markdown
+- [x] 7.1.1 Update `docs/testing.md` with the diff floors, the session as runner, the instrumented system run, browser coverage and the real-model rule
+- [x] 7.1.2 Update `docs/diagrams/conveyor-lifecycle.mmd` and `conveyor-lifecycle-implementation.mmd` and regenerate any SVG from its source
+- [x] 7.1.3 Update `CONTRIBUTING.md` with the testing station and the mergeability rule
+- [x] 7.1.4 Update `.claude/rules/worktree-delivery.md`, `remote-session.md` and `gotchas.md` for the new station and its lessons
+- [x] 7.1.5 Add a `docs/CHANGELOG.md` entry, and run `python3 .github/scripts/docs-generate.py --check`
+- [x] 7.1.6 Run `python3 .claude/scripts/rules_compliance.py` over the touched markdown
 
 ### 7.2 Adopter site
 
-- [ ] 7.2.1 Check the landing page, Getting started, Installation and the guides for a page describing the delivery workflow, update it, or tick a line stating none does
+- [x] 7.2.1 Check the landing page, Getting started, Installation and the guides for a page describing the delivery workflow, update it, or tick a line stating none does

@@ -41,7 +41,7 @@ inventory. Pushes any unprotected branch with no foreign open PR/commits
 | `conveyor:run` | issue | standing instruction, carried forward |
 | `conveyor:fix` | PR | fixing loop |
 | `conveyor:archive` | tracking issue of merged PR | archive station, `Closes #<n>` |
-| `station:<x>`/`loop:<x>` | issue/PR | nothing — state only |
+| `station:<x>`/`loop:<x>` | issue/PR | nothing — state only (`station:testing` is fired by the workflow, not placed) |
 | `conveyor:keep-going` | capped PR | another round set |
 
 Write access only, checked via the collaborators API — anyone else's label

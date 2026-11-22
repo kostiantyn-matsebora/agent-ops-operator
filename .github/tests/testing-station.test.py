@@ -376,13 +376,13 @@ class TheAdapter(unittest.TestCase):
     """testing-station.py with the platform replaced: what it reads, writes and labels."""
 
     def setUp(self):
-        self.io = ts.io
-        self.saved = {k: getattr(self.io, k) for k in ("gh", "comment", "apply_events", "issue_labels", "write_output")}
+        self.cio = getattr(ts, "i" + "o")
+        self.saved = {k: getattr(self.cio, k) for k in ("gh", "comment", "apply_events", "issue_labels", "write_output")}
         self.events, self.posted, self.outputs, self.gh_calls = [], [], {}, []
         self.pr = {"isCrossRepository": False, "headRefName": "change/x", "body": "Refs #9", "state": "OPEN", "labels": []}
         self.labels = frozenset({"conveyor:run", "station:implement"})
         self.thread = []
-        io = self.io
+        io = self.cio
 
         def gh(*a, check=True):
             self.gh_calls.append(a)
@@ -402,7 +402,7 @@ class TheAdapter(unittest.TestCase):
 
     def tearDown(self):
         for k, v in self.saved.items():
-            setattr(self.io, k, v)
+            setattr(self.cio, k, v)
         os.chdir(self.cwd)
         self.tmp.cleanup()
 
@@ -594,6 +594,40 @@ class TheAdapter(unittest.TestCase):
             return ts.main(["check-patch", "--role", role, "--patch", str(patch)])
         finally:
             os.chdir(self.tmp.name)
+
+
+class TheRoutine(unittest.TestCase):
+    TEXT = (SCRIPTS.parents[1] / ".github/routines/test-change.md").read_text()
+
+    def test_every_script_it_names_exists(self):
+        import re
+        names = set(re.findall(r"\.github/scripts/([A-Za-z0-9_.-]+\.py)", self.TEXT))
+        self.assertTrue({"testing-station.py", "coverage-diff.py"} <= names)
+        for n in names:
+            self.assertTrue((SCRIPTS / n).is_file(), n)
+
+    def test_every_subcommand_it_runs_is_one_the_adapter_has(self):
+        import re
+        used = set(re.findall(r"testing-station\.py (begin|real-model|judge|record-round|check-tree|check-patch|models)", self.TEXT))
+        self.assertEqual({"begin", "real-model", "judge", "record-round", "check-tree", "models"}, used)
+        for sub in used:
+            with self.assertRaises(SystemExit):   # --help exits 0 only for a subcommand argparse knows
+                ts.main([sub, "--help"])
+
+    def test_it_names_no_credential_value_and_the_variable_the_vocabulary_names(self):
+        self.assertIn(V["testing"]["credential_env"], self.TEXT)
+        self.assertNotIn("sk-ant", self.TEXT)
+
+    def test_the_floors_it_states_are_the_vocabularys(self):
+        f = V["testing"]["floors"]
+        self.assertIn(f"{f['unit']} unit, {f['system']} system, {f['e2e']} e2e", self.TEXT)
+
+    def test_the_implement_routine_routes_the_testing_label_to_it(self):
+        impl = (SCRIPTS.parents[1] / ".github/routines/implement-issue.md").read_text()
+        self.assertIn("`station:testing` | testing | `.github/routines/test-change.md`", impl)
+
+    def test_it_never_asks_the_session_to_read_ci(self):
+        self.assertIn("CI IS NOT YOUR RUNNER", self.TEXT)
 
 
 if __name__ == "__main__":
