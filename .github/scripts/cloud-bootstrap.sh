@@ -202,13 +202,16 @@ start_docker() {
   docker_answers && { note "docker running"; return; }
   have dockerd || { missing docker; return; }
   note "starting dockerd"
-  if have sudo; then nohup sudo dockerd >/dev/null 2>&1 & else nohup dockerd >/dev/null 2>&1 & fi
+  # DETACHED (setsid), because the SessionStart hook that runs this is killed at its own timeout (10s), and
+  # a plain background child would be killed with it. The wait is short for the same reason: the routine
+  # waits for the daemon itself before it needs one.
+  if have sudo; then setsid nohup sudo dockerd >/dev/null 2>&1 < /dev/null & else setsid nohup dockerd >/dev/null 2>&1 < /dev/null & fi
   local i
-  for i in 1 2 3 4 5 6 7 8 9 10; do
+  for i in 1 2 3; do
     docker_answers && { note "docker running"; return; }
     sleep 2
   done
-  missing "docker (dockerd would not start)"
+  missing "docker (dockerd was started and is not answering yet)"
 }
 
 ## playwright — the e2e tier. Dependencies come from the lockfile (`npm ci`), then the
