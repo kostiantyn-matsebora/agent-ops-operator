@@ -112,9 +112,18 @@ assert_contains "$out" "docker not running"
 
 it "a runtime that answers is left alone: dockerd is not started"
 make_env present
-out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap)
+out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap --verify)
 assert_contains "$out" "docker running"
 assert_not_contains "$out" "starting dockerd"
+
+it "the setup run never starts dockerd: a process is not in the snapshot, only the session start can start it"
+make_env absent
+printf '#!/bin/sh\necho "$0 $*" >> "%s"\n' "$CALLS" > "$BIN/dockerd"; chmod +x "$BIN/dockerd"
+printf '#!/bin/sh\nexec "$@"\n' > "$BIN/sudo"; chmod +x "$BIN/sudo"   # never the real sudo, which could prompt
+out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap)
+assert_not_contains "$(cat "$CALLS")" "dockerd"
+out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap --verify)
+assert_contains "$(cat "$CALLS")" "dockerd"
 
 it "playwright's dependencies are installed from the lockfile when the UI has none, and a failure names it"
 make_env absent

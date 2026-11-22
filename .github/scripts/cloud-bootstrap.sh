@@ -195,7 +195,7 @@ install_kubectl() {
 # `docker` or `nerdctl`: either answers when its engine runs.
 docker_answers() { { have docker && docker info; } >/dev/null 2>&1 || { have nerdctl && nerdctl info; } >/dev/null 2>&1; }
 
-## dockerd — the image HAS it, but a sandbox does not always start it. Started in the
+## dockerd — the image HAS it, but a session starts with none running. Started, by `--verify`, in the
 ## background when nothing answers, and waited on briefly. A sandbox that forbids it
 ## (no privileges) leaves it named as missing, and the station dispatches the tier instead.
 start_docker() {
@@ -281,6 +281,9 @@ main() {
   export PATH="$HOME/.local/bin:$PATH"
 
   if [ "$VERIFY_ONLY" = 1 ]; then
+    # A RUNNING PROCESS IS NOT SNAPSHOTTED. The setup script's filesystem is cached, a daemon is
+    # not, so dockerd is started here, at every session start, and never in the setup run.
+    start_docker >/dev/null 2>&1
     verify
     exit 0
   fi
@@ -298,7 +301,6 @@ main() {
   install_k3d
   install_kubectl
   install_playwright
-  start_docker
 
   if [ ${#MISSING[@]} -gt 0 ]; then
     # NAMED, NEVER FATAL. The setup must exit 0 or the platform reports a
