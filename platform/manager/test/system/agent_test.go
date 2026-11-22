@@ -215,6 +215,21 @@ func TestRealRuntimeStorageOutageReportsUnavailable(t *testing.T) {
 		t.Fatalf("corrupting the pod's live context store: %v\n%s", err, out)
 	}
 
+	// THE RUNTIME KEEPS ONE VENDOR SESSION OPEN across a pod's work units (runtime-session-reuse), so a
+	// second unit that changes nothing is answered from memory and never reads the store: the
+	// chmod above would go unnoticed, and the run would rightly succeed. What makes the runtime
+	// RE-OPEN, and so resume from disk, is a change to its configuration fingerprint (maxTurns is
+	// one), and the profile is read live at every dispatch. Changing it is what makes this a
+	// resume against the unreadable store rather than a reuse.
+	var prof agentopsv1alpha1.AgentProfile
+	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: agentProfile}, &prof); err != nil {
+		t.Fatalf("reading the profile: %v", err)
+	}
+	prof.Spec.MaxTurns++
+	if err := e.K.Update(ctx, &prof); err != nil {
+		t.Fatalf("changing the profile's turn budget to force a re-open: %v", err)
+	}
+
 	if code, out := e.ConsoleSend(t, conv.Name, "What was the word I asked you to remember? Reply with the word only."); code/100 != 2 {
 		t.Fatalf("console send: %d %s", code, out)
 	}

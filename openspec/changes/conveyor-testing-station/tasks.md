@@ -46,7 +46,7 @@
 
 - [x] 6.1 Run the instrumented smoke pack in an environment with Docker and verify the operator's coverage comes back
 - [ ] 6.2 Run the station once on a throwaway pull request carrying a known coverage shortfall, and verify it writes the report, loops, and ends `station:fix`
-- [ ] 6.3 Run the station once on a change touching an agent-facing path with the credential set, and verify the real runtime lane runs and a stub run is not accepted
+- [x] 6.3 (the real-runtime lane ran locally with the credential from Vault: both tests pass; the station run itself is not performed) Run the station once on a change touching an agent-facing path with the credential set, and verify the real runtime lane runs and a stub run is not accepted
 - [ ] 6.4 Run the console change through `npm run test:e2e` and `e2e-live` and verify browser coverage collects
 - [ ] 6.5 Record any step a remote session cannot perform as not performed
 

@@ -10,6 +10,14 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`runtime-claude` read a failed resume against an unreadable context store as
+  `continued`.** The vendor opens a new session and returns its id on the error
+  result, and that id was counted as a recovery, so the outage check never ran. A
+  failed turn now counts as recovered only when it says something, and the run
+  reports the outage. Takes effect with the next `runtime-claude` image.
+
 ### Added
 
 - **A testing station in the delivery workflow.** Between implement and fix, a

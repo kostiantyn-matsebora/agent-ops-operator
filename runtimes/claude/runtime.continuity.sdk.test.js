@@ -113,6 +113,26 @@ test('a resume attempt that is confirmed missing fails with the existing user-fa
   assert.strictEqual(fakeQuery.sessions.length, 1, 'a confirmed loss spends no second vendor invocation on an answer that should not exist');
 });
 
+// A resume against an unreadable store makes the vendor open a NEW session, whose id comes back on the
+// error result. That id is not a recovery: the run must still be read as an outage.
+test('a failed resume that carries a fresh session id is still an outage, never "continued"', async (t) => {
+  freshSession(t);
+  const contextId = 'store-down-fresh-id';
+
+  const real = fs.promises.readdir;
+  fs.promises.readdir = (dir, opts) => (
+    dir === SESSIONS_DIR ? Promise.reject(Object.assign(new Error('denied'), { code: 'EACCES' })) : real(dir, opts)
+  );
+  t.after(() => { fs.promises.readdir = real; });
+
+  const failedWithFreshId = { type: 'result', subtype: 'error_during_execution', num_turns: 0, duration_ms: 5, result: '', is_error: true, session_id: 'fresh-new-session' };
+  __setQueryForTest(makeFakeQuery([[failedWithFreshId]]));
+
+  const out = await executeUnit({ runId: 'r-fresh', promptText: 'hi', runtimeContextId: contextId });
+  assert.strictEqual(out.status, 'failed');
+  assert.strictEqual(out.continuity, 'unavailable');
+});
+
 // ---- store unavailable: fails as an outage, never a loss ------------------
 
 test('a resume attempt whose store cannot be read fails as an outage, not a loss', async (t) => {
