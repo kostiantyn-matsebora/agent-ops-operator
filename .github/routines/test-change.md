@@ -71,7 +71,7 @@ For each round, in order:
    SYSTEM_COVER=1 SYSTEM_ARTIFACT_DIR=<dir> go test -tags system -count=1 -timeout 55m -v ./test/system/
    ```
 
-   - It needs Docker, k3d, helm and kubectl. **If one is missing, say which, set nothing
+   - It needs a container runtime (`docker` or `nerdctl`, check for both and that it answers: `docker info || nerdctl info`), k3d, helm and kubectl. **If one is missing or not running, say which, set nothing
      passed, and end the station.** A tier you could not run is not a tier that passed.
    - **Real model required:** `SYSTEM_TIER=full` with the credential in the environment.
      The real-runtime lane then runs instead of skipping. A run on the stub does not count.

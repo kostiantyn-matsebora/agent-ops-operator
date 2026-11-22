@@ -21,6 +21,10 @@ func lookPath(name string) string {
 		return v.(string)
 	}
 	p, err := exec.LookPath(name)
+	if err != nil && name == "docker" {
+		// nerdctl (Rancher Desktop's containerd mode) takes the same verbs the pack uses.
+		p, err = exec.LookPath("nerdctl")
+	}
 	if err != nil {
 		panic(fmt.Sprintf("%s not found on PATH: %v", name, err))
 	}
