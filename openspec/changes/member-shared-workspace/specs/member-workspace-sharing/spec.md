@@ -47,7 +47,7 @@ The owner SHALL be resolved when the member is created and recorded on the membe
 
 #### Scenario: A member shares its parent's tree
 - **WHEN** a root invokes an entry declaring `workspace: shared`
-- **THEN** the member mounts the root's claim and subdirectory, and files either writes are visible to the other
+- **THEN** the member mounts the root's claim and subdirectory, and a file either one writes is visible to the other
 
 #### Scenario: A chain of sharing members has one owner
 - **WHEN** a root invokes a sharing member and that member invokes a further entry declaring `workspace: shared`

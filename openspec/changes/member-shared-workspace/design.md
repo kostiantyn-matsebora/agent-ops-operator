@@ -128,7 +128,7 @@ The field is sent only for `omit`, and absent reads as `load`, the way `toolsMod
 
 **Contract edit needs approval.** `docs/contracts/runtime.md` is not edited without the user's explicit approval (`runtime-spec.md`, `runtime-contract`: `The specification governs the agent's own changes`). This change does not edit it. The `runtime-contract` delta states what the page must say, and the tasks carry the edit behind an explicit approval step. Once approved, the same change MUST bring all five runtimes into conformance and move the claimed version on each page, bumping MINOR with a changelog row and two checklist items.
 
-Per runtime:
+Per runtime. `claude` and `claude-cli` have no capability spec of their own, so the `runtime-contract` delta is their requirement, exactly as in `multi-repo-workspace`. The other three each carry a delta in this change.
 
 | Runtime | How `omit` is honoured | Status |
 |---|---|---|
