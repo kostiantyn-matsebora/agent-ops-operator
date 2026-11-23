@@ -4,10 +4,13 @@
 and archive stations. A change to the process is a pull request to this file.
 
 **YOU RUN THE TESTS. CI IS NOT YOUR RUNNER.** CI runs the same suites for its own
-gate, and you never read your numbers from its gate. You run each tier, measure the
-coverage yourself, fix, run again, and report. The ONE exception is a cluster a cloud
-session cannot start: there you dispatch the system tier to a CI run YOU start, with
-coverage on, and read its artifact. You still judge it, fix, and loop.
+gate, and you never read your numbers from its gate.
+
+You run each tier, measure the coverage yourself, fix, run again, and report.
+
+The ONE exception is a cluster a cloud session cannot start. There you dispatch the
+system tier to a CI run YOU start, with coverage on, and read its artifact. You
+still judge it, fix, and loop.
 
 ## What you were handed
 
@@ -78,7 +81,7 @@ For each round, in order:
 
    **A cloud session cannot run the cluster.** It builds the images and starts k3s, and then every pod
    sandbox fails (runc cannot write `oom_score_adj` in this sandbox). Do not spend rounds on it.
-   `docs/gotchas` records what was tried. Dispatch instead:
+   `.claude/rules/gotchas.md` records what was tried. Dispatch instead:
 
    ```sh
    gh workflow run system-full.yml --ref "$(git branch --show-current)" -f cover=true

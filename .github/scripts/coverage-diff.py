@@ -147,7 +147,8 @@ def resolve(name: str, changed, maps) -> str | None:
     best = None
     for p in changed:
         if name.endswith("/" + p) or p.endswith("/" + name.lstrip("./")) or name.lstrip("./") == p:
-            if best is None or len(p) > len(best):
+            # THE LONGEST MATCH, and the name breaks a tie, so the answer never depends on dict order.
+            if best is None or (len(p), p) > (len(best), best):
                 best = p
     return best
 

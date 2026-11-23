@@ -23,7 +23,7 @@ make_env() {  # make_env <mode: present|absent>
   # HERMETIC: the script sees only the system tools it needs, linked in by name, never /usr/bin as a
   # whole. A runner ships docker, kubectl and more there, and "this tool is absent" must mean absent.
   for t in bash sh env cat sed awk grep head tail sort find mktemp mkdir rm ln install chmod tar tr \
-           dirname basename printf sleep date uname cut wc xargs python3 setsid nohup; do
+           dirname basename printf sleep date uname cut wc xargs python3 setsid nohup timeout; do
     p=$(command -v "$t" 2>/dev/null) && [ -x "$p" ] && ln -sf "$p" "$BIN/$t"
   done
   for i in curl npm pip uv tar go_install; do
@@ -125,6 +125,8 @@ assert_not_contains "$out" "starting dockerd"
 it "the setup run never starts dockerd: a process is not in the snapshot, only the session start can start it"
 make_env absent
 printf '#!/bin/sh\necho "$0 $*" >> "%s"\n' "$CALLS" > "$BIN/dockerd"; chmod +x "$BIN/dockerd"
+# a docker that answers once dockerd has been started, so the retry wait is not paid
+printf '#!/bin/sh\ngrep -q dockerd "%s"\n' "$CALLS" > "$BIN/docker"; chmod +x "$BIN/docker"
 printf '#!/bin/sh\nexec "$@"\n' > "$BIN/sudo"; chmod +x "$BIN/sudo"   # never the real sudo, which could prompt
 out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap)
 assert_not_contains "$(cat "$CALLS")" "dockerd"
@@ -137,11 +139,14 @@ UI=$(mktemp -d); touch "$UI/package-lock.json"
 out=$(CLAUDE_CODE_REMOTE=1 UI_DIR="$UI" run_bootstrap); status=$?
 assert_status 0 "$status"
 assert_contains "$(cat "$CALLS")" "npm ci"
+# the stubs install nothing, so readiness is never reached: the failure line is the one that names it
+assert_not_contains "$out" "playwright present"
 assert_contains "$out" "playwright"
 
 it "a missing lockfile names playwright rather than guessing"
 make_env absent
-out=$(CLAUDE_CODE_REMOTE=1 UI_DIR="$(mktemp -d)" run_bootstrap)
+out=$(CLAUDE_CODE_REMOTE=1 UI_DIR="$(mktemp -d)" run_bootstrap); status=$?
+assert_status 0 "$status"
 assert_contains "$out" "could not install"
 
 # --- verify ------------------------------------------------------------------

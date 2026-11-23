@@ -57,11 +57,16 @@ is removed. The session opens its PR with NO LABEL and `Refs #<n>`, never
 
 **A SESSION IS TITLED AFTER ITS ROUTINE, AND NOTHING ELSE.** The fire request has
 no title field, so every session of one routine reads `agent-ops-operator:
-implement issue` in History. A station with its OWN routine is the only way a
-session names its station: set `ROUTINE_FIRE_URL_<STATION>` (variable) and
-`ROUTINE_FIRE_TOKEN_<STATION>` (secret), `TESTING` or `ARCHIVE`, both or neither.
-Absent, the shared pair fires and the routine's prompt routes by label. The issue
-number cannot be in the title: the issue's comment carries the session link.
+implement issue` in History.
+
+A station with its OWN routine is the only way a session names its station:
+
+1. Set `ROUTINE_FIRE_URL_<STATION>` as a variable.
+2. Set `ROUTINE_FIRE_TOKEN_<STATION>` as a secret.
+3. `<STATION>` is `TESTING` or `ARCHIVE`. Both halves, or neither.
+
+- Absent, the shared pair fires and the routine's prompt routes by label.
+- The issue number cannot be in the title. The issue's comment carries the session link.
 
 **WORKSTATION-ONLY:** local cluster/`helmfile sync`/deploy, the visual
 check, the system pack by hand. A remote session records these as not

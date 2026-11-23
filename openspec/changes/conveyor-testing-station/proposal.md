@@ -1,9 +1,10 @@
 ## Why
 
-The conveyor implements a change and then fixes review remarks. It never asks
-whether the new behaviour is tested, and it ends a loop as `mergeable` on review
-state alone. A change can reach the archive station with no test for the code it
-added, with a merge conflict, or behind its base.
+The conveyor implements a change and then fixes review remarks. It never asks whether
+the new behaviour is tested, and it ends a loop as `mergeable` on review state alone.
+
+A change can reach the archive station with no test for the code it added, with a merge
+conflict, or behind its base.
 
 ## What Changes
 
@@ -21,7 +22,8 @@ added, with a merge conflict, or behind its base.
   its own budget of 5 rounds, extended by `conveyor:keep-going`.
 - One comment on the tracking issue reports the numbers, edited in place each round.
 - The fixing loop ends `mergeable` only when the pull request can merge: no failed
-  check, no open thread and no conflict with its base.
+  check, no open thread, no unaddressed analysis issue, no conflict with its base,
+  and the testing station passed on the current head.
 - A trivial conflict is resolved by the line. A non-trivial one stops the loop and
   asks a person.
 

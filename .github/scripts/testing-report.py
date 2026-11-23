@@ -4,7 +4,7 @@
   judge   --tier-file unit=F ... [--outcome unit=passed|failed|skipped ...]
           coverage-diff.py's output per tier plus whether the tier's TESTS passed,
           to a verdict per tier and the round's work list (conveyor.judge_tier).
-  render  --verdict F --round N --cap M [--verdict-line ...]
+  render  --verdict F --round N --cap M [--state running|passed|capped]
           the report as markdown. Paths and line numbers only, never a line of source.
   post    --issue N --body-file F
           create the one comment carrying the marker, or edit it in place.
@@ -50,10 +50,21 @@ def tier_result(cov: dict | None, outcome: str) -> "conveyor.TierResult":
 
 
 def judge(vocab: dict, covs: dict, outcomes: dict) -> dict:
+    """Every tier needs an explicit outcome, and only a known tier may be named.
+
+    A MISSING OUTCOME IS NOT `passed`: defaulting it let a tier nobody ran read as a run that left no
+    coverage (`collection_failed`) instead of `not_run`, and a misspelt tier name vanished without a word."""
+    known = set(conveyor.TIERS)
+    for name in list(covs) + list(outcomes):
+        if name not in known:
+            raise ValueError(f"unknown tier {name!r}: the tiers are {', '.join(conveyor.TIERS)}")
+    missing = [t for t in conveyor.TIERS if t not in outcomes]
+    if missing:
+        raise ValueError("no --outcome for " + ", ".join(missing) + ": give passed, failed or skipped for every tier")
     floors = vocab["testing"]["floors"]
     verdicts = []
     for tier in conveyor.TIERS:
-        r = tier_result(covs.get(tier), outcomes.get(tier, "passed"))
+        r = tier_result(covs.get(tier), outcomes[tier])
         verdicts.append(conveyor.judge_tier(tier, floors[tier], r))
     work = conveyor.testing_work(verdicts)
     details = {}
@@ -106,6 +117,12 @@ def render(vocab: dict, verdict: dict, number: int, cap: int, state: str = "runn
             left.append(f"- {extra} more file(s) under {tier}")
     if left:
         out += ["Uncovered changed lines:", "", *left, ""]
+    unmeasured = []
+    for tier in conveyor.TIERS:
+        for path in verdict["details"][tier].get("unmeasured", [])[:MAX_FILES]:
+            unmeasured.append(f"- `{path}` ({tier})")
+    if unmeasured:
+        out += ["Changed files with no coverage data (every added line counts as uncovered):", "", *unmeasured, ""]
     if verdict["work"]:
         w = ", ".join(sorted({f"{x['kind'].replace('_', ' ')} ({x['tier']}, {x['session']})" for x in verdict["work"]}))
         out += [f"Work: {w}.", ""]

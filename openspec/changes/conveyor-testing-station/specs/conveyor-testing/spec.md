@@ -10,8 +10,10 @@ numbers on the change's tracking issue.
 
 The testing station SHALL be one session started for the change's issue. It SHALL run
 the unit, system and e2e tiers itself, in its own environment, and SHALL measure their
-coverage there. CI MAY run the same suites for its own gate. The station SHALL NOT read
-its numbers from CI's runs.
+coverage there.
+
+CI MAY run the same suites for its own gate. The station SHALL NOT read its numbers from
+CI's runs.
 
 #### Scenario: The session measures its own run
 
@@ -27,14 +29,22 @@ its numbers from CI's runs.
 
 The session SHALL judge, for the change, whether the behaviour of the real model affects
 the functionality it adds or changes. The judgement SHALL be recorded in the report with
-its reason. Where it does, the system and e2e tiers SHALL run on a real runtime, with the
-credential read from the `CLAUDE_CODE_OAUTH_TOKEN` environment variable. A run on the
+its reason.
+
+Where it does, the system and e2e tiers SHALL run on a real runtime, with the credential
+read from an environment variable only.
+
+The vocabulary names that variable (`testing.credential_env`), and the vendor's own name
+is accepted beside it, because a cloud session strips the vendor's name. A run on the
 stub runtime SHALL NOT count as passing for such a change.
 
 A path list SHALL name the code that is agent-facing by default, as a floor the judgement
-may extend and SHALL NOT shrink. Assertions on a real model SHALL tolerate its
-nondeterminism and SHALL NOT assert exact wording. A failing real-model test SHALL be
-re-run once before it is work.
+may extend and SHALL NOT shrink. The list is `testing.agent_facing_paths` in
+`.github/review-triage.json`.
+
+Assertions on a real model SHALL tolerate its nondeterminism and SHALL NOT assert exact
+wording. A failing real-model test SHALL be re-run once, inside its round, before it is
+work. A red outside that rule follows the re-run rule of the failing-test requirement.
 
 The session SHALL NOT read, print or store the credential. When it is required and
 absent, the station SHALL stop and say so.
@@ -51,15 +61,17 @@ absent, the station SHALL stop and say so.
 
 #### Scenario: The credential is absent
 
-- **WHEN** real-model testing is required and `CLAUDE_CODE_OAUTH_TOKEN` is unset
+- **WHEN** real-model testing is required and the credential variable is unset
 - **THEN** the station stops and no tier reads as passed
 
 ### Requirement: The testing station sits between implement and the fixing loop
 
-When the implement session opens the change's pull request, the issue's station
-label SHALL read `station:testing`. The station SHALL end in one of two ways.
-Passing moves the line to the fixing loop. Exhausting the budget moves it to
-`stalled`.
+When the implement session opens the change's pull request, the issue's station label
+SHALL read `station:testing`. The station SHALL end in one of three ways. Passing moves
+the line to the fixing loop. Exhausting the budget moves it to `stalled`.
+
+A stop the report names, because the environment cannot run a tier or the credential is
+absent, leaves it at `stalled` as well, until a person acts.
 
 #### Scenario: Implement hands over to testing
 
@@ -73,10 +85,11 @@ Passing moves the line to the fixing loop. Exhausting the budget moves it to
 
 ### Requirement: Coverage is judged on the lines the change added
 
-Each tier SHALL be measured over the executable lines the pull request adds or
-changes, never over the repository. A tier SHALL apply only to the code it can
-exercise. A tier with no executable changed line in its domain SHALL be reported
-`not applicable` and SHALL hold no floor.
+Each tier SHALL be measured over the executable lines the pull request adds or changes,
+never over the repository. A tier SHALL apply only to the code it can exercise.
+
+A tier with no executable changed line in its domain SHALL be reported `not applicable`
+and SHALL hold no floor.
 
 | Tier | Floor | Domain |
 |---|---|---|
@@ -97,9 +110,11 @@ exercise. A tier with no executable changed line in its domain SHALL be reported
 ### Requirement: The system tier is measured on an instrumented operator
 
 The system pack SHALL run against an operator binary built with coverage
-instrumentation, and SHALL collect its coverage data when the run ends. The e2e
-tier SHALL collect browser coverage of the console UI source. A tier that ran
-but yielded no coverage data SHALL fail, never read as zero changed lines.
+instrumentation, and SHALL collect its coverage data when the run ends. The e2e tier
+SHALL collect browser coverage of the console UI source.
+
+A tier that ran but yielded no coverage data SHALL fail, never read as zero changed
+lines.
 
 #### Scenario: Missing coverage data fails the tier
 
@@ -109,10 +124,11 @@ but yielded no coverage data SHALL fail, never read as zero changed lines.
 ### Requirement: Missing tests are written by a model that did not write the code
 
 A shortfall of coverage SHALL be answered by a separate agent, a different model from
-the one that implemented the change, running with its own context. That agent SHALL read the
-change's specs, its design and the public interfaces. It SHALL NOT read the
-implementing session's transcript. It SHALL write only test files, and a patch
-touching any other path SHALL be refused.
+the one that implemented the change, running with its own context. That agent SHALL read
+the change's specs, its design and the public interfaces.
+
+It SHALL NOT read the implementing session's transcript. It SHALL write only test files,
+and a patch touching any other path SHALL be refused.
 
 A test the separate model wrote SHALL NOT be edited by the fixing session. A
 fixer that holds such a test wrong SHALL dispute it, and the separate model SHALL
@@ -141,17 +157,31 @@ reproduce SHALL be re-run on every round the budget allows before a person is as
 
 ### Requirement: The testing station loops until the tests pass, within its own budget
 
-Each round SHALL run the three tiers, then fix or write according to the result,
-then run the tiers again. The station SHALL have a budget of 5 rounds, counted
-apart from the fixing loop's rounds. `conveyor:keep-going` SHALL extend a capped
-testing station by another 5 rounds, as it extends the fixing loop. A round in
-which no model ran SHALL spend nothing. A round that changes nothing SHALL end the
-station early.
+Each round SHALL run the three tiers, then fix or write according to the result, then
+run the tiers again. The station SHALL have a budget of 5 rounds, counted apart from the
+fixing loop's rounds.
+
+`conveyor:keep-going` SHALL extend a capped testing station by another 5 rounds, as it
+extends the fixing loop, and one label SHALL extend only the budget that is spent: the
+testing station's when it is stalled, the fixing loop's otherwise.
+
+A round in which no model ran SHALL spend nothing. A round that changes nothing SHALL
+end the station early.
 
 #### Scenario: The budget is spent
 
 - **WHEN** the fifth testing round ends with a tier still failing
-- **THEN** the station ends `capped`, the issue label becomes `station:stalled` and the report names the failing tier
+- **THEN** the station ends with its budget spent, the issue label becomes `station:stalled` and the report names the failing tier
+
+#### Scenario: A round in which no model ran
+
+- **WHEN** a round ends without a model having run
+- **THEN** the round is not counted against the budget
+
+#### Scenario: A round that changes nothing
+
+- **WHEN** a round ends with the tree unchanged and a tier still failing
+- **THEN** the station ends early, because the next round would read the same tree
 
 #### Scenario: Keep-going extends the budget
 
@@ -160,11 +190,14 @@ station early.
 
 ### Requirement: One comment on the tracking issue reports the coverage
 
-The station SHALL keep exactly one coverage comment on the change's tracking
-issue, found by a hidden marker and edited in place each round. It SHALL show, per
-tier, the floor, the diff coverage, the covered and total changed lines, and the
-tests' pass or fail. It SHALL show the round number against the budget and the
-verdict. It SHALL name uncovered files and line numbers and SHALL NOT quote code.
+The station SHALL keep exactly one coverage comment on the change's tracking issue,
+found by a hidden marker and edited in place each round.
+
+It SHALL show, per tier, the floor, the diff coverage, the covered and total changed
+lines, and the tests' pass or fail. It SHALL show the round number against the budget
+and the verdict.
+
+It SHALL name uncovered files and line numbers and SHALL NOT quote code.
 
 #### Scenario: A second round edits the comment
 

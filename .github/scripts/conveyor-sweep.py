@@ -87,7 +87,12 @@ def unanswered_conflict(repo: str, pr: int, marker: str) -> bool:
         thread = conveyor_io.parse_paginated(gh("api", f"repos/{repo}/issues/{pr}/comments", "--paginate"))
     except (Unreadable, ValueError) as exc:
         raise Unreadable(str(exc))
-    return conveyor_io.conveyor.unanswered_after_marker(thread, marker)
+    # THE REST SHAPE (`user.login`, `user.type`) is not the GraphQL one the reader expects (`author.login`,
+    # `author.__typename`), and unreshaped every author reads as nobody, so a person's reply was never seen.
+    shaped = [{"body": c.get("body"),
+               "author": {"login": (c.get("user") or {}).get("login"), "__typename": (c.get("user") or {}).get("type")}}
+              for c in thread]
+    return conveyor_io.conveyor.unanswered_after_marker(shaped, marker)
 
 
 def keep_going_pull_requests(repo: str, keep: str) -> list[int]:

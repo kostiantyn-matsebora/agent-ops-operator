@@ -29,7 +29,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import conveyor  # noqa: E402
 
 VOCAB = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
-MARKERS = ("<<<<<<< ", "=======\n", ">>>>>>> ")
+MARKERS = ("<<<<<<< ", ">>>>>>> ")
+# A regenerator is a build (controller-gen, the docs generator), so it gets a generous bound, never none.
+REGENERATOR_TIMEOUT = 900
 
 
 _IDENTITY: list | None = None
@@ -59,7 +61,7 @@ def has_marker(path: str) -> bool:
     if not p.is_file():
         return False
     text = p.read_text(errors="replace")
-    return any(line.startswith("<<<<<<< ") or line.startswith(">>>>>>> ") for line in text.splitlines())
+    return any(line.startswith(MARKERS) for line in text.splitlines())
 
 
 def regenerators_for(files, regenerators) -> list:
@@ -83,19 +85,38 @@ def sync(base: str, vocab: dict, message: str) -> dict:
         return {"action": "updated", "files": []}
     if not files:
         git("merge", "--abort", check=False)
-        return {"action": "asked", "files": [], "reason": (r.stderr or r.stdout).strip().splitlines()[-1:]}
+        # THE WHOLE OUTPUT, capped: the last line alone ("Automatic merge failed") names no cause.
+        return {"action": "asked", "files": [], "reason": (r.stderr or r.stdout).strip()[-1000:]}
     if conveyor.classify_conflict(files, t["generated_paths"]) != "trivial":
         git("merge", "--abort", check=False)
         return {"action": "asked", "files": sorted(files)}
     # Take the base's copy of each generated file, then let the repository's own scripts rebuild it.
+    regs = t.get("regenerators", [])
+    # A GENERATED FILE NOTHING REGENERATES CANNOT BE REBUILT: keeping the base's copy would silently drop this
+    # branch's side, so it is a question for a person like any other conflict.
+    uncovered = [f for f in files if not any(conveyor.path_matches(f, r["paths"]) for r in regs)]
+    if uncovered:
+        git("merge", "--abort", check=False)
+        return {"action": "asked", "files": sorted(files),
+                "reason": "no regenerator covers: " + ", ".join(sorted(uncovered))}
     for f in files:
         git("checkout", "--theirs", "--", f, check=False)
-        git("add", "--", f)
-    for cmd in regenerators_for(files, t.get("regenerators", [])):
-        if subprocess.run(cmd, shell=True, capture_output=True, text=True).returncode != 0:
+    for cmd in regenerators_for(files, regs):
+        # `run` is a shell line from the vocabulary, which the workflow restores from the BASE branch, so the
+        # branch under review cannot supply it. It needs a shell: the commands `cd` and chain.
+        try:
+            done = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=REGENERATOR_TIMEOUT)
+        except subprocess.TimeoutExpired:
             git("merge", "--abort", check=False)
-            return {"action": "asked", "files": sorted(files), "reason": "a regenerator failed"}
-    git("add", "-A", "--", *files)
+            return {"action": "asked", "files": sorted(files), "reason": f"a regenerator ran past {REGENERATOR_TIMEOUT}s"}
+        if done.returncode != 0:
+            git("merge", "--abort", check=False)
+            return {"action": "asked", "files": sorted(files),
+                    "reason": "a regenerator failed: " + (done.stderr or done.stdout).strip()[-500:]}
+    # STAGE EVERYTHING A REGENERATOR MAY HAVE WRITTEN, not only the files that conflicted: controller-gen
+    # rewrites a whole directory, and an unstaged sibling would be left out of the merge commit.
+    globs = [":(glob)" + g for r in regs if any(conveyor.path_matches(f, r["paths"]) for f in files) for g in r["paths"]]
+    git("add", "-A", "--", *files, *globs)
     if any(has_marker(f) for f in files):
         git("merge", "--abort", check=False)
         return {"action": "asked", "files": sorted(files), "reason": "a conflict marker survived"}

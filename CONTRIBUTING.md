@@ -33,14 +33,20 @@ the pointer the promotion leaves as it does for any promoted issue.
 That pull request opens UNLABELLED — the session holds no write access of its
 own, so it places nothing.
 
-Before the fixing loop, a testing station runs. A session (never CI) runs the
-unit, system and e2e tests, measures the coverage of the lines the pull request
-adds against floors of 90, 70 and 50 percent, and has a different model write
-what is missing. Where the change alters what a real model does, those tests run
-against a real model, and the station stops rather than substitute a stub. It
-gets five rounds of its own, and `conveyor:keep-going` grants five more. A pull
-request is mergeable only once it also merges cleanly: the fixing loop merges the
-base in, and asks a person about any conflict in hand-written code.
+Before the fixing loop, a testing station runs. A session, never CI, runs the
+unit, system and e2e tests.
+
+It measures the coverage of the lines the pull request adds or changes against
+floors of 90, 70 and 50 percent. A different model writes what is missing.
+
+Where the change alters what a real model does, those tests run against a real
+model. A stub run does not count as passing for such a change.
+
+The station gets five rounds of its own, and `conveyor:keep-going` grants five
+more.
+
+A pull request is mergeable only once it also merges cleanly. The fixing loop
+merges the base in, and asks a person about any conflict in hand-written code.
 
 Where `conveyor:run` authorised it, a workflow reads the issue again once the
 pull request opens and carries that instruction forward as `conveyor:fix`, so

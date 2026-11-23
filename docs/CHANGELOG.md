@@ -10,14 +10,6 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
-### Fixed
-
-- **`runtime-claude` read a failed resume against an unreadable context store as
-  `continued`.** The vendor opens a new session and returns its id on the error
-  result, and that id was counted as a recovery, so the outage check never ran. A
-  failed turn now counts as recovered only when it says something, and the run
-  reports the outage. Takes effect with the next `runtime-claude` image.
-
 ### Added
 
 - **A testing station in the delivery workflow.** Between implement and fix, a
@@ -26,6 +18,14 @@ for the source and the reference material beside this file.
   different model write what is missing. Behaviour that depends on the model is
   tested against a real one. The fixing loop now also merges the base branch in.
   Delivery tooling only: no chart value, image or CRD changes, and no upgrade step.
+
+### Fixed
+
+- **`runtime-claude` read a failed resume against an unreadable context store as
+  `continued`.** The vendor opens a new session and returns its id on the error
+  result, and that id was counted as a recovery, so the outage check never ran. A
+  failed turn now counts as recovered only when it says something, and the run
+  reports the outage. Takes effect with the next `runtime-claude` image.
 
 ## [24.0.0] — 2026-11-22
 

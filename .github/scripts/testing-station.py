@@ -117,7 +117,7 @@ def cmd_begin(args, vocab) -> int:
         # CONSUMED ONLY WHEN IT TAKES EFFECT: the station was out of rounds and a person asked for more.
         io.comment(args.repo, issue, f"{vocab['testing']['grant_marker']}\n`{keep}` grants another "
                    f"{vocab['testing']['max_rounds']} testing rounds.")
-        io.gh("issue", "edit", str(args.pr), "--repo", args.repo, "--remove-label", keep, check=False)
+        io.gh("pr", "edit", str(args.pr), "--repo", args.repo, "--remove-label", keep, check=False)
         if state["stalled"] in labels:
             io.apply_events(args.repo, issue, station_event="testing:resume", vocabulary_path=args.vocabulary)
         used, cap = budget(vocab, comments(args.repo, issue))
@@ -196,11 +196,28 @@ def changed_paths(base: str) -> list:
     return [p for p in out.splitlines() if p]
 
 
+def porcelain_paths(raw: str) -> set:
+    """Paths out of `git status --porcelain -z`. A rename or copy is TWO records, `XY new` then the bare
+    old path, so a fixed `rec[3:]` turned the old name into a path with its first three letters cut off."""
+    paths, recs, i = set(), raw.split("\0"), 0
+    while i < len(recs):
+        rec = recs[i]
+        i += 1
+        if len(rec) <= 3:
+            continue
+        paths.add(rec[3:])
+        if rec[0] in "RC" or rec[1] in "RC":
+            if i < len(recs) and recs[i]:
+                paths.add(recs[i])
+            i += 1
+    return paths
+
+
 def cmd_check_tree(args, vocab) -> int:
     """After an agent has edited the working tree: which uncommitted paths its role refuses.
     A role is judged by what it TOUCHED, since the agent edits in place and writes no patch."""
     out = subprocess.run(["git", "status", "--porcelain", "-z", "-uall"], capture_output=True, text=True, check=True).stdout
-    paths = sorted({rec[3:] for rec in out.split("\0") if len(rec) > 3})
+    paths = sorted(porcelain_paths(out))
     if args.role == "tester":
         bad = conveyor.tester_patch_refusals(paths, vocab["testing"]["test_paths"])
         why = "the tester writes test files only"

@@ -222,8 +222,10 @@ jobs:
           if ! api_out=$(gh api --method GET \
             "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" \
             --jq '.[] | select(.state == "open") | .number'); then
-            echo "::error::could not look up pull requests for ${HEAD_SHA:0:7}"
-            exit 1
+            # NOT FATAL: this step runs before the carry, and a lookup that fails here must not stop the carry.
+            # The next CI completion or the 15-minute sweep starts the station.
+            echo "::notice::could not look up pull requests for ${HEAD_SHA:0:7}; the testing station waits for the next event"
+            exit 0
           fi
           pr=$(printf '%s\n' "$api_out" | head -1)
           [ -n "$pr" ] || { echo "no open pull request for ${HEAD_SHA:0:7}; no testing station"; exit 0; }
@@ -260,7 +262,7 @@ jobs:
             # THE TESTING STATION PASSED and asked for the carry. There is no CI run to read the head from, so the
             # head's own latest CI conclusion stands in for it.
             head=$(gh pr view "$CARRY_FIX_PR" --json headRefOid --jq .headRefOid)
-            conclusion=$(gh run list --workflow ci.yml --commit "$head" --json conclusion --jq '[.[] | select(.conclusion != "")] | .[0].conclusion // "success"')
+            conclusion=$(gh run list --workflow ci.yml --commit "$head" --json conclusion --jq '[.[] | select(.conclusion != "")] | .[0].conclusion // "failure"')
             echo "pr=$CARRY_FIX_PR" >> "$GITHUB_OUTPUT"
             python3 .github/scripts/carry.py --repo "$GITHUB_REPOSITORY" --pr "$CARRY_FIX_PR" --station fix \
               --ci-conclusion "$conclusion"

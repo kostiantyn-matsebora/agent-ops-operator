@@ -26,7 +26,7 @@ flowchart TD
   subgraph S2["Station 3 — fix, round after round"]
     CI["ci.yml + claude-review.yml run on the PR<br/>review-clean asks only: did the review run"]:::workflow
     THREAD["GitHub branch protection<br/>an open review thread blocks the merge, live —<br/>no workflow and no check carries it"]:::platform
-    CARRY["remote-implement.yml · open (ci concluded)<br/>read Refs #n or Closes #n, re-read conveyor:run<br/>(or conveyor:archive on the issue), placer still a writer?<br/>carry.py asks conveyor.py, labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml;<br/>no review thread open → mergeable"]:::workflow
+    CARRY["remote-implement.yml · open (ci concluded)<br/>read Refs #n or Closes #n, re-read conveyor:run<br/>(or conveyor:archive on the issue), placer still a writer?<br/>carry.py asks conveyor.py, labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml;<br/>no thread open, merge state clean, testing passed → mergeable"]:::workflow
     FIX["PR grant: conveyor:fix<br/>placed by the bot, records whose grant"]:::label
     GREEN["PR state: loop:mergeable<br/>ISSUE state: station:merge"]:::state
     GATE["review-dispatch.yml · gate (dispatch-gate.py)<br/>conveyor.gate: who started this, is the grant still standing,<br/>rounds used below the cap — re-checked on every start;<br/>conveyor.round_may_start: CI and review both concluded on the head?"]:::workflow
@@ -41,8 +41,12 @@ flowchart TD
     CAP(["round cap 5 — stop<br/>PR state: loop:capped<br/>conveyor:keep-going grants 5 more, consumed on use"]):::stop
 
     CI -->|workflow_run: ci success or failure| CARRY --> FIX --> GATE --> ST2 --> COLLECT --> MODEL --> LAND
-    CARRY -->|no review thread open| GREEN
+    CARRY -->|no thread open, merge clean, testing passed| GREEN
     CI -->|workflow_run: ci or review concluded second| GATE
+    SYNC["land · merge-sync.py, a program, no model<br/>behind its base: merge the base in<br/>only generated files conflict: regenerate<br/>a hand-written conflict: comment, push nothing"]:::workflow
+    LAND --> SYNC
+    SYNC -->|the head changed: station:testing again| TFIRE
+    SYNC -->|hand-written conflict| WAITING
     LAND -->|push starts ci + review again| CI
     LAND --> RETRY --> GATE
     LAND --> MERGEABLE
@@ -77,7 +81,7 @@ flowchart TD
   GREEN --> THREAD
   THREAD --> P2
 
-  subgraph S3["Station 3 — archive (opsx lane only)"]
+  subgraph S3["Station 4 — archive (opsx lane only)"]
     ARCH["remote-implement.yml · archive<br/>find the merged PR, its Refs #n,<br/>conveyor:run still on the issue?<br/>carry.py labels the ISSUE conveyor:archive<br/>only when the change's tasks are all ticked"]:::workflow
     ALBL["ISSUE grant: conveyor:archive"]:::label
     ST3["ISSUE state: station:archive"]:::state

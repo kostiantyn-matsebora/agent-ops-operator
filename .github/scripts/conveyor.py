@@ -674,7 +674,7 @@ RETRIES = ("unaddressed", "stale patch")   # nothing landed and items are still 
 
 def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_on_person: bool = False,
            merge_state: str = "CLEAN", checks_failed: int = 0, testing_passed: bool = True,
-           conflicted=(), generated_paths=()) -> Decision:
+           conflicted=(), generated_paths=(), sync_action: str = "") -> Decision:
     """A round ended. The loop event, whether the round counted, and whether it
     starts the next round itself.
 
@@ -718,15 +718,27 @@ def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_
     if kind == "clean":
         if thread_open or waiting_on_person:
             return Decision("waiting", "nothing to fix, but a person's answer is waited on", loop_event="end:waiting")
+        # THE SYNC'S OWN VERDICT WINS: `merge-sync.py` tried this head and asked a person, so the head is not
+        # re-derived from a file list (a failed regenerator names generated files, which would read as trivial).
+        if sync_action == "asked":
+            return Decision("waiting", "the base could not be merged in without a person's decision",
+                            loop_event="end:waiting")
         # A CLEAN ROUND IS MERGEABLE ONLY IF GITHUB SAYS THE HEAD CAN MERGE (merge_ready).
         m = merge_ready(merge_state, checks_failed, thread_open, testing_passed, conflicted, generated_paths)
         if m.action == "mergeable":
             return Decision("mergeable", "nothing left and the head is green", loop_event="end:mergeable")
         if m.action == "ask":
             return Decision("waiting", m.reason, loop_event="end:waiting")
-        if m.action in ("update", "regenerate", "work", "testing"):
+        if m.action == "work":
+            # A REQUIRED CHECK IS RED ON A CLEAN REVIEW: the fixer's, so the next round starts now, as it does for
+            # a retry. Ending `continue` alone would wait for an event that no push is going to cause.
+            return Decision("continue", m.reason, loop_event="end:continue", counted=True, dispatch_round=True)
+        if m.action in ("update", "regenerate", "testing"):
             # NO ROUND IS STARTED HERE: an update or a regeneration is a push, and the push starts CI and the review.
             return Decision("continue", m.reason, loop_event="end:continue")
+        # `defer`: GitHub has not settled the state, so the loop has no honest way to end. It stays `waiting`, the
+        # one label that is not a running round, and the next CI or review completion asks again. `running` here
+        # would claim a round that is not there, and `recover` would then have to correct it.
         return Decision("waiting", m.reason, loop_event="end:waiting")
     if kind == "disputed":
         return Decision("waiting", "every item left is a dispute, and a person is owed an answer",
@@ -805,6 +817,8 @@ def judge_tier(tier: str, floor: int, r: TierResult) -> TierVerdict:
     if not r.passed:
         return TierVerdict(tier, "tests_failed", diff_percent(r.covered, r.total), floor)
     if not r.collected:
+        # `testing-report.tier_result` marks a tier collected whenever its domain holds no changed file, so a tier
+        # with nothing to measure reaches `not_applicable` below. Only a tier that SHOULD have data and has none fails.
         return TierVerdict(tier, "collection_failed", None, floor)
     pct = diff_percent(r.covered, r.total)
     if pct is None:
@@ -978,6 +992,9 @@ def merge_ready(merge_state: str, checks_failed: int = 0, thread_open: bool = Fa
         if classify_conflict(conflicted, generated_paths) == "trivial" and list(conflicted):
             return Decision("regenerate", "only generated files conflict, and a repository script regenerates them",
                             loop_event="end:continue")
+        if not list(conflicted):
+            return Decision("ask", "the head conflicts with its base and the conflicted files could not be listed, so "
+                            "a person looks at it", loop_event="end:waiting")
         return Decision("ask", "a hand-written file conflicts with the base, and a person decides the resolution",
                         loop_event="end:waiting")
     if merge_state == "BEHIND":

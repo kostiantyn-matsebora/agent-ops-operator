@@ -1010,6 +1010,23 @@ class TheMergeState(unittest.TestCase):
         d = c.ending("clean", 1, 5, merge_state="DIRTY", conflicted=["a.go"], generated_paths=self.GEN)
         self.assertEqual(("waiting", "end:waiting"), (d.action, d.loop_event))
         self.assertEqual("continue", c.ending("clean", 1, 5, checks_failed=1).action)
+
+    def test_a_red_check_on_a_clean_review_starts_the_next_round_and_spends_it(self):
+        d = c.ending("clean", 1, 5, checks_failed=1)
+        self.assertEqual((True, True), (d.dispatch_round, d.counted))
+
+    def test_a_head_that_cannot_be_judged_yet_is_waiting_not_a_running_round(self):
+        d = c.ending("clean", 1, 5, merge_state="UNKNOWN")
+        self.assertEqual(("waiting", "end:waiting", False), (d.action, d.loop_event, d.dispatch_round))
+
+    def test_the_syncs_own_asked_verdict_is_not_re_derived_from_the_file_list(self):
+        # a failed regenerator names GENERATED files, which classify as trivial on their own
+        d = c.ending("clean", 1, 5, merge_state="DIRTY", conflicted=["chart/crds/a.yaml"], generated_paths=self.GEN,
+                     sync_action="asked")
+        self.assertEqual(("waiting", "end:waiting"), (d.action, d.loop_event))
+
+    def test_a_conflict_with_no_listed_files_says_so_instead_of_blaming_a_hand_written_one(self):
+        self.assertIn("could not be listed", self.ready("DIRTY").reason)
         self.assertNotEqual("mergeable", c.ending("clean", 1, 5, testing_passed=False).action)
 
     def test_a_carry_marks_a_head_green_only_when_it_can_merge(self):

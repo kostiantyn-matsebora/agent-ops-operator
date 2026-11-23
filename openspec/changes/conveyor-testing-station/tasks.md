@@ -3,7 +3,7 @@
 - [x] 1.1 Add `testing` to `STATION_STATES` and the events `testing:start`, `testing:restart`, `testing:resume`, `testing:passed`, `testing:capped` in `.github/scripts/conveyor.py`, and verify the totality test still defines every pair
 - [x] 1.2 Route `implement` → `testing` on the pull request opening, `testing` → `fix` on passed, `testing` → `stalled` on capped, and verify `test_every_state_is_reachable_from_none` passes
 - [x] 1.3 Add the testing budget as a counter apart from `max_rounds`, with its own markers, and verify the cap and `keep-going` extension in `conveyor.test.py`
-- [x] 1.4 `.github/conveyor-model/` is the separate engine proposal (#293), read by nothing here, so it is left as it is; the two lifecycle Mermaid diagrams under `docs/diagrams/` are updated
+- [x] 1.4 `.github/conveyor-model/` is the separate engine proposal (#293), read by nothing here, so it is left as it is. The lifecycle diagrams are task 7.1.2
 
 ## 2. Coverage measurement
 
@@ -11,8 +11,8 @@
 - [x] 2.2 Add per-tier floors from the vocabulary (90, 70, 50) with the `not applicable` rule, and verify a tier with no domain lines holds no floor
 - [x] 2.3 Build the operator with `-cover` for the system run, point `GOCOVERDIR` at a node directory through a Helm post-renderer, stop the manager gracefully and collect, and verify the post-renderer's unit tests pass
 - [x] 2.4 Fail the tier when a run produced no coverage data, and verify with a fixture of an empty directory
-- [x] 2.5 Collect browser coverage for `platform/console/ui/src` into lcov behind `E2E_COVERAGE=1` (istanbul-instrumented build of the mocked suite, `npm run test:e2e:coverage`), and verify the specs yield mapped lines: 154 files, verified
-- [x] 2.6 Run the instrumented system pack once and verify it writes `system-coverage.out` (needs a container runtime and k3d; ran against Rancher Desktop on moby, Helm 4: 8595-line profile, 6 of 7 lines of a sampled range mapped)
+- [x] 2.5 Collect browser coverage for `platform/console/ui/src` into lcov behind `E2E_COVERAGE=1` from an istanbul-instrumented build of the mocked suite, `npm run test:e2e:coverage`, and verify the specs yield mapped lines (154 files)
+- [x] 2.6 Run the instrumented system pack once and verify it writes `system-coverage.out` (a container runtime and k3d are needed. It ran against Rancher Desktop on moby with Helm 4 and wrote an 8595-line profile)
 
 ## 3. The testing session
 
@@ -24,7 +24,7 @@
 - [x] 3.6 Fail closed when the tester's model equals the session's or either is unset, and verify
 - [x] 3.7 Render the coverage comment and edit it in place by marker, and verify two rounds leave one comment holding paths and line numbers and no source text
 - [x] 3.8 Add `testing.agent_facing_paths` and a decision naming the diff's agent-facing files, and verify it on a prompt change and a label-only chart change
-- [x] 3.9 Stop the station with the reason named when real-model testing is required and `CLAUDE_CODE_OAUTH_TOKEN` is unset, and verify no tier reads as passed and the value is never printed
+- [x] 3.9 Stop the station with the reason named when real-model testing is required and the credential variable is unset, and verify no tier reads as passed and the value is never printed
 - [x] 3.10 On passing, dispatch the carry so the fixing loop starts on the pushed head, and verify the dispatch input
 
 ## 4. Mergeable pull request
@@ -46,9 +46,9 @@
 
 - [x] 6.1 Run the instrumented smoke pack in an environment with Docker and verify the operator's coverage comes back
 - [ ] 6.2 Run the station once on a throwaway pull request carrying a known coverage shortfall, and verify it writes the report, loops, and ends `station:fix`
-- [x] 6.3 (the real-runtime lane ran locally with the credential from Vault: both tests pass; the station run itself is not performed) Run the station once on a change touching an agent-facing path with the credential set, and verify the real runtime lane runs and a stub run is not accepted
+- [x] 6.3 Run the real-runtime system lane with the credential set, and verify both real-runtime tests pass and a stub run is not accepted for an agent-facing change
 - [ ] 6.4 Run the console change through `npm run test:e2e` and `e2e-live` and verify browser coverage collects
-- [ ] 6.5 Record any step a remote session cannot perform as not performed
+- [ ] 6.5 Run each step above that a remote session cannot run in an environment that can, and tick it only when it ran. A step that was not run stays unticked and the pull request says why
 
 ## 7. Documentation
 

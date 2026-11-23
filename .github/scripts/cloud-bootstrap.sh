@@ -25,7 +25,9 @@
 #   serena    the .mcp.json stdio server.
 #   k3d       the system pack's cluster, with kubectl beside it. The testing
 #   kubectl   station runs that tier ITSELF, so a session without them can only
-#             dispatch it. dockerd is STARTED when it is not answering.
+#             dispatch it.
+#   docker    (dockerd) is not installed here: the image has it. It is STARTED, detached,
+#             when nothing answers, and reported by --verify like the rest.
 #   playwright  the e2e tier: the console UI's node_modules and Chromium with its
 #             system libraries. Without them `npm run test:e2e` cannot start.
 #   Go 1.25   platform/manager and runtimes/ollama declare it; the image's own
@@ -193,7 +195,17 @@ install_kubectl() {
 }
 
 # `docker` or `nerdctl`: either answers when its engine runs.
-docker_answers() { { have docker && docker info; } >/dev/null 2>&1 || { have nerdctl && nerdctl info; } >/dev/null 2>&1; }
+# BOUNDED: a daemon that is starting can hang `info`, and this runs inside a 10s hook budget. A dockerd started
+# through sudo answers a root caller only until the socket's group is open, so the same check is tried as root too.
+docker_answers() {
+  local c
+  for c in docker nerdctl; do
+    have "$c" || continue
+    timeout 3 "$c" info >/dev/null 2>&1 && return 0
+    have sudo && timeout 3 sudo -n "$c" info >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
 
 ## dockerd — the image HAS it, but a session starts with none running. Started, by `--verify`, in the
 ## background when nothing answers, and waited on briefly. A sandbox that forbids it

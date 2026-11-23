@@ -52,7 +52,7 @@
 | Gotcha | Fix |
 |---|---|
 | A tier that ran but left no coverage file reads as "0 lines changed" and passes | no data is `collection_failed`, never a pass |
-| A stub-runtime run proves plumbing only | an agent-facing diff needs a real-model run, else the station stops |
+| A stub-runtime run proves plumbing only | an agent-facing diff needs a real-model run, and without one no tier passes |
 | The tester's model equal to the author's tests the author's beliefs | `testing-station.py models` exits 5 on equal or unset |
 | A cloud session never sees `CLAUDE_CODE_OAUTH_TOKEN`, though the environment sets it: the platform owns that name for its own login | store the credential as `AGENTOPS_REAL_MODEL_TOKEN`, and map it for the test process only |
 | An image build in a cloud session hangs at `npm ci` and dies with `Exit handler never called`: the sandbox re-signs HTTPS with a CA the host trusts and a build container does not (a bridge container reaches the network directly, the loopback proxy is irrelevant) | `SYSTEM_BUILD_CA=<host bundle>` makes the pack bake it into local copies of the base images (`buildca.go`) |

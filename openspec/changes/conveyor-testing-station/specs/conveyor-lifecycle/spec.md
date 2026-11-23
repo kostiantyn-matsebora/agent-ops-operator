@@ -11,13 +11,18 @@ vocabulary file, and SHALL grant nothing:
 
 | On | Says | Values |
 |---|---|---|
-| the issue | which station the line is at | implement, testing, fix, merge, stalled, archive, done |
+| the issue | which station the line is at | implement, testing, fix, merge, archive, done, stalled |
 | the pull request | what the fixing loop is doing | running, waiting, stalled, capped, mergeable |
 
-`waiting` SHALL mean a person's answer is owed: every remaining item is a
-dispute the fixing step made, or a conflict the line cannot resolve itself. `stalled` SHALL mean the machine stopped: no
-report, the fixing step failed or timed out, or the next round could not be
-started.
+`waiting` SHALL mean a person's answer is owed. Every remaining item is a
+dispute the fixing step made, or a conflict the line cannot resolve itself.
+
+`stalled` SHALL mean the machine stopped. There was no report, the fixing step failed or
+timed out, or the next round could not be started.
+
+On the issue, `stalled` SHALL also name a testing station that spent its budget or
+stopped. The testing budget of 5 rounds SHALL be counted from the issue and kept apart
+from the fixing loop's rounds.
 
 A stale patch is neither. Nothing landed and every item is still eligible, so
 that round starts the next one itself.
@@ -74,14 +79,25 @@ whether the loop had given up or was waiting on them.
 
 The fixing loop SHALL end `mergeable` only when the head has no failed required
 check, no open review thread, no unaddressed analysis issue, and a merge state
-GitHub reports as clean. A failed build SHALL be work like any failed check. A
-head behind its base SHALL be brought up to date. The testing station SHALL have
-passed on the current head.
+GitHub reports as clean. The testing station SHALL have passed on the current head.
+
+A failed build SHALL be work like any failed check. A head behind its base SHALL
+be brought up to date.
 
 #### Scenario: A failed build
 
 - **WHEN** a required build check fails on the head
 - **THEN** the loop treats it as work and does not end `mergeable`
+
+#### Scenario: Everything agrees
+
+- **WHEN** no required check failed, no thread is open, no analysis issue is unaddressed, GitHub reports a clean merge state and the testing station passed on this head
+- **THEN** the loop ends `mergeable`
+
+#### Scenario: One condition disagrees
+
+- **WHEN** the merge state is clean but a thread is open, or the testing station has not passed on this head
+- **THEN** the loop does not end `mergeable`
 
 #### Scenario: Behind its base
 
@@ -92,9 +108,11 @@ passed on the current head.
 
 A conflict SHALL be trivial when the base merges into the branch with no
 conflict marker, or when every conflicted file is one a repository script
-regenerates. The line SHALL resolve a trivial conflict and push. Any other
-conflict SHALL stop the loop in the waiting state, with a pull request comment
-naming the conflicted files. A person's comment SHALL resume it.
+regenerates.
+
+The line SHALL resolve a trivial conflict and push. Any other conflict SHALL stop
+the loop in the waiting state, with a pull request comment naming the conflicted
+files. A person's comment SHALL resume it.
 
 #### Scenario: Only a generated file conflicts
 

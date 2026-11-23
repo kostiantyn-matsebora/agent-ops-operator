@@ -505,6 +505,10 @@ class Round:
         m = re.search(r"\b(?:Refs|Closes)\s+#(\d+)", view.get("body") or "")
         testing_passed = True
         self.issue = int(m.group(1)) if m else None
+        if not m:
+            # NO TRACKING ISSUE, NO TESTING STATION: the station belongs to an issue's lane, so a pull request
+            # that names none is judged by the rest, and the log says the check did not apply.
+            print(f"::notice::#{a.pr} names no tracking issue, so the testing station does not apply to it")
         if m:
             try:
                 labels = gh("issue", "view", m.group(1), "--repo", a.repo, "--json", "labels",
@@ -525,7 +529,11 @@ class Round:
         script = getattr(a, "merge_sync_script", None)
         if not (script and pathlib.Path(script).is_file() and a.push_starts_workflows):
             return None
-        base = gh("pr", "view", str(a.pr), "--repo", a.repo, "--json", "baseRefName", "--jq", ".baseRefName").strip()
+        try:
+            base = gh("pr", "view", str(a.pr), "--repo", a.repo, "--json", "baseRefName", "--jq", ".baseRefName").strip()
+        except subprocess.CalledProcessError:
+            return None
+        before = sh("git", "rev-parse", "HEAD", check=False).stdout.strip()
         sh("git", "fetch", "-q", "origin", base, check=False)
         out = sh(sys.executable, str(script), "--base", base, "--vocabulary", str(a.vocabulary), check=False)
         try:
@@ -536,7 +544,10 @@ class Round:
             push = sh("git", "push", "origin", f"HEAD:refs/heads/{a.branch}", check=False)
             if push.returncode != 0:
                 print(f"the merge of the base could not be pushed:\n{push.stderr}", file=sys.stderr)
-                sh("git", "reset", "-q", "--hard", "HEAD~1", check=False)
+                # BACK TO WHAT THE SYNC STARTED FROM, never `HEAD~1`: a merge that fast-forwards, or one that
+                # also regenerated files, is not one commit.
+                if before:
+                    sh("git", "reset", "-q", "--hard", before, check=False)
                 return None
         return result
 
@@ -574,12 +585,20 @@ class Round:
                     self.restart_testing()
                 elif synced and synced["action"] == "asked" and synced.get("files"):
                     merge["conflicted"] = synced["files"]
+                    kind_of = ("generated files that the repository's script could not regenerate"
+                               if conveyor.classify_conflict(synced["files"], self.generated_paths()) == "trivial"
+                               else "hand-written files")
+                    why = (synced.get("reason") or "").strip()
                     pr_comment(a.repo, a.pr, f"{self.markers['conflict']}\nThis branch conflicts with its base in "
-                               f"hand-written files, and the loop does not choose a side. Resolve "
+                               f"{kind_of}, and the loop does not choose a side. Resolve "
                                f"{', '.join('`' + f + '`' for f in synced['files'])} and push, or answer here "
-                               f"with how to resolve it. Any comment from you resumes the loop.")
+                               f"with how to resolve it. Any comment from you resumes the loop."
+                               + (f"\n\nWhat the sync reported: {why}" if why else ""))
+                    merge["sync_action"] = "asked"
                 elif merge["merge_state"] == "DIRTY":
                     merge["conflicted"] = ["(not read: the base could not be merged here)"]
+        if kind == "clean" and merge:
+            merge.setdefault("checks_failed", len((self.checks or {}).get("items") or []))
         decision = conveyor.ending(kind, self.number, self.cap, thread_open=thread_open,
                                    waiting_on_person=kind == "clean" and self.waiting_on_person(),
                                    generated_paths=self.generated_paths(), **merge)

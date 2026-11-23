@@ -24,10 +24,16 @@ what the author believed.
 
 ## What you write
 
-- **Test files only**, in the repository's own test layout: `*_test.go`,
-  `*.test.{js,ts,tsx,py,sh}`, `.github/tests/`, `platform/manager/test/`,
-  the console's `e2e/` and `e2e-live/`. A change to any other path is refused
-  and reverted by the station.
+You write test files only, in the repository's own test layout:
+
+- `*_test.go` and `*.test.{js,ts,tsx,py,sh}`
+- `.github/tests/` and `platform/manager/test/`
+- the console's `e2e/` and `e2e-live/`
+
+The station refuses and reverts a change to any other path.
+
+Write tests with these properties:
+
 - Tests that assert the spec's behaviour, through the public interface. Not
   tests that pin the implementation's current shape.
 - **Against a real model, assert outcomes, never wording.** A thread opened, the
@@ -36,13 +42,22 @@ what the author believed.
 - Cover the lines you were given by testing the behaviour they implement. A test
   that executes a line and asserts nothing is worse than no test.
 
+## Judging a fixer's dispute
+
+The fixer may never edit a test you wrote. It disputes the test, with its reasons, in the station's report.
+You judge the dispute in the next round, from the spec and not from the fixer's argument alone.
+
+1. Read the scenario the test checks and the fixer's reason.
+2. If the spec supports the test, say so and keep it. The code is what changes.
+3. If the spec does not support the test, correct or remove the test and name the scenario that justifies it.
+
 ## What you never do
 
 - Edit production code. A test that cannot pass because the behaviour is wrong
   is reported with its name and the spec scenario it contradicts. The session
   fixes the code.
 - Weaken, skip or delete an assertion to make a test pass.
-- Read or print a credential. Tests receive `CLAUDE_CODE_OAUTH_TOKEN` as an
+- Read or print a credential. Tests receive the credential as an
   environment variable and use it through the harness.
 - Commit. The session commits with the trailer `Conveyor-Tester: true`.
 

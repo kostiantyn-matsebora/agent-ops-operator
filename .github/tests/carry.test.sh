@@ -96,6 +96,7 @@ for st in BEHIND DIRTY; do
   out=$(run --pr 220 --station fix --ci-conclusion success)
   assert_equals "1" "$(edited 220 conveyor:fix)"
   assert_not_contains "$(cat "$GH_CALLS")" "loop:mergeable"
+  assert_not_contains "$(cat "$GH_CALLS")" "station:merge"
 done
 
 it "fix: the testing station holds the carry: nothing is labelled while the issue reads station:testing"
@@ -103,17 +104,14 @@ reset; pr "Refs #51"; issue_has 51 "conveyor:run station:testing"; placed mainta
 out=$(run --pr 220 --station fix --ci-conclusion success)
 assert_equals "0" "$(edited 220 conveyor:fix)"
 assert_contains "$out" "testing station"
-# THE TESTS BELOW READ THE FIXTURES THE FIRST FIX TEST SET UP: put them back.
-pr "Refs #51"; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"
-
 it "fix: no round is dispatched while the review has not completed on the head: its own completion is the round"
-reset; echo 0 > "$FX/review-runs"
+reset; pr "Refs #51"; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"; echo 0 > "$FX/review-runs"
 out=$(run --pr 220 --station fix --ci-conclusion success)
 assert_equals "1" "$(edited 220 conveyor:fix)"
 assert_equals "false" "$(output dispatch_round)"
 
 it "fix: CI red still carries the grant, and marks nothing mergeable"
-reset; echo 1 > "$FX/review-runs"
+reset; pr "Refs #51"; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"; echo 1 > "$FX/review-runs"
 out=$(run --pr 220 --station fix --ci-conclusion failure)
 assert_equals "1" "$(edited 220 conveyor:fix)"
 assert_not_contains "$(cat "$GH_CALLS")" "loop:mergeable"
@@ -121,7 +119,7 @@ assert_not_contains "$(cat "$GH_CALLS")" "station:merge"
 assert_equals "true" "$(output dispatch_round)"
 
 it "fix: a review thread open carries the grant but is not mergeable"
-reset
+reset; pr "Refs #51"; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"; echo 1 > "$FX/review-runs"
 out=$(THREADS_OPEN=1 run --pr 220 --station fix --ci-conclusion success)
 assert_equals "1" "$(edited 220 conveyor:fix)"
 assert_not_contains "$(cat "$GH_CALLS")" "loop:mergeable"

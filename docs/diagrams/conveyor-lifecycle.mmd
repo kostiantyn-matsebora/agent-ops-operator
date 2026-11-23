@@ -15,12 +15,16 @@ flowchart TD
   subgraph ST["2 · Test"]
     TEST["A session runs unit, system and e2e tests,<br/>measures the coverage of the lines the pull request adds,<br/>and a different model writes what is missing"]:::auto
     TOK(["Passed: 90 / 70 / 50 held,<br/>real model used where behaviour depends on it"]):::stop
-    TCAP(["Stopped: five rounds, or the real model<br/>is needed and its credential is not set"]):::stop
+    TCAP(["Stopped: five rounds spent"]):::stop
+    TENV(["Stopped: the real model is needed<br/>and its credential is not set,<br/>or an environment cannot run a tier"]):::stop
     TEST --> TOK
     TEST --> TCAP
+    TEST --> TENV
   end
   TGRANT(["A person grants more rounds"]):::person
+  TFIX(["A person fixes the environment<br/>or sets the credential"]):::person
   TCAP --> TGRANT --> TEST
+  TENV --> TFIX --> TEST
 
   subgraph S2["3 · Fix, until mergeable"]
     CHECK["CI and the review run"]:::auto
@@ -34,6 +38,7 @@ flowchart TD
 
   ANSWER(["A person answers the disputes<br/>or grants more rounds"]):::person
   HOLD --> ANSWER --> CHECK
+  CHECK -->|the base is merged in: the head changed| TEST
 
   MERGE(["A person merges"]):::person
   OK --> MERGE

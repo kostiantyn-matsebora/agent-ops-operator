@@ -28,6 +28,9 @@ chmod +x "$tmp/bin/gh"; export PATH="$tmp/bin:$PATH"
 MARK='<!-- conveyor:disputed -->'
 BOT='{"login":"github-actions","__typename":"Bot"}'
 PERSON='{"login":"maintainer","__typename":"User"}'
+# THE REST SHAPE, which the issue-comments endpoint answers in: `user.login`, `user.type`.
+RBOT='{"login":"github-actions","type":"Bot"}'
+RPERSON='{"login":"maintainer","type":"User"}'
 threads() {  # threads <pr> <resolved:true|false> <answered:yes|no>
   local answer=""
   [ "$3" = yes ] && answer=",{\"body\":\"it is real\",\"author\":$PERSON}"
@@ -134,13 +137,13 @@ assert_contains "$out" "dry run"
 
 it "a waiting loop that asked about a merge conflict stays waiting until a PERSON has answered"
 reset; prs 220; threads 220 true yes
-comments 220 "[{\"body\":\"$CONFLICT\\nThis branch conflicts.\",\"author\":$BOT}]"
+comments 220 "[{\"body\":\"$CONFLICT\\nThis branch conflicts.\",\"user\":$RBOT}]"
 out=$(run); assert_equals "0" "$(dispatched)"
 assert_contains "$out" "merge conflict"
 
 it "a person's comment after the conflict question starts the round"
 reset; prs 220; threads 220 true yes
-comments 220 "[{\"body\":\"$CONFLICT\\nThis branch conflicts.\",\"author\":$BOT},{\"body\":\"take theirs\",\"author\":$PERSON}]"
+comments 220 "[{\"body\":\"$CONFLICT\\nThis branch conflicts.\",\"user\":$RBOT},{\"body\":\"take theirs\",\"user\":$RPERSON}]"
 out=$(run); assert_equals "1" "$(dispatched)"
 
 rm -rf "$tmp"

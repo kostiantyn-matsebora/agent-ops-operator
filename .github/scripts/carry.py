@@ -91,7 +91,8 @@ def settled_merge_state(repo: str, pr: int, first: str, tries: int = 4, pause: f
         try:
             state = json.loads(io.gh("pr", "view", str(pr), "--repo", repo, "--json", "mergeStateStatus")
                                ).get("mergeStateStatus") or "UNKNOWN"
-        except (RuntimeError, ValueError):
+        except (RuntimeError, ValueError) as exc:
+            print(f"::notice::the merge state of #{pr} could not be re-read ({exc}); going on with {state.lower()}")
             break
     return state
 
@@ -117,7 +118,10 @@ def main() -> int:
         review_completed=args.station == "fix" and review_completed(args.repo, view.get("headRefOid") or ""),
         thread_open=args.station == "fix" and args.ci_conclusion == "success" and thread_open(args.repo, args.pr),
         ci_conclusion=args.ci_conclusion,
+        # ONLY WHEN CI PASSED: a failed CI is `work` whatever the merge state, so waiting for GitHub to compute
+        # it would only hold the step for up to 20 seconds to produce a value nothing reads.
         merge_state=settled_merge_state(args.repo, args.pr, view.get("mergeStateStatus") or "UNKNOWN")
+        if args.station == "fix" and args.ci_conclusion == "success" else (view.get("mergeStateStatus") or "UNKNOWN")
         if args.station == "fix" else "CLEAN")
 
     # THE ISSUE THE EVENTS CONCERN is whichever the body names. The GRANT is read from it too,

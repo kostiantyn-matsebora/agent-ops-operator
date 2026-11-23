@@ -112,10 +112,14 @@ together, could expose:
 ## The testing station: coverage of the lines a change adds
 
 The delivery workflow's testing station (`.github/routines/test-change.md`) is a
-session, never a CI job. It runs each tier itself and judges the **lines the pull
-request adds**, per tier: 90 percent for unit, 70 for system, 50 for e2e. A tier
-with no changed lines in its domain is not applicable. A tier that ran but left no
-coverage file fails as a collection failure, never as zero changed lines.
+session, never a CI job. It runs each tier itself.
+
+It judges the **lines the pull request adds or changes**, per tier: 90 percent for
+unit, 70 for system, 50 for e2e. A tier with no changed lines in its domain is not
+applicable.
+
+A tier that ran but left no coverage file fails as a collection failure. It never
+reads as zero changed lines.
 
 | Tier | Coverage comes from |
 |---|---|
@@ -125,11 +129,17 @@ coverage file fails as a collection failure, never as zero changed lines.
 
 Where a change alters what the agent is told, which tools it holds, or how its
 output is read, the station runs the tests that drive a conversation against a
-real runtime. The path list is `testing.agent_facing_paths` in
-`.github/review-triage.json`; the session may add to it, never waive it. The
-credential is the environment variable `CLAUDE_CODE_OAUTH_TOKEN`. A cloud session strips that name, so the cloud environment stores it as `AGENTOPS_REAL_MODEL_TOKEN` and the station maps it for the test process. Without either
-the station stops. Tests written for the real model assert outcomes, never
-wording.
+real runtime.
+
+The path list is `testing.agent_facing_paths` in `.github/review-triage.json`. The
+session may add to it and never waive it.
+
+The credential is an environment variable. A workstation or CI holds the vendor's
+own name, `CLAUDE_CODE_OAUTH_TOKEN`. A cloud session strips that name, so its
+environment stores `AGENTOPS_REAL_MODEL_TOKEN` and the station maps it for the
+test process only. With neither, the station stops.
+
+Tests written for the real model assert outcomes, never wording.
 
 ## What gates a pull request
 

@@ -96,14 +96,17 @@ required reviewer. `/opsx:archive` is refused while any of this is open.
 
 ### The testing station sits between implement and fix
 
-A session runs unit, system and e2e tests, judges coverage of the ADDED lines
-(90/70/50 per tier, a tier with no changed lines in its domain is not
-applicable) and a separate model (`conveyor-tester`) writes the missing tests,
-which the fixer can never edit. Behaviour that depends on the model is tested
-against a real one (`CLAUDE_CODE_OAUTH_TOKEN`, environment only, never read or
-printed), else the station stops. It has five rounds of its own, counted from
-issue comments. Mergeable includes merging cleanly: `merge-sync.py` is
-model-free and asks a person on a hand-written conflict.
+**A SESSION RUNS THE TESTS, NEVER CI.** It judges the lines the PR ADDS or changes.
+
+| Rule | Is |
+|---|---|
+| Floors | 90 unit, 70 system, 50 e2e. A tier with no changed line in its domain is not applicable |
+| Missing tests | written by a separate model, `conveyor-tester` |
+| The fixer and a tester's test | disputes it, and the tester judges the dispute. It never edits it |
+| Model-dependent behaviour | tested against a real model, credential in the environment only, never read or printed |
+| No credential where it is required | the station stops, and no tier passes |
+| Budget | five rounds of its own, counted from issue comments, apart from the fixing loop's rounds |
+| Mergeable | includes merging cleanly. `merge-sync.py` is model-free and asks a person on a hand-written conflict |
 
 ### `conveyor.py` decides. Nothing else does
 

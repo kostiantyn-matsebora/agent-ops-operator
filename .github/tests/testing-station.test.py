@@ -189,33 +189,48 @@ def cov(covered, total, files=None, collected=True, domain=1):
 
 class TheVerdict(unittest.TestCase):
     def test_every_tier_green_passes(self):
-        j = tr.judge(V, {"unit": cov(95, 100), "system": cov(8, 10), "e2e": cov(0, 0, domain=0)}, {})
+        j = tr.judge(V, {"unit": cov(95, 100), "system": cov(8, 10), "e2e": cov(0, 0, domain=0)}, dict(PASSED))
         self.assertEqual(["pass", "pass", "not_applicable"], [v["status"] for v in j["verdicts"]])
         self.assertEqual([], j["work"])
 
     def test_a_shortfall_is_work_for_the_tester(self):
-        j = tr.judge(V, {"unit": cov(85, 100), "system": cov(0, 0, domain=0), "e2e": cov(0, 0, domain=0)}, {})
+        j = tr.judge(V, {"unit": cov(85, 100), "system": cov(0, 0, domain=0), "e2e": cov(0, 0, domain=0)}, dict(PASSED))
         self.assertEqual([("missing_tests", "unit", "tester")], [(w["kind"], w["tier"], w["session"]) for w in j["work"]])
 
     def test_a_failed_tier_is_work_for_the_fixer(self):
-        j = tr.judge(V, {"unit": cov(95, 100), "system": cov(1, 1), "e2e": None}, {"system": "failed", "e2e": "skipped"})
+        j = tr.judge(V, {"unit": cov(95, 100), "system": cov(1, 1), "e2e": None}, {**PASSED, "system": "failed", "e2e": "skipped"})
         self.assertEqual({("failing_tests", "system", "fixer"), ("not_run", "e2e", "fixer")},
                          {(w["kind"], w["tier"], w["session"]) for w in j["work"]})
 
+    def test_a_missing_outcome_or_an_unknown_tier_is_refused_not_defaulted(self):
+        with self.assertRaises(ValueError):
+            tr.judge(V, {"unit": cov(95, 100)}, {"unit": "passed"})
+        with self.assertRaises(ValueError):
+            tr.judge(V, {"units": cov(95, 100)}, dict(PASSED))
+
+    def test_files_with_no_coverage_data_are_reported(self):
+        c = cov(0, 10, {"a.go": [1]})
+        c["unmeasured"] = ["platform/manager/new.go"]
+        j = tr.judge(V, {"unit": c, "system": cov(0, 0, domain=0), "e2e": cov(0, 0, domain=0)}, dict(PASSED))
+        self.assertIn("platform/manager/new.go", tr.render(V, j, 1, 5, "running"))
+
     def test_a_ran_tier_with_no_coverage_file_fails_collection(self):
-        j = tr.judge(V, {"unit": cov(95, 100), "system": None, "e2e": cov(0, 0, domain=0)}, {})
+        j = tr.judge(V, {"unit": cov(95, 100), "system": None, "e2e": cov(0, 0, domain=0)}, dict(PASSED))
         self.assertEqual("collection_failed", j["verdicts"][1]["status"])
 
     def test_a_tier_with_no_domain_file_never_fails_on_coverage(self):
         j = tr.judge(V, {"unit": cov(0, 0, collected=False, domain=0), "system": None, "e2e": None},
-                     {"system": "passed"})
+                     dict(PASSED))
         self.assertEqual("not_applicable", j["verdicts"][0]["status"])
+
+
+PASSED = {"unit": "passed", "system": "passed", "e2e": "passed"}
 
 
 class TheReport(unittest.TestCase):
     J = tr.judge(V, {"unit": cov(85, 100, {"platform/manager/internal/x/x.go": [4, 5, 6, 9]}),
                      "system": cov(8, 10, {"platform/manager/internal/y/y.go": [1]}),
-                     "e2e": cov(0, 0, domain=0)}, {})
+                     "e2e": cov(0, 0, domain=0)}, dict(PASSED))
 
     def test_the_report_carries_the_marker_the_round_and_each_tier(self):
         md = tr.render(V, self.J, 2, 5)
@@ -233,7 +248,7 @@ class TheReport(unittest.TestCase):
 
     def test_the_verdict_line_follows_the_state(self):
         self.assertIn("holds its floor", tr.render(V, tr.judge(V, {"unit": cov(1, 1), "system": cov(0, 0, domain=0),
-                                                                    "e2e": cov(0, 0, domain=0)}, {}), 1, 5, "passed"))
+                                                                    "e2e": cov(0, 0, domain=0)}, dict(PASSED)), 1, 5, "passed"))
         self.assertIn("A person decides", tr.render(V, self.J, 5, 5, "capped"))
 
     def test_ranges(self):
@@ -310,6 +325,23 @@ class TheSync(unittest.TestCase):
 
     def test_a_branch_that_has_the_base_is_uptodate(self):
         self.assertEqual("uptodate", ms.sync("master", self.v, "m")["action"])
+
+    def test_a_generated_conflict_no_regenerator_covers_is_asked_not_kept_at_the_bases_copy(self):
+        self.v["testing"]["regenerators"] = []
+        self.branch_commit("chart/crds/c.yaml", "mine: 1\n")
+        self.base_commit("chart/crds/c.yaml", "theirs: 1\n")
+        r = ms.sync("master", self.v, "m")
+        self.assertEqual("asked", r["action"])
+        self.assertIn("no regenerator covers", r["reason"])
+        self.assertEqual("mine: 1\n", (self.w / "chart/crds/c.yaml").read_text())
+
+    def test_a_failed_regenerator_is_asked_with_its_output(self):
+        self.v["testing"]["regenerators"] = [{"paths": ["chart/crds/**"], "run": "echo boom >&2; exit 1"}]
+        self.branch_commit("chart/crds/c.yaml", "mine: 1\n")
+        self.base_commit("chart/crds/c.yaml", "theirs: 1\n")
+        r = ms.sync("master", self.v, "m")
+        self.assertEqual("asked", r["action"])
+        self.assertIn("boom", r["reason"])
 
     def test_a_behind_branch_merges_clean_and_commits(self):
         self.branch_commit("b.go", "mine\n")
@@ -452,7 +484,7 @@ class TheAdapter(unittest.TestCase):
         self.pr["labels"] = [{"name": "conveyor:keep-going"}]
         self.begin()
         self.assertEqual(["testing:resume"], self.events)
-        self.assertIn(("issue", "edit", "5", "--repo", "o/r", "--remove-label", "conveyor:keep-going"), self.gh_calls)
+        self.assertIn(("pr", "edit", "5", "--repo", "o/r", "--remove-label", "conveyor:keep-going"), self.gh_calls)
         self.assertEqual(("10", "6", "false"), (self.outputs["cap"], self.outputs["round"], self.outputs["exhausted"]))
 
     def test_a_stalled_line_without_keep_going_stays_stalled(self):
@@ -461,12 +493,14 @@ class TheAdapter(unittest.TestCase):
         self.assertEqual(("false", []), (self.outputs["active"], self.events))
 
     def judge(self, tiers, outcomes=(), rnd=1, cap=5, extra=()):
+        self.addCleanup(setattr, ts.report, "_gh", ts.report._gh)   # restored, never left patched for the next test
         files = []
         for t, c_ in tiers.items():
             f = pathlib.Path(f"{t}.json"); f.write_text(json.dumps(c_)); files += ["--tier-file", f"{t}={f}"]
         ts.report._gh = lambda *a, stdin=None: json.dumps([[]]) if a[:2] == ("api", "--paginate") else ""
         return ts.main(["judge", "--repo", "o/r", "--issue", "9", "--round", str(rnd), "--cap", str(cap), *files,
-                        *[x for o in outcomes for x in ("--outcome", o)], *extra])
+                        *[x for t_ in PASSED for x in ("--outcome", next((o for o in outcomes if o.startswith(t_ + "=")), f"{t_}=passed"))],
+                        *extra])
 
     GOOD = {"unit": cov(95, 100), "system": cov(0, 0, domain=0), "e2e": cov(0, 0, domain=0)}
 
@@ -584,7 +618,12 @@ class TheAdapter(unittest.TestCase):
         front = text.split("---")[1]
         model = [l.split(":", 1)[1].strip() for l in front.splitlines() if l.startswith("model:")][0]
         self.assertEqual(V["testing"]["tester_model"], model)
-        self.assertNotIn("Edit production", "".join(l for l in front.splitlines() if l.startswith("tools:")))
+        # A tool list cannot scope a path, so the boundary is `check-tree --role tester`, which the routine runs
+        # after every tester session. The agent must say so, and its tools are exactly the ones it needs.
+        tools = [l.split(":", 1)[1].strip() for l in front.splitlines() if l.startswith("tools:")][0]
+        self.assertEqual("Read, Grep, Glob, Edit, Write, Bash", tools)
+        self.assertIn("test files only", text)
+        self.assertIn("check-tree --role tester", (SCRIPTS.parents[1] / ".github/routines/test-change.md").read_text())
 
     def patch_check(self, role, path):
         repo = pathlib.Path(self.tmp.name, "r")
@@ -605,6 +644,10 @@ class TheAdapter(unittest.TestCase):
 
 class TheRoutine(unittest.TestCase):
     TEXT = (SCRIPTS.parents[1] / ".github/routines/test-change.md").read_text()
+
+    def test_a_real_model_failure_is_re_run_once_before_it_counts_as_work(self):
+        flat = " ".join(self.TEXT.split())
+        self.assertIn("A real-model failure is re-run once before it", flat)
 
     def test_every_script_it_names_exists(self):
         import re

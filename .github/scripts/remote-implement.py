@@ -49,8 +49,7 @@ MARKER = "<!-- remote-implement:fired -->"
 # PER STATION. The implement marker keeps its original text so every issue
 # already carrying it still reads as fired; the archive station records its
 # own, or the archive would never fire on an issue the implement did.
-STATION_MARKER = {"implement": MARKER, "archive": "<!-- remote-implement:fired:archive -->",
-                  "testing": "<!-- remote-implement:fired:testing -->"}
+STATION_MARKER = io.FIRE_MARKERS
 BETA = "experimental-cc-routine-2026-04-01"
 API_VERSION = "2023-06-01"
 
@@ -171,28 +170,30 @@ def main() -> int:
     # station a session is. Both halves must be set, and either absent falls back to the shared pair.
     own_url = os.environ.get(f"ROUTINE_FIRE_URL_{station.upper()}", "").strip()
     own_token = os.environ.get(f"ROUTINE_FIRE_TOKEN_{station.upper()}", "").strip()
+    url_name, token_name = "ROUTINE_FIRE_URL", "ROUTINE_FIRE_TOKEN"
     if own_url and own_token:
         fire_url, token = own_url, own_token
+        url_name, token_name = f"ROUTINE_FIRE_URL_{station.upper()}", f"ROUTINE_FIRE_TOKEN_{station.upper()}"
     if fire_url and (any(c in fire_url for c in "\r\n\t ")
                      or not fire_url.lower().startswith(("http://", "https://"))):
         comment(args.repo, number,
-                f"`{label}` was placed by @{sender}, but this repository's `ROUTINE_FIRE_URL` "
+                f"`{label}` was placed by @{sender}, but this repository's `{url_name}` "
                 "is not a URL. Nothing started; check the variable and place the label again.")
-        print(f"::error::ROUTINE_FIRE_URL is not a URL: {fire_url[:60]!r}")
+        print(f"::error::{url_name} is not a URL: {fire_url[:60]!r}")
         return 1
     if any(c in token for c in "\r\n\t "):
         comment(args.repo, number,
                 f"`{label}` was placed by @{sender}, but this repository's "
-                "`ROUTINE_FIRE_TOKEN` contains a line break or space — it was probably "
+                f"`{token_name}` contains a line break or space — it was probably "
                 "copied out of a wrapped display. Nothing started; set it again and "
                 "place the label back.")
-        print("::error::ROUTINE_FIRE_TOKEN contains whitespace; refusing to send it")
+        print(f"::error::{token_name} contains whitespace; refusing to send it")
         return 1
     if not fire_url or not token:
         comment(args.repo, number,
                 f"`{label}` was placed by @{sender}, but this repository has no routine "
-                "configured (`ROUTINE_FIRE_URL` / `ROUTINE_FIRE_TOKEN`). Nothing started.")
-        print("::error::ROUTINE_FIRE_URL or ROUTINE_FIRE_TOKEN is not set")
+                f"configured (`{url_name}` / `{token_name}`). Nothing started.")
+        print(f"::error::{url_name} or {token_name} is not set")
         return 1
     try:
         payload = fire(fire_url, token, number)

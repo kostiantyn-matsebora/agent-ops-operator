@@ -222,7 +222,6 @@ case "$*" in
   "pr view "*"mergeStateStatus,body"*) printf '{"mergeStateStatus":"%s","body":"Refs #5"}\n' "${MERGE_STATE:-CLEAN}" ;;
   "pr view "*"baseRefName"*) echo master ;;
   "issue view "*"--jq"*) printf '%s\n' ${ISSUE_LABELS:-} ;;
-  "issue view "*"--json labels"*) python3 -c 'import json,os,sys;print(json.dumps({"labels":[{"name":n} for n in os.environ.get("ISSUE_LABELS","").split()]}))' ;;
   "workflow run"*) [ -z "${GH_DISPATCH_FAILS:-}" ] || { echo "HTTP 422" >&2; exit 1; } ;;
 esac
 exit 0
@@ -571,6 +570,7 @@ it "labelled: a clean round on a head the platform cannot read yet is waiting, n
 fresh_repo
 out=$(MERGE_STATE=UNKNOWN WORK="$tmp/none.json" land_all); rc=$?
 assert_not_contains "$(loop_label)" "mergeable"
+assert_equals "waiting" "$(loop_label)"
 
 it "labelled: a clean round while the testing station has not passed does not claim mergeable"
 fresh_repo
