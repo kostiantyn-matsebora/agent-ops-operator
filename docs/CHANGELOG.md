@@ -10,6 +10,23 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+### Added
+
+- **A testing station in the delivery workflow.** Between implement and fix, a
+  session runs the unit, system and e2e tests, measures the coverage of the lines
+  the pull request adds against floors of 90, 70 and 50 percent, and has a
+  different model write what is missing. Behaviour that depends on the model is
+  tested against a real one. The fixing loop now also merges the base branch in.
+  Delivery tooling only: no chart value, image or CRD changes, and no upgrade step.
+
+### Fixed
+
+- **`runtime-claude` read a failed resume against an unreadable context store as
+  `continued`.** The vendor opens a new session and returns its id on the error
+  result, and that id was counted as a recovery, so the outage check never ran. A
+  failed turn now counts as recovered only when it says something, and the run
+  reports the outage. Takes effect with the next `runtime-claude` image.
+
 ## [24.0.0] — 2026-11-22
 
 Images: manager 0.66.0, console 0.46.0, runtime-pi 0.2.0, runtime-ollama 0.2.0. Every other image is unchanged.

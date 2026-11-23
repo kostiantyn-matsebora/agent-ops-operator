@@ -18,6 +18,8 @@
 //	SYSTEM_ARTIFACT_DIR   where failure diagnostics are written (default $TMPDIR/agentops-e2e)
 //	SYSTEM_TIER           smoke (default) or full — full adds the real-runtime lane
 //	SYSTEM_BUDGET         wall-clock budget of the gating tier (default 20m)
+//	SYSTEM_COVER=1        build the manager with -cover, and write system-coverage.out into
+//	                      SYSTEM_ARTIFACT_DIR when the pack ends (cover.go)
 //	SYSTEM_STATE_BACKEND  pins stateStore.backend for the WHOLE pack (task 5.7's
 //	                      kube-fallback smoke run); empty leaves the chart's own
 //	                      default (nats) untouched
@@ -101,6 +103,18 @@ func run(m *testing.M) int {
 			cluster.Delete()
 		}
 	}()
+	if coverEnabled() {
+		bin, err := buildRenderer(ctx)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "coverage:", err)
+			return 1
+		}
+		cluster.PostRenderer = bin
+		if err := prepareCover(ctx, cluster); err != nil {
+			fmt.Fprintln(os.Stderr, "coverage:", err)
+			return 1
+		}
+	}
 	if os.Getenv("SYSTEM_SKIP_BUILD") != "1" {
 		if err := BuildAndImport(ctx, cluster, neededImages(tier)); err != nil {
 			fmt.Fprintln(os.Stderr, "images:", err)
@@ -137,6 +151,13 @@ func run(m *testing.M) int {
 		return 1
 	}
 	code = m.Run()
+	if coverEnabled() {
+		// BEST EFFORT, NEVER THE PACK'S VERDICT: a run that could not collect leaves no
+		// profile, and the testing station reads that as a collection failure.
+		if err := CollectCover(ctx, cluster, artifact); err != nil {
+			fmt.Fprintln(os.Stderr, "coverage:", err)
+		}
+	}
 	return enforceSmokeBudget(code)
 }
 

@@ -13,7 +13,10 @@ RUN go mod download
 COPY api/ api/
 COPY cmd/ cmd/
 COPY internal/ internal/
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -o /out/manager ./cmd/manager
+# GOCOVER=1 builds an instrumented operator for the system tier's coverage run (test/system/cover.go).
+ARG GOCOVER=""
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build ${GOCOVER:+-cover -covermode=atomic} -o /out/manager ./cmd/manager
 
 FROM gcr.io/distroless/static:nonroot
 LABEL org.opencontainers.image.source=https://github.com/kostiantyn-matsebora/agent-ops-operator

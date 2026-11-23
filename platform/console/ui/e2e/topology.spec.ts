@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './support/coverage'
 
 // The topology smoke test: load the graph, drive three synthetic events, and
 // assert the animated edges are the ones the events name — then toggle an

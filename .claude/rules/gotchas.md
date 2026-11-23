@@ -47,6 +47,19 @@
 | A `pull_request` run's `base.sha` freezes at opening | diff `origin/<base>...<head>`, `fetch-depth: 0` |
 | `t.Run` does NOT lower Sonar's `go:S3776` (closure charges the enclosing fn) | extract to a separate named top-level function |
 
+### The testing station
+
+| Gotcha | Fix |
+|---|---|
+| A tier that ran but left no coverage file reads as "0 lines changed" and passes | no data is `collection_failed`, never a pass |
+| A stub-runtime run proves plumbing only | an agent-facing diff needs a real-model run, and without one no tier passes |
+| The tester's model equal to the author's tests the author's beliefs | `testing-station.py models` exits 5 on equal or unset |
+| A cloud session never sees `CLAUDE_CODE_OAUTH_TOKEN`, though the environment sets it: the platform owns that name for its own login | store the credential as `AGENTOPS_REAL_MODEL_TOKEN`, and map it for the test process only |
+| An image build in a cloud session hangs at `npm ci` and dies with `Exit handler never called`: the sandbox re-signs HTTPS with a CA the host trusts and a build container does not (a bridge container reaches the network directly, the loopback proxy is irrelevant) | `SYSTEM_BUILD_CA=<host bundle>` makes the pack bake it into local copies of the base images (`buildca.go`) |
+| A cloud session cannot run the system pack: images build and k3s starts (with `fail-cgroupv1=false` and `SYSTEM_BUILD_CA`), then every pod sandbox fails with runc `oom_score_adj: Permission denied`, nine probes in | do not try again: dispatch `system-full.yml -f cover=true` and read `system-coverage.out` from its artifact |
+| `k3d cluster create` times out on a cloud session: its host is cgroup v1, and k3s's kubelet refuses to start on one | `--kubelet-arg=fail-cgroupv1=false@server:0` in the pack's create call |
+| The e2e-live specs run against an UNinstrumented console | browser coverage comes from the mocked suite (`npm run test:e2e:coverage`) only |
+
 ### The conveyor loop — one drifted rule per issue, now in `conveyor.py`
 
 | # | Was | Fixed by |
@@ -63,6 +76,7 @@
 | — | `run-name:` breaks a `workflow_run.name` match | match `.path` instead |
 | #325 | `land`'s self-dispatch (`workflow_dispatch`, always sent as the bot) required a standing grant even when a person placed `conveyor:fix` directly, with none needed | gate on `trigger.label_carried` too, not `trigger.sender.bot` alone |
 | #325 | `land-dispatch.py` checked only a finding's own anchor `path`, so a correct fix landed in a second file the finding's own `Where:` line named read as `unaddressed` | accept a patch touching any path the finding's `Where:` line names |
+| The coordinator's prompt grew past 128 KiB on a long-lived pull request (every thread is in it), and `claude -p "$prompt"` died with `Argument list too long` before reading, so the review posted nothing and `review-clean` stayed red | pass the prompt on STDIN (`< "$prompt_file"`), never as an argument |
 
 ### Replica scaling — chat delivery and rollout races above 1 replica
 

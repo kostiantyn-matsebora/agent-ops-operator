@@ -99,6 +99,9 @@ func BuildAndImport(ctx context.Context, c *Cluster, need map[string]bool) error
 	sort.Strings(skipped)
 	fmt.Fprintf(os.Stderr, "building %d images: %s\nNOT built for this tier (not installed by it): %s\n",
 		len(chosen), strings.Join(build, " "), strings.Join(skipped, " "))
+	if err := prepareBuildCA(ctx, chosen); err != nil {
+		return err
+	}
 	for _, img := range chosen {
 		if err := dockerBuild(ctx, img); err != nil {
 			return err
@@ -112,8 +115,12 @@ func dockerBuild(ctx context.Context, img Image) error {
 	root := repoRoot()
 	args := []string{"buildx", "build", "--load",
 		"-f", filepath.Join(root, img.Dockerfile),
-		"-t", img.Tag,
-		filepath.Join(root, img.Context)}
+		"-t", img.Tag}
+	// THE COVERAGE RUN's manager is built with `go build -cover` (cover.go).
+	if coverEnabled() && img.Component == "manager" {
+		args = append(args, "--build-arg", "GOCOVER=1")
+	}
+	args = append(args, filepath.Join(root, img.Context))
 	cmd := exec.CommandContext(ctx, lookPath("docker"), args...)
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	fmt.Fprintf(os.Stderr, "== docker build %s (%s)\n", img.Tag, img.Context)

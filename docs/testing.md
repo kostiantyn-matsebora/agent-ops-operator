@@ -109,6 +109,38 @@ together, could expose:
 | `E2E_LIVE_NAMESPACE` | the namespace fixtures are created in — default `agent-ops` |
 | `E2E_LIVE_KUBECTL` | overrides the `kubectl` binary resolved from an absolute `PATH` entry |
 
+## The testing station: coverage of the lines a change adds
+
+The delivery workflow's testing station (`.github/routines/test-change.md`) is a
+session, never a CI job. It runs each tier itself.
+
+It judges the **lines the pull request adds or changes**, per tier: 90 percent for
+unit, 70 for system, 50 for e2e. A tier with no changed lines in its domain is not
+applicable.
+
+A tier that ran but left no coverage file fails as a collection failure. It never
+reads as zero changed lines.
+
+| Tier | Coverage comes from |
+|---|---|
+| unit | `go test -coverpkg`, vitest, `node --test`, the script suites |
+| system | the operator built with `-cover` (`SYSTEM_COVER=1`), written to `system-coverage.out` when the pack ends |
+| e2e | the mocked browser suite against a build instrumented by `E2E_COVERAGE=1` (`npm run test:e2e:coverage`). `e2e-live` runs against an uninstrumented console and contributes none |
+
+Where a change alters what the agent is told, which tools it holds, or how its
+output is read, the station runs the tests that drive a conversation against a
+real runtime.
+
+The path list is `testing.agent_facing_paths` in `.github/review-triage.json`. The
+session may add to it and never waive it.
+
+The credential is an environment variable. A workstation or CI holds the vendor's
+own name, `CLAUDE_CODE_OAUTH_TOKEN`. A cloud session strips that name, so its
+environment stores `AGENTOPS_REAL_MODEL_TOKEN` and the station maps it for the
+test process only. With neither, the station stops.
+
+Tests written for the real model assert outcomes, never wording.
+
 ## What gates a pull request
 
 **Contract conformance, and nothing that needs a cluster.** It is a minute of

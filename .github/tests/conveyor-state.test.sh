@@ -69,6 +69,19 @@ has "station:archive"
 run --target 51 --station-event fire:implement >/dev/null
 assert_equals "0" "$(edits)"
 
+it "the testing station's round trip: implement to testing on the start, testing to fix on a pass, and back on a restart"
+has "station:implement"
+run --target 51 --station-event testing:start >/dev/null
+assert_contains "$(grep '^issue edit' "$GH_CALLS")" "--add-label station:testing"
+has "station:testing"
+run --target 51 --station-event testing:passed >/dev/null
+call=$(grep '^issue edit' "$GH_CALLS")
+assert_contains "$call" "--add-label station:fix"
+assert_contains "$call" "--remove-label station:testing"
+has "station:fix"
+run --target 51 --station-event testing:restart >/dev/null
+assert_contains "$(grep '^issue edit' "$GH_CALLS")" "--add-label station:testing"
+
 it "a target somehow showing two values is read as the most advanced one"
 has "station:implement station:merge"
 run --target 51 --station-event merge:finished_carried >/dev/null
@@ -76,7 +89,7 @@ assert_contains "$(grep '^issue edit' "$GH_CALLS")" "--add-label station:archive
 
 it "reads the names from the vocabulary, never from its own text"
 names=$(python3 -c 'import json;v=json.load(open("'"$ROOT"'/.github/review-triage.json"));print(" ".join(sorted(v["station_labels"].values())+sorted(v["loop_labels"].values())))')
-assert_equals "station:archive station:done station:fix station:implement station:merge station:stalled loop:capped loop:mergeable loop:running loop:stalled loop:waiting" "$names"
+assert_equals "station:archive station:done station:fix station:implement station:merge station:stalled station:testing loop:capped loop:mergeable loop:running loop:stalled loop:waiting" "$names"
 
 it "an unknown event is a notice and exit 0, and nothing is edited"
 has "station:fix"

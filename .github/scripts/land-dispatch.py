@@ -119,6 +119,15 @@ def pr_comment(repo: str, pr: int, body: str) -> None:
     gh("pr", "comment", str(pr), "--repo", repo, "--body", body)
 
 
+def marker_stands(repo: str, pr: int, marker: str) -> bool:
+    """A comment carrying `marker` is already on the pull request. Unreadable counts as standing,
+    so nothing is posted twice."""
+    try:
+        return marker in gh("api", f"repos/{repo}/issues/{pr}/comments", "--paginate", "--jq", ".[].body")
+    except subprocess.CalledProcessError:
+        return True
+
+
 def thread_reply(repo: str, pr: int, comment_id: int, body: str) -> None:
     gh("api", f"repos/{repo}/pulls/{pr}/comments/{comment_id}/replies", "-f", f"body={body}")
 
@@ -185,7 +194,9 @@ def load_markers(path: pathlib.Path) -> dict:
             "round": doc.get("round_marker", "<!-- conveyor:round"),
             "grant": doc.get("grant_marker", "<!-- conveyor:grant -->"),
             "refresh": doc.get("refresh_marker", "<!-- conveyor:refreshed -->"),
-            "keep_going": doc.get("keep_going_label", "conveyor:keep-going")}
+            "keep_going": doc.get("keep_going_label", "conveyor:keep-going"),
+            "conflict": doc.get("conflict_marker", "<!-- conveyor:conflict -->"),
+            "testing_label": (doc.get("station_labels") or {}).get("testing", "station:testing")}
 
 
 # THE FIXING STEP'S OWN PROMPT ASKS FOR AT MOST 40 WORDS (this repository's
@@ -293,6 +304,7 @@ class Round:
         self.work = work
         self._comments_cache: list[dict] | None = None
         self.number = self.count_rounds() + 1
+        self.issue: int | None = None
         self.sonar = self.read_json(self.args.sonar)
         self.checks = self.read_json(getattr(self.args, "checks", None))
         # THE EFFECTIVE CAP, not the bare constant. Each grant ADDS a full set
@@ -473,6 +485,84 @@ class Round:
             return True, "a review thread opened since collect ran"
         return True, f"review-not-clean.py could not be read (exit {rc})"
 
+    def restart_testing(self) -> None:
+        """A merge of the base changed the head: the tests judged an earlier one. The issue's station
+        goes back to `testing`, and the new head's CI completion starts the station's round."""
+        script = self.args.state_script
+        if not self.issue or not script or not pathlib.Path(script).is_file():
+            return
+        sh(sys.executable, str(script), "--repo", self.args.repo, "--target", str(self.issue),
+           "--station-event", "testing:restart", "--vocabulary", str(self.args.vocabulary), check=False)
+
+    def generated_paths(self) -> list:
+        try:
+            return json.loads(self.args.vocabulary.read_text())["testing"]["generated_paths"]
+        except (OSError, ValueError, KeyError):
+            return []
+
+    def merge_facts(self) -> dict:
+        """What GitHub says about merging this head, and whether the testing station has passed on it.
+
+        UNREADABLE IS NOT MERGEABLE. A state that cannot be read is `UNKNOWN`, which the machine
+        defers on, so a failed lookup never ends a loop `mergeable` over a conflict."""
+        a = self.args
+        try:
+            view = json.loads(gh("pr", "view", str(a.pr), "--repo", a.repo, "--json", "mergeStateStatus,body"))
+        except (subprocess.CalledProcessError, ValueError):
+            return {"merge_state": "UNKNOWN"}
+        state = view.get("mergeStateStatus") or "UNKNOWN"
+        m = re.search(r"\b(?:Refs|Closes)\s+#(\d+)", view.get("body") or "")
+        testing_passed = True
+        self.issue = int(m.group(1)) if m else None
+        if not m:
+            # NO TRACKING ISSUE, NO TESTING STATION: the station belongs to an issue's lane, so a pull request
+            # that names none is judged by the rest, and the log says the check did not apply.
+            print(f"::notice::#{a.pr} names no tracking issue, so the testing station does not apply to it")
+        if m:
+            try:
+                labels = gh("issue", "view", m.group(1), "--repo", a.repo, "--json", "labels",
+                            "--jq", ".labels[].name").splitlines()
+                testing_passed = self.markers["testing_label"] not in labels
+            except subprocess.CalledProcessError:
+                testing_passed = False
+        return {"merge_state": state, "testing_passed": testing_passed}
+
+    def sync_branch(self) -> dict | None:
+        """Bring the branch up to date with its base, in this checkout, and push it.
+
+        NO MODEL RESOLVES A CONFLICT: `merge-sync.py` merges, regenerates what a repository script
+        regenerates, and otherwise aborts and names the files. Only a push through the deploy key
+        starts CI, so without one nothing is attempted and the caller asks a person instead.
+        Returns the sync's result, or None when it did not run."""
+        a = self.args
+        script = getattr(a, "merge_sync_script", None)
+        if not (script and pathlib.Path(script).is_file() and a.push_starts_workflows):
+            return None
+        try:
+            base = gh("pr", "view", str(a.pr), "--repo", a.repo, "--json", "baseRefName", "--jq", ".baseRefName").strip()
+        except subprocess.CalledProcessError:
+            return None
+        before = sh("git", "rev-parse", "HEAD", check=False).stdout.strip()
+        fetched = sh("git", "fetch", "-q", "origin", base, check=False)
+        if fetched.returncode != 0:
+            print(f"the base could not be fetched, so it is not merged in:\n{fetched.stderr}", file=sys.stderr)
+            return None
+        out = sh(sys.executable, str(script), "--base", base, "--vocabulary", str(a.vocabulary), check=False)
+        try:
+            result = json.loads(out.stdout.strip().splitlines()[-1])
+        except (IndexError, ValueError):
+            return None
+        if result.get("action") in ("updated", "regenerated"):
+            push = sh("git", "push", "origin", f"HEAD:refs/heads/{a.branch}", check=False)
+            if push.returncode != 0:
+                print(f"the merge of the base could not be pushed:\n{push.stderr}", file=sys.stderr)
+                # BACK TO WHAT THE SYNC STARTED FROM, never `HEAD~1`: a merge that fast-forwards, or one that
+                # also regenerated files, is not one commit.
+                if before:
+                    sh("git", "reset", "-q", "--hard", before, check=False)
+                return None
+        return result
+
     def summary(self, ending: str, fixed: list[str], disputed: dict[str, str], sha: str | None = None,
                 note: str = "", unaddressed: dict[str, str] | None = None,
                 refreshed: dict[str, str] | None = None) -> None:
@@ -492,8 +582,43 @@ class Round:
             thread_open, why = self.threads_still_open()
             if thread_open:
                 print(f"clean ending, but {why}; loop label set to waiting")
+        merge = {}
+        if kind == "clean" and not thread_open:
+            merge = self.merge_facts()
+            if merge["merge_state"] in ("BEHIND", "DIRTY"):
+                synced = self.sync_branch()
+                if synced and synced["action"] == "uptodate":
+                    # THE BASE IS ALREADY IN THE BRANCH, so GitHub's BEHIND/DIRTY is stale: it has not recomputed
+                    # since the last push. Nothing can be said yet, which the machine defers on.
+                    merge["merge_state"] = "UNKNOWN"
+                elif synced and synced["action"] in ("updated", "regenerated"):
+                    note = (note + "\n" if note else "") + (
+                        "The branch was behind its base" if synced["action"] == "updated" else
+                        "The branch conflicted with its base in generated files only") + \
+                        ", so the base was merged in" + (" and the files regenerated" if synced["action"] == "regenerated" else "") + \
+                        ". CI and the review run on the new head."
+                    merge = {"merge_state": "CLEAN", "testing_passed": False}   # the new head is judged afresh
+                    self.restart_testing()
+                elif synced and synced["action"] == "asked" and synced.get("files"):
+                    merge["conflicted"] = synced["files"]
+                    kind_of = ("generated files that the repository's script could not regenerate"
+                               if conveyor.classify_conflict(synced["files"], self.generated_paths()) == "trivial"
+                               else "hand-written files")
+                    why = (synced.get("reason") or "").strip()
+                    if not marker_stands(a.repo, a.pr, self.markers["conflict"]):
+                        pr_comment(a.repo, a.pr, f"{self.markers['conflict']}\nThis branch conflicts with its base in "
+                                   f"{kind_of}, and the loop does not choose a side. Resolve "
+                                   f"{', '.join('`' + f + '`' for f in synced['files'])} and push, or answer here "
+                                   f"with how to resolve it. Any comment from you resumes the loop."
+                                   + (f"\n\nWhat the sync reported: {why}" if why else ""))
+                    merge["sync_action"] = "asked"
+                elif merge["merge_state"] == "DIRTY":
+                    merge["conflicted"] = ["(not read: the base could not be merged here)"]
+        if kind == "clean" and merge:
+            merge.setdefault("checks_failed", len((self.checks or {}).get("items") or []))
         decision = conveyor.ending(kind, self.number, self.cap, thread_open=thread_open,
-                                   waiting_on_person=kind == "clean" and self.waiting_on_person())
+                                   waiting_on_person=kind == "clean" and self.waiting_on_person(),
+                                   generated_paths=self.generated_paths(), **merge)
         self.apply_loop(decision.loop_event)
         # A RETRY STARTS THE NEXT ROUND ITSELF, before the summary is composed so
         # the one summary says what happened. A dispatch that fails is its own
@@ -641,6 +766,10 @@ def main() -> int:
                     help="review-not-clean.py, restored beside this program by the workflow; read LIVE "
                          "before a clean ending claims mergeable, since collect's own read of the "
                          "threads is a snapshot from the start of the round")
+    ap.add_argument("--merge-sync-script", type=pathlib.Path,
+                    default=pathlib.Path(__file__).with_name("merge-sync.py"),
+                    help="merge-sync.py, restored beside this program by the workflow; brings the branch up to "
+                         "date with its base before a clean ending claims mergeable")
     args = ap.parse_args()
     if args.mode == "all" and not args.approver:
         args.approver = args.dispatched_by
