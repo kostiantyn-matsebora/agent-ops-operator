@@ -32,8 +32,22 @@ VOCAB = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
 MARKERS = ("<<<<<<< ", "=======\n", ">>>>>>> ")
 
 
+_IDENTITY: list | None = None
+
+
+def identity() -> list:
+    """The `-c` pair for a commit when the checkout names nobody. A runner has no global git identity, and a
+    merge commit made without one fails with "Committer identity unknown", which read as a conflict."""
+    global _IDENTITY
+    if _IDENTITY is None:
+        have = subprocess.run(["git", "config", "user.email"], capture_output=True, text=True).stdout.strip()
+        _IDENTITY = [] if have else ["-c", "user.name=github-actions[bot]",
+                                     "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com"]
+    return _IDENTITY
+
+
 def git(*args, check=True):
-    return subprocess.run(["git", *args], capture_output=True, text=True, check=check)
+    return subprocess.run(["git", *identity(), *args], capture_output=True, text=True, check=check)
 
 
 def conflicted_files() -> list:
