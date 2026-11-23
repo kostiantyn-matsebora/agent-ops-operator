@@ -119,6 +119,7 @@ For each round, in order:
    cd platform/console/ui
    npm run test:e2e:coverage                          # mocked API, instrumented build: the coverage
    npx playwright test --config e2e-live/playwright.config.ts   # the real console on the cluster the system tier left up (SYSTEM_REUSE=1)
+   # a cloud session has no cluster (the system tier ran in CI), so e2e-live is workstation-only and contributes no coverage there
    ```
 
    - The mocked suite serves a build instrumented by `E2E_COVERAGE=1`, and writes
