@@ -64,7 +64,7 @@ The session runs each tier in its own environment, then `coverage-diff.py` over 
 
 - It is a project agent definition whose model is set to Sonnet 5. It must differ from the session's model, and `testing-station.py models` fails closed when they are equal or either is unset.
 - It runs with its own context, so it sees the change's specs, design, the diff's public signatures and the uncovered line list, and never the session's reasoning.
-- It writes test files only. After it returns, `testing-station.py check-tree` refuses a change to any path outside the test path list, and the session reverts it.
+- It writes test files only. After it returns, `testing-station.py check-tree` `--role tester` refuses a change to any uncommitted path outside the test path list, and the session reverts it. For the session's own edits, `--role fixer` refuses a change to any file a tester commit authored, and nothing else.
 - The session may not edit a file the tester authored, found by a commit trailer. It disputes it instead, and the tester judges the dispute in the next round.
 - Alternative: one model writes code and tests. Rejected by the requirement, since it grades its own work.
 

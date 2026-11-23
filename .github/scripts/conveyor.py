@@ -435,8 +435,10 @@ def carry_fix(vocab: dict, pr: PullRequest, line: Line, placer: Placer | None) -
     if vocab["station_labels"]["testing"] in line.issue_labels:
         return Decision("nothing", f"#{issue} is at the testing station: its tests pass before a fixing round starts")
     # GREEN IS NOT MERGEABLE: a head behind its base or in conflict is red to a person who tries to merge it.
+    # The testing label is absent here (the guard above returned otherwise), so the tests have passed on this line.
+    testing_passed = vocab["station_labels"]["testing"] not in line.issue_labels
     green = (pr.ci_conclusion == "success" and not pr.thread_open
-             and merge_ready(pr.merge_state).action == "mergeable")
+             and merge_ready(pr.merge_state, testing_passed=testing_passed).action == "mergeable")
     return Decision("carry", f"carried `{grant}` from #{issue}", station="fix", grant=grant,
                     dispatch_round=pr.review_completed,
                     loop_event="ci:green_clean" if green else "",
@@ -983,7 +985,11 @@ def merge_ready(merge_state: str, checks_failed: int = 0, thread_open: bool = Fa
       update      the head is behind its base and merges clean: the line merges the base in
       regenerate  only generated files conflict: the line regenerates them
       ask         a hand-written file conflicts: the loop waits on a person
-      defer       GitHub has not computed the state, or checks are still going"""
+      defer       GitHub has not computed the state, or checks are still going
+
+    CLEAN, HAS_HOOKS and UNSTABLE all END `mergeable`: GitHub reports HAS_HOOKS when only
+    non-required commit-status hooks remain and UNSTABLE when only non-required checks fail,
+    and neither blocks a merge. A REQUIRED check failing is `checks_failed`, handled above."""
     if merge_state not in MERGE_STATES:
         raise ValueError(f"unknown merge state {merge_state!r}")
     if checks_failed:

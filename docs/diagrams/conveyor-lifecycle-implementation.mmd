@@ -58,7 +58,7 @@ flowchart TD
     TFIRE["remote-implement.yml · open<br/>station:testing, conveyor:run carried:<br/>fire the session once, under its own marker"]:::workflow
     TSESS["cloud session · test-change.md<br/>real-model gate · unit, system, e2e tiers<br/>coverage of the added lines · tester agent (another model)<br/>judge + one report comment, edited in place"]:::session
     TPASS["passed: dispatch the carry on the pushed head"]:::workflow
-    TSTOP(["capped, or the real model needed and unset<br/>conveyor:keep-going resumes it"]):::stop
+    TSTOP(["capped, the real model needed and unset,<br/>or the environment cannot run a tier<br/>conveyor:keep-going resumes it"]):::stop
     TFIRE --> TSESS --> TPASS
     TSESS --> TSTOP
   end

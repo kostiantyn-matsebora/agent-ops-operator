@@ -94,6 +94,11 @@ be brought up to date.
 - **WHEN** no required check failed, no thread is open, no analysis issue is unaddressed, GitHub reports a clean merge state and the testing station passed on this head
 - **THEN** the loop ends `mergeable`
 
+#### Scenario: A fixer pushes after the tests passed
+
+- **WHEN** a fixing round pushes new commits to the head after the testing station passed
+- **THEN** the testing station runs again on the new head, and the loop does not end `mergeable` until it has passed
+
 #### Scenario: One condition disagrees
 
 - **WHEN** the merge state is clean but a thread is open, or the testing station has not passed on this head

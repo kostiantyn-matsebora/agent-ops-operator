@@ -590,8 +590,6 @@ class Round:
                         ". CI and the review run on the new head."
                     merge = {"merge_state": "CLEAN", "testing_passed": False}   # the new head is judged afresh
                     self.restart_testing()
-                elif synced and synced["action"] == "uptodate":
-                    merge = self.merge_facts()   # the base is already in: read the state afresh, never the stale BEHIND
                 elif synced and synced["action"] == "asked" and synced.get("files"):
                     merge["conflicted"] = synced["files"]
                     kind_of = ("generated files that the repository's script could not regenerate"

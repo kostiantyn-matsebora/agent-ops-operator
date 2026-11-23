@@ -165,7 +165,8 @@ For each round, in order:
    ```
 
    Commit and push to `change/<name>`. A round in which no model ran spends nothing, so do
-   not record one that did nothing.
+   not record one that did nothing, and pass `--no-model` (no model ran) or `--no-change`
+   (nothing changed) to `judge` in step 6 for such a round.
 
 The station ends when `judge` says `passed` or `capped`. At `capped` it is stalled, the
 report names what is left, and a person decides.
