@@ -578,7 +578,11 @@ class Round:
             merge = self.merge_facts()
             if merge["merge_state"] in ("BEHIND", "DIRTY"):
                 synced = self.sync_branch()
-                if synced and synced["action"] in ("updated", "regenerated"):
+                if synced and synced["action"] == "uptodate":
+                    # THE BASE IS ALREADY IN THE BRANCH, so GitHub's BEHIND/DIRTY is stale: it has not recomputed
+                    # since the last push. Nothing can be said yet, which the machine defers on.
+                    merge["merge_state"] = "UNKNOWN"
+                elif synced and synced["action"] in ("updated", "regenerated"):
                     note = (note + "\n" if note else "") + (
                         "The branch was behind its base" if synced["action"] == "updated" else
                         "The branch conflicted with its base in generated files only") + \
