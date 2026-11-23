@@ -76,6 +76,7 @@
 | — | `run-name:` breaks a `workflow_run.name` match | match `.path` instead |
 | #325 | `land`'s self-dispatch (`workflow_dispatch`, always sent as the bot) required a standing grant even when a person placed `conveyor:fix` directly, with none needed | gate on `trigger.label_carried` too, not `trigger.sender.bot` alone |
 | #325 | `land-dispatch.py` checked only a finding's own anchor `path`, so a correct fix landed in a second file the finding's own `Where:` line named read as `unaddressed` | accept a patch touching any path the finding's `Where:` line names |
+| The coordinator's prompt grew past 128 KiB on a long-lived pull request (every thread is in it), and `claude -p "$prompt"` died with `Argument list too long` before reading, so the review posted nothing and `review-clean` stayed red | pass the prompt on STDIN (`< "$prompt_file"`), never as an argument |
 
 ### Replica scaling — chat delivery and rollout races above 1 replica
 

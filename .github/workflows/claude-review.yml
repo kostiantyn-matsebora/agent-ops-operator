@@ -551,13 +551,17 @@ jobs:
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/review-execution.jsonl"
-          prompt=$(python3 .github/scripts/review-prompt.py coordinator --input review-input.json --readings readings)
+          # THE PROMPT GOES IN ON STDIN, NEVER AS AN ARGUMENT: one argument may not exceed 128 KiB (MAX_ARG_STRLEN),
+          # and a pull request with a long thread history made the coordinator's message 147 KB, so `claude` failed
+          # with "Argument list too long" before it read a word and the review posted nothing.
+          prompt_file="$RUNNER_TEMP/coordinator-prompt.md"
+          python3 .github/scripts/review-prompt.py coordinator --input review-input.json --readings readings > "$prompt_file"
           conclusion=success
-          claude -p "$prompt" --agent review-coordinator \
+          claude -p --agent review-coordinator \
             --output-format stream-json --verbose --json-schema "$POST_SCHEMA" \
             --model "$CLAUDE_MODEL" --effort "$CLAUDE_EFFORT" --settings "$CLAUDE_SETTINGS" \
             --allowedTools "Read,Grep,Glob,Bash(git grep:*)" \
-            > "$out" || conclusion=failure
+            < "$prompt_file" > "$out" || conclusion=failure
           echo "execution_file=$out" >> "$GITHUB_OUTPUT"
           last=$(grep '"type":"result"' "$out" | tail -1 || true)
           [ -n "$last" ] || conclusion=failure

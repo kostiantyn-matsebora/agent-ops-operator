@@ -192,7 +192,8 @@ assert_contains "$c" "review-post.py post.json --coverage coverage.json"
 
 it "the coordinator runs its role in consolidate, and holds the summary gate and the resolve list"
 assert_contains "$c" ".github/scripts/mark-thread-resolved.sh"
-assert_contains "$c" 'claude -p "$prompt" --agent review-coordinator'
+assert_contains "$c" 'claude -p --agent review-coordinator'
+assert_contains "$c" '< "$prompt_file"'
 assert_contains "$c" '--output-format stream-json'
 assert_contains "$c" 'review-prompt.py coordinator --input review-input.json --readings readings'
 assert_contains "$c" 'post-result.json'
