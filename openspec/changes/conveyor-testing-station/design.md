@@ -129,3 +129,11 @@ A script renders it from the round's numbers and edits it in place through the i
 4. Enable it by the implement session's hand-over.
 
 Rollback is removing the hand-over, so `implement` goes to `fix` as before.
+
+## Known follow-up
+
+`review-dispatch.yml` is NOT changed here, because the fixing action refuses to run on a pull request
+whose copy of that workflow differs from the default branch's. The `land` job restores its scripts from the
+base branch by name, so `merge-sync.py` is absent there until a follow-up change adds it to that list.
+`land-dispatch.py` treats an absent script as "no sync ran" and asks a person, so the loop stays correct
+and only the automatic merge of the base waits for that one-word change.

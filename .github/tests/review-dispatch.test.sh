@@ -493,7 +493,7 @@ assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["env"]["FIX_TIMED_OU
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '$FIX_TIMED_OUT'
 
 it "land restores conveyor-state.py, conveyor.py (which both import) AND review-not-clean.py beside the landing programs, and hands them to land-dispatch.py"
-assert_contains "$(py 'print(d["jobs"]["land"])')" "for s in land-dispatch.py resolve-review-threads.py conveyor-state.py conveyor.py review-not-clean.py merge-sync.py; do"
+assert_contains "$(py 'print(d["jobs"]["land"])')" "for s in land-dispatch.py resolve-review-threads.py conveyor-state.py conveyor.py review-not-clean.py; do"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--state-script "$RUNNER_TEMP/conveyor-state.py"'
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--thread-check-script "$RUNNER_TEMP/review-not-clean.py"'
 
