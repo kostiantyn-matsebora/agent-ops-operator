@@ -202,6 +202,16 @@ class TheVerdict(unittest.TestCase):
         self.assertEqual({("failing_tests", "system", "fixer"), ("not_run", "e2e", "fixer")},
                          {(w["kind"], w["tier"], w["session"]) for w in j["work"]})
 
+    def test_a_skipped_tier_with_nothing_to_measure_is_not_applicable_not_not_run(self):
+        j = tr.judge(V, {"unit": cov(95, 100), "system": cov(0, 0, domain=0), "e2e": cov(0, 0, domain=0)},
+                     {**PASSED, "e2e": "skipped"})
+        self.assertEqual("not_applicable", j["verdicts"][2]["status"])
+
+    def test_a_skipped_tier_with_changed_lines_is_not_run(self):
+        j = tr.judge(V, {"unit": cov(95, 100), "system": cov(0, 0, domain=0), "e2e": cov(5, 10)},
+                     {**PASSED, "e2e": "skipped"})
+        self.assertEqual("not_run", j["verdicts"][2]["status"])
+
     def test_a_missing_outcome_or_an_unknown_tier_is_refused_not_defaulted(self):
         with self.assertRaises(ValueError):
             tr.judge(V, {"unit": cov(95, 100)}, {"unit": "passed"})

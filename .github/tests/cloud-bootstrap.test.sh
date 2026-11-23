@@ -111,7 +111,7 @@ assert_status 0 "$status"
 assert_contains "$out" "k3d"
 assert_contains "$out" "kubectl"
 
-it "a container runtime that does not answer and has no dockerd is named, never fatal"
+it "no container engine answering, and no dockerd to start, is named and never fatal"
 make_env absent
 printf '#!/bin/sh\nexit 1\n' > "$BIN/docker"; chmod +x "$BIN/docker"   # a docker whose daemon cannot be reached
 out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap --verify)

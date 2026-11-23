@@ -566,6 +566,14 @@ assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:conflict -->"
 assert_contains "$(cat "$GH_CALLS")" "\`a.go\`"
 assert_equals "clean" "$(git -C "$tmp/work" status --porcelain | wc -l | tr -d ' ' | sed 's/^0$/clean/')"
 
+it "labelled: BEHIND reported for a head that already has the base is a stale reading: waiting, nothing pushed, never mergeable"
+fresh_repo
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(MERGE_STATE=BEHIND WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_equals "waiting" "$(loop_label)"
+
 it "labelled: a clean round on a head the platform cannot read yet is waiting, never mergeable"
 fresh_repo
 out=$(MERGE_STATE=UNKNOWN WORK="$tmp/none.json" land_all); rc=$?

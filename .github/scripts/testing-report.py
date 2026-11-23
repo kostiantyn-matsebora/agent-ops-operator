@@ -39,7 +39,10 @@ def tier_result(cov: dict | None, outcome: str) -> "conveyor.TierResult":
 
     A tier whose domain holds no changed file is `not applicable` whatever else it did,
     so its tests alone can still fail it but its coverage never can."""
-    ran = outcome != "skipped"
+    domain_empty = cov is not None and cov.get("domain_files", 0) == 0
+    # A TIER WITH NOTHING TO MEASURE IS `not applicable`, never `not run`: skipping a tier the change cannot reach
+    # is no gap. Only a tier that has changed lines in its domain and did not run is.
+    ran = outcome != "skipped" or domain_empty
     passed = outcome != "failed"
     if cov is None:
         return conveyor.TierResult(ran=ran, passed=passed, collected=False)

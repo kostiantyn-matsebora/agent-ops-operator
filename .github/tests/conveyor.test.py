@@ -1015,6 +1015,12 @@ class TheMergeState(unittest.TestCase):
         d = c.ending("clean", 1, 5, checks_failed=1)
         self.assertEqual((True, True), (d.dispatch_round, d.counted))
 
+    def test_the_command_line_forwards_the_syncs_verdict(self):
+        facts = {"kind": "clean", "number": 1, "cap": 5, "merge_state": "DIRTY", "conflicted": ["chart/crds/a.yaml"],
+                 "generated_paths": self.GEN, "sync_action": "asked"}
+        rc, out = TheCommandLine.run_cli(None, "decide", "ending", stdin=json.dumps(facts))
+        self.assertEqual("waiting", json.loads(out)["action"])
+
     def test_a_head_that_cannot_be_judged_yet_is_waiting_not_a_running_round(self):
         d = c.ending("clean", 1, 5, merge_state="UNKNOWN")
         self.assertEqual(("waiting", "end:waiting", False), (d.action, d.loop_event, d.dispatch_round))
