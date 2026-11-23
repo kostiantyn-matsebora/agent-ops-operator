@@ -28,9 +28,8 @@ A stale patch is neither. Nothing landed and every item is still eligible, so
 that round starts the next one itself.
 
 Each SHALL be moved by the workflow performing the transition. At most one
-value of each SHALL be present at a time. State labels are read by nobody but
-people, so a person removing one SHALL change nothing about what the line
-does next.
+value of each SHALL be present at a time. State labels are written only by
+the event that earns them, never by a caller-supplied value.
 
 **Anything else is a second source of truth that drifts.** Labels are already
 what the gates read, what a person sees without leaving the page, and what a

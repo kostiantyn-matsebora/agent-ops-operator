@@ -83,7 +83,11 @@ One session runs rounds. A round runs the tiers, derives the work, acts, and rec
 - `conveyor:keep-going` grants another 5 and is consumed only when it takes effect.
 - A round in which no model ran spends nothing. A round that changed nothing ends the station early.
 - A red that does not reproduce is re-run, and a real-model failure is re-run once.
-- The session pushes its own branch, as the implement session does. The "model never pushes" rule belongs to the fixing job, whose patch is applied by a model-free job with a scoped deploy key, because a fixer answers findings it did not write. The testing session writes the change's own tests on the change's own branch, and `check-tree` refuses any path outside its role first. On passing, the station moves to `fix` and a dispatch of the carry starts the fixing loop on the pushed head.
+- The session pushes its own branch, as the implement session does.
+- The "model never pushes" rule belongs to the fixing job. A fixer answers findings it did not write, so a model-free job applies its patch with a scoped deploy key.
+- The testing session writes the change's own tests on the change's own branch.
+- `check-tree` runs first. `--role tester` refuses any uncommitted path outside the test path list. `--role fixer` refuses only a file a tester commit authored.
+- On passing, the station moves to `fix` and a dispatch of the carry starts the fixing loop on the pushed head.
 
 ### D5a. Whether the real model matters is a judgement with a floor
 

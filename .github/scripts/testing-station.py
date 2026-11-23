@@ -76,7 +76,11 @@ def tester_authored(base: str) -> list:
 
 
 def patch_paths(patch: pathlib.Path) -> list:
-    out = subprocess.run(["git", "apply", "--numstat", "-z", str(patch)], capture_output=True, text=True, check=True).stdout
+    try:
+        out = subprocess.run(["git", "apply", "--numstat", "-z", str(patch)], capture_output=True, text=True,
+                             check=True).stdout
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(f"refused: git cannot read the patch {patch}: {(exc.stderr or '').strip()[:200]}")
     paths = []
     for rec in out.split("\0"):
         parts = rec.split("\t")
@@ -117,7 +121,10 @@ def cmd_begin(args, vocab) -> int:
         # CONSUMED ONLY WHEN IT TAKES EFFECT: the station was out of rounds and a person asked for more.
         io.comment(args.repo, issue, f"{vocab['testing']['grant_marker']}\n`{keep}` grants another "
                    f"{vocab['testing']['max_rounds']} testing rounds.")
-        io.gh("pr", "edit", str(args.pr), "--repo", args.repo, "--remove-label", keep, check=False)
+        try:
+            io.gh("pr", "edit", str(args.pr), "--repo", args.repo, "--remove-label", keep)
+        except RuntimeError as exc:
+            print(f"::warning::`{keep}` could not be removed from #{args.pr} ({exc}): it may grant rounds again")
         if state["stalled"] in labels:
             io.apply_events(args.repo, issue, station_event="testing:resume", vocabulary_path=args.vocabulary)
         used, cap = budget(vocab, comments(args.repo, issue))

@@ -45,8 +45,10 @@ model. A stub run does not count as passing for such a change.
 The station gets five rounds of its own, and `conveyor:keep-going` grants five
 more.
 
-A pull request is mergeable only once it also merges cleanly. The fixing loop
-merges the base in, and asks a person about any conflict in hand-written code.
+A pull request is mergeable only once every required check is green, no review
+thread is open, no analysis issue is unaddressed and it merges cleanly. The
+fixing loop merges the base in, and asks a person about any conflict in
+hand-written code.
 
 Where `conveyor:run` authorised it, a workflow reads the issue again once the
 pull request opens and carries that instruction forward as `conveyor:fix`, so

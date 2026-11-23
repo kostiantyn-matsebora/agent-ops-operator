@@ -99,7 +99,7 @@ For each round, in order:
 
    ```sh
    cd platform/manager
-   SYSTEM_COVER=1 SYSTEM_ARTIFACT_DIR=<dir> go test -tags system -count=1 -timeout 55m -v ./test/system/
+   SYSTEM_REUSE=1 SYSTEM_COVER=1 SYSTEM_ARTIFACT_DIR=<dir> go test -tags system -count=1 -timeout 55m -v ./test/system/
    ```
 
    - It needs a container runtime (`docker` or `nerdctl`, check for both and that it answers:
@@ -125,6 +125,8 @@ For each round, in order:
      `coverage/e2e/lcov.info`. **No file is a collection failure.**
    - `e2e-live` runs against the real console image, which is not instrumented, so it
      verifies and contributes no coverage.
+   - **It needs the cluster the local system tier left up.** After a dispatch to CI there is none,
+     so a cloud session skips `e2e-live` and says so. The mocked suite still counts.
    - Where the real model is required, the live specs that drive a conversation run against
      the real runtime, and assert outcomes: a thread opened, the required sections present,
      no error state. **Never exact wording.** A real-model failure is re-run once before it

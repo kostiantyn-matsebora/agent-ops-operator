@@ -119,6 +119,15 @@ def pr_comment(repo: str, pr: int, body: str) -> None:
     gh("pr", "comment", str(pr), "--repo", repo, "--body", body)
 
 
+def marker_stands(repo: str, pr: int, marker: str) -> bool:
+    """A comment carrying `marker` is already on the pull request. Unreadable counts as standing,
+    so nothing is posted twice."""
+    try:
+        return marker in gh("api", f"repos/{repo}/issues/{pr}/comments", "--paginate", "--jq", ".[].body")
+    except subprocess.CalledProcessError:
+        return True
+
+
 def thread_reply(repo: str, pr: int, comment_id: int, body: str) -> None:
     gh("api", f"repos/{repo}/pulls/{pr}/comments/{comment_id}/replies", "-f", f"body={body}")
 
@@ -596,11 +605,12 @@ class Round:
                                if conveyor.classify_conflict(synced["files"], self.generated_paths()) == "trivial"
                                else "hand-written files")
                     why = (synced.get("reason") or "").strip()
-                    pr_comment(a.repo, a.pr, f"{self.markers['conflict']}\nThis branch conflicts with its base in "
-                               f"{kind_of}, and the loop does not choose a side. Resolve "
-                               f"{', '.join('`' + f + '`' for f in synced['files'])} and push, or answer here "
-                               f"with how to resolve it. Any comment from you resumes the loop."
-                               + (f"\n\nWhat the sync reported: {why}" if why else ""))
+                    if not marker_stands(a.repo, a.pr, self.markers["conflict"]):
+                        pr_comment(a.repo, a.pr, f"{self.markers['conflict']}\nThis branch conflicts with its base in "
+                                   f"{kind_of}, and the loop does not choose a side. Resolve "
+                                   f"{', '.join('`' + f + '`' for f in synced['files'])} and push, or answer here "
+                                   f"with how to resolve it. Any comment from you resumes the loop."
+                                   + (f"\n\nWhat the sync reported: {why}" if why else ""))
                     merge["sync_action"] = "asked"
                 elif merge["merge_state"] == "DIRTY":
                     merge["conflicted"] = ["(not read: the base could not be merged here)"]

@@ -571,6 +571,12 @@ class TheEndings(unittest.TestCase):
         # at the cap the retry ends the loop like every counted round
         self.assertEqual(("capped", False), (c.ending("unaddressed", 5, 5).action, c.ending("unaddressed", 5, 5).dispatch_round))
 
+    def test_an_unaddressed_analysis_issue_never_ends_mergeable(self):
+        # An issue left unaddressed ends as `unaddressed`, a retry, so even a green head is not `mergeable`.
+        d = c.ending("unaddressed", 2, 5, merge_state="CLEAN", testing_passed=True)
+        self.assertNotEqual("mergeable", d.action)
+        self.assertEqual(("continue", "end:continue", True), (d.action, d.loop_event, d.dispatch_round))
+
     def test_259_only_disputes_left_is_waiting_and_a_machine_stop_is_stalled(self):
         self.assertEqual(("waiting", "end:waiting"), (c.ending("disputed", 1, 5).action, c.ending("disputed", 1, 5).loop_event))
         for kind in ("no report", "failed", "timed out", "no next round"):

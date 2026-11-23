@@ -100,7 +100,11 @@ def sync(base: str, vocab: dict, message: str) -> dict:
         return {"action": "asked", "files": sorted(files),
                 "reason": "no regenerator covers: " + ", ".join(sorted(uncovered))}
     for f in files:
-        git("checkout", "--theirs", "--", f, check=False)
+        taken = git("checkout", "--theirs", "--", f, check=False)
+        if taken.returncode != 0:
+            git("merge", "--abort", check=False)
+            return {"action": "asked", "files": sorted(files),
+                    "reason": f"the base's copy of {f} could not be taken: " + (taken.stderr or "").strip()[-300:]}
     for cmd in regenerators_for(files, regs):
         # `run` is a shell line from the vocabulary, which the workflow restores from the BASE branch, so the
         # branch under review cannot supply it. It needs a shell: the commands `cd` and chain.
