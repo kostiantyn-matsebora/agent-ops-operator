@@ -534,7 +534,10 @@ class Round:
         except subprocess.CalledProcessError:
             return None
         before = sh("git", "rev-parse", "HEAD", check=False).stdout.strip()
-        sh("git", "fetch", "-q", "origin", base, check=False)
+        fetched = sh("git", "fetch", "-q", "origin", base, check=False)
+        if fetched.returncode != 0:
+            print(f"the base could not be fetched, so it is not merged in:\n{fetched.stderr}", file=sys.stderr)
+            return None
         out = sh(sys.executable, str(script), "--base", base, "--vocabulary", str(a.vocabulary), check=False)
         try:
             result = json.loads(out.stdout.strip().splitlines()[-1])
@@ -583,6 +586,8 @@ class Round:
                         ". CI and the review run on the new head."
                     merge = {"merge_state": "CLEAN", "testing_passed": False}   # the new head is judged afresh
                     self.restart_testing()
+                elif synced and synced["action"] == "uptodate":
+                    merge = self.merge_facts()   # the base is already in: read the state afresh, never the stale BEHIND
                 elif synced and synced["action"] == "asked" and synced.get("files"):
                     merge["conflicted"] = synced["files"]
                     kind_of = ("generated files that the repository's script could not regenerate"

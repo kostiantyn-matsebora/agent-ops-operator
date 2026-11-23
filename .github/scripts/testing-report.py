@@ -44,7 +44,8 @@ def tier_result(cov: dict | None, outcome: str) -> "conveyor.TierResult":
     if cov is None:
         return conveyor.TierResult(ran=ran, passed=passed, collected=False)
     if cov.get("domain_files", 0) == 0:
-        return conveyor.TierResult(ran=ran, passed=passed, covered=0, total=0, collected=True)
+        # Checked BEFORE `ran`: a skipped tier with nothing to measure is not applicable, never not run.
+        return conveyor.TierResult(ran=True, passed=passed, covered=0, total=0, collected=True)
     return conveyor.TierResult(ran=ran, passed=passed, covered=cov["covered"], total=cov["total"],
                                collected=bool(cov.get("collected")))
 

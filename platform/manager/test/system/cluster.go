@@ -20,6 +20,7 @@ import (
 const (
 	kubeconfigFlag = "--kubeconfig"
 	allContainers  = "--all-containers"
+	k3sArg         = "--k3s-arg"
 )
 
 // Resolved once, and used everywhere the harness shells out to kubectl or
@@ -87,11 +88,11 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 			return nil, closeErr
 		}
 		args := []string{"cluster", "create", name,
-			"--k3s-arg", "--disable=traefik@server:0",
-			"--k3s-arg", "--disable=servicelb@server:0",
+			k3sArg, "--disable=traefik@server:0",
+			k3sArg, "--disable=servicelb@server:0",
 			// A cgroup v1 host (a Firecracker cloud session is one) makes k3s's kubelet refuse to start
 			// by default, and k3d then waits out its whole timeout. Harmless on a v2 host.
-			"--k3s-arg", "--kubelet-arg=fail-cgroupv1=false@server:0",
+			k3sArg, "--kubelet-arg=fail-cgroupv1=false@server:0",
 			"--registry-config", regs,
 			"--wait", "--timeout", "180s",
 			"--no-lb",

@@ -104,6 +104,7 @@ reset; pr "Refs #51"; issue_has 51 "conveyor:run station:testing"; placed mainta
 out=$(run --pr 220 --station fix --ci-conclusion success)
 assert_equals "0" "$(edited 220 conveyor:fix)"
 assert_contains "$out" "testing station"
+
 it "fix: no round is dispatched while the review has not completed on the head: its own completion is the round"
 reset; pr "Refs #51"; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"; echo 0 > "$FX/review-runs"
 out=$(run --pr 220 --station fix --ci-conclusion success)

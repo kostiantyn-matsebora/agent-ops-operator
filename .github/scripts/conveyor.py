@@ -1059,7 +1059,7 @@ def _decide(vocab: dict, name: str, facts: dict) -> dict:
     elif name == "ending":
         d = ending(facts["kind"], facts["number"], facts["cap"], facts.get("thread_open", False), facts.get("waiting_on_person", False),
                    facts.get("merge_state", "CLEAN"), facts.get("checks_failed", 0), facts.get("testing_passed", True),
-                   facts.get("conflicted", ()), facts.get("generated_paths", ()))
+                   facts.get("conflicted", ()), facts.get("generated_paths", ()), facts.get("sync_action", ""))
     elif name == "judge_tiers":
         floors = facts["floors"]
         vs = [judge_tier(t, floors[t], TierResult(**facts["tiers"][t])) for t in TIERS]

@@ -23,7 +23,7 @@ make_env() {  # make_env <mode: present|absent>
   # HERMETIC: the script sees only the system tools it needs, linked in by name, never /usr/bin as a
   # whole. A runner ships docker, kubectl and more there, and "this tool is absent" must mean absent.
   for t in bash sh env cat sed awk grep head tail sort find mktemp mkdir rm ln install chmod tar tr \
-           dirname basename printf sleep date uname cut wc xargs python3 setsid nohup timeout; do
+           dirname basename printf sleep date uname cut wc xargs python3 setsid nohup timeout sha256sum; do
     p=$(command -v "$t" 2>/dev/null) && [ -x "$p" ] && ln -sf "$p" "$BIN/$t"
   done
   for i in curl npm pip uv tar go_install; do
@@ -113,6 +113,7 @@ assert_contains "$out" "kubectl"
 
 it "a container runtime that does not answer and has no dockerd is named, never fatal"
 make_env absent
+printf '#!/bin/sh\nexit 1\n' > "$BIN/docker"; chmod +x "$BIN/docker"   # a docker whose daemon cannot be reached
 out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap --verify)
 assert_contains "$out" "docker not running"
 

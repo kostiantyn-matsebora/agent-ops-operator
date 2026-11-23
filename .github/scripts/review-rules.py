@@ -27,10 +27,11 @@ RULES = ".claude/rules"
 
 # Rules that are NOT REVIEW CRITERIA, and why. A reader reads a rule to judge
 # a diff against it; these govern something else:
-#   - the EIGHT SESSION rules (`containers` names which engine runs the system pack): how a person builds, delivers, names a window,
+#   - the SEVEN SESSION rules: how a person builds, delivers, names a window,
 #     keeps a private thing private, looks at a UI, answers in chat, and works
 #     in a cloud session rather than on the workstation;
-#   - gotchas: operational lore for somebody running helm or docker — nothing
+#   - gotchas and containers: operational lore for somebody running helm or
+#     docker (`containers` names which engine runs the system pack) — nothing
 #     in it is a property of a diff;
 #   - structure: a MAP. Its one enforceable rule (a directory is a component,
 #     one docs/) is routed to the files that derive the tree, below, and to

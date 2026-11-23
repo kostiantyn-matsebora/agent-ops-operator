@@ -45,7 +45,7 @@ conflict, or behind its base.
 - New scripts for the diff intersection, the verdict and the report.
 - A routine file for the testing session, a tester agent definition, and the workflow step that fires the session.
 - `.github/conveyor-model/` labels and workflow model.
-- `platform/manager/test/system/` runs against an instrumented manager binary.
+- `platform/manager/test/system/` runs against an instrumented operator binary.
 - `platform/console/ui/e2e*` collects V8 coverage.
 - Reference docs made untrue: `docs/testing.md` (tiers, floors, instrumented runs), `docs/diagrams/conveyor-lifecycle*.mmd`, `CONTRIBUTING.md`, `docs/CHANGELOG.md`.
 - Adopter site: the pages describing the delivery workflow. This is a repository-internal change, so a statement that no adopter page names the conveyor is recorded.

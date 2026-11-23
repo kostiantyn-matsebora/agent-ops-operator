@@ -172,10 +172,16 @@ install_serena() {
 }
 
 ## k3d and kubectl — the system pack creates its cluster with them.
+# verify_sha256 FILE EXPECTED: EXPECTED is a hex digest. An empty one is refused.
+verify_sha256() {
+  [ -n "$2" ] && [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$2" ]
+}
+
 install_k3d() {
   have k3d && { note "k3d $(k3d version 2>/dev/null | head -1 || echo present)"; return; }
   note "installing k3d $K3D_VERSION"
   if curl -fsSL "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" -o "$HOME/.local/bin/k3d" \
+     && verify_sha256 "$HOME/.local/bin/k3d" "$(curl -fsSL "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/checksums.txt" | awk '$2 == "_dist/k3d-linux-amd64" {print $1}')" \
      && chmod +x "$HOME/.local/bin/k3d"; then
     note "k3d installed"
   else
@@ -187,6 +193,7 @@ install_kubectl() {
   have kubectl && { note "kubectl present"; return; }
   note "installing kubectl $KUBECTL_VERSION"
   if curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o "$HOME/.local/bin/kubectl" \
+     && verify_sha256 "$HOME/.local/bin/kubectl" "$(curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256" | cut -d' ' -f1)" \
      && chmod +x "$HOME/.local/bin/kubectl"; then
     note "kubectl installed"
   else
