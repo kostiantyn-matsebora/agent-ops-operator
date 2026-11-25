@@ -8,9 +8,13 @@ gate, and you never read your numbers from its gate.
 
 You run each tier, measure the coverage yourself, fix, run again, and report.
 
-The ONE exception is a cluster a cloud session cannot start. There you dispatch the
-system tier to a CI run YOU start, with coverage on, and read its artifact. You
-still judge it, fix, and loop.
+**EVERY TIER RUNS IN YOUR SESSION, THE SYSTEM TIER INCLUDED. You never dispatch a CI workflow
+to run one.** If your environment cannot run a tier, you stop and say what it lacks (below).
+
+**ROUNDS ARE INCREMENTAL.** Round 1 runs every tier in full and keeps each tier's coverage
+profile. A later round re-runs ONLY what failed, and the tests the tester just added, and
+adds their profiles to the kept ones. ONE full run of each tier closes the station, since a
+fix can break a test no round touched, and only that run is judged `passed`.
 
 ## What you were handed
 
@@ -63,7 +67,9 @@ For each round, in order:
      tests get it under the vendor's name for their own process only:
      `CLAUDE_CODE_OAUTH_TOKEN="${AGENTOPS_REAL_MODEL_TOKEN:-$CLAUDE_CODE_OAUTH_TOKEN}" go test ...`.
 
-2. **Run the unit tier** in every module the diff touches, with coverage:
+2. **Run the unit tier** in every module the diff touches, with coverage. A later round runs
+   only the failed tests and the added ones (`go test -run`, `node --test --test-name-pattern`, the
+   one script suite), each to its own profile:
 
    | Toolchain | Command | Writes |
    |---|---|---|
@@ -72,46 +78,27 @@ For each round, in order:
    | Node runtimes | `node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage.lcov` | `coverage.lcov` |
    | scripts | `.github/tests/run.sh` under the coverage hook CI uses | `coverage.xml` |
 
-3. **Run the system tier.** Where it runs depends on where you are:
-
-   | You are on | Run it |
-   |---|---|
-   | a cloud session (`CLAUDE_CODE_REMOTE=1`) | **dispatch it to CI**, below |
-   | a workstation with a container runtime, k3d, helm and kubectl | locally, below |
-
-   **A cloud session cannot run the cluster.** It builds the images and starts k3s, and then every pod
-   sandbox fails (runc cannot write `oom_score_adj` in this sandbox). Do not spend rounds on it.
-   `.claude/rules/gotchas.md` records what was tried. Dispatch instead:
-
-   ```sh
-   gh workflow run system-full.yml --ref "$(git branch --show-current)" -f cover=true
-   run=$(gh run list --workflow system-full.yml --branch "$(git branch --show-current)" --limit 1 --json databaseId -q '.[0].databaseId')
-   gh run watch "$run" --exit-status || true
-   gh run download "$run" -n "system-full-$run" -D <dir>
-   ```
-
-   `system-full.yml` is the full tier, with the real credential CI already holds, so a real-model change
-   is tested on a real runtime. Use `system-smoke.yml` (same `-f cover=true`) when
-   `real-model` said `not_required`. The artifact holds `system-coverage.out` and the diagnostics.
-   **Fix the cause if the run is red. A run that did not finish is a tier that did not pass.**
-
-   Locally:
+3. **Run the system tier, here, in your own session.**
 
    ```sh
    cd platform/manager
+   # round 1 and the closing run: the whole pack
    SYSTEM_REUSE=1 SYSTEM_COVER=1 SYSTEM_ARTIFACT_DIR=<dir> go test -tags system -count=1 -timeout 55m -v ./test/system/
+   # a later round: only the lanes that failed, against the cluster the first run left up
+   SYSTEM_REUSE=1 SYSTEM_COVER=1 SYSTEM_ARTIFACT_DIR=<dir>/r<round> go test -tags system -count=1 -run '^(TestA|TestB)$' -v ./test/system/
    ```
 
-   - It needs a container runtime (`docker` or `nerdctl`, check for both and that it answers:
-     `docker info || nerdctl info`), k3d, helm and kubectl. **If one is missing or not running, say
-     which, set nothing passed, and end the station.** A tier you could not run is not a tier that passed.
-   - **Real model required:** `SYSTEM_TIER=full` with the credential in the environment. The
-     real-runtime lane then runs instead of skipping. Give it the credential under the vendor's name,
-     for that process only (see above). A run on the stub does not count.
-   - **Behind an intercepting proxy** set `SYSTEM_BUILD_CA=<the CA bundle>`: the pack then bakes it
-     into the base images and the k3s node.
-   - The instrumented operator writes `system-coverage.out` when the pack ends. **No file
-     is a collection failure, never "nothing changed".**
+   - It needs a container runtime (`docker` or `nerdctl`: `docker info || nerdctl info`), k3d, helm
+     and kubectl. **If one is missing or not running, say which, set nothing passed, and end the
+     station.** A tier you could not run is not a tier that passed.
+   - **A cloud sandbox:** set `SYSTEM_BUILD_CA=<the CA bundle>` (it re-signs HTTPS) and
+     `SYSTEM_K3S_OOM_FIX=1` (pods cannot lower `oom_score_adj` there). If a trivial pod still
+     does not start, **stop and report the failure verbatim.** Never dispatch the tier to CI.
+   - **Real model required:** `SYSTEM_TIER=full` with the credential in the environment, under the
+     vendor's name for that process only. A run on the stub does not count.
+   - The instrumented operator writes `system-coverage.out` when the pack ends. **No file is a
+     collection failure, never "nothing changed".** Keep each run's file, and pass every one to
+     `coverage-diff.py --go` (a block counts as covered when any of them covers it).
 
 4. **Run the e2e tier.** Two suites, and only the first one counts for coverage:
 
@@ -119,15 +106,13 @@ For each round, in order:
    cd platform/console/ui
    npm run test:e2e:coverage                          # mocked API, instrumented build: the coverage
    npx playwright test --config e2e-live/playwright.config.ts   # the real console on the cluster the system tier left up (SYSTEM_REUSE=1)
-   # a cloud session has no cluster (the system tier ran in CI), so e2e-live is workstation-only and contributes no coverage there
    ```
 
    - The mocked suite serves a build instrumented by `E2E_COVERAGE=1`, and writes
      `coverage/e2e/lcov.info`. **No file is a collection failure.**
    - `e2e-live` runs against the real console image, which is not instrumented, so it
      verifies and contributes no coverage.
-   - **It needs the cluster the local system tier left up.** After a dispatch to CI there is none,
-     so a cloud session skips `e2e-live` and says so. The mocked suite still counts.
+   - **It needs the cluster the system tier left up** (`SYSTEM_REUSE=1`).
    - Where the real model is required, the live specs that drive a conversation run against
      the real runtime, and assert outcomes: a thread opened, the required sections present,
      no error state. **Never exact wording.** A real-model failure is re-run once before it
@@ -137,7 +122,7 @@ For each round, in order:
 
    ```sh
    python3 .github/scripts/coverage-diff.py --tier unit   --base origin/<base> --go ... --lcov ... --cobertura ... > unit.json
-   python3 .github/scripts/coverage-diff.py --tier system --base origin/<base> --go <dir>/system-coverage.out > system.json
+   python3 .github/scripts/coverage-diff.py --tier system --base origin/<base> --go <dir>/system-coverage.out --go <dir>/r2/system-coverage.out > system.json
    python3 .github/scripts/coverage-diff.py --tier e2e    --base origin/<base> --lcov platform/console/ui/coverage/e2e/lcov.info@platform/console/ui > e2e.json
    ```
 

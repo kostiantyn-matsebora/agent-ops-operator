@@ -98,6 +98,12 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 			"--no-lb",
 		}
 		args = append(args, clusterCAArgs(os.Getenv(buildCAEnv))...)
+		oomArgs, oomCleanup, oomErr := oomFixArgs()
+		if oomErr != nil {
+			return nil, oomErr
+		}
+		defer oomCleanup()
+		args = append(args, oomArgs...)
 		if out, err := exec.CommandContext(ctx, lookPath("k3d"), args...).CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("k3d cluster create: %v\n%s", err, out)
 		}

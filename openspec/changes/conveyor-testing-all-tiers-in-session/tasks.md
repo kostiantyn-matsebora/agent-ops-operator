@@ -6,14 +6,14 @@
 
 ## 2. Incremental rounds
 
-- [ ] 2.1 `coverage-diff.py` takes several Go profiles and counts a block covered when any covers it
-- [ ] 2.2 The system pack takes `SYSTEM_RUN` to select lanes and keeps the cluster with `SYSTEM_REUSE=1`
-- [ ] 2.3 `test-change.md`: round 1 full, later rounds re-run failed and added tests, one closing full run judges
+- [x] 2.1 `coverage-diff.py` takes several Go profiles and counts a block covered when any covers it
+- [x] 2.2 The system pack takes `SYSTEM_RUN` to select lanes and keeps the cluster with `SYSTEM_REUSE=1`
+- [x] 2.3 `test-change.md`: round 1 full, later rounds re-run failed and added tests, one closing full run judges
 - [ ] 2.4 `testing-station.py judge` refuses `passed` for a tier without a full run recorded
 
 ## 3. Remove the dispatch to CI
 
-- [ ] 3.1 `test-change.md`, `remote-session.md` and the `gotchas.md` row drop the `system-full.yml` instruction
+- [x] 3.1 `test-change.md`, `remote-session.md` and the `gotchas.md` row drop the `system-full.yml` instruction
 
 ## 4. Unit tests
 
