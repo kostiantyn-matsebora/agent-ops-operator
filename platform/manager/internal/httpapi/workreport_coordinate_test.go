@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"strings"
 	"testing"
@@ -73,6 +74,66 @@ func TestHandleWorkDoneRoutesAMemberResultToItsParent(t *testing.T) {
 	}
 	if len(gotMember.Status.Runs) != 1 || !gotMember.Status.Runs[0].RoutedToParent {
 		t.Fatalf("the run must be marked routed once the append succeeds, got %+v", gotMember.Status.Runs)
+	}
+}
+
+// listFailsForID is a Conversations store whose List fails ONLY for one
+// particular ByID value — isolating the parent lookup
+// chat.Router.AppendMemberResult performs (resolving causedBy.Parent, the
+// ID) from the member's own convo=ID lookup handleWorkDone performs first,
+// so the first lookup succeeds and only the second, nested one fails.
+type listFailsForID struct {
+	state.Collection[state.ConversationRecord]
+	failID string
+}
+
+var errParentUnreadable = errors.New("parent unreadable")
+
+func (w listFailsForID) List(ctx context.Context, idx state.Index[state.ConversationRecord], value string) ([]state.ConversationRecord, error) {
+	if value == w.failID {
+		return nil, errParentUnreadable
+	}
+	return w.Collection.List(ctx, idx, value)
+}
+
+// A backstop append that fails must be logged, not surfaced as a failure of
+// the report itself (the reconciler backstop re-derives it): the report
+// still answers 200, and the run is left unmarked so a later pass retries
+// it.
+func TestHandleWorkDoneLogsWhenRoutingToTheParentFails(t *testing.T) {
+	parent := &agentopsv1alpha1.Conversation{}
+	parent.Name, parent.Namespace = "root-1", "agent-ops"
+	parent.UID = types.UID("parent-uid-1")
+	member := &agentopsv1alpha1.Conversation{}
+	member.Name, member.Namespace = "member-1", "agent-ops"
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "parent-uid-1", Entry: "worker"}
+	member.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r1", DispatchedAt: metav1.Now()}
+
+	objs := []client.Object{member, parent}
+	assignUIDs(objs) // member has no UID of its own yet, so it becomes "member-1"
+	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
+		WithObjects(objs...).
+		WithStatusSubresource(member, parent).Build()
+	store, runs, blobs := testConversations(t, c, "agent-ops"), testRuns(t, c, "agent-ops"), testBlobs(c, "agent-ops")
+	wrapped := listFailsForID{store, "parent-uid-1"}
+	q := &chat.OpQueue{Conversations: wrapped, Runs: runs, Registry: chat.NewRegistry(), Bus: memory.Open()}
+	router := &chat.Router{Client: c, Reader: c, Conversations: wrapped, Runs: runs, Blobs: blobs,
+		Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Ops: q}
+	s := &Server{Reader: c, Client: c, Conversations: wrapped, Runs: runs, Blobs: blobs,
+		Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Activity: activity.New(64), Router: router}
+
+	rec := postWorkDone(t, s, map[string]any{
+		"convo": member.Name, "runId": "r1", "status": "succeeded", "result": "found the leak",
+	})
+	if rec.Code != 200 {
+		t.Fatalf("a failed backstop append must not fail the report itself, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var gotMember agentopsv1alpha1.Conversation
+	if err := s.Reader.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: member.Name}, &gotMember); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotMember.Status.Runs) != 1 || gotMember.Status.Runs[0].RoutedToParent {
+		t.Fatalf("a run whose append to the parent failed must not be marked routed, got %+v", gotMember.Status.Runs)
 	}
 }
 

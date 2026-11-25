@@ -100,6 +100,22 @@ func TestHandleCoordinateInvokeRefusesTheWrongToken(t *testing.T) {
 	}
 }
 
+// callerActingForCoordinator excludes a deletion-marked caller exactly as
+// callerConversation does (design conversation-identity, Decision 5): a
+// finalizer is still holding it, so it is not a live match and the token
+// check never even runs — it fails identically to an unknown conversation.
+func TestHandleCoordinateInvokeRefusesADeletionMarkedCaller(t *testing.T) {
+	root := markDeleting(coordRoot("root-1", "co-a"))
+	s, _ := coordServer(t, coordCoordinator("co-a"), root)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "worker", "task": "do it"})
+	if rec.Code != 401 {
+		t.Fatalf("a deletion-marked caller must be refused like an unknown one, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandleCoordinateInvokeSucceedsWithTheDerivedToken(t *testing.T) {
 	capability := &agentopsv1alpha1.AgentCapability{}
 	capability.Name, capability.Namespace = "cap-worker", "agent-ops"
@@ -327,6 +343,41 @@ func TestHandleCoordinateReadReachesADescendantAtAnyDepth(t *testing.T) {
 	}
 	if out.Name != "grandchild-1" {
 		t.Fatalf("want the grandchild's own projection, got %+v", out)
+	}
+}
+
+// listFailsConversations is a Conversations store whose List always fails,
+// isolating descendsFrom's own loop (which resolves CausedBy.Parent by
+// state.ByID) from the Get calls authentication and target resolution make.
+type listFailsConversations struct {
+	state.Collection[state.ConversationRecord]
+}
+
+var errAncestryUnreadable = errors.New("ancestry unreadable")
+
+func (listFailsConversations) List(context.Context, state.Index[state.ConversationRecord], string) ([]state.ConversationRecord, error) {
+	return nil, errAncestryUnreadable
+}
+
+// descendsFrom walks up by state.ByID, one List per hop beyond the first
+// comparison — a read failure resolving an ancestor must fail the read
+// outright (500), never be mistaken for "out of scope" or "no such parent".
+func TestHandleCoordinateReadReturns500WhenTheAncestryCannotBeRead(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	member := &agentopsv1alpha1.Conversation{}
+	member.Name, member.Namespace = "member-1", "agent-ops"
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "worker"}
+	grandchild := &agentopsv1alpha1.Conversation{}
+	grandchild.Name, grandchild.Namespace = "grandchild-1", "agent-ops"
+	grandchild.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "member-1", Entry: "helper"}
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, member, grandchild)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+	s.Conversations = listFailsConversations{s.Conversations}
+
+	rec := postCoordinate(s, "/coordinate/read", token,
+		map[string]any{"conversation": "root-1", "target": "grandchild-1"})
+	if rec.Code != 500 {
+		t.Fatalf("an unreadable ancestry must fail the read, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

@@ -2,6 +2,7 @@ package namewords
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 
@@ -82,5 +83,81 @@ func TestAllocateNameSecondCallOnTheSameBaseGetsADistinctID(t *testing.T) {
 	}
 	if second.Name != "member-alpha-2" {
 		t.Fatalf("second.Name = %q, want the next free suffix", second.Name)
+	}
+}
+
+// alwaysConflictConversations is a Collection whose List always succeeds
+// empty and whose Create always refuses with ErrAlreadyExists — every
+// attempt collides, as a genuine race between concurrent creators would,
+// without ever actually persisting a record.
+type alwaysConflictConversations struct {
+	state.Collection[state.ConversationRecord]
+}
+
+func (alwaysConflictConversations) List(context.Context, state.Index[state.ConversationRecord], string) ([]state.ConversationRecord, error) {
+	return nil, nil
+}
+
+func (alwaysConflictConversations) Create(context.Context, state.Key, state.ConversationRecord) (state.ConversationRecord, state.Revision, error) {
+	return state.ConversationRecord{}, "", state.ErrAlreadyExists
+}
+
+// A genuine race retries through sleepCtx's own backoff (desynchronizing
+// this attempt's List from every other loser's) — a context that ends
+// while that retry is waiting must fail AllocateName with the context's own
+// error, never swallow it and try again.
+func TestAllocateNamePropagatesACanceledContextFromTheRetryBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := AllocateName(ctx, alwaysConflictConversations{}, "task", "hello-world", &state.ConversationRecord{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled from the retry backoff, got %v", err)
+	}
+}
+
+// listFailsConversations is a Collection whose List always fails outright —
+// never a conflict, a genuine read failure.
+type listFailsConversations struct {
+	state.Collection[state.ConversationRecord]
+}
+
+var errListBoom = errors.New("list boom")
+
+func (listFailsConversations) List(context.Context, state.Index[state.ConversationRecord], string) ([]state.ConversationRecord, error) {
+	return nil, errListBoom
+}
+
+// AllocateName's own List, over ByNameBase, must fail the whole call rather
+// than guess at a free name from nothing.
+func TestAllocateNamePropagatesAListFailure(t *testing.T) {
+	_, err := AllocateName(context.Background(), listFailsConversations{}, "task", "hello-world", &state.ConversationRecord{})
+	if !errors.Is(err, errListBoom) {
+		t.Fatalf("want the list failure wrapped and returned, got %v", err)
+	}
+}
+
+// createFailsConversations is a Collection whose List always succeeds empty
+// and whose Create always fails with something OTHER than ErrAlreadyExists
+// — a genuine write failure, never the create-conflict retry path.
+type createFailsConversations struct {
+	state.Collection[state.ConversationRecord]
+}
+
+var errCreateBoom = errors.New("create boom")
+
+func (createFailsConversations) List(context.Context, state.Index[state.ConversationRecord], string) ([]state.ConversationRecord, error) {
+	return nil, nil
+}
+
+func (createFailsConversations) Create(context.Context, state.Key, state.ConversationRecord) (state.ConversationRecord, state.Revision, error) {
+	return state.ConversationRecord{}, "", errCreateBoom
+}
+
+// A non-conflict Create failure must be returned verbatim, on the FIRST
+// attempt, never retried as if it were a name collision.
+func TestAllocateNamePropagatesANonConflictCreateFailure(t *testing.T) {
+	_, err := AllocateName(context.Background(), createFailsConversations{}, "task", "hello-world", &state.ConversationRecord{})
+	if !errors.Is(err, errCreateBoom) {
+		t.Fatalf("want a non-conflict create failure returned verbatim, got %v", err)
 	}
 }

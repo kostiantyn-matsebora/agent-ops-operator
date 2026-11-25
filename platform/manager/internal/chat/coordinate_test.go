@@ -1138,6 +1138,24 @@ func TestDescendantsOfALeafIsEmpty(t *testing.T) {
 	}
 }
 
+// causedByAncestry resolves each ancestor by conversationByID
+// (state.ByID), never Get-by-name (conversation-identity Decision 6) — a
+// store that cannot be listed must fail the whole walk rather than silently
+// stopping short, so ResolveActingCoordinator propagates the read failure
+// verbatim instead of answering "acts for no Coordinator".
+func TestResolveActingCoordinatorPropagatesAnUnreadableAncestry(t *testing.T) {
+	r, _ := coordFixture(t, testCoordinator("co-a"))
+	r.Conversations = unreadableConversations{r.Conversations}
+
+	member := &state.ConversationRecord{
+		Name:     "member-1",
+		CausedBy: &state.Provenance{Parent: "root-1-id", Entry: "worker"},
+	}
+	if _, err := r.ResolveActingCoordinator(context.Background(), member); !errors.Is(err, errNotReady) {
+		t.Fatalf("want the store's own read failure to propagate, got %v", err)
+	}
+}
+
 // A close that lands after InvokeMember's first read of the caller and before
 // the member exists must not leave an open member under a closed ancestor. The
 // re-read after creation sees the close and closes the member.

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"net/http/httptest"
 	"strings"
@@ -298,5 +299,17 @@ func TestWorkRefusesAnUnknownConvoID(t *testing.T) {
 	s, _ := workReportServer(t)
 	if _, served, err := s.tryDispatch(t.Context(), "never-existed", "pod-a"); err == nil || served {
 		t.Fatalf("an unknown convo id must be refused, got served=%v err=%v", served, err)
+	}
+}
+
+// conversationByID resolves convo= through state.ByID (conversation-
+// identity Decision 1/7) — a genuine failure reading that index must
+// propagate verbatim, never be folded into "unknown id" the way a merely
+// empty match is.
+func TestTryDispatchPropagatesAListFailureResolvingTheConvoID(t *testing.T) {
+	s, _ := workReportServer(t)
+	s.Conversations = listFailsConversations{s.Conversations}
+	if _, served, err := s.tryDispatch(t.Context(), "conv-a", "pod-a"); !errors.Is(err, errAncestryUnreadable) || served {
+		t.Fatalf("a List failure resolving the convo id must propagate, got served=%v err=%v", served, err)
 	}
 }

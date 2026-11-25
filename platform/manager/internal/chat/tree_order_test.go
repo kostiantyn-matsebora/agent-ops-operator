@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
@@ -71,5 +72,32 @@ func TestDeleteTreeGoesLeavesToRootAndTakesOpenMembers(t *testing.T) {
 		if _, _, err := healthy.Get(context.Background(), state.Key(n)); err == nil {
 			t.Fatalf("%s survived the delete", n)
 		}
+	}
+}
+
+// unGettableConversations is a Conversations store whose Get always fails
+// with something other than state.ErrNotFound, as a backend read failure
+// unrelated to the record's own absence would.
+type unGettableConversations struct {
+	state.Collection[state.ConversationRecord]
+}
+
+var errGetBoom = errors.New("get boom")
+
+func (unGettableConversations) Get(context.Context, state.Key) (state.ConversationRecord, state.Revision, error) {
+	return state.ConversationRecord{}, "", errGetBoom
+}
+
+// DeleteTree resolves the root's own ID once, up front, by reading the root
+// itself (conversation-identity Decision 6) — a failure reading it that is
+// NOT "the root is already gone" must fail DeleteTree outright, never be
+// read as "no subtree" and proceed to delete nothing.
+func TestDeleteTreePropagatesAGetFailureOtherThanNotFound(t *testing.T) {
+	root := boundConv("root-1", "c1")
+	r, _, _ := closeFixture(t, nsChannel("c1", "slack"), root)
+	r.Conversations = unGettableConversations{r.Conversations}
+
+	if err := r.DeleteTree(context.Background(), "root-1"); !errors.Is(err, errGetBoom) {
+		t.Fatalf("want the Get failure to propagate, got %v", err)
 	}
 }
