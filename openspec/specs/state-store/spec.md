@@ -151,7 +151,7 @@ A collection whose record carries no identity SHALL return it as stored, which i
 #### Scenario: A caller-supplied identity is not echoed
 
 - **WHEN** a create carries an `ID` and a `CreatedAt`
-- **THEN** the returned record carries the backend's own values
+- **THEN** the returned record carries the backend's own values, as `A record carries a backend-minted identity` requires of the stored one
 
 #### Scenario: A conflicting create returns no record
 

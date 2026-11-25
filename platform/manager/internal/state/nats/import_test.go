@@ -122,6 +122,19 @@ func TestImporterUpgradeKeepsEveryKind(t *testing.T) {
 	if conv.Phase != "Working" {
 		t.Fatalf("conversation phase = %q, want Working", conv.Phase)
 	}
+	assertImportedEveryKind(t, dest, convKey, sourceKey, blobKey, adapterKey)
+
+	// "The source is left intact": nothing the import does ever writes to
+	// Source; re-reading it back proves nothing moved.
+	srcConv, _, err := source.Stores.Conversations.Get(ctx, convKey)
+	if err != nil || srcConv.Phase != "Working" {
+		t.Fatalf("source conversation moved: %+v, %v", srcConv, err)
+	}
+}
+
+func assertImportedEveryKind(t *testing.T, dest *Backend, convKey, sourceKey, blobKey, adapterKey state.Key) {
+	t.Helper()
+	ctx := context.Background()
 	runs, err := dest.Stores.Runs.List(ctx, convKey)
 	if err != nil || len(runs) != 1 || runs[0].RunID != "run-1" {
 		t.Fatalf("runs = %+v, %v, want exactly run-1", runs, err)
@@ -145,13 +158,6 @@ func TestImporterUpgradeKeepsEveryKind(t *testing.T) {
 	adapterValue, _, err := dest.Stores.AdapterState.Get(ctx, adapterKey)
 	if err != nil || adapterValue != "42" {
 		t.Fatalf("adapter state = %q, %v, want 42", adapterValue, err)
-	}
-
-	// "The source is left intact": nothing the import does ever writes to
-	// Source; re-reading it back proves nothing moved.
-	srcConv, _, err := source.Stores.Conversations.Get(ctx, convKey)
-	if err != nil || srcConv.Phase != "Working" {
-		t.Fatalf("source conversation moved: %+v, %v", srcConv, err)
 	}
 }
 

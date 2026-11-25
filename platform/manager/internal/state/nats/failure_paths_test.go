@@ -213,9 +213,25 @@ func TestCorruptStoredValuesAreRefusedNotGuessed(t *testing.T) {
 		t.Fatal("Append under a corrupt parent succeeded")
 	}
 
-	if err := b.blobsStore.Delete(ctx, "gone"); err == nil {
-		_ = err // an absent object is the store's own business
+	assertCorruptBlobIsRefusedAndSurvivesSweep(t, b, ctx, garbage)
+
+	// A corrupt run item is skipped when listing, not fatal to its siblings.
+	if err := b.Stores.Runs.Append(ctx, mustConversation(t, b, "good"), state.Run{RunID: "ok", Status: "s"}); err != nil {
+		t.Fatalf("Append: %v", err)
 	}
+	if _, err := b.runsKV.Put(ctx, runsItemKey("good", "junk"), garbage); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	runs, err := b.Stores.Runs.List(ctx, "good")
+	if err != nil || len(runs) != 1 || runs[0].RunID != "ok" {
+		t.Fatalf("runs = %+v, %v, want only the readable one", runs, err)
+	}
+}
+
+func assertCorruptBlobIsRefusedAndSurvivesSweep(t *testing.T, b *Backend, ctx context.Context, garbage []byte) {
+	t.Helper()
+	// An absent object is the store's own business, so the error is ignored.
+	_ = b.blobsStore.Delete(ctx, "gone")
 	if _, err := b.blobsStore.PutBytes(ctx, wireKey("bad-blob"), garbage); err != nil {
 		t.Fatalf("seed blob: %v", err)
 	}
@@ -230,18 +246,6 @@ func TestCorruptStoredValuesAreRefusedNotGuessed(t *testing.T) {
 	}
 	if _, err := b.blobsStore.GetBytes(ctx, wireKey("bad-blob")); err != nil {
 		t.Fatalf("the sweep removed a blob it could not decode: %v", err)
-	}
-
-	// A corrupt run item is skipped when listing, not fatal to its siblings.
-	if err := b.Stores.Runs.Append(ctx, mustConversation(t, b, "good"), state.Run{RunID: "ok", Status: "s"}); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-	if _, err := b.runsKV.Put(ctx, runsItemKey("good", "junk"), garbage); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	runs, err := b.Stores.Runs.List(ctx, "good")
-	if err != nil || len(runs) != 1 || runs[0].RunID != "ok" {
-		t.Fatalf("runs = %+v, %v, want only the readable one", runs, err)
 	}
 }
 

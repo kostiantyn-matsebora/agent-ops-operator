@@ -86,18 +86,7 @@ func TestConversationIdentitySurvivesNameReuse(t *testing.T) {
 		t.Fatalf("the second life's run must succeed: %+v", run)
 	}
 
-	if convB.Name != convA.Name {
-		t.Fatalf("namewords.nextSuffix must reissue the freed base once the first life is actually deleted, got %q then %q from the same title", convA.Name, convB.Name)
-	}
-	if convB.UID == "" || convB.UID == convA.UID {
-		t.Fatalf("the second life must mint its OWN ID, distinct from the first life's %q, got %q", convA.UID, convB.UID)
-	}
-	if convB.Spec.CorrelationID != idB {
-		t.Fatalf("the second life must adopt its OWN initiationId verbatim, got %q want %q", convB.Spec.CorrelationID, idB)
-	}
-	if convB.Spec.CorrelationID == convA.Spec.CorrelationID {
-		t.Fatalf("two unrelated lives must never share a correlation id: both carry %q", convB.Spec.CorrelationID)
-	}
+	assertSecondLifeIdentity(t, convA, convB, idB)
 
 	// 7.2: a typed name reaches the NEWEST live conversation, not a first
 	// life a real API server somehow still answered for.
@@ -120,18 +109,27 @@ func TestConversationIdentitySurvivesNameReuse(t *testing.T) {
 	if podA.UID == podB.UID {
 		t.Fatalf("the second life's pod must be its own object, not the first life's surviving under a reused name: UID %q reused", podA.UID)
 	}
-	idA_, idB_ := podA.Labels[runtimepod.LabelConversationID], podB.Labels[runtimepod.LabelConversationID]
-	if idA_ == "" || idB_ == "" {
-		t.Fatalf("both pods must carry the %s label: %q %q", runtimepod.LabelConversationID, idA_, idB_)
-	}
-	if idA_ == idB_ {
-		t.Fatalf("the %s label must carry the ID, not the Name, so it must differ across lives: both %q", runtimepod.LabelConversationID, idA_)
-	}
-	if idA_ != string(convA.UID) || idB_ != string(convB.UID) {
-		t.Fatalf("the %s label must equal the conversation's own ID: life A %q != %q, life B %q != %q",
-			runtimepod.LabelConversationID, idA_, convA.UID, idB_, convB.UID)
-	}
+	assertPodLabelsCarryID(t, podA, podB, convA, convB)
+	assertWorkspaceSubPathsCarryID(t, podA, podB, convA, convB)
+}
 
+func assertPodLabelsCarryID(t *testing.T, podA, podB *corev1.Pod, convA, convB *agentopsv1alpha1.Conversation) {
+	t.Helper()
+	labelA, labelB := podA.Labels[runtimepod.LabelConversationID], podB.Labels[runtimepod.LabelConversationID]
+	if labelA == "" || labelB == "" {
+		t.Fatalf("both pods must carry the %s label: %q %q", runtimepod.LabelConversationID, labelA, labelB)
+	}
+	if labelA == labelB {
+		t.Fatalf("the %s label must carry the ID, not the Name, so it must differ across lives: both %q", runtimepod.LabelConversationID, labelA)
+	}
+	if labelA != string(convA.UID) || labelB != string(convB.UID) {
+		t.Fatalf("the %s label must equal the conversation's own ID: life A %q != %q, life B %q != %q",
+			runtimepod.LabelConversationID, labelA, convA.UID, labelB, convB.UID)
+	}
+}
+
+func assertWorkspaceSubPathsCarryID(t *testing.T, podA, podB *corev1.Pod, convA, convB *agentopsv1alpha1.Conversation) {
+	t.Helper()
 	subA, okA := workspaceSubPath(podA)
 	subB, okB := workspaceSubPath(podB)
 	if !okA || !okB {
@@ -142,6 +140,22 @@ func TestConversationIdentitySurvivesNameReuse(t *testing.T) {
 	}
 	if subA != string(convA.UID) || subB != string(convB.UID) {
 		t.Fatalf("the workspace subPath must equal the conversation's own ID: life A %q != %q, life B %q != %q", subA, convA.UID, subB, convB.UID)
+	}
+}
+
+func assertSecondLifeIdentity(t *testing.T, convA, convB *agentopsv1alpha1.Conversation, idB string) {
+	t.Helper()
+	if convB.Name != convA.Name {
+		t.Fatalf("namewords.nextSuffix must reissue the freed base once the first life is actually deleted, got %q then %q from the same title", convA.Name, convB.Name)
+	}
+	if convB.UID == "" || convB.UID == convA.UID {
+		t.Fatalf("the second life must mint its OWN ID, distinct from the first life's %q, got %q", convA.UID, convB.UID)
+	}
+	if convB.Spec.CorrelationID != idB {
+		t.Fatalf("the second life must adopt its OWN initiationId verbatim, got %q want %q", convB.Spec.CorrelationID, idB)
+	}
+	if convB.Spec.CorrelationID == convA.Spec.CorrelationID {
+		t.Fatalf("two unrelated lives must never share a correlation id: both carry %q", convB.Spec.CorrelationID)
 	}
 }
 

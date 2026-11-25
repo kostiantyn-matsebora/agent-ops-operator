@@ -295,6 +295,14 @@ The manager only compares it for equality. An open conversation whose
 `correlationId` matches gets the signal as a recurrence, resuming the
 session. It parses no label and owns no grouping policy of its own.
 
+**A conversation has three identifiers.**
+
+| Identifier | Is |
+|---|---|
+| `Name` | the readable word-chain, the store key and the pod name. Unique only among live records |
+| `ID` | the system identity, backend-minted at create and new for every life of a `Name`. Held by the workspace subpath, the pod label and op ids |
+| `correlationId` | the signal's adopted `initiationId`. Many conversations can share one, so it is never the identity |
+
 **Every signal type is adapter-served** — the manager hosts no signal
 transports.
 

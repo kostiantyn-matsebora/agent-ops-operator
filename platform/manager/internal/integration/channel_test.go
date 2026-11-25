@@ -236,15 +236,7 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	}
 
 	// duplicate completion is tolerated
-	rec = adapterReq(srv, "POST", fmt.Sprintf("/channel/ops/%s/done", op.ID),
-		chat.OpResult{ThreadID: "9999"}, "test-adapter-token")
-	if rec.Code != 200 {
-		t.Fatalf("duplicate done: %d", rec.Code)
-	}
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "topic-1"}, &after)
-	if tid := after.ThreadFor("chan-topic"); *tid != "1234567890.000200" {
-		t.Fatalf("duplicate done overwrote thread binding: %v", *tid)
-	}
+	assertDuplicateDoneKeepsThread(t, srv, op.ID)
 
 	// gate lifted — the unit dispatches with the string thread id
 	rec = adapterReq(srv, "GET", "/work?convo="+string(conv.UID)+"&wait=0", nil, "")
@@ -266,6 +258,22 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 		map[string]any{"convo": string(conv.UID), "runId": unit.RunID, "status": "succeeded", "result": "ok"}, "")
 	if rec.Code != 200 {
 		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// assertDuplicateDoneKeepsThread completes an op a second time with another
+// thread id and checks the first binding stands.
+func assertDuplicateDoneKeepsThread(t *testing.T, srv *httpapi.Server, opID string) {
+	t.Helper()
+	rec := adapterReq(srv, "POST", fmt.Sprintf("/channel/ops/%s/done", opID),
+		chat.OpResult{ThreadID: "9999"}, "test-adapter-token")
+	if rec.Code != 200 {
+		t.Fatalf("duplicate done: %d", rec.Code)
+	}
+	var after agentopsv1alpha1.Conversation
+	_ = k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: "topic-1"}, &after)
+	if tid := after.ThreadFor("chan-topic"); tid == nil || *tid != "1234567890.000200" {
+		t.Fatalf("duplicate done overwrote thread binding: %v", tid)
 	}
 }
 

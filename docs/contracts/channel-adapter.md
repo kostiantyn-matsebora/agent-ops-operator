@@ -104,7 +104,7 @@ that delivers an op and the `204` alike. See
 | `OPS-1` | An adapter MUST long-poll this endpoint while able to accept ops. `204` is not an error. |
 | `OPS-2` | A `503` from a replica or a proxy in front of it MUST be treated exactly like a `204` — retried at once, on a fresh connection, never surfaced as an error. |
 | `OPS-3` | An adapter not implementing a kind MAY complete it with an `error`, or ignore it. |
-| `OPS-9` | Every operation additionally carries `conversationId` (the system identity) and `correlationId` (the adopted correlation id), beside the channel and conversation names it already carries. Both fields are ADDITIVE — an adapter that ignores them MUST remain fully conformant, declaring the same `contract` version. |
+| `OPS-9` | Every operation additionally carries `conversationId` (the system identity) and `correlationId` (the adopted correlation id), beside the channel and conversation names it already carries. `correlationId` is ADDITIVE, but `conversationId` changed meaning and that change is BREAKING (contract `3`). An adapter MUST declare `contract=3`. |
 
 ### Delivery operation ids are published shapes
 
@@ -582,7 +582,7 @@ An adapter implementing none of these stays fully conformant — see
 | `MGR-6` | **Delivery recording** — completions land on the Conversation: the thread id in `status.threads[]`, the archive in `status.threadsArchived[]`, read watermarks on the thread bindings. |
 | `MGR-6.1` | **Delivery exclusion** — an input MUST be delivered to every bound channel except the surface it entered on, unless that surface declares `ChannelAdapter.spec.echoesOwnMessages: false`. |
 | `MGR-6.2` | **Idempotent reply ids** — a reply op's id MUST be stable per conversation × channel × run (`send:<conversation>:<channel>:<runId>`), so a manager restart between a run's completion and its delivery re-derives the answer, appending the channel to `status.runs[].delivered[]`. |
-| `MGR-12` | **`conversationId` and `correlationId` on every op** — each operation delivered on `/channel/ops` additionally carries the conversation's system identity (`conversationId`) and its adopted correlation id (`correlationId`), both ADDITIVE and opaque to the adapter, absent only on a conversation created before the field existed. |
+| `MGR-12` | **`conversationId` and `correlationId` on every op** — each operation delivered on `/channel/ops` additionally carries the conversation's system identity (`conversationId`) and its adopted correlation id (`correlationId`), both opaque to the adapter (`correlationId` is additive, the changed meaning of `conversationId` is BREAKING, contract `3`), absent only on a conversation created before the field existed. |
 | `MGR-13` | **The op stream** — `GET /channel/ops/stream`, the long-poll's ops pushed to a receipt adapter in queue order, on any replica (`OPS-12` to `OPS-16`). OPTIONAL: an adapter that never calls it is unaffected. |
 | `MGR-14` | **The receipt-only exception** — adapters named by `CHANNEL_RECEIPT_ADAPTERS` acknowledge on receipt, with no delivery TTL and no report (`OPS-24` to `OPS-26`). |
 

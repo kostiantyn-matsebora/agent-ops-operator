@@ -126,12 +126,7 @@ func ReclaimWorkspaces(ctx context.Context, root string, lister Lister, opts Opt
 		}
 		return rep, fmt.Errorf("scanning %s: %w", root, err)
 	}
-	var dirs []string
-	for _, e := range entries {
-		if e.IsDir() && couldBeConversation(e.Name()) {
-			dirs = append(dirs, e.Name())
-		}
-	}
+	dirs := conversationDirs(entries)
 	rep.Scanned = len(dirs)
 	if len(dirs) == 0 {
 		return rep, nil
@@ -143,12 +138,7 @@ func ReclaimWorkspaces(ctx context.Context, root string, lister Lister, opts Opt
 	if err != nil {
 		return rep, fmt.Errorf("listing conversations: %w", err)
 	}
-	live := make(map[string]bool, len(convs))
-	for _, c := range convs {
-		if c.ID != "" {
-			live[c.ID] = true
-		}
-	}
+	live := liveIDs(convs)
 
 	sort.Strings(dirs) // deterministic, so a bounded run makes progress in order
 	for _, id := range dirs {
@@ -169,6 +159,29 @@ func ReclaimWorkspaces(ctx context.Context, root string, lister Lister, opts Opt
 		rep.Removed = append(rep.Removed, id)
 	}
 	return rep, nil
+}
+
+// conversationDirs keeps the directory entries whose name could be a
+// conversation ID.
+func conversationDirs(entries []os.DirEntry) []string {
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() && couldBeConversation(e.Name()) {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	return dirs
+}
+
+// liveIDs is the set of IDs of every listed conversation.
+func liveIDs(convs []Conversation) map[string]bool {
+	live := make(map[string]bool, len(convs))
+	for _, c := range convs {
+		if c.ID != "" {
+			live[c.ID] = true
+		}
+	}
+	return live
 }
 
 // ReclaimSessions removes transcript files whose session id no longer appears

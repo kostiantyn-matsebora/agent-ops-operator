@@ -540,6 +540,18 @@ func (s *Server) conversationByID(ctx context.Context, id string) (state.Convers
 	return s.Conversations.Get(ctx, state.Key(matches[0].Name))
 }
 
+// anyChatChannel reports whether at least one named Channel resolves to an
+// adapter. A dangling ref counts as chat-less.
+func (s *Server) anyChatChannel(ctx context.Context, refs []string) bool {
+	for _, ref := range refs {
+		var ch agentopsv1alpha1.Channel
+		if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: ref}, &ch); err == nil && ch.Spec.Adapter != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) tryDispatch(ctx context.Context, convoID, podName string) (dispatch.WorkUnit, bool, error) {
 	conv, rev, err := s.conversationByID(ctx, convoID)
 	if err != nil {
@@ -559,18 +571,8 @@ func (s *Server) tryDispatch(ctx context.Context, convoID, podName string) (disp
 	// would deadlock on one broken channel; late topics catch up). Dangling
 	// channelRefs stay chat-less. Delivery itself needs no channel lookup — the
 	// operator routes every result to the bound channels after /work/done.
-	if len(conv.ChannelRefs) > 0 {
-		chatBound := false
-		for _, ref := range conv.ChannelRefs {
-			var ch agentopsv1alpha1.Channel
-			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: ref}, &ch); err != nil || ch.Spec.Adapter == "" {
-				continue
-			}
-			chatBound = true
-		}
-		if chatBound && len(conv.Threads) == 0 {
-			return dispatch.WorkUnit{}, false, nil
-		}
+	if len(conv.Threads) == 0 && s.anyChatChannel(ctx, conv.ChannelRefs) {
+		return dispatch.WorkUnit{}, false, nil
 	}
 	var profile agentopsv1alpha1.AgentProfile
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: conv.ProfileRef}, &profile); err != nil {
