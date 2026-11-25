@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './support/coverage'
 import { TESTID, testid } from '../src/model/testids'
 import { at, base, startHarness, type Harness } from './support/mock'
 

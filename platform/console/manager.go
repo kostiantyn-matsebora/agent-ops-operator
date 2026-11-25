@@ -457,6 +457,14 @@ type ManagerStatus struct {
 		Max     int `json:"max"`
 		Waiting int `json:"waiting"`
 	} `json:"runtimeSlots"`
+	// MemberSlots is the members pool's own sibling of RuntimeSlots, additive
+	// (separate-member-slot-pool design D-6) — a Coordinator member, `causedBy`
+	// set, draws from its own independent ceiling, never RuntimeSlots'.
+	MemberSlots struct {
+		InUse   int `json:"inUse"`
+		Max     int `json:"max"`
+		Waiting int `json:"waiting"`
+	} `json:"members"`
 	Queues    []QueueStat    `json:"queues"`
 	Cooldowns []CooldownStat `json:"cooldowns"`
 	// StorageOutage is present while context storage is being treated as

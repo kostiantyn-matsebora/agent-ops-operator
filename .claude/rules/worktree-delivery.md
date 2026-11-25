@@ -63,6 +63,7 @@ runs comes from the PR — scripts/prompts restore from the BASE branch.
 | `conveyor:fix` | a PR | fix every finding/Sonar issue/failed check, round after round |
 | `conveyor:run` | an issue | STANDING: implement → mergeable → archive |
 | `conveyor:implement` / `conveyor:archive` | issue | one station each |
+| `station:testing` | issue | the testing session (`.github/routines/test-change.md`): the SESSION runs the tiers, never CI. State only |
 | `station:<x>` / `loop:<x>` | issue/PR | STATE only, set by the workflow |
 | `conveyor:keep-going` | a capped PR | one more set of rounds |
 
@@ -92,6 +93,20 @@ A person's comment — never a check — restarts a waiting round, and a
 
 A failed fix is UNADDRESSED, not a dispute. SonarCloud is the second
 required reviewer. `/opsx:archive` is refused while any of this is open.
+
+### The testing station sits between implement and fix
+
+**A SESSION RUNS THE TESTS, NEVER CI.** It judges the lines the PR ADDS or changes.
+
+| Rule | Is |
+|---|---|
+| Floors | 90 unit, 70 system, 50 e2e. A tier with no changed line in its domain is not applicable |
+| Missing tests | written by a separate model, `conveyor-tester` |
+| The fixer and a tester's test | disputes it, and the tester judges the dispute. It never edits it |
+| Model-dependent behaviour | tested against a real model, credential in the environment only, never read or printed |
+| No credential where it is required | the station stops, and no tier passes |
+| Budget | five rounds of its own, counted from issue comments, apart from the fixing loop's rounds |
+| Mergeable | includes merging cleanly. `merge-sync.py` is model-free and asks a person on a hand-written conflict |
 
 ### `conveyor.py` decides. Nothing else does
 

@@ -36,6 +36,18 @@ claimStalenessSeconds: 90
 # to restore it. Nothing is lost, only delayed (up to maxQueuedConversations).
 maxActiveConversations: 5
 
+# How many Coordinator members may be ACTIVE at once — a pool independent of
+# maxActiveConversations above. A member is a conversation an `invoke`
+# created (`spec.causedBy` set); an uncaused conversation counts against
+# maxActiveConversations instead, never this one. Over-cap work is not
+# dropped — it waits in phase Pending and is admitted FIFO by creation time
+# as slots free, same as the conversations pool.
+#
+# BREAKING (capacity): this pool is NEW, so total simultaneous pods can now
+# reach the sum of both values — up to 10 by default where it was 5. Size
+# node resources for both.
+maxActiveMembers: 5
+
 # Bound on the PENDING backlog. Beyond it /signal/inbound declines to create a
 # conversation and reports the batch as dropped for capacity — chat senders are
 # told on the surface they typed on, alerts are logged and counted.
@@ -1122,7 +1134,8 @@ console:
     # 0.45.0: the Queues work table pages, long titles clip with a hover tooltip,
     # and the narrow columns stop wrapping.
     # 0.46.0: reads correlationId, the conversation's identity moved off it to
-    # conversationId, and the channel adapter contract moves to 3.
+    # conversationId, and the channel adapter contract moves to 3. The Queues
+    # work-queue card shows the conversations and members pools side by side.
     tag: 0.46.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080

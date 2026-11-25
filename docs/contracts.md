@@ -659,9 +659,13 @@ Both endpoints below are read-only and use the same bearer scheme as
 **`GET /status`** — manager-internal state that exists in no Kubernetes object:
 
 - **Build version** and the leader-election lease holder.
-- **Runtime slots in use** against `MAX_ACTIVE_CONVERSATIONS`, counted from the
-  live POD list — the same definition the admission gate uses, so the two cannot
-  disagree — plus how many conversations are waiting for one.
+- **Runtime slots in use, in two independent pools** — `runtimeSlots` against
+  `MAX_ACTIVE_CONVERSATIONS`, and an additive sibling `members` against
+  `MAX_ACTIVE_MEMBERS`, same `inUse`/`max`/`waiting` shape on both. Each is
+  counted from the live POD list, split by whether the conversation's
+  `causedBy` is set — the same split the admission gate uses, so the two
+  cannot disagree — plus how many conversations of that pool are waiting for
+  a slot.
 - **Per-adapter op queue depth**, split into **queued** (not yet acknowledged)
   and **claimed but uncompleted** (acknowledged and awaiting its report, so an
   adapter is wedged mid-delivery). Those are
@@ -719,8 +723,8 @@ scrape time from the same in-memory state `/status` reports.
 | `agentops_channel_ops_claimed` | gauge | `adapter` |
 | `agentops_channel_op_oldest_queued_age_seconds` | gauge | `adapter` |
 | `agentops_channel_op_oldest_claimed_age_seconds` | gauge | `adapter` |
-| `agentops_runtime_slots_in_use` | gauge | — |
-| `agentops_runtime_slots_max` | gauge | — |
+| `agentops_runtime_slots_in_use` | gauge | `pool` (`conversations`, `members`) |
+| `agentops_runtime_slots_max` | gauge | `pool` (`conversations`, `members`) |
 | `agentops_conversations_inflight` | gauge | `pipeline` |
 | `agentops_cooldowns_active` | gauge | `source` |
 

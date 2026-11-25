@@ -553,12 +553,15 @@ async function consumeTurn(sdkQuery, watch, calls) {
 }
 
 // resumeSucceeded decides whether one attempted resume actually recovered
-// the context — the vendor's own signal (a session id, any result text). A
-// session that was found emits a session id even on a later failure, so "no
-// session id and no result" is what a missing session looks like here too.
+// the context. A turn that SUCCEEDED did. A turn that FAILED did only if it
+// said something: a failed turn that carries a session id and no text is what a
+// resume against an unreadable or missing store looks like, because the vendor
+// opens a NEW session, whose id comes back on the error result. Counting that id
+// as a recovery reported a failed run as `continued` and skipped the presence
+// check that tells an outage from a loss.
 function resumeSucceeded(first) {
   if (first.status === 'succeeded') return true;
-  return !(!first.sessionId && !first.result);
+  return Boolean(first.result);
 }
 
 // runTurnOnLiveSession pushes one prompt into the already-open/reused/

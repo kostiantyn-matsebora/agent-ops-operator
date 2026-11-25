@@ -61,6 +61,57 @@ func TestHandleStatusCountsSlotsFromLivePodsNotStatus(t *testing.T) {
 	}
 }
 
+// /status reports the members pool as an ADDITIVE sibling of RuntimeSlots
+// (separate-member-slot-pool design D-6): a Coordinator member — CausedBy
+// set — counts and waits against its own ceiling, never the conversations
+// one, and the existing RuntimeSlots field keeps reporting conversations
+// only.
+func TestHandleStatusReportsTheMembersPoolSeparately(t *testing.T) {
+	memberPod := &corev1.Pod{}
+	memberPod.Name, memberPod.Namespace = "member-a-pod", "agent-ops"
+	memberPod.Labels = map[string]string{runtimepod.LabelApp: runtimepod.LabelAppValue, runtimepod.LabelConversation: "member-a"}
+	memberPod.Status.Phase = corev1.PodRunning
+
+	memberA := &agentopsv1alpha1.Conversation{}
+	memberA.Name, memberA.Namespace = "member-a", "agent-ops"
+	memberA.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1"}
+	memberA.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r1"}
+
+	// member-b has no pod and inflight work: it is a WAITING member, never a
+	// waiting conversation.
+	memberB := &agentopsv1alpha1.Conversation{}
+	memberB.Name, memberB.Namespace = "member-b", "agent-ops"
+	memberB.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1"}
+	memberB.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r2"}
+
+	// an ordinary conversation, uncaused, also inflight with no pod.
+	plain := &agentopsv1alpha1.Conversation{}
+	plain.Name, plain.Namespace = "plain-a", "agent-ops"
+	plain.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r3"}
+
+	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(memberPod, memberA, memberB, plain).Build()
+	s := &Server{
+		Reader: c, Conversations: testConversations(t, c, "agent-ops"), Client: c,
+		Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"},
+		MaxActiveConversations: 5, MaxActiveMembers: 2, Version: "test",
+	}
+
+	rec := httptest.NewRecorder()
+	s.handleStatus(rec, httptest.NewRequest("GET", "/status", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out statusResponse
+	mustUnmarshal(t, rec.Body.Bytes(), &out)
+
+	if out.MemberSlots.InUse != 1 || out.MemberSlots.Waiting != 1 || out.MemberSlots.Max != 2 {
+		t.Fatalf("member slots: %+v", out.MemberSlots)
+	}
+	if out.RuntimeSlots.InUse != 0 || out.RuntimeSlots.Waiting != 1 || out.RuntimeSlots.Max != 5 {
+		t.Fatalf("conversation slots must stay additive and exclude members: %+v", out.RuntimeSlots)
+	}
+}
+
 // A Closed conversation is INERT (invariants.md: "no place in the FIFO
 // waiting set") and can carry unpruned spec.inputs forever — one that
 // arrived but was never processed before close. Measured live: the console's

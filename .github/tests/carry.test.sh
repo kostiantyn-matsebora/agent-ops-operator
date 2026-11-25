@@ -39,9 +39,9 @@ PY
 
 pr() {  # pr <body> [branch] [cross] [state]
   python3 - "$(printf '%b' "$1")" "${2:-change/thing}" "${3:-false}" "${4:-OPEN}" > "$FX/pr.json" <<'PY'
-import json, sys
+import json, os, sys
 print(json.dumps({"body": sys.argv[1], "headRefName": sys.argv[2], "isCrossRepository": sys.argv[3] == "true",
-                  "state": sys.argv[4], "headRefOid": "abc123", "labels": [{"name": "conveyor:fix"}] if sys.argv[4] == "OPEN" else []}))
+                  "state": sys.argv[4], "headRefOid": "abc123", "mergeStateStatus": os.environ.get("MERGE_STATE", "CLEAN"), "labels": [{"name": "conveyor:fix"}] if sys.argv[4] == "OPEN" else []}))
 PY
 }
 issue_has() { printf '%s' "$2" > "$FX/labels-$1"; }               # issue_has <n> "<labels>"
@@ -90,14 +90,29 @@ it "fix: the state events follow: loop mergeable on the pull request, station me
 assert_contains "$(cat "$GH_CALLS")" "issue edit 220 --repo o/r --add-label loop:mergeable"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 51 --repo o/r --add-label station:merge"
 
+for st in BEHIND DIRTY; do
+  it "fix: a green head that is $st its base is carried the grant and marked nothing mergeable"
+  reset; MERGE_STATE=$st pr "Refs #51"; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"; echo 1 > "$FX/review-runs"
+  out=$(run --pr 220 --station fix --ci-conclusion success)
+  assert_equals "1" "$(edited 220 conveyor:fix)"
+  assert_not_contains "$(cat "$GH_CALLS")" "loop:mergeable"
+  assert_not_contains "$(cat "$GH_CALLS")" "station:merge"
+done
+
+it "fix: the testing station holds the carry: nothing is labelled while the issue reads station:testing"
+reset; pr "Refs #51"; issue_has 51 "conveyor:run station:testing"; placed maintainer write; change 51 "$PENDING"; echo 1 > "$FX/review-runs"
+out=$(run --pr 220 --station fix --ci-conclusion success)
+assert_equals "0" "$(edited 220 conveyor:fix)"
+assert_contains "$out" "testing station"
+
 it "fix: no round is dispatched while the review has not completed on the head: its own completion is the round"
-reset; echo 0 > "$FX/review-runs"
+reset; pr "Refs #51"; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"; echo 0 > "$FX/review-runs"
 out=$(run --pr 220 --station fix --ci-conclusion success)
 assert_equals "1" "$(edited 220 conveyor:fix)"
 assert_equals "false" "$(output dispatch_round)"
 
 it "fix: CI red still carries the grant, and marks nothing mergeable"
-reset; echo 1 > "$FX/review-runs"
+reset; pr "Refs #51"; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"; echo 1 > "$FX/review-runs"
 out=$(run --pr 220 --station fix --ci-conclusion failure)
 assert_equals "1" "$(edited 220 conveyor:fix)"
 assert_not_contains "$(cat "$GH_CALLS")" "loop:mergeable"
@@ -105,7 +120,7 @@ assert_not_contains "$(cat "$GH_CALLS")" "station:merge"
 assert_equals "true" "$(output dispatch_round)"
 
 it "fix: a review thread open carries the grant but is not mergeable"
-reset
+reset; pr "Refs #51"; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"; echo 1 > "$FX/review-runs"
 out=$(THREADS_OPEN=1 run --pr 220 --station fix --ci-conclusion success)
 assert_equals "1" "$(edited 220 conveyor:fix)"
 assert_not_contains "$(cat "$GH_CALLS")" "loop:mergeable"

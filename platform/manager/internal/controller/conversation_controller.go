@@ -125,7 +125,18 @@ type ConversationReconciler struct {
 	// conversation is active while a runtime pod exists for it. Counted from
 	// live pods, never from status: a pod stuck Pending on an unschedulable
 	// node, or a status patch lost to a conflict, must not inflate capacity.
+	//
+	// This is the CONVERSATIONS pool only (separate-member-slot-pool design
+	// D-1/D-2): an uncaused conversation, CausedBy unset. A Coordinator
+	// member draws from MaxActiveMembers instead, a fully independent
+	// ceiling — admission, FIFO, idle eviction and the freed-slot wake-up are
+	// all scoped to one pool, through poolOf/splitPools, never a shared
+	// count.
 	MaxActiveConversations int
+	// MaxActiveMembers caps simultaneously ACTIVE Coordinator members — a
+	// conversation an `invoke` created, CausedBy set. Same counting rule as
+	// MaxActiveConversations, over the other pool.
+	MaxActiveMembers int
 	// Ops carries outbound channel operations (topic creation) to the serving
 	// channel implementation; nil disables chat entirely (tests).
 	Ops *chat.OpQueue
@@ -1064,17 +1075,21 @@ func (r *ConversationReconciler) liveRuntimePods(ctx context.Context, ns string)
 	return live, nil
 }
 
-// waitingFIFO is the conversations waiting for a worker, oldest first.
+// waitingFIFO is the conversations of pool p waiting for a worker, oldest
+// first.
 //
 // The waiting set is defined by PODS, not by phase: a conversation that
 // needs a worker and holds none is waiting, whether it has been marked
 // Pending yet or has only just been created. Keying on phase would let a
 // brand-new conversation reconciled first jump an older one.
-func (r *ConversationReconciler) waitingFIFO(all []state.ConversationRecord, hasPod map[string]bool) []state.ConversationRecord {
+func (r *ConversationReconciler) waitingFIFO(all []state.ConversationRecord, hasPod map[string]bool, p pool) []state.ConversationRecord {
 	now := time.Now()
 	var waiting []state.ConversationRecord
 	for i := range all {
 		c := &all[i]
+		if poolOf(*c, nil) != p {
+			continue
+		}
 		if c.DeletionRequestedAt != nil || hasPod[c.ID] || !dispatch.NeedsWorker(c) {
 			continue
 		}
@@ -1103,20 +1118,25 @@ func (r *ConversationReconciler) waitingFIFO(all []state.ConversationRecord, has
 	return waiting
 }
 
-// admit decides whether this conversation may take a capacity slot now.
+// admit decides whether this conversation may take a capacity slot now, IN
+// ITS OWN POOL (separate-member-slot-pool design D-1/D-2) — conversations
+// and members never compete for the same slot, and a full pool never blocks
+// the other.
 //
 // Both halves come from the same two lists every conversation reads — the live
-// runtime pods and the conversations waiting for one — so admission order is
-// stable across reconciles without a leader-elected scheduler or a queue
-// object. Order is FIFO by creation time, full stop: no priority, no fairness
-// classes between pipelines.
+// runtime pods of its pool and the pool's own conversations waiting for one —
+// so admission order is stable across reconciles without a leader-elected
+// scheduler or a queue object. Order is FIFO by creation time, full stop: no
+// priority, no fairness classes between pipelines.
 //
-// A slot counts as free when the cap is not reached, or when a live pod is
-// EVICTABLE (its conversation has nothing inflight and nothing queued) —
-// createRuntimePod does the eviction, and admitting on that basis is what keeps
-// a burst from blocking behind a worker that is doing nothing.
+// A slot counts as free when the pool's cap is not reached, or when a live
+// pod of that SAME pool is EVICTABLE (its conversation has nothing inflight
+// and nothing queued) — createRuntimePod does the eviction, and admitting on
+// that basis is what keeps a burst from blocking behind a worker that is
+// doing nothing.
 func (r *ConversationReconciler) admit(ctx context.Context, conv *state.ConversationRecord) (bool, error) {
-	live, free, err := r.freeSlots(ctx)
+	p := poolOf(*conv, nil)
+	live, free, err := r.freeSlots(ctx, p)
 	if err != nil {
 		return false, err
 	}
@@ -1124,8 +1144,8 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *state.Conversa
 	// outliving its deleted conversation must not be read as a same-named
 	// conversation's own pod (conversation-identity).
 	hasPod := map[string]bool{}
-	for _, p := range live {
-		if id := p.Labels[runtimepod.LabelConversationID]; id != "" {
+	for _, pd := range live {
+		if id := pd.Labels[runtimepod.LabelConversationID]; id != "" {
 			hasPod[id] = true
 		}
 	}
@@ -1141,7 +1161,7 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *state.Conversa
 	if err != nil {
 		return false, err
 	}
-	waiting := r.waitingFIFO(all, hasPod)
+	waiting := r.waitingFIFO(all, hasPod, p)
 	for i := range waiting {
 		if waiting[i].Name == conv.Name {
 			return i < free, nil
@@ -1169,10 +1189,12 @@ func (r *ConversationReconciler) conversationForPod(ctx context.Context, p *core
 	return list[0], true, nil
 }
 
-// evictableCount reports how many live pods could be freed for waiting work:
-// those whose conversation has nothing inflight and nothing queued. Eviction
-// deletes only the pod — the conversation and its session survive and it gets a
-// fresh pod on its next input.
+// evictableCount reports how many of the given live pods could be freed for
+// waiting work: those whose conversation has nothing inflight and nothing
+// queued. Eviction deletes only the pod — the conversation and its session
+// survive and it gets a fresh pod on its next input. Pool-blind: the caller
+// passes a list already scoped to one pool (freeSlots/splitPools), so this
+// never reaches across pools.
 func (r *ConversationReconciler) evictableCount(ctx context.Context, live []corev1.Pod) int {
 	n := 0
 	for i := range live {
@@ -1528,10 +1550,12 @@ func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *state
 	return nil
 }
 
-// evictIdleWorker evicts the longest-idle worker whose conversation has
-// nothing queued. It reports false when none can be evicted (every slot is
-// held by a busy conversation) or the delete failed.
-func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv string, live []corev1.Pod) (types.UID, bool, error) {
+// evictIdleWorker evicts the longest-idle worker of pool p whose conversation
+// has nothing queued — live is already scoped to p, so this can never evict a
+// pod of the other pool (design D-3). It reports false when none can be
+// evicted (every slot of this pool is held by a busy conversation) or the
+// delete failed.
+func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv string, p pool, live []corev1.Pod) (types.UID, bool, error) {
 	logger := log.FromContext(ctx)
 	type cand struct {
 		pod  corev1.Pod
@@ -1553,8 +1577,8 @@ func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv strin
 		}
 	}
 	if len(cands) == 0 {
-		logger.Info("at the active-conversation cap, all busy — pending",
-			"conversation", conv, "cap", r.MaxActiveConversations)
+		logger.Info("at the pool's active-conversation cap, all busy — pending",
+			"conversation", conv, "pool", p, "cap", r.capFor(p))
 		return "", false, nil
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].last.Before(cands[j].last) })
@@ -1572,7 +1596,7 @@ func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv strin
 func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *state.ConversationRecord) (bool, error) {
 	logger := log.FromContext(ctx)
 
-	ok, release, err := r.reserveSlot(ctx, conv.ID)
+	ok, release, err := r.reserveSlot(ctx, conv)
 	if !ok {
 		return false, err
 	}
@@ -1767,7 +1791,10 @@ func (r *ConversationReconciler) setToolingCondition(ctx context.Context, conv *
 }
 
 // MapRuntimePodToPending maps a freed capacity slot to the conversations that
-// might take it: the oldest Pending ones, up to the cap.
+// might take it: the oldest Pending ones OF THE DELETED POD'S OWN POOL, up to
+// that pool's own ceiling (separate-member-slot-pool design D-4) — a freed
+// member slot wakes pending members, never a pending conversation, and vice
+// versa.
 //
 // Owns(&corev1.Pod{}) cannot do this — it routes a pod event to the pod's OWN
 // conversation, which is precisely the conversation that no longer needs the
@@ -1778,11 +1805,17 @@ func (r *ConversationReconciler) MapRuntimePodToPending(ctx context.Context, obj
 	if obj != nil && obj.GetNamespace() != "" && obj.GetNamespace() != r.Namespaces.Conversations {
 		return nil
 	}
+	p := poolConversations
+	if obj != nil {
+		p = r.poolOfID(ctx, obj.GetLabels()[runtimepod.LabelConversationID])
+	}
 	pending, err := r.Conversations.List(ctx, state.ByPhase, state.PhasePending)
 	if err != nil {
 		return nil
 	}
-	pending = slices.DeleteFunc(pending, func(c state.ConversationRecord) bool { return c.DeletionRequestedAt != nil })
+	pending = slices.DeleteFunc(pending, func(c state.ConversationRecord) bool {
+		return c.DeletionRequestedAt != nil || poolOf(c, nil) != p
+	})
 	sort.Slice(pending, func(i, j int) bool {
 		if !pending[i].CreatedAt.Equal(pending[j].CreatedAt) {
 			return pending[i].CreatedAt.Before(pending[j].CreatedAt)
@@ -1792,7 +1825,7 @@ func (r *ConversationReconciler) MapRuntimePodToPending(ctx context.Context, obj
 	// One deletion frees one slot, but waking a few costs a no-op reconcile
 	// each and covers the case where several exited at once. Each still makes
 	// its own FIFO decision, so waking a younger one cannot let it jump ahead.
-	n := r.MaxActiveConversations
+	n := r.capFor(p)
 	if n < 1 {
 		n = 1
 	}

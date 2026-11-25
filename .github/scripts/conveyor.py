@@ -66,10 +66,15 @@ SKIP = None  # a table entry meaning: the event does not move this state, and th
 # can say "no pair is undefined" and a reader can see what an event does to
 # every state. `SKIP` is an answer, not a gap.
 
-STATION_STATES = ("none", "implement", "fix", "merge", "archive", "stalled", "done")
+STATION_STATES = ("none", "implement", "testing", "fix", "merge", "archive", "stalled", "done")
 STATION_EVENTS = (
     "fire:implement",            # the implement station's session starts
     "fire:archive",              # the archive station's session starts
+    "testing:start",             # the implement session opened the pull request: the testing station starts
+    "testing:restart",           # the base was merged into the branch: the tests judged an earlier head
+    "testing:resume",            # a person's `conveyor:keep-going` granted another set of testing rounds
+    "testing:passed",            # every tier passes and holds its floor on the head
+    "testing:capped",            # the testing station spent its budget with a tier still failing
     "round:start",               # a fixing round starts on the change's pull request
     "pr:green",                  # the pull request is green with no review thread open
     "merge:proposal_or_apply",   # a pull request merged and the change is NOT finished
@@ -90,6 +95,12 @@ def _station_table() -> dict:
         t[(s, "fire:archive")] = "archive"
         t[(s, "round:start")] = "fix"
         t[(s, "pr:green")] = "merge"
+        # THE TESTING STATION IS NOT SKIPPED. A fixing round or a green head does not
+        # move `testing`: only `testing:passed` leaves it for `fix` (a merge, a restart
+        # of implement or the archive station still can, since each ends or replaces it).
+        if s == "testing":
+            t[(s, "round:start")] = SKIP
+            t[(s, "pr:green")] = SKIP
         t[(s, "merge:proposal_or_apply")] = "implement"        # the next station is implement
         t[(s, "merge:finished_carried")] = "archive"
         t[(s, "merge:finished_stalled")] = "stalled"
@@ -98,6 +109,12 @@ def _station_table() -> dict:
         # An implement session never REGRESSES a change that reached the archive
         # station: the fire decision refuses it, and the label must agree.
         t[(s, "fire:implement")] = SKIP if s == "archive" else "implement"
+    t[("implement", "testing:start")] = "testing"
+    t[("stalled", "testing:resume")] = "testing"
+    t[("fix", "testing:restart")] = "testing"
+    t[("merge", "testing:restart")] = "testing"
+    t[("testing", "testing:passed")] = "fix"
+    t[("testing", "testing:capped")] = "stalled"
     return t
 
 
@@ -200,6 +217,7 @@ class PullRequest:
     grants: int = 0                     # grant markers since then: one per consumed keep-going
     max_rounds: int = 5
     fork: bool = False                  # the gate refuses a fork, and accepts any same-repository branch
+    merge_state: str = "CLEAN"          # GitHub's mergeStateStatus: the fact `mergeable` rests on
 
 
 @dataclass(frozen=True)
@@ -300,6 +318,12 @@ def _carried_by_a_person_or_a_bot(placer: Placer | None) -> bool:
 
 # ---- the fire: a label on the issue ----------------------------------------------------------
 
+def _fire_event(station: str) -> str:
+    """The station event a fire moves the line by. The testing station has none: `testing-station.py begin`
+    already moved the line (implement -> testing, or stalled -> testing on a grant), and a fire only starts the session."""
+    return "" if station == "testing" else f"fire:{station}"
+
+
 def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Placer | None = None,
          restart_ok: bool = False) -> Decision:
     """A label landed on the issue. Which station starts, if any.
@@ -347,7 +371,10 @@ def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Plac
         return Decision("refuse", f"`{label}` starts a session that writes to this repository, which needs "
                         f"write access, and @{placer.login} has `{placer.permission}`", remove_label=strip)
 
-    if label == vocab["archive_label"] or (label == vocab["run_label"] and line.lane == "opsx" and line.change_finished):
+    if vocab["station_labels"]["testing"] in line.issue_labels and label == vocab["run_label"]:
+        # THE TESTING STATION: the label on the issue says the line is there, and `conveyor:run` stands for it.
+        station = "testing"
+    elif label == vocab["archive_label"] or (label == vocab["run_label"] and line.lane == "opsx" and line.change_finished):
         station = "archive"
     else:
         station = "implement"
@@ -362,6 +389,14 @@ def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Plac
                             "is implement, not archive", remove_label=keep)
 
     if station in line.fired:
+        if station == "testing":
+            # THE PULL REQUEST IS ALWAYS OPEN at this station, so "is a session still at work" cannot be read
+            # from it. A second session starts only on a consumed `conveyor:keep-going` (`restart_ok`).
+            if not restart_ok:
+                return Decision("skip", "the testing station already fired: a session is at work, and only a "
+                                "granted `conveyor:keep-going` starts another", station=station)
+            return Decision("fire", "a granted `conveyor:keep-going` starts another testing session",
+                            station=station, station_event="")
         if placer.bot and not restart_ok:
             return Decision("skip", f"the {station} station already carries a fire record and a carry never "
                             "fires twice", station=station)
@@ -372,8 +407,8 @@ def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Plac
               "the merge that just landed is proof the previous session finished its phase")
         return Decision("fire", f"the {station} station fired before but nothing is open from the change's "
                         f"branch, so {why}",
-                        station=station, station_event=f"fire:{station}")
-    return Decision("fire", f"the {station} station starts", station=station, station_event=f"fire:{station}")
+                        station=station, station_event=_fire_event(station))
+    return Decision("fire", f"the {station} station starts", station=station, station_event=_fire_event(station))
 
 
 # ---- the carries -----------------------------------------------------------------------------
@@ -397,7 +432,13 @@ def carry_fix(vocab: dict, pr: PullRequest, line: Line, placer: Placer | None) -
         return Decision("nothing", f"#{issue} carries no grant for this pull request's fix station")
     if not _carried_by_a_person_or_a_bot(placer):
         return Decision("nothing", f"`{grant}` on #{issue} was placed by someone who cannot push here now")
-    green = pr.ci_conclusion == "success" and not pr.thread_open
+    if vocab["station_labels"]["testing"] in line.issue_labels:
+        return Decision("nothing", f"#{issue} is at the testing station: its tests pass before a fixing round starts")
+    # GREEN IS NOT MERGEABLE: a head behind its base or in conflict is red to a person who tries to merge it.
+    # The testing label is absent here (the guard above returned otherwise), so the tests have passed on this line.
+    testing_passed = vocab["station_labels"]["testing"] not in line.issue_labels
+    green = (pr.ci_conclusion == "success" and not pr.thread_open
+             and merge_ready(pr.merge_state, testing_passed=testing_passed).action == "mergeable")
     return Decision("carry", f"carried `{grant}` from #{issue}", station="fix", grant=grant,
                     dispatch_round=pr.review_completed,
                     loop_event="ci:green_clean" if green else "",
@@ -555,6 +596,11 @@ def gate(vocab: dict, trigger: Trigger, pr: PullRequest, line: Line, grant_place
     if pr.state != "OPEN" or fix not in pr.labels:
         return Decision("none", f"the pull request is {pr.state.lower()} or does not carry `{fix}`")
 
+    # THE TESTING STATION COMES FIRST. A fixing round on a head whose tests have not passed
+    # would fix review remarks over code that may change under them.
+    if vocab["station_labels"]["testing"] in line.issue_labels:
+        return Decision("none", "the testing station has not passed: its own rounds run first")
+
     cap = cap_for(pr.max_rounds, pr.grants)
     if pr.rounds_used >= cap and keep not in pr.labels:
         return Decision("none", f"the loop reached its bound: {pr.rounds_used} of {cap} rounds used. "
@@ -628,7 +674,9 @@ NO_MODEL_RAN = ("clean", "failed")   # the two endings that spent no model: noth
 RETRIES = ("unaddressed", "stale patch")   # nothing landed and items are still eligible: the round starts the next itself
 
 
-def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_on_person: bool = False) -> Decision:
+def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_on_person: bool = False,
+           merge_state: str = "CLEAN", checks_failed: int = 0, testing_passed: bool = True,
+           conflicted=(), generated_paths=(), sync_action: str = "") -> Decision:
     """A round ended. The loop event, whether the round counted, and whether it
     starts the next round itself.
 
@@ -672,7 +720,28 @@ def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_
     if kind == "clean":
         if thread_open or waiting_on_person:
             return Decision("waiting", "nothing to fix, but a person's answer is waited on", loop_event="end:waiting")
-        return Decision("mergeable", "nothing left and the head is green", loop_event="end:mergeable")
+        # THE SYNC'S OWN VERDICT WINS: `merge-sync.py` tried this head and asked a person, so the head is not
+        # re-derived from a file list (a failed regenerator names generated files, which would read as trivial).
+        if sync_action == "asked":
+            return Decision("waiting", "the base could not be merged in without a person's decision",
+                            loop_event="end:waiting")
+        # A CLEAN ROUND IS MERGEABLE ONLY IF GITHUB SAYS THE HEAD CAN MERGE (merge_ready).
+        m = merge_ready(merge_state, checks_failed, thread_open, testing_passed, conflicted, generated_paths)
+        if m.action == "mergeable":
+            return Decision("mergeable", "nothing left and the head is green", loop_event="end:mergeable")
+        if m.action == "ask":
+            return Decision("waiting", m.reason, loop_event="end:waiting")
+        if m.action == "work":
+            # A REQUIRED CHECK IS RED ON A CLEAN REVIEW: the fixer's, so the next round starts now, as it does for
+            # a retry. Ending `continue` alone would wait for an event that no push is going to cause.
+            return Decision("continue", m.reason, loop_event="end:continue", counted=True, dispatch_round=True)
+        if m.action in ("update", "regenerate", "testing"):
+            # NO ROUND IS STARTED HERE: an update or a regeneration is a push, and the push starts CI and the review.
+            return Decision("continue", m.reason, loop_event="end:continue")
+        # `defer`: GitHub has not settled the state, so the loop has no honest way to end. It stays `waiting`, the
+        # one label that is not a running round, and the next CI or review completion asks again. `running` here
+        # would claim a round that is not there, and `recover` would then have to correct it.
+        return Decision("waiting", m.reason, loop_event="end:waiting")
     if kind == "disputed":
         return Decision("waiting", "every item left is a dispute, and a person is owed an answer",
                         loop_event="end:waiting", counted=True)
@@ -700,6 +769,250 @@ def check_is_work(job: str, conclusion: str, required) -> Decision:
     if conclusion != "failure":
         return Decision("skip", f"concluded {conclusion or 'nothing'}")
     return Decision("work", "a failed required check")
+
+
+# ---- the testing station ---------------------------------------------------------------------
+
+TIERS = ("unit", "system", "e2e")
+
+
+@dataclass(frozen=True)
+class TierResult:
+    """One tier's run on the head, over the lines the pull request changed.
+
+    `covered`/`total` count EXECUTABLE changed lines in the tier's domain. A tier whose
+    domain holds no changed line has total == 0 and is `not applicable`. `collected` is
+    False when the tier ran and left no coverage data behind."""
+    ran: bool = True
+    passed: bool = True
+    covered: int = 0
+    total: int = 0
+    collected: bool = True
+
+
+@dataclass(frozen=True)
+class TierVerdict:
+    tier: str
+    status: str          # pass | tests_failed | under_floor | collection_failed | not_applicable | not_run
+    percent: float | None = None
+    floor: int = 0
+
+
+def diff_percent(covered: int, total: int) -> float | None:
+    """Covered changed lines over changed lines. None when nothing changed in the domain."""
+    if total <= 0:
+        return None
+    return round(100.0 * covered / total, 1)
+
+
+def judge_tier(tier: str, floor: int, r: TierResult) -> TierVerdict:
+    """One tier against its floor.
+
+    ORDER IS THE RULE: a tier that did not run is not judged on coverage, a failing test
+    outranks a coverage number, and a tier that ran but left no data FAILS -- it never
+    reads as zero changed lines (the system pack ran against an operator that never
+    wrote its counters, and an empty directory must not look like "nothing changed")."""
+    if tier not in TIERS:
+        raise ValueError(f"unknown tier {tier!r}")
+    if not r.ran:
+        return TierVerdict(tier, "not_run", None, floor)
+    if not r.passed:
+        return TierVerdict(tier, "tests_failed", diff_percent(r.covered, r.total), floor)
+    if not r.collected:
+        # `testing-report.tier_result` marks a tier collected whenever its domain holds no changed file, so a tier
+        # with nothing to measure reaches `not_applicable` below. Only a tier that SHOULD have data and has none fails.
+        return TierVerdict(tier, "collection_failed", None, floor)
+    pct = diff_percent(r.covered, r.total)
+    if pct is None:
+        return TierVerdict(tier, "not_applicable", None, floor)
+    return TierVerdict(tier, "pass" if pct >= floor else "under_floor", pct, floor)
+
+
+@dataclass(frozen=True)
+class WorkItem:
+    kind: str       # failing_tests | missing_tests | collection | not_run
+    tier: str
+    session: str    # fixer | tester
+
+
+def testing_work(verdicts) -> list:
+    """What a testing round has to do, from the tiers' verdicts.
+
+    A red tier is the PRODUCTION CODE's to fix, never the test's: the fixer answers it.
+    A shortfall is the TESTER's, a separate model that did not write the code. A tier
+    that could not be measured is the pack's or its instrumentation's, the fixer's too."""
+    out = []
+    for v in verdicts:
+        if v.status == "tests_failed":
+            out.append(WorkItem("failing_tests", v.tier, "fixer"))
+        elif v.status == "under_floor":
+            out.append(WorkItem("missing_tests", v.tier, "tester"))
+        elif v.status == "collection_failed":
+            out.append(WorkItem("collection", v.tier, "fixer"))
+        elif v.status == "not_run":
+            out.append(WorkItem("not_run", v.tier, "fixer"))
+    return out
+
+
+def testing_ending(work, number: int, cap: int, changed: bool = True, model_ran: bool = True) -> Decision:
+    """A testing round ended. Does the station pass, go on, or stop.
+
+    `work` is what the round's verdicts left. `number` is this round's number, `cap` the
+    ceiling (the station's own budget, never the fixing loop's). `changed` is False when
+    the round's patches changed nothing. `model_ran` is False when no session ran.
+
+    Actions: `passed`, `continue`, `capped`. A round in which no model ran spends nothing.
+    A round that changed nothing ends the station early, since the next round would read
+    the same tree and ask the same questions."""
+    if not work:
+        return Decision("passed", "every tier passes and holds its floor on the head",
+                        station_event="testing:passed", loop_event="")
+    counted = bool(model_ran)
+    if counted and number >= cap:
+        return Decision("capped", f"{cap} testing rounds have run and {len(work)} item(s) are left",
+                        station_event="testing:capped", counted=True)
+    if counted and not changed:
+        return Decision("capped", "the round changed nothing, and a next round would read the same tree",
+                        station_event="testing:capped", counted=True)
+    return Decision("continue", f"{len(work)} item(s) are left, so the tiers run again",
+                    counted=counted, dispatch_round=True)
+
+
+def testing_cap(max_rounds: int, grants: int) -> int:
+    """The station's ceiling: one set, and a full set per consumed `conveyor:keep-going`."""
+    return cap_for(max_rounds, grants)
+
+
+def models_independent(tester_model: str, author_model: str) -> bool:
+    """The tester must be a different model from the one that wrote the code. An empty name on
+    either side is a configuration gap, and it fails closed: independence cannot be shown."""
+    t, a = (tester_model or "").strip().lower(), (author_model or "").strip().lower()
+    return bool(t) and bool(a) and t != a
+
+
+def _glob_regex(pattern: str):
+    """A path glob: `**` crosses directories, `*` does not, and `**/` may match nothing."""
+    out, i = "", 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out += "(?:.*/)?"; i += 3
+        elif pattern.startswith("**", i):
+            out += ".*"; i += 2
+        elif pattern[i] == "*":
+            out += "[^/]*"; i += 1
+        elif pattern[i] == "?":
+            out += "[^/]"; i += 1
+        else:
+            out += re.escape(pattern[i]); i += 1
+    return re.compile(out + r"\Z")
+
+
+def path_matches(path: str, patterns) -> bool:
+    return any(_glob_regex(p).match(path) for p in patterns)
+
+
+def tester_patch_refusals(paths, test_paths) -> list:
+    """The paths of a TESTER's patch that are not test files. The tester writes tests only,
+    so one such path refuses the whole patch."""
+    return [p for p in paths if not path_matches(p, test_paths)]
+
+
+def fixer_patch_refusals(paths, tester_authored) -> list:
+    """The paths of a FIXER's patch that edit a file the tester wrote. A fixer that believes
+    such a test wrong disputes it, and the tester judges the dispute next round."""
+    owned = set(tester_authored)
+    return [p for p in paths if p in owned]
+
+
+def agent_facing(paths, patterns) -> list:
+    """The changed paths a model's output flows through. A FLOOR: the session may require real-model
+    testing for more, and may never waive it for one of these. The list is `testing.agent_facing_paths`."""
+    return [p for p in paths if path_matches(p, patterns)]
+
+
+def real_model_gate(paths, patterns, session_requires: bool, credential_present: bool) -> Decision:
+    """Does this change need a REAL model, and may the station go on without one.
+
+    Actions: `not_required`, `run` (real-model testing is required and the credential is set), `stop`
+    (it is required and the credential is absent: no tier reads as passed).
+
+    A STUB PROVES PLUMBING. A change to a prompt, the dispatch or a runtime can pass every stub
+    test and still break what the agent does, so the floor is not the session's to waive."""
+    floor = agent_facing(paths, patterns)
+    if not floor and not session_requires:
+        return Decision("not_required", "no changed path is agent-facing and the session found the model's behaviour irrelevant")
+    why = (f"{len(floor)} changed path(s) are agent-facing" if floor else "the session judged the model's behaviour relevant")
+    if not credential_present:
+        return Decision("stop", f"{why}, and the credential is not set in the environment: no tier can read as passed")
+    return Decision("run", f"{why}: the system and e2e tiers run on a real runtime")
+
+
+def tester_may_see(path: str) -> bool:
+    """What the tester is shown: specs, the design, the proposal and the diff's code. Never
+    a transcript or a report an implementing session left behind."""
+    return not path_matches(path, ["**/transcript*", "**/.claude/projects/**", "**/session*.jsonl",
+                                   ".pi/**", "**/dispatch/report*"])
+
+
+# ---- is the pull request able to merge -------------------------------------------------------
+
+MERGE_STATES = ("CLEAN", "HAS_HOOKS", "UNSTABLE", "BEHIND", "DIRTY", "BLOCKED", "DRAFT", "UNKNOWN")
+
+
+def classify_conflict(conflicted, generated_paths) -> str:
+    """A conflict is `trivial` when nothing is conflicted (the base merges clean), or every
+    conflicted file is one a repository script regenerates. Anything else is `asked`.
+
+    A MODEL NEVER CHOOSES A SIDE OF A HAND-WRITTEN CONFLICT. The two sides are two people's
+    intent, and a silent pick is the one resolution nobody reviews."""
+    files = list(conflicted)
+    if all(path_matches(f, generated_paths) for f in files):
+        return "trivial"
+    return "asked"
+
+
+def merge_ready(merge_state: str, checks_failed: int = 0, thread_open: bool = False,
+                testing_passed: bool = True, conflicted=(), generated_paths=()) -> Decision:
+    """May the loop end `mergeable` on this head. Actions: `mergeable`, `work`, `update`,
+    `regenerate`, `ask`, `defer`, `testing`.
+
+    MERGEABLE IS A FACT GITHUB REPORTS, NOT AN INFERENCE FROM THE REVIEW. A loop ended
+    `mergeable` on review state alone while the head was behind its base, or conflicted,
+    or red on a build. Every check below is a reason that pull request cannot merge.
+
+      work        a required check failed (a build included): the fixer's
+      testing     the testing station has not passed on THIS head
+      update      the head is behind its base and merges clean: the line merges the base in
+      regenerate  only generated files conflict: the line regenerates them
+      ask         a hand-written file conflicts: the loop waits on a person
+      defer       GitHub has not computed the state, or checks are still going
+
+    CLEAN, HAS_HOOKS and UNSTABLE all END `mergeable`: GitHub reports HAS_HOOKS when only
+    non-required commit-status hooks remain and UNSTABLE when only non-required checks fail,
+    and neither blocks a merge. A REQUIRED check failing is `checks_failed`, handled above."""
+    if merge_state not in MERGE_STATES:
+        raise ValueError(f"unknown merge state {merge_state!r}")
+    if checks_failed:
+        return Decision("work", f"{checks_failed} required check(s) failed on the head, a failed build included")
+    if merge_state == "DIRTY":
+        if classify_conflict(conflicted, generated_paths) == "trivial" and list(conflicted):
+            return Decision("regenerate", "only generated files conflict, and a repository script regenerates them",
+                            loop_event="end:continue")
+        if not list(conflicted):
+            return Decision("ask", "the head conflicts with its base and the conflicted files could not be listed, so "
+                            "a person looks at it", loop_event="end:waiting")
+        return Decision("ask", "a hand-written file conflicts with the base, and a person decides the resolution",
+                        loop_event="end:waiting")
+    if merge_state == "BEHIND":
+        return Decision("update", "the head is behind its base and the base merges in clean", loop_event="end:continue")
+    if merge_state in ("UNKNOWN", "BLOCKED", "DRAFT"):
+        return Decision("defer", f"the merge state is {merge_state.lower()}: nothing can be said until it settles")
+    if thread_open:
+        return Decision("defer", "a review thread is open, and a person's answer is owed")
+    if not testing_passed:
+        return Decision("testing", "the testing station has not passed on this head")
+    return Decision("mergeable", "the head merges clean, its checks pass, no thread is open and the tests passed",
+                    loop_event="end:mergeable")
 
 
 # ---- recovery and refresh: correcting a label a round left behind ----------------------------
@@ -750,7 +1063,23 @@ def _decide(vocab: dict, name: str, facts: dict) -> dict:
     elif name == "guard":
         d = guard(vocab, _build(PullRequest, facts.get("pr")), facts.get("running_rounds", 0), facts.get("unanswered_disputes", 0))
     elif name == "ending":
-        d = ending(facts["kind"], facts["number"], facts["cap"], facts.get("thread_open", False), facts.get("waiting_on_person", False))
+        d = ending(facts["kind"], facts["number"], facts["cap"], facts.get("thread_open", False), facts.get("waiting_on_person", False),
+                   facts.get("merge_state", "CLEAN"), facts.get("checks_failed", 0), facts.get("testing_passed", True),
+                   facts.get("conflicted", ()), facts.get("generated_paths", ()), facts.get("sync_action", ""))
+    elif name == "judge_tiers":
+        floors = facts["floors"]
+        vs = [judge_tier(t, floors[t], TierResult(**facts["tiers"][t])) for t in TIERS]
+        return {"verdicts": [asdict(v) for v in vs], "work": [asdict(w) for w in testing_work(vs)]}
+    elif name == "testing_ending":
+        w = [WorkItem(**x) for x in facts.get("work", [])]
+        d = testing_ending(w, facts["number"], facts["cap"], facts.get("changed", True), facts.get("model_ran", True))
+    elif name == "merge_ready":
+        d = merge_ready(facts["merge_state"], facts.get("checks_failed", 0), facts.get("thread_open", False),
+                        facts.get("testing_passed", True), facts.get("conflicted", ()), facts.get("generated_paths", ()))
+    elif name == "real_model_gate":
+        vocab_t = vocab["testing"]
+        d = real_model_gate(facts.get("paths", ()), vocab_t["agent_facing_paths"], facts.get("session_requires", False),
+                            facts.get("credential_present", False))
     elif name == "round_may_start":
         d = round_may_start(facts.get("ci", "none"), facts.get("review", "none"))
     else:
@@ -764,7 +1093,8 @@ def main(argv=None) -> int:
                     default=pathlib.Path(__file__).resolve().parents[1] / "review-triage.json")
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("decide", help="read facts as JSON on stdin, print the Decision as JSON")
-    d.add_argument("decision", choices=["fire", "carry_fix", "carry_archive", "gate", "guard", "ending", "round_may_start"])
+    d.add_argument("decision", choices=["fire", "carry_fix", "carry_archive", "gate", "guard", "ending", "round_may_start",
+                                          "judge_tiers", "testing_ending", "merge_ready", "real_model_gate"])
     n = sub.add_parser("next", help="print the state after an event, or the state unchanged when the event skips")
     n.add_argument("machine", choices=["station", "loop"])
     n.add_argument("state")

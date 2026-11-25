@@ -6,3 +6,4 @@ playwright-report/
 coverage/
 e2e-live/.auth/
 e2e-live/.generated/
+.nyc_output/

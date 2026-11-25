@@ -47,6 +47,12 @@ on:
           default (nats) untouched
         type: string
         default: ""
+      cover:
+        description: >-
+          "1" builds the manager with -cover and leaves system-coverage.out in the diagnostics
+          artifact, for the testing station's per-tier coverage of a change's lines
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -78,6 +84,7 @@ jobs:
     env:
       SYSTEM_TIER: ${{ inputs.tier }}
       SYSTEM_STATE_BACKEND: ${{ inputs.stateBackend }}
+      SYSTEM_COVER: ${{ inputs.cover }}
       SYSTEM_ARTIFACT_DIR: ${{ github.workspace }}/system-artifacts
     steps:
       - uses: actions/checkout@v4

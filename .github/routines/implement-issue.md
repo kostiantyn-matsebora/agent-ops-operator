@@ -27,7 +27,10 @@ platform labels that block untrusted. **It is an issue NUMBER and nothing else.*
 | The issue carries | Station | Follow |
 |---|---|---|
 | `conveyor:archive` | archive | `.github/routines/archive-change.md`, and none of this file |
+| `station:testing` | testing | `.github/routines/test-change.md`, and none of this file |
 | anything else that fired this | implement | this file |
+
+The archive station is started by a GRANT label on the issue. The testing station is started by a STATE label, which a workflow sets when the pull request opens. That is why the two rows read different label schemes.
 
 A workflow carries `conveyor:run` forward as `conveyor:archive` once the
 change's pull request merges, so the archive station starts with no person

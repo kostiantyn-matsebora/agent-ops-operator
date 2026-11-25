@@ -39,6 +39,11 @@
     "an HTML comment tag nobody reads is still part of the retired vocabulary",
     "if it names the retired word.",
     "",
+    "`conflict_marker` is the line `land-dispatch.py` writes at the top of the",
+    "pull-request comment that says the branch conflicts with its base in files",
+    "the loop will not resolve alone. It is posted once per pull request: a",
+    "later round finding that marker already standing posts nothing.",
+    "",
     "`implement_label` and `run_label` are ISSUE-level consent, placed on an",
     "issue rather than a pull request (`archive_label` is the third — see",
     "below, on the ISSUE a merged pull request tracked).",
@@ -135,6 +140,7 @@
   "grant_marker": "<!-- conveyor:grant -->",
   "station_labels": {
     "implement": "station:implement",
+    "testing": "station:testing",
     "fix": "station:fix",
     "merge": "station:merge",
     "stalled": "station:stalled",
@@ -148,5 +154,97 @@
     "capped": "loop:capped",
     "mergeable": "loop:mergeable"
   },
-  "refresh_marker": "<!-- conveyor:refreshed -->"
+  "refresh_marker": "<!-- conveyor:refreshed -->",
+  "testing": {
+    "max_rounds": 5,
+    "round_marker": "<!-- conveyor:testing-round",
+    "grant_marker": "<!-- conveyor:testing-grant -->",
+    "coverage_marker": "<!-- conveyor:coverage -->",
+    "floors": {
+      "unit": 90,
+      "system": 70,
+      "e2e": 50
+    },
+    "tester_model": "claude-sonnet-5",
+    "test_paths": [
+      "**/*_test.go",
+      "**/*.test.js",
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/*.test.py",
+      "**/*.test.sh",
+      ".github/tests/**",
+      "platform/manager/test/**",
+      "platform/console/ui/e2e/**",
+      "platform/console/ui/e2e-live/**",
+      "**/testdata/**"
+    ],
+    "generated_paths": [
+      "chart/crds/**",
+      "**/zz_generated.deepcopy.go",
+      "docs/cr-reference.md"
+    ],
+    "domains": {
+      "unit": [
+        "**/*.go",
+        "**/*.js",
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.py"
+      ],
+      "system": [
+        "platform/manager/**/*.go"
+      ],
+      "e2e": [
+        "platform/console/ui/src/**/*.ts",
+        "platform/console/ui/src/**/*.tsx"
+      ]
+    },
+    "excluded_from_coverage": [
+      "**/*_test.go",
+      "**/*.test.*",
+      "**/*.spec.*",
+      "**/testdata/**",
+      "**/zz_generated.*",
+      "**/node_modules/**",
+      "platform/console/ui/e2e*/**",
+      ".github/tests/**",
+      "platform/manager/test/**",
+      "**/*.d.ts"
+    ],
+    "regenerators": [
+      {
+        "paths": [
+          "chart/crds/**",
+          "**/zz_generated.deepcopy.go"
+        ],
+        "run": "cd platform/manager && go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 object paths=./api/... && go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 crd paths=./api/... output:crd:artifacts:config=../../chart/crds"
+      },
+      {
+        "paths": [
+          "docs/cr-reference.md"
+        ],
+        "run": "python3 .github/scripts/docs-generate.py"
+      }
+    ],
+    "agent_facing_paths": [
+      "runtimes/**",
+      "platform/manager/internal/dispatch/**",
+      "platform/manager/internal/runtimepod/**",
+      "platform/manager/internal/chat/**",
+      "platform/manager/internal/mcpcompile/**",
+      "platform/mcp-aops/**",
+      "platform/egress-proxy/**",
+      "platform/context-sync/**",
+      "chart/charts/*/templates/*profile*",
+      "chart/templates/runtime*.yaml",
+      "**/templates/format.md",
+      "**/*.prompt.md",
+      "**/systemPrompt*",
+      "docs/contracts/runtime.md"
+    ],
+    "credential_env": "AGENTOPS_REAL_MODEL_TOKEN",
+    "credential_env_fallback": "CLAUDE_CODE_OAUTH_TOKEN"
+  },
+  "conflict_marker": "<!-- conveyor:conflict -->"
 }

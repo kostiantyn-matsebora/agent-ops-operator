@@ -153,6 +153,10 @@ spec:
               value: {{ include "agentops.managerReplicas" . | quote }}
             - name: MAX_ACTIVE_CONVERSATIONS
               value: {{ .Values.maxActiveConversations | quote }}
+            # separate-member-slot-pool: a Coordinator member is admitted
+            # against this cap instead, never MAX_ACTIVE_CONVERSATIONS.
+            - name: MAX_ACTIVE_MEMBERS
+              value: {{ .Values.maxActiveMembers | quote }}
             - name: MAX_QUEUED_CONVERSATIONS
               value: {{ .Values.maxQueuedConversations | quote }}
             # signal-persistence: the consumer pool's concurrency and the

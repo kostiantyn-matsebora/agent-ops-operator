@@ -206,6 +206,9 @@ func Install(ctx context.Context, c *Cluster, v *InstallValues) error {
 	for _, kv := range v.ExtraSet {
 		args = append(args, "--set", kv)
 	}
+	if c.PostRenderer != "" {
+		args = append(args, "--post-renderer", c.PostRenderer)
+	}
 	out, err := c.Helm(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("helm install: %v\n%s", err, out)

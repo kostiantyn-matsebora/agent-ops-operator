@@ -219,6 +219,9 @@ esac
 case "$*" in
   "api graphql"*) cat "$GH_FIXTURE" ;;
   "api repos/"*"/issues/"*"/comments --paginate") cat "$GH_COMMENTS" ;;
+  "pr view "*"mergeStateStatus,body"*) printf '{"mergeStateStatus":"%s","body":"Refs #5"}\n' "${MERGE_STATE:-CLEAN}" ;;
+  "pr view "*"baseRefName"*) echo master ;;
+  "issue view "*"--jq"*) printf '%s\n' ${ISSUE_LABELS:-} ;;
   "workflow run"*) [ -z "${GH_DISPATCH_FAILS:-}" ] || { echo "HTTP 422" >&2; exit 1; } ;;
 esac
 exit 0
@@ -528,6 +531,59 @@ assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
 
 it "labelled: a clean ending marks the loop mergeable -- the gate said running when the round started"
 assert_equals "mergeable" "$(loop_label)"
+
+# A HEAD THAT CANNOT MERGE IS NOT MERGEABLE, WHATEVER THE REVIEW SAYS.
+base_moves() {  # base_moves <file> <text>: master advances in origin while the branch stays put
+  git -C "$tmp/work" checkout -q master
+  printf '%s' "$2" > "$tmp/work/$1"
+  git -C "$tmp/work" add . && git -C "$tmp/work" commit -qm "base moves"
+  git -C "$tmp/work" push -q origin master
+  git -C "$tmp/work" checkout -q "$BRANCH"
+}
+
+it "labelled: a clean round on a head BEHIND its base merges the base in, pushes, and does not claim mergeable"
+fresh_repo
+base_moves c.go $'package c\n'
+out=$(MERGE_STATE=BEHIND ISSUE_LABELS="conveyor:run station:fix" WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH" --merges)"
+assert_not_contains "$(loop_label)" "mergeable"
+assert_equals "running" "$(loop_label)"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "the base was merged in"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 5 --repo o/r --add-label station:testing"
+
+it "labelled: a clean round on a head that CONFLICTS in a hand-written file asks a person, pushes nothing and marks waiting"
+fresh_repo
+printf 'package a\n\nfunc A() int { return 2 }\n' > "$tmp/work/a.go"
+git -C "$tmp/work" commit -qam "branch edit" && git -C "$tmp/work" push -q origin "$BRANCH"
+base_moves a.go $'package a\n\nfunc A() string { return "x" }\n'
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(MERGE_STATE=DIRTY WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_equals "waiting" "$(loop_label)"
+assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:conflict -->"
+assert_contains "$(cat "$GH_CALLS")" "\`a.go\`"
+assert_equals "clean" "$(git -C "$tmp/work" status --porcelain | wc -l | tr -d ' ' | sed 's/^0$/clean/')"
+
+it "labelled: BEHIND reported for a head that already has the base is a stale reading: waiting, nothing pushed, never mergeable"
+fresh_repo
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(MERGE_STATE=BEHIND WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_equals "waiting" "$(loop_label)"
+
+it "labelled: a clean round on a head the platform cannot read yet is waiting, never mergeable"
+fresh_repo
+out=$(MERGE_STATE=UNKNOWN WORK="$tmp/none.json" land_all); rc=$?
+assert_not_contains "$(loop_label)" "mergeable"
+assert_equals "waiting" "$(loop_label)"
+
+it "labelled: a clean round while the testing station has not passed does not claim mergeable"
+fresh_repo
+out=$(MERGE_STATE=CLEAN ISSUE_LABELS="station:testing" WORK="$tmp/none.json" land_all); rc=$?
+assert_not_contains "$(loop_label)" "mergeable"
 
 it "labelled: a clean ending, but a thread opened since collect ran, does NOT mark mergeable"
 fresh_repo

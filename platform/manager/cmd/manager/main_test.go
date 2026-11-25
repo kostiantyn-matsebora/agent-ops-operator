@@ -137,6 +137,38 @@ func TestMaxActiveConversationsPrefersTheNewSpelling(t *testing.T) {
 	}
 }
 
+// maxActiveMembers is the members pool's own cap, independent of the
+// conversations pool: default 5, an explicit value, and an invalid one
+// falling back to 5 — same rule as maxActiveConversations, but MAX_RUNTIMES
+// (the conversations pool's deprecated alias) must never feed it.
+func TestMaxActiveMembersDefaultsAndIgnoresTheConversationsAlias(t *testing.T) {
+	t.Setenv("MAX_ACTIVE_MEMBERS", "")
+	t.Setenv("MAX_RUNTIMES", "")
+	if n := maxActiveMembers(); n != 5 {
+		t.Fatalf("default: got %d, want 5", n)
+	}
+
+	t.Setenv("MAX_ACTIVE_MEMBERS", "7")
+	if n := maxActiveMembers(); n != 7 {
+		t.Fatalf("set: got %d, want 7", n)
+	}
+
+	for _, invalid := range []string{"0", "-1", "nope"} {
+		t.Setenv("MAX_ACTIVE_MEMBERS", invalid)
+		if n := maxActiveMembers(); n != 5 {
+			t.Fatalf("invalid %q: got %d, want the fallback 5", invalid, n)
+		}
+	}
+
+	// MAX_RUNTIMES sets only the conversations pool (proposal.md, design
+	// D-5) -- it must never feed the members cap, however it is set.
+	t.Setenv("MAX_ACTIVE_MEMBERS", "")
+	t.Setenv("MAX_RUNTIMES", "9")
+	if n := maxActiveMembers(); n != 5 {
+		t.Fatalf("MAX_RUNTIMES must never feed the members pool: got %d, want the default 5", n)
+	}
+}
+
 func TestCommandFromEnvParsesTheJSONArrayOrReturnsNil(t *testing.T) {
 	t.Setenv("RUNTIME_COMMAND_JSON", "")
 	if got := commandFromEnv(); got != nil {

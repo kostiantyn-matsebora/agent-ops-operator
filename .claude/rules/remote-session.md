@@ -13,6 +13,8 @@ cd /home/user/agent-ops-operator && bash .github/scripts/cloud-bootstrap.sh
 | Installs | Absent, breaks |
 |---|---|
 | helm | chart render tests SKIP |
+| playwright (UI `npm ci` + chromium) | the e2e tier cannot run, `npm run test:e2e` fails to start |
+| k3d, kubectl, a running docker | start, and build images, but k3s pods cannot start in this sandbox: the testing station DISPATCHES the system tier (`system-full.yml -f cover=true`) |
 | `@fission-ai/openspec` | no opsx command |
 | pyyaml | `docs-generate.py`/`docs-task-guard.py` |
 | envtest assets → `~/.envtest` | manager integration suite |
@@ -41,7 +43,7 @@ inventory. Pushes any unprotected branch with no foreign open PR/commits
 | `conveyor:run` | issue | standing instruction, carried forward |
 | `conveyor:fix` | PR | fixing loop |
 | `conveyor:archive` | tracking issue of merged PR | archive station, `Closes #<n>` |
-| `station:<x>`/`loop:<x>` | issue/PR | nothing — state only |
+| `station:<x>`/`loop:<x>` | issue/PR | nothing — state only (`station:testing` is fired by the workflow, not placed) |
 | `conveyor:keep-going` | capped PR | another round set |
 
 Write access only, checked via the collaborators API — anyone else's label
@@ -52,6 +54,19 @@ is removed. The session opens its PR with NO LABEL and `Refs #<n>`, never
   self-labelled session was refused for having no write access). A workflow
   re-checks and carries the label instead, on `workflow_run` after `ci`.
 - One session at a time. The platform's own auto-fix stays OFF.
+
+**A SESSION IS TITLED AFTER ITS ROUTINE, AND NOTHING ELSE.** The fire request has
+no title field, so every session of one routine reads `agent-ops-operator:
+implement issue` in History.
+
+A station with its OWN routine is the only way a session names its station:
+
+1. Set `ROUTINE_FIRE_URL_<STATION>` as a variable.
+2. Set `ROUTINE_FIRE_TOKEN_<STATION>` as a secret.
+3. `<STATION>` is `TESTING` or `ARCHIVE`. Both halves, or neither.
+
+- Absent, the shared pair fires and the routine's prompt routes by label.
+- The issue number cannot be in the title. The issue's comment carries the session link.
 
 **WORKSTATION-ONLY:** local cluster/`helmfile sync`/deploy, the visual
 check, the system pack by hand. A remote session records these as not

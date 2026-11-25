@@ -43,7 +43,7 @@ describe('workspace QueuesPage', () => {
     page(<QueuesPage />)
     expect(screen.getByRole('main', { name: 'Queues and capacity' })).toHaveClass('wk-pane', 'wk-page')
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Queues and capacity')
-    expect(screen.getByRole('heading', { name: 'Work queue — 2/5 slots, 1 waiting' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Work queue — Conversations 2/5 slots, 1 waiting' })).toBeInTheDocument()
     const work = within(screen.getByRole('table', { name: 'work queue' }))
     expect(work.getByRole('link', { name: 'Fix the build' })).toHaveAttribute('href', '/conversations/c-1')
     expect(work.getByRole('link', { name: 'c-2' })).toBeInTheDocument()
@@ -106,5 +106,48 @@ describe('workspace QueuesPage', () => {
   it('shows no pager for a single page', () => {
     page(<QueuesPage />)
     expect(screen.queryByRole('button', { name: 'Next page' })).not.toBeInTheDocument()
+  })
+
+  // TASK 3.1 (separate-member-slot-pool): the members pool renders beside the
+  // conversations pool, each labelled by name, each stating its own ceiling.
+  it('shows the members pool beside the conversations pool, neither at ceiling', () => {
+    state.value = { data: queues({ members: { inUse: 2, max: 5, waiting: 0 } }) }
+    page(<QueuesPage />)
+    expect(
+      screen.getByRole('heading', { name: 'Work queue — Conversations 2/5 slots, 1 waiting · Members 2/5 slots, 0 waiting' }),
+    ).toBeInTheDocument()
+  })
+
+  it('flags whichever pool is at ceiling, independently of the other', () => {
+    state.value = {
+      data: queues({
+        capacity: { inUse: 5, max: 5, waiting: 3 },
+        members: { inUse: 1, max: 5, waiting: 0 },
+      }),
+    }
+    page(<QueuesPage />)
+    expect(
+      screen.getByRole('heading', {
+        name: 'Work queue — Conversations 5/5 slots, 3 waiting — at ceiling · Members 1/5 slots, 0 waiting',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('omits the members reading entirely until the backend reports it', () => {
+    state.value = { data: queues({ members: undefined }) }
+    page(<QueuesPage />)
+    expect(screen.getByRole('heading', { name: 'Work queue — Conversations 2/5 slots, 1 waiting' })).toBeInTheDocument()
+    expect(screen.queryByText(/Members/)).not.toBeInTheDocument()
+  })
+
+  it('names both pools\' env var in the at-ceiling flag, since the row alone does not say which pool it filled', () => {
+    state.value = {
+      data: queues({
+        work: [{ conversation: 'c-3', phase: 'Pending', queued: 1, ageSeconds: 10, stuck: 'at-runtime-ceiling' }],
+      }),
+    }
+    page(<QueuesPage />)
+    expect(screen.getByText(/MAX_ACTIVE_CONVERSATIONS/)).toBeInTheDocument()
+    expect(screen.getByText(/MAX_ACTIVE_MEMBERS/)).toBeInTheDocument()
   })
 })

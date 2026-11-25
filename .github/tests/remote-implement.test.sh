@@ -343,6 +343,65 @@ assert_contains "$out" "fired the archive station for #51"
 it "the archive fire marks the issue's station archive, state not grant"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 51 --repo o/r --add-label station:archive"
 
+TESTING_STANDING='{"labels":[{"name":"conveyor:run"},{"name":"station:testing"},{"name":"opsx:review"}]}'
+
+it "the testing station fires one session from a carried conveyor:run, under its OWN marker, and moves no station by itself"
+setup; stub_gh_carried "$BIN" "$TESTING_STANDING" "$PLACED" write; pending_change 51
+event "$EVENT" conveyor:run 51 "github-actions[bot]"
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_equals '{"text": "51"}' "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["body"])' "$RECORD")"
+assert_contains "$(cat "$GH_CALLS")" "<!-- remote-implement:fired:testing -->"
+assert_contains "$(cat "$GH_CALLS")" "Testing this change"
+assert_contains "$out" "fired the testing station for #51"
+assert_not_contains "$(cat "$GH_CALLS")" "--add-label station:"
+
+it "a second testing fire is skipped: the pull request is open by construction, so the record alone stops it"
+setup; stub_gh_carried "$BIN" "$TESTING_STANDING" "$PLACED" write; pending_change 51
+printf '<!-- remote-implement:fired:testing -->\nTesting this change.\n' > "$DIR/comments"; export GH_COMMENTS="$DIR/comments"
+event "$EVENT" conveyor:run 51 "github-actions[bot]"
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 0 "$status"
+assert_not_contains "$out" "fired the testing station"
+unset GH_COMMENTS
+
+it "a granted conveyor:keep-going (restart) fires the testing station again"
+setup; stub_gh_carried "$BIN" "$TESTING_STANDING" "$PLACED" write; pending_change 51
+printf '<!-- remote-implement:fired:testing -->\nTesting this change.\n' > "$DIR/comments"; export GH_COMMENTS="$DIR/comments"
+python3 - "$EVENT" <<'PY'
+import json, sys
+json.dump({"action": "labeled", "label": {"name": "conveyor:run"}, "issue": {"number": 51, "labels": [{"name": "conveyor:run"}]},
+           "sender": {"login": "github-actions[bot]"}, "restart": True}, open(sys.argv[1], "w"))
+PY
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_contains "$out" "fired the testing station for #51"
+unset GH_COMMENTS
+
+it "a station with its OWN routine fires that one: its url and its token, both or neither"
+setup; stub_gh_carried "$BIN" "$TESTING_STANDING" "$PLACED" write; pending_change 51
+event "$EVENT" conveyor:run 51 "github-actions[bot]"
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(ROUTINE_FIRE_URL_TESTING="http://127.0.0.1:$ENDPOINT_PORT/own" ROUTINE_FIRE_TOKEN_TESTING=own-token run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_contains "$out" "fired the testing station for #51"
+assert_contains "$(cat "$RECORD")" "own-token"
+
+it "an own url without its own token is NOT used: the shared routine fires instead"
+setup; stub_gh_carried "$BIN" "$TESTING_STANDING" "$PLACED" write; pending_change 51
+event "$EVENT" conveyor:run 51 "github-actions[bot]"
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(ROUTINE_FIRE_URL_TESTING="http://127.0.0.1:1/own-never" run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/shared"); status=$?
+stop_endpoint
+assert_not_contains "$out" "own-never"
+assert_status 0 "$status"
+assert_contains "$out" "fired the testing station"
+
 it "the implement station's own marker already on the issue does NOT stop the archive station firing"
 setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write; finished_change 51
 printf '<!-- remote-implement:fired -->\nImplementing this issue: started.\n' > "$DIR/comments"; export GH_COMMENTS="$DIR/comments"
@@ -511,8 +570,20 @@ assert_not_contains "$run" "carry-grant.py"
 cond=$(wpy 'print([s for s in d["jobs"]["open"]["steps"] if "dispatch" in s.get("name","").lower() or "round" in s.get("name","").lower()][0]["if"])')
 assert_contains "$cond" "steps.carry.outputs.dispatch_round == 'true'"
 
+it "the workflow starts the testing station BEFORE it carries the fixing grant, so the carry finds the station label"
+order=$(wpy 'names=[s.get("name") or s.get("id") for s in d["jobs"]["open"]["steps"]]; print(names.index("Start the testing station") < names.index("Carry the standing instruction onto the pull request"))')
+assert_equals "True" "$order"
+
+it "the testing-resume job runs only on a testing_pr dispatch, grants nothing at the top, and the fire is the same program"
+assert_contains "$(wpy 'print(d["jobs"]["testing-resume"]["if"])')" "inputs.testing_pr"
+assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'write'}" "$(wpy 'print(d["jobs"]["testing-resume"]["permissions"])')"
+assert_contains "$(wpy 'print([s for s in d["jobs"]["testing-resume"]["steps"] if s.get("name") == "Fire the testing session"][0]["run"])')" "remote-implement.py"
+
+it "the passing station hands the carry on: the open job takes a carry_fix_pr dispatch"
+assert_contains "$(wpy 'print(d["jobs"]["open"]["if"])')" "inputs.carry_fix_pr"
+
 it "the round is dispatched with the pull request the carry step named, as mode=all"
-run=$(wpy 'print([s for s in d["jobs"]["open"]["steps"] if "if" in s][0]["run"])')
+run=$(wpy 'print([s for s in d["jobs"]["open"]["steps"] if s.get("if") == "steps.carry.outputs.dispatch_round == '"'"'true'"'"'"][0]["run"])')
 assert_contains "$run" "gh workflow run review-dispatch.yml"
 assert_contains "$run" "steps.carry.outputs.pr"
 assert_contains "$run" "mode=all"
@@ -550,10 +621,11 @@ env=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["env
 assert_contains "$env" "vars.ROUTINE_FIRE_URL"
 assert_contains "$env" "secrets.ROUTINE_FIRE_TOKEN"
 
-it "workflow_dispatch declares a required pr input, for replaying a merge the archive job never saw"
+it "workflow_dispatch declares an optional pr input, for replaying a merge the archive job never saw, beside the testing hand-offs"
 inputs=$(wpy 'print(d[True]["workflow_dispatch"]["inputs"])')
 assert_contains "$inputs" "'pr':"
-assert_contains "$inputs" "'required': True"
+assert_contains "$inputs" "'testing_pr':"
+assert_contains "$inputs" "'carry_fix_pr':"
 
 it "the archive job also runs on a manual workflow_dispatch, beside its ordinary push-completion trigger"
 cond=$(wpy 'print(d["jobs"]["archive"]["if"])')

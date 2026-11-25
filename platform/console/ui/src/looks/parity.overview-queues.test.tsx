@@ -20,6 +20,7 @@ const overview: Overview = {
 }
 const queues: Queues = {
   capacity: { inUse: 1, max: 5, waiting: 0 },
+  members: { inUse: 5, max: 5, waiting: 2 },
   work: [], delivery: [], cooldowns: [],
 }
 
@@ -49,7 +50,11 @@ describe('classic and workspace draw the same cards', () => {
 
   it('Queues', () => {
     const mine = titles(<QueuesPage />, '.wk-card > h2')
-    expect(mine).toEqual(['Work queue — 1/5 slots, 0 waiting', 'Delivery queue', 'Cooldowns'])
+    expect(mine).toEqual([
+      'Work queue — Conversations 1/5 slots, 0 waiting · Members 5/5 slots, 2 waiting — at ceiling',
+      'Delivery queue',
+      'Cooldowns',
+    ])
     expect(mine).toEqual(titles(<ClassicQueues />, '.pf-v6-c-card__title-text'))
   })
 })

@@ -33,6 +33,23 @@ the pointer the promotion leaves as it does for any promoted issue.
 That pull request opens UNLABELLED — the session holds no write access of its
 own, so it places nothing.
 
+Before the fixing loop, a testing station runs. A session, never CI, runs the
+unit, system and e2e tests.
+
+It measures the coverage of the lines the pull request adds or changes against
+floors of 90, 70 and 50 percent. A different model writes what is missing.
+
+Where the change alters what a real model does, those tests run against a real
+model. A stub run does not count as passing for such a change.
+
+The station gets five rounds of its own, and `conveyor:keep-going` grants five
+more.
+
+A pull request is mergeable only once every required check is green, no review
+thread is open, no analysis issue is unaddressed and it merges cleanly. The
+fixing loop merges the base in, and asks a person about any conflict in
+hand-written code.
+
 Where `conveyor:run` authorised it, a workflow reads the issue again once the
 pull request opens and carries that instruction forward as `conveyor:fix`, so
 the review's findings are fixed without a reply in each thread. After a person
@@ -40,7 +57,7 @@ merges, the same instruction is carried forward as `conveyor:archive`, and a
 second session archives the change and opens the archive pull request.
 
 **Where the line is** is on the issue and the pull request, as labels that
-grant nothing: `station:<implement|fix|merge|archive|done>` on the issue, and
+grant nothing: `station:<implement|testing|fix|merge|archive|done>` on the issue, and
 `loop:<running|waiting|stalled|capped|mergeable>` on the pull request.
 
 What it does not change is who decides. The proposal, the pull request and
