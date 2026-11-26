@@ -108,6 +108,9 @@ runtimes:
 persistence:
   context:
     accessModes: [ReadWriteOnce]
+  workspace:
+    enabled: true
+    accessModes: [ReadWriteOnce]
 console:
   enabled: true
   image:

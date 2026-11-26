@@ -77,7 +77,7 @@ func TestCoordinatorModeInvokeAndMemberResultRouting(t *testing.T) {
 	// domain capability as an ordinary member. A REAL pod backs it.
 	member := e.invokeMember(t, coordName, root.Name, "domain", "echo domain-task-"+stamp)
 	memberConv := e.waitForConversation(t, member, time.Minute)
-	if memberConv.Spec.CausedBy == nil || memberConv.Spec.CausedBy.Parent != root.Name || memberConv.Spec.CausedBy.Entry != "domain" {
+	if memberConv.Spec.CausedBy == nil || memberConv.Spec.CausedBy.Parent != string(root.UID) || memberConv.Spec.CausedBy.Entry != "domain" {
 		t.Fatalf("the member must carry causedBy naming the root and the invoked entry, got %+v", memberConv.Spec.CausedBy)
 	}
 	memberConv = e.WaitRun(t, member, 1, 3*time.Minute)

@@ -73,7 +73,7 @@ func memberPodNeverAppears(t *testing.T, ctx context.Context, e *Env, conv strin
 // claims a source: every deeper level's root is created by its parent's invoke.
 func mkChainCoordinators(t *testing.T, ctx context.Context, e *Env, stamp string, depth int, coordName func(int) string, leafCapName string) {
 	t.Helper()
-	for i := 1; i <= depth; i++ {
+	for i := depth; i >= 1; i-- { // deepest first: a level is Ready only once the level it references exists
 		var entry agentopsv1alpha1.CoordinatorAgentEntry
 		if i < depth {
 			entry = coordinatorRefEntry("child", coordName(i+1), "the next level of the chain")
