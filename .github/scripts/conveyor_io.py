@@ -105,7 +105,7 @@ def rest_pr(repo: str, number: int) -> dict:
     base = (doc.get("base") or {}).get("repo") or {}
     return {"isCrossRepository": head.get("full_name") != base.get("full_name"),
             "headRefName": (doc.get("head") or {}).get("ref", ""), "body": doc.get("body") or "",
-            "state": (doc.get("state") or "").upper(), "labels": doc.get("labels") or []}
+            "state": "MERGED" if doc.get("merged_at") else (doc.get("state") or "").upper(), "labels": doc.get("labels") or []}
 
 
 def rest_labels(repo: str, target: int) -> frozenset:

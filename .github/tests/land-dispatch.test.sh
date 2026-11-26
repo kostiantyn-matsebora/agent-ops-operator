@@ -223,7 +223,7 @@ case "$*" in
   "pr view "*"baseRefName"*) echo master ;;
   "issue view "*"--jq"*) printf '%s\n' ${ISSUE_LABELS:-} ;;
   "api repos/o/r/issues/"[0-9]*" --jq .labels[].name") printf '%s\n' ${ISSUE_LABELS:-} ;;
-  "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) n=${4##*/}; n=${n%/labels}; printf 'issue edit %s --repo o/r --add-label %s\n' "${4#repos/o/r/issues/}" "${6#labels[]=}" | sed 's#/labels##' >> "$GH_CALLS" ;;
+  "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) printf 'issue edit %s --repo o/r --add-label %s\n' "${4#repos/o/r/issues/}" "${6#labels[]=}" | sed 's#/labels##' >> "$GH_CALLS" ;;
   "workflow run"*) [ -z "${GH_DISPATCH_FAILS:-}" ] || { echo "HTTP 422" >&2; exit 1; } ;;
 esac
 exit 0

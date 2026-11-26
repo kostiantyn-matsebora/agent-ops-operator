@@ -12,8 +12,10 @@ Order of attempts, each verified by a trivial pod starting, stopping at the firs
 
 1. containerd `restrict_oom_score_adj = true` in the k3s containerd template. It clamps the
    value to the process's own, so nothing is lowered. Kubelet gives the pause sandbox and
-   Guaranteed pods a negative score, and lowering needs `CAP_SYS_RESOURCE`.
-2. `KubeletInUserNamespace=true` on the kubelet.
+   Guaranteed pods a negative score, and lowering needs `CAP_SYS_RESOURCE`. **Verified in a cloud
+   sandbox.** The drop-in is mounted as a DIRECTORY: a single-file mount makes `k3d kubeconfig get`
+   fail with `mkdirat ... file exists`, so a run against a live cluster cannot start.
+2. `KubeletInUserNamespace=true` on the kubelet (not needed, untried).
 3. Rootless k3s.
 4. A real API server and etcd without a kubelet, only if 1 to 3 fail, and only with the
    owner's decision, since it drops the pack's pod-lifecycle lanes.

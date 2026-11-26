@@ -16,6 +16,7 @@ printf '%s\n' "$*" >> "$GH_CALLS"
 case "$*" in
   "api repos/o/r/issues/"[0-9]*" --jq"*) [ -z "${GH_READ_FAILS:-}" ] || { echo "rate limited" >&2; exit 1; }; tr ' ' '\n' < "$LABELS_ON" ;;
   "api --method POST repos/o/r/issues/"*"/labels"*) if [ -n "${GH_FAILS:-}" ]; then echo "could not add label: 'station:fix' not found" >&2; exit 1; fi ;;
+  "api --method DELETE repos/o/r/issues/"*"/labels/"*) [ -z "${GH_DELETE_FAILS:-}" ] || { echo "HTTP 500: server error" >&2; exit 1; } ;;
 esac
 exit 0
 STUB
@@ -23,21 +24,22 @@ chmod +x "$tmp/bin/gh"; export PATH="$tmp/bin:$PATH"
 
 has() { printf '%s' "$*" > "$LABELS_ON"; }
 run() { : > "$GH_CALLS"; python3 "$S" --repo o/r "$@" 2>&1; }
-# THE WRITER USES THE REST API (a cloud sandbox refuses GraphQL), so an "edit" is one POST that adds the label and a
-# DELETE per sibling. This rebuilds the old one-line shape from the calls, so the assertions read as they did.
-edits() { grep -c '^api --method POST .*/labels' "$GH_CALLS"; }
-edit_call() {
+# WHAT IS ASSERTED IS THE EFFECT: one label added, its siblings removed. The writer reaches the API over REST (a cloud
+# sandbox refuses GraphQL); this reads the stub's call log and reports the effect, so a test never pins a flag.
+effects() {
   python3 - "$GH_CALLS" <<'PY'
 import re, sys
 add, rem, tgt = None, [], None
 for l in open(sys.argv[1]).read().splitlines():
-    m = re.match(r"api --method POST repos/o/r/issues/(\d+)/labels -f labels\[\]=(\S+)", l)
+    m = re.search(r"POST repos/o/r/issues/(\d+)/labels.*labels\[\]=(\S+)", l)
     if m: tgt, add = m.group(1), m.group(2)
-    m = re.match(r"api --method DELETE repos/o/r/issues/\d+/labels/(\S+)", l)
+    m = re.search(r"DELETE repos/o/r/issues/\d+/labels/(\S+)", l)
     if m: rem.append(m.group(1))
-if add: print(f"issue edit {tgt} --repo o/r --add-label {add} " + " ".join(f"--remove-label {r}" for r in rem))
+if add: print(f"#{tgt} add {add}" + "".join(f" remove {r}" for r in rem))
 PY
 }
+edits() { grep -c 'POST repos/o/r/issues/.*/labels' "$GH_CALLS"; }
+edit_call() { effects | sed -E 's/^#([0-9]+) add ([^ ]+)/issue edit \1 --repo o\/r --add-label \2/; s/ remove / --remove-label /g'; }
 
 it "an event the table maps writes ONE station label and removes its five siblings, in one edit"
 has "opsx:review station:implement"
@@ -125,6 +127,13 @@ out=$(GH_FAILS=1 run --target 51 --station-event round:start); rc=$?
 assert_status 0 "$rc"
 assert_contains "$out" "::notice::conveyor state not recorded on #51"
 assert_contains "$out" "not found"
+
+it "a label removal that fails for a reason other than 'not on the target' is surfaced, not swallowed"
+has "station:implement"
+out=$(GH_DELETE_FAILS=1 run --target 51 --station-event round:start); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "::notice::conveyor state not recorded on #51"
+assert_contains "$out" "server error"
 
 it "there is no way to name a value: only events are accepted, exactly one, and one is required"
 python3 "$S" --repo o/r --target 1 --station fix >/dev/null 2>&1; assert_status 2 "$?"

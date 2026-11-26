@@ -126,6 +126,21 @@ class TheMeasure(unittest.TestCase):
             r = cd.measure({path: {1, 2}}, [{path: {1: False, 2: False}}], self.T["domains"][tier], excluded, [])
             self.assertEqual(0 if applies else 2, r["total"], tier)
 
+    def test_a_tier_from_a_partial_rerun_cannot_be_passed(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("tr", SCRIPTS / "testing-report.py")
+        tr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tr)
+        covs = {t: {"covered": 9, "total": 10, "collected": True, "domain_files": 1} for t in conveyor.TIERS}
+        outcomes = {t: "passed" for t in conveyor.TIERS}
+        full = tr.judge(V, covs, outcomes)
+        self.assertEqual("pass", {v["tier"]: v["status"] for v in full["verdicts"]}["system"])
+        partial = tr.judge(V, covs, outcomes, partial=("system",))
+        self.assertEqual("not_run", {v["tier"]: v["status"] for v in partial["verdicts"]}["system"])
+        self.assertTrue(any(w["tier"] == "system" for w in partial["work"]))
+        with self.assertRaises(ValueError):
+            tr.judge(V, covs, outcomes, partial=("nope",))
+
     def test_a_backend_only_change_has_no_e2e_domain(self):
         d = {"platform/manager/internal/x/x.go": {1, 2}}
         r = cd.measure(d, [], self.T["domains"]["e2e"], self.T["excluded_from_coverage"], [])
@@ -716,6 +731,38 @@ class TheRoutine(unittest.TestCase):
 
     def test_it_never_asks_the_session_to_read_ci(self):
         self.assertIn("CI IS NOT YOUR RUNNER", self.TEXT)
+
+
+class TheRestReaders(unittest.TestCase):
+    """The station reads over REST, because a cloud sandbox refuses GraphQL."""
+
+    def setUp(self):
+        import conveyor_io
+        self.cio = conveyor_io
+        self.saved = conveyor_io.gh
+
+    def tearDown(self):
+        self.cio.gh = self.saved
+
+    def pr(self, **over):
+        doc = {"state": "open", "merged_at": None, "body": "Refs #1", "labels": [{"name": "conveyor:fix"}],
+               "head": {"ref": "change/x", "repo": {"full_name": "o/r"}}, "base": {"repo": {"full_name": "o/r"}}}
+        doc.update(over)
+        self.cio.gh = lambda *a, check=True: json.dumps(doc)
+        return self.cio.rest_pr("o/r", 5)
+
+    def test_an_open_same_repository_pull_request(self):
+        got = self.pr()
+        self.assertEqual(("OPEN", False, "change/x"), (got["state"], got["isCrossRepository"], got["headRefName"]))
+
+    def test_a_merged_pull_request_reads_as_merged_not_closed(self):
+        self.assertEqual("MERGED", self.pr(state="closed", merged_at="2026-11-26T00:00:00Z")["state"])
+
+    def test_a_closed_unmerged_pull_request_reads_as_closed(self):
+        self.assertEqual("CLOSED", self.pr(state="closed")["state"])
+
+    def test_a_fork_reads_as_cross_repository(self):
+        self.assertTrue(self.pr(head={"ref": "x", "repo": {"full_name": "someone/r"}})["isCrossRepository"])
 
 
 if __name__ == "__main__":

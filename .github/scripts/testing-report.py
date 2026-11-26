@@ -53,7 +53,7 @@ def tier_result(cov: dict | None, outcome: str) -> "conveyor.TierResult":
                                collected=bool(cov.get("collected")))
 
 
-def judge(vocab: dict, covs: dict, outcomes: dict) -> dict:
+def judge(vocab: dict, covs: dict, outcomes: dict, partial=()) -> dict:
     """Every tier needs an explicit outcome, and only a known tier may be named.
 
     A MISSING OUTCOME IS NOT `passed`: defaulting it let a tier nobody ran read as a run that left no
@@ -65,6 +65,13 @@ def judge(vocab: dict, covs: dict, outcomes: dict) -> dict:
     missing = [t for t in conveyor.TIERS if t not in outcomes]
     if missing:
         raise ValueError("no --outcome for " + ", ".join(missing) + ": give passed, failed or skipped for every tier")
+    # A TIER IS PASSED ONLY ON A FULL RUN. A tier whose numbers come from a partial re-run reads as not run, so it
+    # cannot end the station: a fix can break a test the re-run never touched.
+    for name in partial:
+        if name not in known:
+            raise ValueError(f"unknown tier {name!r} in --partial")
+        if outcomes.get(name) == "passed":
+            outcomes = {**outcomes, name: "skipped"}
     floors = vocab["testing"]["floors"]
     verdicts = []
     for tier in conveyor.TIERS:

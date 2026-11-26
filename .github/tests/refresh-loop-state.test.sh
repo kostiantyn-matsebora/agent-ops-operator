@@ -17,7 +17,6 @@ printf '%s\n' "$*" >> "$GH_CALLS"
 case "$*" in
   "api repos/o/r/issues/"[0-9]*" --jq .labels[].name") [ -z "${GH_READ_FAILS:-}" ] || exit 7; printf '%s\n' ${CURRENT_LABELS:-} ;;
   "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) printf 'issue edit %s --repo o/r --add-label %s\n' "$(echo "$4" | sed 's#repos/o/r/issues/##;s#/labels##')" "${6#labels[]=}" >> "$GH_CALLS" ;;
-  "issue view "*"--json labels"*) [ -z "${GH_READ_FAILS:-}" ] || exit 7; printf '%s\n' ${CURRENT_LABELS:-} ;;
 esac
 exit 0
 STUB

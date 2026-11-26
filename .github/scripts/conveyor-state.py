@@ -103,8 +103,11 @@ def _edit(repo: str, target: int, add: str, remove: list) -> str:
     if out.returncode != 0:
         return out.stderr.strip() or "gh api (add label) failed"
     for name in remove:
-        subprocess.run(["gh", "api", "--method", "DELETE", f"repos/{repo}/issues/{target}/labels/{name}"],
-                       capture_output=True, text=True)
+        gone = subprocess.run(["gh", "api", "--method", "DELETE", f"repos/{repo}/issues/{target}/labels/{name}"],
+                              capture_output=True, text=True)
+        # A label the target does not carry answers 404 and is the normal case for a sibling. Anything else is a real failure.
+        if gone.returncode != 0 and "404" not in gone.stderr and "not found" not in gone.stderr.lower():
+            return gone.stderr.strip() or f"removing {name} failed"
     return ""
 
 

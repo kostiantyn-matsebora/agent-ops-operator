@@ -29,6 +29,7 @@ stub_gh_perm() {  # stub_gh_perm <bindir> <permission>: every login has that per
 call="${*//$'\n'/ }"; printf '%s\n' "$call" >> "$GH_CALLS"
 case "$*" in
   *"collaborators/"*"/permission"*) l=$(printf '%s' "$*" | sed 's#.*collaborators/\([^/]*\)/.*#\1#'); cat "$FX/perm-$l" 2>/dev/null || cat "$FX/perm-default" ;;
+  "api repos/o/r/issues/"[0-9]*" --jq [.labels[].name]") python3 -c 'import json,sys;print(json.dumps(open(sys.argv[1]).read().split()))' "$FX/labels" 2>/dev/null ;;
   "api repos/o/r/issues/"[0-9]*" --jq .labels[].name") tr ' ' '\n' < "$FX/labels" 2>/dev/null ;;
   "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) printf 'issue edit %s --repo o/r --add-label %s\n' "$(echo "$4" | sed 's#repos/o/r/issues/##;s#/labels##')" "${6#labels[]=}" >> "$GH_CALLS" ;;
   "issue view "*"--json labels --jq"*) tr ' ' '\n' < "$FX/labels" 2>/dev/null ;;

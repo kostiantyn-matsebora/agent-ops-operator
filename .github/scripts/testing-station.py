@@ -149,7 +149,7 @@ def cmd_judge(args, vocab) -> int:
         f = pathlib.Path(path)
         covs[tier] = json.loads(f.read_text()) if f.exists() and f.stat().st_size else None
     outcomes = dict(kv.split("=", 1) for kv in args.outcome)
-    verdict = report.judge(vocab, covs, outcomes)
+    verdict = report.judge(vocab, covs, outcomes, partial=args.partial)
     work = [conveyor.WorkItem(**w) for w in verdict["work"]]
     d = conveyor.testing_ending(work, args.round, args.cap, changed=args.changed, model_ran=args.model_ran)
     state = {"passed": "passed", "capped": "capped"}.get(d.action, "running")
@@ -278,6 +278,8 @@ def main(argv=None) -> int:
     j.add_argument("--tier-file", action="append", default=[], metavar="TIER=FILE")
     j.add_argument("--outcome", action="append", default=[], metavar="TIER=passed|failed|skipped")
     j.add_argument("--no-change", dest="changed", action="store_false")
+    j.add_argument("--partial", action="append", default=[], metavar="TIER",
+                   help="a tier whose numbers come from a partial re-run: it cannot be passed, only a full run can")
     j.add_argument("--no-model", dest="model_ran", action="store_false")
 
     r = sub.add_parser("record-round")

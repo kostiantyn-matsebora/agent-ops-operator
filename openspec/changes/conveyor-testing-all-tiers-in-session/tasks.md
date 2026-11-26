@@ -9,11 +9,11 @@
 - [x] 2.1 `coverage-diff.py` takes several Go profiles and counts a block covered when any covers it
 - [x] 2.2 The system pack takes `SYSTEM_RUN` to select lanes and keeps the cluster with `SYSTEM_REUSE=1`
 - [x] 2.3 `test-change.md`: round 1 full, later rounds re-run failed and added tests, one closing full run judges
-- [x] 2.4 Rounds judge a tier passed only on a full run: the routine states it, a later round adds profiles (the judge does not refuse a partial one yet)
+- [x] 2.4 `testing-station.py judge --partial <tier>` marks a tier whose numbers come from a partial run, and the judge refuses to pass it (a tier is passed only on a full run)
 
 ## 3. Remove the dispatch to CI
 
-- [x] 3.1 `test-change.md`, `remote-session.md` and the `gotchas.md` row drop the `system-full.yml` instruction
+- [x] 3.1 `test-change.md`, `remote-session.md` and the `gotchas.md` row drop the `system-full.yml` and `system-smoke.yml` dispatch instructions
 
 ## 4. Unit tests
 
