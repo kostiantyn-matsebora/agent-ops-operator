@@ -134,6 +134,8 @@ out=$(GH_DELETE_FAILS=1 run --target 51 --station-event round:start); rc=$?
 assert_status 0 "$rc"
 assert_contains "$out" "::notice::conveyor state not recorded on #51"
 assert_contains "$out" "server error"
+removals=$(grep -c 'DELETE repos/o/r/issues/51/labels/' "$GH_CALLS")
+assert_equals "6" "$removals"   # all six siblings are attempted though each failed
 
 it "there is no way to name a value: only events are accepted, exactly one, and one is required"
 python3 "$S" --repo o/r --target 1 --station fix >/dev/null 2>&1; assert_status 2 "$?"
