@@ -169,6 +169,13 @@ assert_contains "$out" "helm missing"
 
 # ITS OWN RUN, not the previous case's `$out`. Reusing that variable made this
 # assertion pass without calling the script at all — a test that cannot fail.
+it "--verify names the system pack's sandbox defaults: the oom fix is on, and a missing trust bundle is named"
+out=$(CLAUDE_CODE_REMOTE=1 SSL_CERT_FILE=/nonexistent run_bootstrap --verify)
+assert_contains "$out" "system-pack oom-fix on"
+bundle="$FAKEHOME/bundle.crt"; : > "$bundle"
+out=$(CLAUDE_CODE_REMOTE=1 SSL_CERT_FILE="$bundle" run_bootstrap --verify)
+assert_contains "$out" "system-pack oom-fix on, build CA $bundle"
+
 it "--verify names the Go floor when the toolchain is older than the modules need"
 make_env absent
 out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap --verify)

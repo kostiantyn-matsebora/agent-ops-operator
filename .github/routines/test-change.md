@@ -94,8 +94,10 @@ For each round, in order:
    - It needs a container runtime (`docker` or `nerdctl`: `docker info || nerdctl info`), k3d, helm
      and kubectl. **If one is missing or not running, say which, set nothing passed, and end the
      station.** A tier you could not run is not a tier that passed.
-   - **A cloud sandbox:** set `SYSTEM_BUILD_CA=<the CA bundle>` (it re-signs HTTPS) and
-     `SYSTEM_K3S_OOM_FIX=1` (pods cannot lower `oom_score_adj` there). If a trivial pod still
+   - **A cloud sandbox needs nothing set by hand.** The pack turns `SYSTEM_K3S_OOM_FIX` on itself
+     (pods cannot lower `oom_score_adj` there) and finds the host's trust bundle for `SYSTEM_BUILD_CA`
+     (the egress re-signs HTTPS). The session's start-up line `system-pack` says what it will use. An explicit
+     value always wins, and an explicit empty `SYSTEM_BUILD_CA` turns the bundle off. If a trivial pod still
      does not start, **stop and report the failure verbatim.** Never dispatch the tier to CI.
    - **Real model required:** `SYSTEM_TIER=full` with the credential in the environment, under the
      vendor's name for that process only. A run on the stub does not count.
