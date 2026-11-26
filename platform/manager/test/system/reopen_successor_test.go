@@ -23,8 +23,6 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
@@ -47,32 +45,32 @@ func TestReopenRefusedWhileAnOpenSuccessorSharesTheCorrelationID(t *testing.T) {
 	id := "e2e-reopen-successor-id-" + stamp
 	auth := bearerPrefix + e.Values.AdapterToken
 
-	// A DEDICATED source with cooldownHours explicitly 0: the chart default
-	// of 6h (signalsource_types.go) would otherwise suppress the recurrence
-	// below outright as a plain cooldown repeat, regardless of the first
-	// life's phase — this lane is about the REOPEN refusal once a successor
-	// exists, not about the cooldown window, so it opts out of it the same
-	// way correlation_test.go's own dedicated sources never need to for a
-	// single post, but this one — reusing the exact same initiationId twice
-	// on purpose — does.
+	// A DEDICATED source and Pipeline, reused for both posts below. The
+	// recurrence posts the SAME initiationId on purpose — reposting into a
+	// claimed, unaddressed source would hit the source's own cooldown
+	// (signal-persistence spec step 3, "Cooldown is consulted and spent... a
+	// suppressed signal ends Dropped, reason cooldown"), which this lane is
+	// not testing and would otherwise have to wait out (the chart default is
+	// 6h, and signalsource_types.go's own CooldownHours doc notwithstanding,
+	// internal/signalroute/cooldown.go's recoverCooldown only special-cases
+	// kind=="chat", not "task", so a zero on the SignalSource itself cannot
+	// express "no suppression" for a task-kind signal at all).
 	//
-	// Setting src.Spec.CooldownHours = 0 on the Go struct before Create does
-	// NOT reach the server: the field carries `json:"cooldownHours,omitempty"`,
-	// so a zero value is dropped from the request entirely and the CRD's own
-	// `+kubebuilder:default=6` fills it back in on create. A raw merge patch,
-	// built from literal JSON rather than marshaled from the typed struct, is
-	// the one way to put an explicit 0 on the wire.
+	// An ADDRESSED chat command (`/<pipeline> <task>`) is the one path the
+	// spec itself exempts from cooldown entirely (signal-persistence spec,
+	// Requirement "The consumer makes every routing decision", step 1: "no
+	// claim check, no Ready check, no cooldown") — so both posts below
+	// address the pipeline by name directly, which is also what makes which
+	// Pipeline claims the source irrelevant here.
 	srcName := "e2e-reopen-successor-src-" + stamp
 	src := source(srcName, "e2e", nil)
 	mustCreate(t, e.K, src)
-	if err := e.K.Patch(ctx, src, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"cooldownHours":0}}`))); err != nil {
-		t.Fatalf("disabling the dedicated source's cooldown: %v", err)
-	}
 	p := pipeline(src.Name, ProfileStub, []string{src.Name}, []string{ChannelConsole})
 	mustCreate(t, e.K, p)
 	if err := waitPipelineReady(ctx, e.K, p.Name, 2*time.Minute); err != nil {
 		t.Fatal(err)
 	}
+	chatLabels := map[string]string{"agentops.dev/channel": ChannelConsole, "agentops.dev/sender": "e2e-reopen-successor"}
 
 	var names []string
 	t.Cleanup(func() {
@@ -82,7 +80,8 @@ func TestReopenRefusedWhileAnOpenSuccessorSharesTheCorrelationID(t *testing.T) {
 	})
 
 	e.PostSignal(t, src.Name, map[string]any{
-		"initiationId": id, "kind": "task", "payload": "echo first-life", "title": title,
+		"initiationId": id, "kind": "chat", "payload": "/" + p.Name + " echo first-life",
+		"title": title, "labels": chatLabels,
 	})
 	first := e.ConversationFor(t, id, 2*time.Minute)
 	names = append(names, first.Name)
@@ -108,7 +107,8 @@ func TestReopenRefusedWhileAnOpenSuccessorSharesTheCorrelationID(t *testing.T) {
 	// housekeeping: "A matching signal does not land on a closed
 	// conversation").
 	e.PostSignal(t, src.Name, map[string]any{
-		"initiationId": id, "kind": "task", "payload": "echo second-life", "title": title,
+		"initiationId": id, "kind": "chat", "payload": "/" + p.Name + " echo second-life",
+		"title": title, "labels": chatLabels,
 	})
 	var successor *agentopsv1alpha1.Conversation
 	waitFor(t, "a second life opened for the same correlationId", 2*time.Minute, func() (bool, error) {
