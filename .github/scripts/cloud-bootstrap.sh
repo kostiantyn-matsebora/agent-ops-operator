@@ -95,14 +95,14 @@ verify() {
 
 # THE SYSTEM PACK'S SANDBOX DEFAULTS. In a cloud session the pack turns SYSTEM_K3S_OOM_FIX on and finds the host's
 # trust bundle by itself (test/system/oomfix.go), so a session is not told either by hand. This only REPORTS what it will
-# find, in the same order the Go code looks, so a missing bundle is named before a pack spends an hour building images.
+# find, in the same order the Go code looks (CCR_CA_BUNDLE moves the first place, for both), so a missing bundle is named before a pack spends an hour building images.
 system_pack_defaults() {
   remote || { echo "workstation (no sandbox defaults)"; return; }
   local f ca=""
   for f in "${CCR_CA_BUNDLE:-/root/.ccr/ca-bundle.crt}" "${SSL_CERT_FILE:-}"; do
     [ -n "$f" ] && [ -f "$f" ] && { ca="$f"; break; }
   done
-  echo "oom-fix on, build CA ${ca:-missing (set SYSTEM_BUILD_CA if the egress re-signs HTTPS)}"
+  echo "oom-fix on, build CA ${ca:-missing (set SYSTEM_BUILD_CA to the host's bundle, or CCR_CA_BUNDLE to where this cloud keeps it)}"
 }
 
 # `sort -V` decides it, so 1.10 is not read as older than 1.9.

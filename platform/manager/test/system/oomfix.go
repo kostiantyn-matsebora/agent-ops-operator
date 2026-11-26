@@ -43,8 +43,14 @@ func oomFixEnabled() bool {
 }
 
 // cloudCABundles are where a cloud session keeps the host's FULL trust bundle, which re-signs HTTPS.
+// CCR_CA_BUNDLE moves the first one (where a cloud keeps it), and cloud-bootstrap.sh --verify reads the same variable,
+// so what it reports is what the pack finds.
 func cloudCABundles() []string {
-	return []string{"/root/.ccr/ca-bundle.crt", os.Getenv("SSL_CERT_FILE")}
+	first := os.Getenv("CCR_CA_BUNDLE")
+	if first == "" {
+		first = "/root/.ccr/ca-bundle.crt"
+	}
+	return []string{first, os.Getenv("SSL_CERT_FILE")}
 }
 
 // buildCAPath is the bundle the image builds and the node must trust. An explicit SYSTEM_BUILD_CA wins, and an

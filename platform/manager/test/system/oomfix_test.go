@@ -100,3 +100,17 @@ func TestACloudSessionFindsTheBuildCABundleItself(t *testing.T) {
 		t.Fatalf("an explicit empty value turns it off, got %q", got)
 	}
 }
+
+func TestCCRCABundleMovesWhereACloudKeepsTheBundle(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "moved.crt")
+	if err := os.WriteFile(bundle, []byte("pem"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.Unsetenv(buildCAEnvName)
+	t.Setenv("CLAUDE_CODE_REMOTE", "1")
+	t.Setenv("SSL_CERT_FILE", "")
+	t.Setenv("CCR_CA_BUNDLE", bundle)
+	if got := buildCAPath(); got != bundle {
+		t.Fatalf("buildCAPath() = %q, want the CCR_CA_BUNDLE file %q", got, bundle)
+	}
+}
