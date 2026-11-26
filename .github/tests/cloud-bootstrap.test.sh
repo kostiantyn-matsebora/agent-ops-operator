@@ -172,7 +172,10 @@ make_env present
 out=$(CLAUDE_CODE_REMOTE=1 CCR_CA_BUNDLE=/nonexistent SSL_CERT_FILE=/nonexistent run_bootstrap --verify)
 assert_contains "$out" "system-pack oom-fix on"
 assert_contains "$out" "build CA missing"
-assert_contains "$out" "CCR_CA_BUNDLE"   # the message names the variables that fix it, both of which are read
+# The advice names BOTH variables a person can set. SYSTEM_BUILD_CA is read by the pack (test/system/oomfix.go), not by
+# this check, which only reports; CCR_CA_BUNDLE is read by both.
+assert_contains "$out" "SYSTEM_BUILD_CA"
+assert_contains "$out" "CCR_CA_BUNDLE"
 moved="$FAKEHOME/moved.crt"; : > "$moved"
 out=$(CLAUDE_CODE_REMOTE=1 CCR_CA_BUNDLE="$moved" SSL_CERT_FILE=/nonexistent run_bootstrap --verify)
 assert_contains "$out" "build CA $moved"   # CCR_CA_BUNDLE moves where the cloud's bundle is looked for
@@ -180,7 +183,7 @@ bundle="$FAKEHOME/bundle.crt"; : > "$bundle"
 out=$(CLAUDE_CODE_REMOTE=1 CCR_CA_BUNDLE=/nonexistent SSL_CERT_FILE="$bundle" run_bootstrap --verify)
 assert_contains "$out" "system-pack oom-fix on, build CA $bundle"
 
-# ITS OWN RUN, not the previous case's `$out`. Reusing that variable made this
+# The Go-floor case below makes ITS OWN RUN, not the previous case's `$out`. Reusing that variable made its
 # assertion pass without calling the script at all — a test that cannot fail.
 it "--verify names the Go floor when the toolchain is older than the modules need"
 make_env absent
