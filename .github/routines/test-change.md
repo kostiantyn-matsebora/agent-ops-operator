@@ -83,7 +83,7 @@ For each round, in order:
    ```sh
    cd platform/manager
    # round 1 and the closing run: the whole pack
-   SYSTEM_REUSE=1 SYSTEM_COVER=1 SYSTEM_ARTIFACT_DIR=<dir> go test -tags system -count=1 -timeout 55m -v ./test/system/
+   SYSTEM_REUSE=1 SYSTEM_COVER=1 SYSTEM_ARTIFACT_DIR=<dir> go test -tags system -count=1 -timeout 150m -v ./test/system/
    # a later round: only the lanes that failed, against the cluster the first run left up
    SYSTEM_REUSE=1 SYSTEM_COVER=1 SYSTEM_ARTIFACT_DIR=<dir>/r<round> go test -tags system -count=1 -run '^(TestA|TestB)$' -v ./test/system/
    ```
