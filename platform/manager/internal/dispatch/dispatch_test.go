@@ -53,6 +53,26 @@ func TestTaskUsesBuiltinTemplate(t *testing.T) {
 	}
 }
 
+// TestWorkUnitConvoIsTheConversationID pins conversation-identity Decision
+// 1/7: /work/done resolves a report's convo strictly by ID
+// (httpapi.conversationByID), so a runtime that echoes GET /work's own convo
+// field back on its completion report — the documented, contract-legal
+// pattern, and what the stub runtime and runtimes/ollama's context store both
+// do — must receive the ID there, never the display Name. A regression here
+// 404s every completion report system-test-wide ("conversationByID: not
+// found"), since Name and ID differ for every real conversation.
+func TestWorkUnitConvoIsTheConversationID(t *testing.T) {
+	c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "x"})
+	c.ID = "id-123"
+	u, _, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if u.Convo != c.ID {
+		t.Fatalf("WorkUnit.Convo = %q, want the conversation's ID %q (got Name %q)", u.Convo, c.ID, c.Name)
+	}
+}
+
 // TestQueuedAgentOverrideStillDispatches pins the DEPRECATED dual-read.
 // Nothing writes InputItem.Agent any more, but an input queued before the
 // upgrade must still reach the agent it was parsed with — changing agent

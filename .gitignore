@@ -44,3 +44,7 @@ coverage.lcov
 .github/coverage.xml
 .github/.coverage
 .github/.coverage.*
+
+# testing-station.py judge's local verdict/report — already posted to the
+# issue as a comment, never committed.
+coverage-report/
