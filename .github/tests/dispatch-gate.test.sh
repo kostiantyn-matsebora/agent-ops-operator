@@ -20,6 +20,8 @@ num() { printf '%s' "$*" | sed -n 's#.*repos/o/r/issues/\([0-9]*\)/.*#\1#p'; }
 case "$*" in
   "pr view "*"--json isCrossRepository"*) cat "$FX/pr.json" ;;
   "issue view "*"--json labels --jq"*) tr ' ' '\n' < "$FX/labels-$3" ;;
+  "api repos/o/r/issues/"[0-9]*" --jq .labels[].name") tr ' ' '\n' < "$FX/labels-${2##*/}" ;;
+  "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) n=${4##*/}; n=${n%/labels}; printf 'issue edit %s --repo o/r --add-label %s\n' "${4#repos/o/r/issues/}" "${6#labels[]=}" | sed 's#/labels##' >> "$GH_CALLS" ;;
   "issue view "*"--json labels"*) python3 -c 'import json,sys;print(json.dumps({"labels":[{"name":x} for x in open(sys.argv[1]).read().split()]}))' "$FX/labels-$3" ;;
   "api repos/o/r/issues/"*"/timeline"*) cat "$FX/timeline-$(num "$@").json" 2>/dev/null || echo '[]' ;;
   "api repos/o/r/collaborators/"*"/permission"*) l=$(printf '%s' "$*" | sed 's#.*collaborators/\([^/]*\)/.*#\1#'); cat "$FX/perm-$l" 2>/dev/null || echo none ;;

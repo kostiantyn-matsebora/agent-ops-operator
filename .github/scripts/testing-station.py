@@ -90,15 +90,14 @@ def patch_paths(patch: pathlib.Path) -> list:
 
 
 def cmd_begin(args, vocab) -> int:
-    view = json.loads(io.gh("pr", "view", str(args.pr), "--repo", args.repo, "--json",
-                            "isCrossRepository,headRefName,body,state,labels"))
+    view = io.rest_pr(args.repo, args.pr)
     issue = issue_of(view.get("body") or "")
     same = (not view.get("isCrossRepository")) and (view.get("headRefName") or "").startswith("change/")
     if not (same and issue and view.get("state") == "OPEN"):
         print("not an open same-repository change/* pull request naming an issue: nothing to test")
         io.write_output("active", "false")
         return 0
-    labels = io.issue_labels(args.repo, issue)
+    labels = io.rest_labels(args.repo, issue)
     grant = conveyor.standing_grant(vocab, labels, "testing")
     if grant is None:
         print(f"#{issue} carries no standing instruction: the testing station does not start unattended")
@@ -119,10 +118,10 @@ def cmd_begin(args, vocab) -> int:
     pr_labels = {l.get("name") for l in view.get("labels") or []}
     if used >= cap and keep in pr_labels:
         # CONSUMED ONLY WHEN IT TAKES EFFECT: the station was out of rounds and a person asked for more.
-        io.comment(args.repo, issue, f"{vocab['testing']['grant_marker']}\n`{keep}` grants another "
+        io.rest_comment(args.repo, issue, f"{vocab['testing']['grant_marker']}\n`{keep}` grants another "
                    f"{vocab['testing']['max_rounds']} testing rounds.")
         try:
-            io.gh("pr", "edit", str(args.pr), "--repo", args.repo, "--remove-label", keep)
+            io.gh("api", "--method", "DELETE", f"repos/{args.repo}/issues/{args.pr}/labels/{keep}")
         except RuntimeError as exc:
             print(f"::warning::`{keep}` could not be removed from #{args.pr} ({exc}): it may grant rounds again")
         if state["stalled"] in labels:
@@ -162,7 +161,7 @@ def cmd_judge(args, vocab) -> int:
     if d.station_event:
         io.apply_events(args.repo, args.issue, station_event=d.station_event, vocabulary_path=args.vocabulary)
     if d.action == "capped":
-        io.comment(args.repo, args.issue,
+        io.rest_comment(args.repo, args.issue,
                    f"The testing station is stalled: {d.reason}. The report above names what is left. "
                    f"Place `{vocab['keep_going_label']}` on the pull request to grant another "
                    f"{vocab['testing']['max_rounds']} rounds, or take it from here.")
@@ -178,7 +177,7 @@ def cmd_judge(args, vocab) -> int:
 
 
 def cmd_record_round(args, vocab) -> int:
-    io.comment(args.repo, args.issue, f"{vocab['testing']['round_marker']} {args.round} -->\n"
+    io.rest_comment(args.repo, args.issue, f"{vocab['testing']['round_marker']} {args.round} -->\n"
                f"Testing round {args.round} ran a session. This comment counts it against the station's budget.")
     return 0
 

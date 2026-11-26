@@ -14,8 +14,8 @@ cat > "$tmp/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$GH_CALLS"
 case "$*" in
-  "issue view "*) [ -z "${GH_READ_FAILS:-}" ] || { echo "rate limited" >&2; exit 1; }; tr ' ' '\n' < "$LABELS_ON" ;;
-  "issue edit "*) if [ -n "${GH_FAILS:-}" ]; then echo "could not add label: 'station:fix' not found" >&2; exit 1; fi ;;
+  "api repos/o/r/issues/"[0-9]*" --jq"*) [ -z "${GH_READ_FAILS:-}" ] || { echo "rate limited" >&2; exit 1; }; tr ' ' '\n' < "$LABELS_ON" ;;
+  "api --method POST repos/o/r/issues/"*"/labels"*) if [ -n "${GH_FAILS:-}" ]; then echo "could not add label: 'station:fix' not found" >&2; exit 1; fi ;;
 esac
 exit 0
 STUB
@@ -23,14 +23,28 @@ chmod +x "$tmp/bin/gh"; export PATH="$tmp/bin:$PATH"
 
 has() { printf '%s' "$*" > "$LABELS_ON"; }
 run() { : > "$GH_CALLS"; python3 "$S" --repo o/r "$@" 2>&1; }
-edits() { grep -c '^issue edit' "$GH_CALLS"; }
+# THE WRITER USES THE REST API (a cloud sandbox refuses GraphQL), so an "edit" is one POST that adds the label and a
+# DELETE per sibling. This rebuilds the old one-line shape from the calls, so the assertions read as they did.
+edits() { grep -c '^api --method POST .*/labels' "$GH_CALLS"; }
+edit_call() {
+  python3 - "$GH_CALLS" <<'PY'
+import re, sys
+add, rem, tgt = None, [], None
+for l in open(sys.argv[1]).read().splitlines():
+    m = re.match(r"api --method POST repos/o/r/issues/(\d+)/labels -f labels\[\]=(\S+)", l)
+    if m: tgt, add = m.group(1), m.group(2)
+    m = re.match(r"api --method DELETE repos/o/r/issues/\d+/labels/(\S+)", l)
+    if m: rem.append(m.group(1))
+if add: print(f"issue edit {tgt} --repo o/r --add-label {add} " + " ".join(f"--remove-label {r}" for r in rem))
+PY
+}
 
 it "an event the table maps writes ONE station label and removes its five siblings, in one edit"
 has "opsx:review station:implement"
 out=$(run --target 51 --station-event round:start); rc=$?
 assert_status 0 "$rc"
 assert_equals "1" "$(edits)"
-call=$(grep '^issue edit' "$GH_CALLS")
+call=$(edit_call)
 assert_contains "$call" "issue edit 51 --repo o/r --add-label station:fix"
 for other in implement merge stalled archive done; do assert_contains "$call" "--remove-label station:$other"; done
 assert_not_contains "$call" "--remove-label station:fix"
@@ -40,7 +54,7 @@ assert_contains "$out" "was implement, round:start"
 it "the same for a loop event on a pull request: one label added, its four siblings removed"
 has "conveyor:fix loop:waiting"
 run --target 220 --loop-event round:start >/dev/null
-call=$(grep '^issue edit' "$GH_CALLS")
+call=$(edit_call)
 assert_contains "$call" "issue edit 220 --repo o/r --add-label loop:running"
 for other in waiting stalled capped mergeable; do assert_contains "$call" "--remove-label loop:$other"; done
 assert_not_contains "$call" "station:"
@@ -48,7 +62,7 @@ assert_not_contains "$call" "station:"
 it "a target with no state label starts from none"
 has "conveyor:fix"
 run --target 220 --loop-event ci:green_clean >/dev/null
-assert_contains "$(grep '^issue edit' "$GH_CALLS")" "--add-label loop:mergeable"
+assert_contains "$(edit_call)" "--add-label loop:mergeable"
 
 it "an event the table SKIPS writes nothing: a running round keeps its label against a green CI on an older head"
 has "conveyor:fix loop:running"
@@ -72,20 +86,20 @@ assert_equals "0" "$(edits)"
 it "the testing station's round trip: implement to testing on the start, testing to fix on a pass, and back on a restart"
 has "station:implement"
 run --target 51 --station-event testing:start >/dev/null
-assert_contains "$(grep '^issue edit' "$GH_CALLS")" "--add-label station:testing"
+assert_contains "$(edit_call)" "--add-label station:testing"
 has "station:testing"
 run --target 51 --station-event testing:passed >/dev/null
-call=$(grep '^issue edit' "$GH_CALLS")
+call=$(edit_call)
 assert_contains "$call" "--add-label station:fix"
 assert_contains "$call" "--remove-label station:testing"
 has "station:fix"
 run --target 51 --station-event testing:restart >/dev/null
-assert_contains "$(grep '^issue edit' "$GH_CALLS")" "--add-label station:testing"
+assert_contains "$(edit_call)" "--add-label station:testing"
 
 it "a target somehow showing two values is read as the most advanced one"
 has "station:implement station:merge"
 run --target 51 --station-event merge:finished_carried >/dev/null
-assert_contains "$(grep '^issue edit' "$GH_CALLS")" "--add-label station:archive"
+assert_contains "$(edit_call)" "--add-label station:archive"
 
 it "reads the names from the vocabulary, never from its own text"
 names=$(python3 -c 'import json;v=json.load(open("'"$ROOT"'/.github/review-triage.json"));print(" ".join(sorted(v["station_labels"].values())+sorted(v["loop_labels"].values())))')

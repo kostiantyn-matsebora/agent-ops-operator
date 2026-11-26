@@ -64,8 +64,9 @@ def main() -> int:
         print(f"::notice::conveyor state not recorded: the vocabulary has no {key} ({exc})")
         return 0
 
-    read = subprocess.run(["gh", "issue", "view", str(args.target), "--repo", args.repo,
-                           "--json", "labels", "--jq", ".labels[].name"], capture_output=True, text=True)
+    # REST, not `gh issue view`: a cloud session's sandbox answers GraphQL with 403.
+    read = subprocess.run(["gh", "api", f"repos/{args.repo}/issues/{args.target}", "--jq", ".labels[].name"],
+                          capture_output=True, text=True)
     if read.returncode != 0:
         print(f"::notice::conveyor state not recorded on #{args.target}: the labels could not be read "
               f"({read.stderr.strip() or 'gh issue view failed'})")
@@ -83,19 +84,28 @@ def main() -> int:
         print(f"::notice::conveyor state not recorded on #{args.target}: {after!r} has no label in {key}")
         return 0
 
-    cmd = ["gh", "issue", "edit", str(args.target), "--repo", args.repo, "--add-label", labels[after]]
-    for other, name in labels.items():
-        if other != after:
-            cmd += ["--remove-label", name]
-    out = subprocess.run(cmd, capture_output=True, text=True)
-    if out.returncode != 0:
+    err = _edit(args.repo, args.target, labels[after], [n for o, n in labels.items() if o != after])
+    if err:
         # A LABEL THAT DOES NOT EXIST IN THE REPOSITORY is the likely cause: the
         # families are created by hand, once. Say which, and move on.
         print(f"::notice::conveyor state not recorded on #{args.target} ({family} {state} -> {after}): "
-              f"{out.stderr.strip() or 'gh issue edit failed'}")
+              f"{err}")
         return 0
     print(f"#{args.target}: {family} = {labels[after]} (was {state}, {event})")
     return 0
+
+
+def _edit(repo: str, target: int, add: str, remove: list) -> str:
+    """Add one label and remove the others over REST. "" on success, else the error text. Removing a label the
+    target does not carry is no error."""
+    out = subprocess.run(["gh", "api", "--method", "POST", f"repos/{repo}/issues/{target}/labels", "-f", f"labels[]={add}"],
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        return out.stderr.strip() or "gh api (add label) failed"
+    for name in remove:
+        subprocess.run(["gh", "api", "--method", "DELETE", f"repos/{repo}/issues/{target}/labels/{name}"],
+                       capture_output=True, text=True)
+    return ""
 
 
 if __name__ == "__main__":

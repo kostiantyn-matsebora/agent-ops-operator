@@ -24,8 +24,11 @@ The fire payload is an issue NUMBER and nothing else. Validate it against
 ## First: is this your station
 
 ```sh
-gh issue view <n> --json labels,state
+gh api repos/<owner/name>/issues/<n> --jq '{state, labels: [.labels[].name]}'
 ```
+
+**Use `gh api`, never `gh pr view` or `gh issue view`.** Those are GraphQL calls, and a cloud
+session's sandbox answers GraphQL with HTTP 403. The station's scripts already use REST.
 
 - **The issue carries `station:testing`:** this file.
 - **Anything else:** stop, and say so in one comment. Another station owns it.
@@ -145,6 +148,12 @@ For each round, in order:
    | a tier red | Fix the PRODUCTION CODE. Never weaken or delete the test. Reproduce first. |
    | a tier under its floor | Hand the uncovered lines to the tester agent below |
    | a collection failure | Fix the pack or its instrumentation, or say what the environment lacks |
+   | a lane red on the pull request | Re-run it ALONE on the live cluster first: a lane that passes alone is a load flake. Then check it against the base: run the same lane on a clean checkout of `origin/<base>`, or read the base's last scheduled `system-full` result. **A lane that also fails on the base is not this change's work.** List it under "failing on the base" in the report, never fix or skip it here, and judge the tier on the lanes that are. |
+
+   **A tier is not stuck on code it cannot reach.** The system pack runs the NATS backend, so
+   `testing.excluded_from_tier.system` in `.github/review-triage.json` lists what it cannot measure.
+   If an uncovered changed line is unreachable from a tier by construction, say so in the report and
+   ask a person to extend that list. Never lower a floor and never edit the list yourself.
 
 8. **Record the round and commit.**
 

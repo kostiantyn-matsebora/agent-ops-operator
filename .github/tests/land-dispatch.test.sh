@@ -222,6 +222,8 @@ case "$*" in
   "pr view "*"mergeStateStatus,body"*) printf '{"mergeStateStatus":"%s","body":"Refs #5"}\n' "${MERGE_STATE:-CLEAN}" ;;
   "pr view "*"baseRefName"*) echo master ;;
   "issue view "*"--jq"*) printf '%s\n' ${ISSUE_LABELS:-} ;;
+  "api repos/o/r/issues/"[0-9]*" --jq .labels[].name") printf '%s\n' ${ISSUE_LABELS:-} ;;
+  "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) n=${4##*/}; n=${n%/labels}; printf 'issue edit %s --repo o/r --add-label %s\n' "${4#repos/o/r/issues/}" "${6#labels[]=}" | sed 's#/labels##' >> "$GH_CALLS" ;;
   "workflow run"*) [ -z "${GH_DISPATCH_FAILS:-}" ] || { echo "HTTP 422" >&2; exit 1; } ;;
 esac
 exit 0
@@ -344,6 +346,7 @@ case "\$*" in
     printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
   "api repos/"*"/replies"*)
     printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) set -- "\$@"; printf 'issue edit %s --repo o/r --add-label %s\n' "\$(echo "\$4" | sed 's#repos/o/r/issues/##;s#/labels##')" "\${6#labels[]=}" >> "\$GH_CALLS" ;;
   *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
 esac
 case "\$*" in
@@ -379,6 +382,7 @@ case "\$*" in
     printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
   "api repos/"*"/replies"*)
     printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) set -- "\$@"; printf 'issue edit %s --repo o/r --add-label %s\n' "\$(echo "\$4" | sed 's#repos/o/r/issues/##;s#/labels##')" "\${6#labels[]=}" >> "\$GH_CALLS" ;;
   *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
 esac
 case "\$*" in
@@ -416,6 +420,7 @@ case "\$*" in
     printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
   "api repos/"*"/replies"*)
     printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) set -- "\$@"; printf 'issue edit %s --repo o/r --add-label %s\n' "\$(echo "\$4" | sed 's#repos/o/r/issues/##;s#/labels##')" "\${6#labels[]=}" >> "\$GH_CALLS" ;;
   *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
 esac
 case "\$*" in
@@ -455,6 +460,7 @@ case "\$*" in
     printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
   "api repos/"*"/replies"*)
     printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) set -- "\$@"; printf 'issue edit %s --repo o/r --add-label %s\n' "\$(echo "\$4" | sed 's#repos/o/r/issues/##;s#/labels##')" "\${6#labels[]=}" >> "\$GH_CALLS" ;;
   *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
 esac
 case "\$*" in
@@ -488,6 +494,7 @@ case "\$*" in
     printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
   "api repos/"*"/replies"*)
     printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) set -- "\$@"; printf 'issue edit %s --repo o/r --add-label %s\n' "\$(echo "\$4" | sed 's#repos/o/r/issues/##;s#/labels##')" "\${6#labels[]=}" >> "\$GH_CALLS" ;;
   *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
 esac
 case "\$*" in
