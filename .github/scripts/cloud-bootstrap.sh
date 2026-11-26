@@ -99,7 +99,7 @@ verify() {
 system_pack_defaults() {
   remote || { echo "workstation (no sandbox defaults)"; return; }
   local f ca=""
-  for f in /root/.ccr/ca-bundle.crt "${SSL_CERT_FILE:-}"; do
+  for f in "${CCR_CA_BUNDLE:-/root/.ccr/ca-bundle.crt}" "${SSL_CERT_FILE:-}"; do
     [ -n "$f" ] && [ -f "$f" ] && { ca="$f"; break; }
   done
   echo "oom-fix on, build CA ${ca:-missing (set SYSTEM_BUILD_CA if the egress re-signs HTTPS)}"
