@@ -238,7 +238,24 @@ func (c *Cluster) Forward(namespace, target string, remotePort int) (*Forward, e
 		return nil, err
 	}
 	go f.supervise()
+	go watchForward(f.URL()+"/healthz", 3*time.Second, 3*time.Second, f.isStopped, f.kill)
 	return f, nil
+}
+
+func (f *Forward) isStopped() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stopped
+}
+
+// kill ends the running port-forward process without marking the Forward stopped, so supervise relaunches it.
+func (f *Forward) kill() {
+	f.mu.Lock()
+	cmd := f.cmd
+	f.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
 }
 
 // start launches kubectl port-forward on f.Port and waits for it to report
