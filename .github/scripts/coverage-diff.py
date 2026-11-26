@@ -16,7 +16,8 @@ INPUTS (any mix, repeated)
                   its own module path automatically, so this is for the odd one out.
 
 THE DIFF      --diff-file F (a unified diff, `git diff -U0`) or --base REF (diffs REF...HEAD)
-THE DOMAIN    --tier NAME reads `testing.domains.<NAME>` and `testing.excluded_from_coverage`
+THE DOMAIN    --tier NAME reads `testing.domains.<NAME>`, `testing.excluded_from_coverage` and
+              `testing.excluded_from_tier.<NAME>` (code a tier cannot reach by construction)
               from the vocabulary. A changed line outside the domain is not this tier's.
 
 THE OUTPUT is JSON: {tier, covered, total, collected, unmeasured, files: {path: [uncovered lines]}}.
@@ -218,7 +219,7 @@ def main(argv=None) -> int:
         records.append(with_prefix(parse_cobertura(pathlib.Path(f).read_text()), prefix) if pathlib.Path(f).exists() else {})
     maps = [tuple(m.split("=", 1)) for m in args.map] + module_maps()
     result = measure(parse_diff(read_diff(args)), records, vocab["domains"][args.tier],
-                     vocab["excluded_from_coverage"], maps)
+                     vocab["excluded_from_coverage"] + vocab.get("excluded_from_tier", {}).get(args.tier, []), maps)
     result["tier"] = args.tier
     json.dump(result, sys.stdout, indent=2, sort_keys=True)
     print()

@@ -14,7 +14,7 @@ cd /home/user/agent-ops-operator && bash .github/scripts/cloud-bootstrap.sh
 |---|---|
 | helm | chart render tests SKIP |
 | playwright (UI `npm ci` + chromium) | the e2e tier cannot run, `npm run test:e2e` fails to start |
-| k3d, kubectl, a running docker | start, and build images, but k3s pods cannot start in this sandbox: the testing station DISPATCHES the system tier (`system-full.yml -f cover=true`) |
+| k3d, kubectl, a running docker | start, and run the system pack with `SYSTEM_K3S_OOM_FIX=1` and `SYSTEM_BUILD_CA` (`gotchas.md`): the testing station runs every tier in the session and never dispatches one to CI |
 | `@fission-ai/openspec` | no opsx command |
 | pyyaml | `docs-generate.py`/`docs-task-guard.py` |
 | envtest assets → `~/.envtest` | manager integration suite |
