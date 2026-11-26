@@ -200,7 +200,13 @@
         "platform/console/ui/src/**/*.tsx"
       ]
     },
-    "excluded_from_coverage": [
+    "excluded_from_tier": {
+    "system": [
+      "platform/manager/internal/state/conformance/**",
+      "platform/manager/internal/state/kube/**"
+    ]
+  },
+  "excluded_from_coverage": [
       "**/*_test.go",
       "**/*.test.*",
       "**/*.spec.*",

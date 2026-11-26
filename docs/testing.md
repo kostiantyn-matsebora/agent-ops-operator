@@ -121,6 +121,20 @@ applicable.
 A tier that ran but left no coverage file fails as a collection failure. It never
 reads as zero changed lines.
 
+**Every tier runs in the session, the system tier included, and none is dispatched to CI.**
+In a cloud sandbox the pack needs `SYSTEM_K3S_OOM_FIX=1` (pods cannot lower `oom_score_adj`
+there) and `SYSTEM_BUILD_CA`. If it still cannot run, the station stops and says why.
+
+**Rounds are incremental.** Round 1 runs each tier in full and keeps its coverage profile.
+A later round re-runs only the tests that failed and the tests the tester added, and adds their
+profiles to the kept ones (a block counts as covered when any profile covers it). One full run
+of each tier closes the station, and only that run is judged passed.
+
+A lane that also fails on the base branch is not the change's work: the report lists it
+separately. `testing.excluded_from_tier` in `.github/review-triage.json` names code a tier
+cannot reach by construction, such as the state backend conformance harness and the kube
+backend for the NATS-backed system pack.
+
 | Tier | Coverage comes from |
 |---|---|
 | unit | `go test -coverpkg`, vitest, `node --test`, the script suites |

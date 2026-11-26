@@ -15,6 +15,8 @@ cat > "$tmp/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$GH_CALLS"
 case "$*" in
+  "api repos/o/r/issues/"[0-9]*" --jq .labels[].name") printf '%s\n' ${CURRENT_LABELS:-loop:running} ;;
+  "api --method POST repos/o/r/issues/"*"/labels -f labels[]="*) printf 'issue edit %s --repo o/r --add-label %s\n' "$(echo "$4" | sed 's#repos/o/r/issues/##;s#/labels##')" "${6#labels[]=}" >> "$GH_CALLS" ;;
   "pr view "*"--json labels"*|"issue view "*"--json labels"*) printf '%s\n' ${CURRENT_LABELS:-loop:running} ;;
   "api repos/o/r/issues/226/comments --paginate") printf '%s' "$ROUND_COMMENTS" ;;
 esac

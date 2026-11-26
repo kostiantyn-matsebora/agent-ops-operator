@@ -154,9 +154,15 @@ func run(m *testing.M) int {
 	if coverEnabled() {
 		// BEST EFFORT, NEVER THE PACK'S VERDICT: a run that could not collect leaves no
 		// profile, and the testing station reads that as a collection failure.
-		if err := CollectCover(ctx, cluster, artifact); err != nil {
+		//
+		// ITS OWN CONTEXT: `ctx` above is the SETUP budget (30 minutes), and a full pack runs for more than an
+		// hour, so by now it has expired. Collecting on it failed every full run with "stop the manager:
+		// context deadline exceeded" and wrote no profile, whatever state the cluster was in.
+		collectCtx, collectCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		if err := CollectCover(collectCtx, cluster, artifact); err != nil {
 			fmt.Fprintln(os.Stderr, "coverage:", err)
 		}
+		collectCancel()
 	}
 	return enforceSmokeBudget(code)
 }

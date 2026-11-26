@@ -118,6 +118,29 @@ class TheMeasure(unittest.TestCase):
         self.assertEqual(1, r["domain_files"])
         self.assertEqual((3, 5), (r["covered"], r["total"]))
 
+    def test_code_a_tier_cannot_reach_is_excluded_from_that_tier_only(self):
+        # The system pack runs the NATS backend, and the conformance harness is run by the unit tier.
+        path = "platform/manager/internal/state/conformance/suite.go"
+        for tier, applies in (("system", True), ("unit", False)):
+            excluded = self.T["excluded_from_coverage"] + self.T.get("excluded_from_tier", {}).get(tier, [])
+            r = cd.measure({path: {1, 2}}, [{path: {1: False, 2: False}}], self.T["domains"][tier], excluded, [])
+            self.assertEqual(0 if applies else 2, r["total"], tier)
+
+    def test_a_tier_from_a_partial_rerun_cannot_be_passed(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("tr", SCRIPTS / "testing-report.py")
+        tr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tr)
+        covs = {t: {"covered": 9, "total": 10, "collected": True, "domain_files": 1} for t in conveyor.TIERS}
+        outcomes = {t: "passed" for t in conveyor.TIERS}
+        full = tr.judge(V, covs, outcomes)
+        self.assertEqual("pass", {v["tier"]: v["status"] for v in full["verdicts"]}["system"])
+        partial = tr.judge(V, covs, outcomes, partial=("system",))
+        self.assertEqual("not_run", {v["tier"]: v["status"] for v in partial["verdicts"]}["system"])
+        self.assertTrue(any(w["tier"] == "system" for w in partial["work"]))
+        with self.assertRaises(ValueError):
+            tr.judge(V, covs, outcomes, partial=("nope",))
+
     def test_a_backend_only_change_has_no_e2e_domain(self):
         d = {"platform/manager/internal/x/x.go": {1, 2}}
         r = cd.measure(d, [], self.T["domains"]["e2e"], self.T["excluded_from_coverage"], [])
@@ -419,7 +442,7 @@ class TheAdapter(unittest.TestCase):
 
     def setUp(self):
         self.cio = getattr(ts, "i" + "o")
-        self.saved = {k: getattr(self.cio, k) for k in ("gh", "comment", "apply_events", "issue_labels", "write_output")}
+        self.saved = {k: getattr(self.cio, k) for k in ("gh", "comment", "apply_events", "issue_labels", "write_output", "rest_pr", "rest_labels", "rest_comment")}
         self.events, self.posted, self.outputs, self.gh_calls = [], [], {}, []
         self.pr = {"isCrossRepository": False, "headRefName": "change/x", "body": "Refs #9", "state": "OPEN", "labels": []}
         self.labels = frozenset({"conveyor:run", "station:implement"})
@@ -437,6 +460,10 @@ class TheAdapter(unittest.TestCase):
         io.comment = lambda repo, target, body: (self.posted.append(body), self.thread.append({"body": body}))
         io.apply_events = lambda repo, target, station_event="", loop_event="", vocabulary_path=None: self.events.append(station_event)
         io.issue_labels = lambda repo, issue: self.labels
+        # THE STATION READS OVER REST (a cloud sandbox refuses GraphQL), so these are what it calls.
+        io.rest_pr = lambda repo, number: self.pr
+        io.rest_labels = lambda repo, issue: self.labels
+        io.rest_comment = io.comment
         io.write_output = lambda k, v: self.outputs.__setitem__(k, v)
         self.cwd = os.getcwd()
         self.tmp = tempfile.TemporaryDirectory()
@@ -494,7 +521,7 @@ class TheAdapter(unittest.TestCase):
         self.pr["labels"] = [{"name": "conveyor:keep-going"}]
         self.begin()
         self.assertEqual(["testing:resume"], self.events)
-        self.assertIn(("pr", "edit", "5", "--repo", "o/r", "--remove-label", "conveyor:keep-going"), self.gh_calls)
+        self.assertIn(("api", "--method", "DELETE", "repos/o/r/issues/5/labels/conveyor:keep-going"), self.gh_calls)
         self.assertEqual(("10", "6", "false"), (self.outputs["cap"], self.outputs["round"], self.outputs["exhausted"]))
 
     def test_a_stalled_line_without_keep_going_stays_stalled(self):
@@ -686,17 +713,56 @@ class TheRoutine(unittest.TestCase):
         impl = (SCRIPTS.parents[1] / ".github/routines/implement-issue.md").read_text()
         self.assertIn("`station:testing` | testing | `.github/routines/test-change.md`", impl)
 
-    def test_a_cloud_session_dispatches_the_system_tier_with_coverage_on(self):
-        self.assertIn("gh workflow run system-full.yml", self.TEXT)
-        self.assertIn("-f cover=true", self.TEXT)
-        for wf in ("system-full.yml", "system-smoke.yml"):
-            text = (SCRIPTS.parents[1] / ".github/workflows" / wf).read_text()
-            self.assertIn("cover:", text)
-            self.assertIn("cover: ${{ inputs.cover", text)
-        self.assertIn("SYSTEM_COVER: ${{ inputs.cover }}", (SCRIPTS.parents[1] / ".github/workflows/system.yml").read_text())
+    def test_every_tier_runs_in_the_session_and_nothing_is_dispatched_to_ci(self):
+        self.assertNotIn("gh workflow run", self.TEXT)
+        self.assertIn("Never dispatch the tier to CI", self.TEXT)
+        self.assertIn("SYSTEM_K3S_OOM_FIX=1", self.TEXT)
+        self.assertIn("-timeout 150m", self.TEXT)
+
+    def test_later_rounds_rerun_only_what_failed_and_one_full_run_judges(self):
+        self.assertIn("ROUNDS ARE INCREMENTAL", self.TEXT)
+        self.assertIn("-run '^(TestA|TestB)$'", self.TEXT)
+        self.assertIn("ONE full run of each tier closes the station", self.TEXT)
+
+    def test_the_routine_reads_the_tracker_over_rest_not_graphql(self):
+        self.assertNotIn("gh issue view <n>", self.TEXT)
+        self.assertNotIn("gh pr view <", self.TEXT)
+        self.assertIn("gh api repos/<owner/name>/issues/<n>", self.TEXT)
 
     def test_it_never_asks_the_session_to_read_ci(self):
         self.assertIn("CI IS NOT YOUR RUNNER", self.TEXT)
+
+
+class TheRestReaders(unittest.TestCase):
+    """The station reads over REST, because a cloud sandbox refuses GraphQL."""
+
+    def setUp(self):
+        import conveyor_io
+        self.cio = conveyor_io
+        self.saved = conveyor_io.gh
+
+    def tearDown(self):
+        self.cio.gh = self.saved
+
+    def pr(self, **over):
+        doc = {"state": "open", "merged_at": None, "body": "Refs #1", "labels": [{"name": "conveyor:fix"}],
+               "head": {"ref": "change/x", "repo": {"full_name": "o/r"}}, "base": {"repo": {"full_name": "o/r"}}}
+        doc.update(over)
+        self.cio.gh = lambda *a, check=True: json.dumps(doc)
+        return self.cio.rest_pr("o/r", 5)
+
+    def test_an_open_same_repository_pull_request(self):
+        got = self.pr()
+        self.assertEqual(("OPEN", False, "change/x"), (got["state"], got["isCrossRepository"], got["headRefName"]))
+
+    def test_a_merged_pull_request_reads_as_merged_not_closed(self):
+        self.assertEqual("MERGED", self.pr(state="closed", merged_at="2026-11-26T00:00:00Z")["state"])
+
+    def test_a_closed_unmerged_pull_request_reads_as_closed(self):
+        self.assertEqual("CLOSED", self.pr(state="closed")["state"])
+
+    def test_a_fork_reads_as_cross_repository(self):
+        self.assertTrue(self.pr(head={"ref": "x", "repo": {"full_name": "someone/r"}})["isCrossRepository"])
 
 
 if __name__ == "__main__":

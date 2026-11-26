@@ -1471,6 +1471,23 @@
         "renamed",
         "gone"
       ]
+    },
+    {
+      "id": "testing-station-ci-dispatch",
+      "pattern": "gh workflow run[^\\n]{0,40}system-(full|smoke)\\.yml|DISPATCHES the system tier|dispatch the system tier",
+      "says": "the testing station runs the system tier in its own session, never in a dispatched CI workflow",
+      "allow": [
+        "never",
+        "removed",
+        "retired",
+        "no longer",
+        "not ",
+        "is gone",
+        "deleted",
+        "replaced",
+        "instead",
+        "without"
+      ]
     }
   ]
 }

@@ -95,6 +95,33 @@ def parse_paginated(raw: str) -> list:
     return events
 
 
+# THE REST HELPERS BELOW EXIST FOR A CLOUD SESSION. Its sandbox answers GraphQL with HTTP 403, and `gh pr view`,
+# `gh issue view`, `gh issue edit` and `gh issue comment` are GraphQL calls. The REST routes work everywhere, so the
+# testing station and the state writer use these.
+def rest_pr(repo: str, number: int) -> dict:
+    """A pull request in the shape `gh pr view --json isCrossRepository,headRefName,body,state,labels` gave."""
+    doc = json.loads(gh("api", f"repos/{repo}/pulls/{number}") or "{}")
+    head = (doc.get("head") or {}).get("repo") or {}
+    base = (doc.get("base") or {}).get("repo") or {}
+    return {"isCrossRepository": head.get("full_name") != base.get("full_name"),
+            "headRefName": (doc.get("head") or {}).get("ref", ""), "body": doc.get("body") or "",
+            "state": "MERGED" if doc.get("merged_at") else (doc.get("state") or "").upper(), "labels": doc.get("labels") or []}
+
+
+def rest_labels(repo: str, target: int) -> frozenset:
+    """The label names on an issue or pull request. A PULL REQUEST IS AN ISSUE TO THIS API."""
+    raw = gh("api", f"repos/{repo}/issues/{target}", "--jq", "[.labels[].name]")
+    try:
+        return frozenset(json.loads(raw or "[]"))
+    except json.JSONDecodeError:
+        return frozenset()
+
+
+def rest_comment(repo: str, target: int, body: str) -> None:
+    subprocess.run(["gh", "api", "--method", "POST", f"repos/{repo}/issues/{target}/comments", "-f", f"body={body}"],
+                   capture_output=True, check=False)
+
+
 def issue_labels(repo: str, issue: int) -> frozenset:
     raw = gh("issue", "view", str(issue), "--repo", repo, "--json", "labels")
     try:
