@@ -23,6 +23,8 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
@@ -53,10 +55,19 @@ func TestReopenRefusedWhileAnOpenSuccessorSharesTheCorrelationID(t *testing.T) {
 	// way correlation_test.go's own dedicated sources never need to for a
 	// single post, but this one — reusing the exact same initiationId twice
 	// on purpose — does.
+	//
+	// Setting src.Spec.CooldownHours = 0 on the Go struct before Create does
+	// NOT reach the server: the field carries `json:"cooldownHours,omitempty"`,
+	// so a zero value is dropped from the request entirely and the CRD's own
+	// `+kubebuilder:default=6` fills it back in on create. A raw merge patch,
+	// built from literal JSON rather than marshaled from the typed struct, is
+	// the one way to put an explicit 0 on the wire.
 	srcName := "e2e-reopen-successor-src-" + stamp
 	src := source(srcName, "e2e", nil)
-	src.Spec.CooldownHours = 0
 	mustCreate(t, e.K, src)
+	if err := e.K.Patch(ctx, src, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"cooldownHours":0}}`))); err != nil {
+		t.Fatalf("disabling the dedicated source's cooldown: %v", err)
+	}
 	p := pipeline(src.Name, ProfileStub, []string{src.Name}, []string{ChannelConsole})
 	mustCreate(t, e.K, p)
 	if err := waitPipelineReady(ctx, e.K, p.Name, 2*time.Minute); err != nil {

@@ -57,8 +57,22 @@ func TestCoordinatorReadAndGetTreeScopedToCallersOwnSubtree(t *testing.T) {
 	m2 := e.invokeMember(t, coordName, m1, "nested", "echo tree-m2-"+stamp)
 	e.WaitRun(t, m2, 1, 3*time.Minute)
 
+	// A second, wholly UNRELATED uncaused root on the same Coordinator — no
+	// causedBy of its own, so it never descends from the first root. Used
+	// below as the out-of-scope target: `read`/`get_tree`'s own callerConversation
+	// (internal/httpapi/coordinate.go) requires the CALLER itself to carry a
+	// coordinatorRef (an uncaused root), unlike the wider
+	// callerActingForCoordinator bound `close`/`open-roots`/`invoke` use for
+	// an ordinary member — so a plain member such as m1 is refused at
+	// AUTHENTICATION (401, "token does not match the declared identity")
+	// before ever reaching the scope check, and cannot stand in for the
+	// out-of-scope case. The root itself targeting a conversation outside
+	// its own subtree is what actually reaches and exercises `!inScope`.
+	fpOther := "e2e-coord-tree-other-" + stamp
+	e.PostTask(t, srcName, fpOther, "echo tree-other-"+stamp)
+	other := e.ConversationFor(t, fpOther, 2*time.Minute)
+
 	rootToken := coordinatorToken(e, coordName, root.Name)
-	m1Token := coordinatorToken(e, coordName, m1)
 
 	// `read`, two hops deep: the root reading m2, its own grandchild.
 	code, out := e.coordinateCall(t, "/coordinate/read", rootToken,
@@ -70,13 +84,14 @@ func TestCoordinatorReadAndGetTreeScopedToCallersOwnSubtree(t *testing.T) {
 		t.Fatalf("read must project the TARGET conversation, got name %q want %q", name, m2)
 	}
 
-	// `read` refuses the reverse direction: m1 reading its own ANCESTOR
-	// (the root) is out of scope — "never an ancestor" (this verb's own doc
-	// comment).
-	code, out = e.coordinateCall(t, "/coordinate/read", m1Token,
-		map[string]any{"conversation": m1, "target": root.Name})
+	// `read` refuses a target OUTSIDE the caller's own subtree: the root
+	// reading the unrelated second root is out of scope — "never ... a
+	// sibling branch" (this verb's own doc comment) — never a 404, since
+	// `other` genuinely exists and is live.
+	code, out = e.coordinateCall(t, "/coordinate/read", rootToken,
+		map[string]any{"conversation": root.Name, "target": other.Name})
 	if code != 403 {
-		t.Fatalf("read(m1 -> its own ancestor root) must be refused out of scope, got %d %v", code, out)
+		t.Fatalf("read(root -> an unrelated root) must be refused out of scope, got %d %v", code, out)
 	}
 
 	// `get_tree` with no target: the caller's own subtree, nested — the
@@ -107,12 +122,12 @@ func TestCoordinatorReadAndGetTreeScopedToCallersOwnSubtree(t *testing.T) {
 		t.Fatalf("get_tree(root, target=m2) must root the returned tree at m2, got name %q", name)
 	}
 
-	// `get_tree` refuses the same reverse direction `read` does: m1 asking
-	// for the tree rooted at its own ancestor is out of scope.
-	code, out = e.coordinateCall(t, "/coordinate/get_tree", m1Token,
-		map[string]any{"conversation": m1, "target": root.Name})
+	// `get_tree` refuses the same out-of-scope target `read` does: the root
+	// asking for the tree rooted at the unrelated second root.
+	code, out = e.coordinateCall(t, "/coordinate/get_tree", rootToken,
+		map[string]any{"conversation": root.Name, "target": other.Name})
 	if code != 403 {
-		t.Fatalf("get_tree(m1 -> its own ancestor root) must be refused out of scope, got %d %v", code, out)
+		t.Fatalf("get_tree(root -> an unrelated root) must be refused out of scope, got %d %v", code, out)
 	}
 }
 
