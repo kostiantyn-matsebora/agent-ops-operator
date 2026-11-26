@@ -102,7 +102,7 @@ system_pack_defaults() {
   for f in "${CCR_CA_BUNDLE:-/root/.ccr/ca-bundle.crt}" "${SSL_CERT_FILE:-}"; do
     [ -n "$f" ] && [ -f "$f" ] && { ca="$f"; break; }
   done
-  echo "oom-fix on, build CA ${ca:-missing (set SYSTEM_BUILD_CA to the host's bundle, or CCR_CA_BUNDLE to where this cloud keeps it)}"
+  echo "oom-fix on, build CA ${ca:-missing (set SYSTEM_BUILD_CA to the host trust bundle, or CCR_CA_BUNDLE to where this cloud keeps it)}"
 }
 
 # `sort -V` decides it, so 1.10 is not read as older than 1.9.
