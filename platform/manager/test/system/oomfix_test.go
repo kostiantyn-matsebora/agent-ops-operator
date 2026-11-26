@@ -2,6 +2,7 @@ package system
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -30,7 +31,10 @@ func TestOOMFixMountsBothDropInsAndCleansUp(t *testing.T) {
 			t.Fatalf("unexpected mount %v", args[i:i+2])
 		}
 		f := strings.SplitN(args[i+1], ":", 2)[0]
-		b, rerr := os.ReadFile(f)
+		if strings.HasSuffix(f, ".toml") {
+			t.Fatalf("a file mount breaks `k3d kubeconfig get`, want a directory: %s", f)
+		}
+		b, rerr := os.ReadFile(filepath.Join(f, "10-restrict-oom.toml"))
 		if rerr != nil || !strings.Contains(string(b), "restrict_oom_score_adj = true") {
 			t.Fatalf("drop-in %s unreadable or wrong: %v %q", f, rerr, b)
 		}
