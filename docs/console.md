@@ -54,6 +54,33 @@ the same recovery a Kubernetes 410 already triggers.
 Plus two write paths, both through the manager: `POST /channel/inbound` (reply)
 and `POST /signal/inbound` (originate).
 
+## Look
+
+The console ships two looks — one behaviour layer, two presentations. Colour
+scheme (light, dark, system) is `useTheme.ts`'s separate choice, and either
+look takes it.
+
+| Look | Is |
+|---|---|
+| `workspace` | the current build default — rounded panes on a canvas |
+| `classic` | the console's original shell, still fully supported |
+
+The switcher, in the masthead, sets the viewer's own choice and stores it
+under `agentops-console-look`.
+
+Resolution order, first match wins:
+
+| Order | Source | Stored? |
+|---|---|---|
+| 1 | this page load's `?look=` query parameter | no |
+| 2 | the viewer's stored choice (the switcher) | yes |
+| 3 | the install's named default (`console.defaultLook`) | chart value |
+| 4 | the build default (`workspace`) | no |
+
+A step naming a look this build does not register is skipped. A stored
+choice naming one is cleared rather than kept as a fallback, so a later
+install default is not shadowed by a stale value.
+
 ## How it stays current
 
 One SSE connection, open for the browser's lifetime, and **every event carries

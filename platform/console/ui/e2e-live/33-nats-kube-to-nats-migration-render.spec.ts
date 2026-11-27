@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 import { TESTID, testid } from '../src/model/testids'
 import { listConversations } from './support/kube'
 

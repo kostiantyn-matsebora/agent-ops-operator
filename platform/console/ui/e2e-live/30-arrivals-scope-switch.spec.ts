@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 import { TESTID, testid, ANY_ROW } from '../src/model/testids'
 import { ManagerClient } from './support/manager'
 import { loadFixtures } from './support/fixtures'

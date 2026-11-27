@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 import { TESTID, testid } from '../src/model/testids'
 
 // Item #31 QA — at a real phone width, the Inbox panel used to render as a

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 import { ANY_ROW, TESTID, testid } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 import { kubectl, listConversations, portForward, waitFor } from './support/kube'

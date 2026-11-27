@@ -47,7 +47,7 @@ export const LOOKS: readonly LookEntry[] = [
 
 /**
  * The look for a viewer who chose none, on an install that named none.
- * `classic` until the new look is ready (design D12), so every step before
- * that is invisible to a viewer.
+ * `workspace` since task 7.4 (design D12) — `classic` stays reachable by
+ * naming it as the install or stored choice.
  */
-export const BUILD_DEFAULT_LOOK = 'classic'
+export const BUILD_DEFAULT_LOOK = 'workspace'

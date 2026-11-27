@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 import { testid } from '../src/model/testids'
 
 // Item #24 — the "All" scope's count badge explains the gap between its
