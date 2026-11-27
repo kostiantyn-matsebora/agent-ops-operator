@@ -210,6 +210,47 @@ def cov(covered, total, files=None, collected=True, domain=1):
             "files": files or {}, "unmeasured": []}
 
 
+class TheGuards(unittest.TestCase):
+    AF = V["testing"]["agent_facing_paths"]
+
+    def test_an_agent_facing_change_needs_the_full_system_tier(self):
+        paths = ["platform/manager/internal/dispatch/x.go"]
+        self.assertTrue(conveyor.system_run_is_short(paths, self.AF, "smoke"))
+        self.assertTrue(conveyor.system_run_is_short(paths, self.AF, ""))
+        self.assertFalse(conveyor.system_run_is_short(paths, self.AF, "full"))
+
+    def test_a_change_off_the_agent_never_needs_it(self):
+        self.assertFalse(conveyor.system_run_is_short(["docs/x.md"], self.AF, "smoke"))
+
+    def test_a_base_that_does_not_resolve_is_an_error_not_an_empty_diff(self):
+        ts = load("testing-station")
+        with self.assertRaises(SystemExit) as c:
+            ts.changed_paths("no-such-branch-anywhere")
+        self.assertIn("does not resolve", str(c.exception))
+
+    def test_either_spelling_of_the_base_names_the_same_branch(self):
+        ts = load("testing-station")
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            sh(root, "git", "init", "-q", "--bare", "-b", "master", "origin.git")
+            sh(root, "git", "clone", "-q", "origin.git", "work")
+            w = root / "work"
+            (w / "a.txt").write_text("one\n")
+            sh(w, "git", "add", "-A"); sh(w, "git", "commit", "-qm", "base")
+            sh(w, "git", "push", "-q", "origin", "HEAD:master")
+            sh(w, "git", "fetch", "-q", "origin")
+            sh(w, "git", "checkout", "-qb", "change/x")
+            (w / "b.txt").write_text("two\n")
+            sh(w, "git", "add", "-A"); sh(w, "git", "commit", "-qm", "change")
+            cwd = os.getcwd()
+            os.chdir(w)
+            try:
+                self.assertEqual(["b.txt"], ts.changed_paths("master"))
+                self.assertEqual(["b.txt"], ts.changed_paths("origin/master"))
+            finally:
+                os.chdir(cwd)
+
+
 class TheVerdict(unittest.TestCase):
     def test_every_tier_green_passes(self):
         j = tr.judge(V, {"unit": cov(95, 100), "system": cov(8, 10), "e2e": cov(0, 0, domain=0)}, dict(PASSED))
@@ -465,6 +506,10 @@ class TheAdapter(unittest.TestCase):
         io.rest_labels = lambda repo, issue: self.labels
         io.rest_comment = io.comment
         io.write_output = lambda k, v: self.outputs.__setitem__(k, v)
+        # A CI checkout has no `origin/master`, so the diff is stubbed: no changed path unless a test says so.
+        self.real_changed_paths = ts.changed_paths
+        self.addCleanup(setattr, ts, "changed_paths", ts.changed_paths)
+        ts.changed_paths = lambda base: []
         self.cwd = os.getcwd()
         self.tmp = tempfile.TemporaryDirectory()
         os.chdir(self.tmp.name)
@@ -550,6 +595,32 @@ class TheAdapter(unittest.TestCase):
         self.judge(self.GOOD, extra=["--pr", "5"])
         self.assertIn(("workflow", "run", "remote-implement.yml", "--repo", "o/r", "-f", "carry_fix_pr=5"), self.gh_calls)
 
+    def test_a_failed_carry_dispatch_is_told_on_the_issue_not_swallowed(self):
+        real = self.cio.gh
+        def failing(*a, check=True):
+            if a[:2] == ("workflow", "run"):
+                raise RuntimeError("HTTP 403")
+            return real(*a, check=check)
+        self.cio.gh = failing
+        self.judge(self.GOOD, extra=["--pr", "5"])
+        self.assertEqual("passed", self.outputs["ending"])
+        self.assertTrue(any("carry_fix_pr=5" in b and "failed" in b for b in self.posted))
+
+    def agent_facing(self):
+        self.addCleanup(setattr, ts, "changed_paths", ts.changed_paths)
+        ts.changed_paths = lambda base: ["platform/manager/internal/dispatch/x.go"]
+
+    def test_an_agent_facing_change_is_not_passed_on_a_system_run_that_was_not_the_full_tier(self):
+        self.agent_facing()
+        self.judge({**self.GOOD, "system": cov(90, 100)}, extra=["--system-tier", "smoke"])
+        self.assertNotEqual("passed", self.outputs["ending"])
+        self.assertTrue(any("ran on the stub" in b or "not run" in b for b in self.posted + [pathlib.Path("coverage-report/report.md").read_text()]))
+
+    def test_an_agent_facing_change_passes_on_the_full_tier(self):
+        self.agent_facing()
+        self.judge({**self.GOOD, "system": cov(90, 100)}, extra=["--system-tier", "full"])
+        self.assertEqual("passed", self.outputs["ending"])
+
     def test_no_carry_is_asked_for_while_work_is_left(self):
         self.judge({**self.GOOD, "unit": cov(50, 100)}, extra=["--pr", "5"])
         self.assertFalse([c for c in self.gh_calls if c[:2] == ("workflow", "run")])
@@ -612,6 +683,7 @@ class TheAdapter(unittest.TestCase):
         sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "change")
         sh(repo, "git", "update-ref", "refs/remotes/origin/master", "HEAD~1")
         os.chdir(repo)
+        ts.changed_paths = self.real_changed_paths  # these tests diff a real repository, not the stub
         names = ("CLAUDE_CODE_OAUTH_TOKEN", "AGENTOPS_REAL_MODEL_TOKEN")
         saved = {n: os.environ.pop(n, None) for n in names}
         if token is not None:

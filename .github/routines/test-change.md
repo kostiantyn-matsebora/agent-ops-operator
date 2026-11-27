@@ -136,8 +136,12 @@ For each round, in order:
    ```sh
    python3 .github/scripts/testing-station.py judge --repo <owner/name> --issue <n> --pr <pr> \
      --round <r> --cap <cap> --tier-file unit=unit.json --tier-file system=system.json --tier-file e2e=e2e.json \
-     --outcome unit=passed --outcome system=passed --outcome e2e=passed
+     --outcome unit=passed --outcome system=passed --outcome e2e=passed \
+     --base <base> --system-tier <the SYSTEM_TIER the system run used>
    ```
+
+   `judge` reads the diff itself: for an agent-facing change a system run that was not `--system-tier full`
+   reads as not run, whatever outcome you give it. `--base` is the branch name (`master`), never `origin/master`.
 
    It edits the one coverage comment on the issue, applies the station's event, and, when
    every tier passes and holds its floor (90 unit, 70 system, 50 e2e), asks for the fixing
