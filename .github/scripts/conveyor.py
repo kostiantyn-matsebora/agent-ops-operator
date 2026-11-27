@@ -947,6 +947,15 @@ def real_model_gate(paths, patterns, session_requires: bool, credential_present:
     return Decision("run", f"{why}: the system and e2e tiers run on a real runtime")
 
 
+def system_run_is_short(paths, patterns, system_tier: str) -> bool:
+    """A system run that did not run the FULL tier cannot judge a change to what the agent is told or does.
+
+    The stub tier proves plumbing only (`real_model_gate`), so for an agent-facing change a `passed` system
+    outcome from any other tier reads as not run. The session's own reading of whether the change needs a
+    real model is not asked: the paths decide, the same list the gate uses."""
+    return bool(agent_facing(paths, patterns)) and system_tier != "full"
+
+
 def tester_may_see(path: str) -> bool:
     """What the tester is shown: specs, the design, the proposal and the diff's code. Never
     a transcript or a report an implementing session left behind."""

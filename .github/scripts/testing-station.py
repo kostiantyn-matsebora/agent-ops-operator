@@ -149,7 +149,13 @@ def cmd_judge(args, vocab) -> int:
         f = pathlib.Path(path)
         covs[tier] = json.loads(f.read_text()) if f.exists() and f.stat().st_size else None
     outcomes = dict(kv.split("=", 1) for kv in args.outcome)
-    verdict = report.judge(vocab, covs, outcomes, partial=args.partial)
+    partial = list(args.partial)
+    if outcomes.get("system") == "passed" and "system" not in partial and conveyor.system_run_is_short(
+            changed_paths(args.base), vocab["testing"]["agent_facing_paths"], args.system_tier):
+        print("the system tier ran on the stub (--system-tier is not `full`), and this change is agent-facing: "
+              "it reads as not run. Run it with SYSTEM_TIER=full and the real-model credential.")
+        partial.append("system")
+    verdict = report.judge(vocab, covs, outcomes, partial=partial)
     work = [conveyor.WorkItem(**w) for w in verdict["work"]]
     d = conveyor.testing_ending(work, args.round, args.cap, changed=args.changed, model_ran=args.model_ran)
     state = {"passed": "passed", "capped": "capped"}.get(d.action, "running")
@@ -168,7 +174,15 @@ def cmd_judge(args, vocab) -> int:
     if d.action == "passed" and args.pr:
         # THE FIXING LOOP STARTS ON THE HEAD THAT PASSED. A pass that pushes nothing fires no CI completion,
         # so nothing would carry the grant: ask for it explicitly.
-        io.gh("workflow", "run", "remote-implement.yml", "--repo", args.repo, "-f", f"carry_fix_pr={args.pr}", check=False)
+        # CHECKED, NOT SWALLOWED: a dispatch that failed in a sandbox once left a passed station with no fixing loop
+        # and nothing said so. A failure is told on the issue, with the command that does it.
+        try:
+            io.gh("workflow", "run", "remote-implement.yml", "--repo", args.repo, "-f", f"carry_fix_pr={args.pr}")
+        except RuntimeError as e:
+            io.rest_comment(args.repo, args.issue,
+                            f"The station passed, but asking for the fixing loop's carry on #{args.pr} failed: {e}. "
+                            f"Run `gh workflow run remote-implement.yml -f carry_fix_pr={args.pr}`, or wait for the sweep.")
+            print(f"carry dispatch failed: {e}")
     io.write_output("ending", d.action)
     io.write_output("tester_work", "true" if any(w.session == "tester" for w in work) else "false")
     io.write_output("fixer_work", "true" if any(w.session == "fixer" for w in work) else "false")
@@ -198,7 +212,18 @@ def cmd_check_patch(args, vocab) -> int:
 
 
 def changed_paths(base: str) -> list:
-    out = subprocess.run(["git", "diff", "--name-only", f"origin/{base}...HEAD"], capture_output=True, text=True, check=False).stdout
+    """The paths this branch changes against `origin/<base>`. Either `master` or `origin/master` names it.
+
+    A BASE THAT DOES NOT RESOLVE IS AN ERROR, NEVER AN EMPTY LIST. `--base origin/master` once became
+    `origin/origin/master`, a ref that does not exist, and `git diff` printed nothing: no changed path read
+    as no agent-facing path, and a change that needs a real model was waved through on the stub."""
+    base = base.removeprefix("origin/")
+    ref = f"origin/{base}"
+    ok = subprocess.run(["git", "rev-parse", "--verify", "--quiet", ref], capture_output=True, text=True, check=False)
+    if ok.returncode != 0:
+        raise SystemExit(f"error: the base {ref!r} does not resolve here. Run `git fetch origin {base}` and name the "
+                         f"branch (`--base {base}`), not the ref.")
+    out = subprocess.run(["git", "diff", "--name-only", f"{ref}...HEAD"], capture_output=True, text=True, check=False).stdout
     return [p for p in out.splitlines() if p]
 
 
@@ -281,6 +306,8 @@ def main(argv=None) -> int:
     j.add_argument("--partial", action="append", default=[], metavar="TIER",
                    help="a tier whose numbers come from a partial re-run: it cannot be passed, only a full run can")
     j.add_argument("--no-model", dest="model_ran", action="store_false")
+    j.add_argument("--base", default="master", help="the branch the change merges into, for the agent-facing check")
+    j.add_argument("--system-tier", default="", help="the SYSTEM_TIER the system run used: an agent-facing change passes only on `full`")
 
     r = sub.add_parser("record-round")
     r.add_argument("--repo", required=True); r.add_argument("--issue", type=int, required=True)
