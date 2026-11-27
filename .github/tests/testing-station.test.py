@@ -230,7 +230,25 @@ class TheGuards(unittest.TestCase):
 
     def test_either_spelling_of_the_base_names_the_same_branch(self):
         ts = load("testing-station")
-        self.assertEqual(ts.changed_paths("master"), ts.changed_paths("origin/master"))
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            sh(root, "git", "init", "-q", "--bare", "-b", "master", "origin.git")
+            sh(root, "git", "clone", "-q", "origin.git", "work")
+            w = root / "work"
+            (w / "a.txt").write_text("one\n")
+            sh(w, "git", "add", "-A"); sh(w, "git", "commit", "-qm", "base")
+            sh(w, "git", "push", "-q", "origin", "HEAD:master")
+            sh(w, "git", "fetch", "-q", "origin")
+            sh(w, "git", "checkout", "-qb", "change/x")
+            (w / "b.txt").write_text("two\n")
+            sh(w, "git", "add", "-A"); sh(w, "git", "commit", "-qm", "change")
+            cwd = os.getcwd()
+            os.chdir(w)
+            try:
+                self.assertEqual(["b.txt"], ts.changed_paths("master"))
+                self.assertEqual(["b.txt"], ts.changed_paths("origin/master"))
+            finally:
+                os.chdir(cwd)
 
 
 class TheVerdict(unittest.TestCase):
@@ -488,6 +506,9 @@ class TheAdapter(unittest.TestCase):
         io.rest_labels = lambda repo, issue: self.labels
         io.rest_comment = io.comment
         io.write_output = lambda k, v: self.outputs.__setitem__(k, v)
+        # A CI checkout has no `origin/master`, so the diff is stubbed: no changed path unless a test says so.
+        self.addCleanup(setattr, ts, "changed_paths", ts.changed_paths)
+        ts.changed_paths = lambda base: []
         self.cwd = os.getcwd()
         self.tmp = tempfile.TemporaryDirectory()
         os.chdir(self.tmp.name)
