@@ -826,5 +826,5 @@ its task's consumer runs.
 
 The `conversations` field is withdrawn, and every routing outcome lives on
 the `Signal`. See [Concepts](concepts.md#signal) for the kind and
-[the adapter specification](contracts/signal-adapter.md), version 2.5.0, for
+[the adapter specification](contracts/signal-adapter.md), version 2.6.0, for
 the contract.
