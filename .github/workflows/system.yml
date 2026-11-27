@@ -148,7 +148,15 @@ jobs:
         run: npx playwright install --with-deps chromium
       # Gated on the pack's own outcome, not shell `&&` chaining, so a pack
       # failure and a browser-suite failure stay distinguishable in the log.
-      - name: Run e2e-live suite
+      #
+      # console-looks task 6.3: `e2e-live/playwright.config.ts` now declares
+      # one Playwright PROJECT per registered look (`classic`, `workspace`),
+      # each at the desktop viewport. No `--project` flag below is deliberate:
+      # Playwright runs every project it finds when none is named, so this
+      # one invocation already runs the whole suite twice, once per look —
+      # confirmed with `playwright test --list` (doubles the test count, one
+      # `[classic]`/`[workspace]` prefix per test, no config error).
+      - name: Run e2e-live suite (both looks)
         if: inputs.tier == 'full' && steps.go-test.outcome == 'success'
         working-directory: platform/console/ui
         run: |

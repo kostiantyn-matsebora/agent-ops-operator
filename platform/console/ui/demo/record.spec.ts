@@ -560,9 +560,9 @@ test('records the landing page demo in both themes', async ({ browser }) => {
       })
       const page = await context.newPage()
       await page.clock.setFixedTime(NOW)
-      // The site shows the console's workspace look. The build's own default is
-      // `classic` (an install names its default through `console.defaultLook`),
-      // so the capture states the viewer's choice the way the switcher stores it.
+      // The site shows the console's workspace look, the build's own default
+      // since task 7.4 — stated explicitly anyway, the way the switcher stores
+      // a viewer's choice, so the capture survives a later install default.
       await page.addInitScript(() => {
         localStorage.setItem(
           'agentops-console-look',

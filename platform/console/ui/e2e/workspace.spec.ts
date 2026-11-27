@@ -1,6 +1,6 @@
 import { expect, test, type Page } from './support/coverage'
 import { TESTID, testid } from '../src/model/testids'
-import { MEMBER, REPLY_TEXT, OWN_TEXT, ROOT, ROWS, SIGNAL_TEXT, startHarness, type Harness } from './support/mock'
+import { at, base, MEMBER, REPLY_TEXT, OWN_TEXT, ROOT, ROWS, SIGNAL_TEXT, startHarness, type Harness } from './support/mock'
 
 // The workspace look in a real browser, against a mocked API — the checks
 // jsdom cannot make: geometry (the panes fill the window and the page never
@@ -176,4 +176,28 @@ test.describe('on a phone', () => {
 test('opens on a row the thread a link names', async ({ page }) => {
   await open(page, `/conversations/${ROOT.name}`)
   await expect(page.getByTestId(testid.row(ROOT.name))).toHaveAttribute('aria-current', 'true')
+})
+
+// console-workspace-feedback: "Motion respects the viewer" — an arrival still
+// lands and is still a real row (the state), but the OS's reduced-motion
+// request means the class driving its animation (workspace.css's
+// `.wk-row.arrived`) never applies.
+test.describe('reduced motion', () => {
+  test.use({ reducedMotion: 'reduce' })
+
+  test('a conversation a signal opens still arrives in place, with no arrival animation', async ({ page }) => {
+    await open(page, '/conversations')
+    const arriving = {
+      ...base, name: 'signal-row', title: 'checkout-api is restarting again', source: 'cron', phase: 'Idle',
+      created: at(50), lastActivity: at(50),
+    }
+    h.push('delta', { type: 'ADDED', kind: 'conversations', name: arriving.name, conversationRow: arriving })
+    const row = page.getByTestId(testid.row('signal-row'))
+    // The state is correct — the row exists, with its own content — whether
+    // or not the browser allows the motion that would otherwise mark it.
+    await expect(row).toBeVisible()
+    await expect(row).toContainText('checkout-api is restarting again')
+    await expect(row).not.toHaveClass(/arrived/)
+    await expect(page.getByTestId(TESTID.toast)).toHaveCount(0)
+  })
 })

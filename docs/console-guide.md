@@ -36,9 +36,11 @@ truth** — every view is the cluster, rendered.
 ## The tour
 
 Five views, one question each, shown here in the **`workspace`** look — the
-current build default. A `?look=classic` link, the switcher, or an install's
-own `console.defaultLook` still gives you the original shell over the same
-views and data. Every field and control is in
+current build default.
+
+A `?look=classic` link, the switcher, or an install's own `console.defaultLook`
+still gives you the original shell over the same views and data. Every field
+and control is in
 [the console reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/console.md).
 
 {: .ao-tabs #console}
