@@ -1,14 +1,23 @@
 # conveyor-testing-session-runs-all Specification
 
 ## Purpose
-TBD - created by archiving change conveyor-testing-all-tiers-in-session. Update Purpose after archive.
+The testing station runs every tier — unit, system and e2e — inside the
+session itself. It never dispatches a tier to CI, and reports what it cannot
+run instead of falling back.
+
+Its rounds are incremental. The first round runs each tier in full and
+measures coverage. A later round re-runs only what failed plus what the
+tester added. A tier passes only on a full, untouched-by-fixes run at the
+end.
 
 ## Requirements
 
 ### Requirement: Every tier runs in the session, and CI is never the system tier's runner
 
 The testing station SHALL run the unit, system and e2e tiers inside the remote session and
-read their results itself. It SHALL NOT dispatch a CI workflow to run a tier. Where the
+read their results itself.
+
+It SHALL NOT dispatch a CI workflow to run a tier. Where the
 session's environment cannot run a tier, the station SHALL stop and report what is missing.
 
 #### Scenario: The system tier on a cloud session
@@ -24,8 +33,9 @@ session's environment cannot run a tier, the station SHALL stop and report what 
 ### Requirement: A round re-runs only what failed
 
 After the first round, a round SHALL re-run only the tests that failed in the last run and
-the tests added since, and SHALL merge their coverage into the first round's profile. A tier
-SHALL be judged passed only on a full run of that tier, run once at the end.
+the tests added since, and SHALL merge their coverage into the first round's profile.
+
+A tier SHALL be judged passed only on a full run of that tier, run once at the end.
 
 #### Scenario: One failing system lane
 - **WHEN** round 1 ends with one system lane red
