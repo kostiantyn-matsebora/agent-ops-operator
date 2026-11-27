@@ -65,6 +65,40 @@ export const DETAIL = {
   ],
 }
 
+/** The stream-health shape every page that joins live events reads. */
+export const STREAM_HEALTH = { connected: true, events: 3, resyncs: 0 }
+
+/** `/api/overview`'s shape — the installation, its capacity and what reports a problem. */
+export const OVERVIEW = {
+  namespace: 'agent-ops',
+  manager: {
+    version: 'v0.1.0', leader: 'agentops-manager-0', now: at(0),
+    runtimeSlots: { inUse: 1, max: 5, waiting: 0 }, queues: [], cooldowns: [],
+  },
+  stream: STREAM_HEALTH,
+  workloads: [{ name: 'agentops-manager', desired: 1, ready: 1, restarts: 0 }],
+  runtimes: [{ name: 'default' }],
+  adapters: [{ kind: 'channeladapters', name: 'console', health: 'ok', serves: 1 }],
+  counts: { conversations: 2 },
+  synced: { conversations: true },
+  problems: [],
+}
+
+/** `/api/queues`'s shape — the two admission pools, work and delivery. */
+export const QUEUES = {
+  capacity: { inUse: 1, max: 5, waiting: 0 },
+  members: { inUse: 0, max: 5, waiting: 0 },
+  work: [],
+  delivery: [],
+  cooldowns: [],
+}
+
+/** `/api/config`'s shape — every kind the console watches, with its count. */
+export const CONFIG_KINDS = [
+  { kind: 'pipelines', title: 'Pipelines', count: 1, synced: true },
+  { kind: 'coordinators', title: 'Coordinators', count: 1, synced: true },
+]
+
 export const TOPOLOGY = {
   windowSeconds: 300,
   eventNodeKinds: { pipeline: 'pipelines', channel: 'channels', runtime: 'agentruntimes' },
@@ -89,7 +123,15 @@ type Extra = { rows?: object[]; vocabulary?: object[] }
 export function answer(path: string, query: URLSearchParams, extra: Extra = {}): unknown {
   const rows = [...ROWS, ...(extra.rows ?? [])]
   if (path === '/api/session') return SESSION
-  if (path === '/api/topology') return { topology: TOPOLOGY, oldestEvent: at(-120), unjoinedPipelines: [], synced: {}, metricsAvailable: false }
+  if (path === '/api/overview') return OVERVIEW
+  if (path === '/api/queues') return QUEUES
+  if (path === '/api/config') return CONFIG_KINDS
+  if (path === '/api/topology') {
+    return {
+      topology: TOPOLOGY, oldestEvent: at(-120), unjoinedPipelines: [], synced: {}, metricsAvailable: false,
+      stream: STREAM_HEALTH, consoleChannel: 'console',
+    }
+  }
   if (path === `/api/conversations/${ROOT.name}/graph`) return { ...TOPOLOGY, events: DETAIL.events, diverged: false, pipeline: 'incident' }
   if (path === '/api/sources') return { sources: [{ name: 'console', wired: true, pipeline: 'k8s-observe' }], canOriginate: true, writeEnabled: true }
   if (path === '/api/vocabulary') return { entries: [{ kind: 'coordinator', name: 'incident', position: 'general' }, { kind: 'pipeline', name: 'k8s-observe', position: 'general' }, ...(extra.vocabulary ?? [])] }

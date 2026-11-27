@@ -187,8 +187,7 @@ export function Row({
     .filter(Boolean)
     .join(' · ')
   const segments = lifecycle(status)
-  void prefersReducedMotion
-  const cls = ['wk-row', unread && 'unread', tree.depth > 0 && 'mem', status === 'failed' && 'fail', arrived && 'arrived', selection && 'sel']
+  const cls = ['wk-row', unread && 'unread', tree.depth > 0 && 'mem', status === 'failed' && 'fail', arrived && !prefersReducedMotion() && 'arrived', selection && 'sel']
     .filter(Boolean)
     .join(' ')
 
