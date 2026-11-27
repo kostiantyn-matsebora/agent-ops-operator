@@ -65,7 +65,7 @@ LABEL %s=1
 }
 
 func prepareBuildCA(ctx context.Context, chosen []Image) error {
-	src := os.Getenv(buildCAEnv)
+	src := buildCAPath()
 	if src == "" {
 		return nil
 	}

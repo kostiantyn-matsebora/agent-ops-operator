@@ -97,7 +97,7 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 			"--wait", "--timeout", "180s",
 			"--no-lb",
 		}
-		args = append(args, clusterCAArgs(os.Getenv(buildCAEnv))...)
+		args = append(args, clusterCAArgs(buildCAPath())...)
 		oomArgs, oomCleanup, oomErr := oomFixArgs()
 		if oomErr != nil {
 			return nil, oomErr

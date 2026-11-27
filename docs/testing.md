@@ -122,8 +122,9 @@ A tier that ran but left no coverage file fails as a collection failure. It neve
 reads as zero changed lines.
 
 **Every tier runs in the session, the system tier included, and none is dispatched to CI.**
-In a cloud sandbox the pack needs `SYSTEM_K3S_OOM_FIX=1` (pods cannot lower `oom_score_adj`
-there) and `SYSTEM_BUILD_CA`. If it still cannot run, the station stops and says why.
+In a cloud sandbox the pack turns `SYSTEM_K3S_OOM_FIX` on (pods cannot lower `oom_score_adj`
+there) and finds the host's trust bundle for `SYSTEM_BUILD_CA` by itself, so nothing is set by
+hand; an explicit value always wins. If it still cannot run, the station stops and says why.
 
 **Rounds are incremental.** Round 1 runs each tier in full and keeps its coverage profile.
 A later round re-runs only the tests that failed and the tests the tester added, and adds their

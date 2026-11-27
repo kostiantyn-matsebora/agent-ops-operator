@@ -47,3 +47,70 @@ func TestOOMFixMountsBothDropInsAndCleansUp(t *testing.T) {
 		}
 	}
 }
+
+func TestACloudSessionTurnsTheOOMFixOnUnlessToldOtherwise(t *testing.T) {
+	cases := []struct {
+		name, remote, env string
+		set               bool
+		want              bool
+	}{
+		{"workstation, unset", "", "", false, false},
+		{"cloud, unset", "1", "", false, true},
+		{"cloud, true", "true", "", false, true},
+		{"cloud, explicitly off", "1", "0", true, false},
+		{"workstation, explicitly on", "", "1", true, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CODE_REMOTE", c.remote)
+			if c.set {
+				t.Setenv(oomFixEnv, c.env)
+			} else {
+				os.Unsetenv(oomFixEnv)
+			}
+			if got := oomFixEnabled(); got != c.want {
+				t.Fatalf("oomFixEnabled() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestACloudSessionFindsTheBuildCABundleItself(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "bundle.crt")
+	if err := os.WriteFile(bundle, []byte("pem"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSL_CERT_FILE", bundle)
+	os.Unsetenv(buildCAEnvName)
+
+	t.Setenv("CLAUDE_CODE_REMOTE", "")
+	if got := buildCAPath(); got != "" {
+		t.Fatalf("a workstation must not pick a bundle up by itself, got %q", got)
+	}
+	t.Setenv("CLAUDE_CODE_REMOTE", "1")
+	if got := buildCAPath(); got != bundle && got != "/root/.ccr/ca-bundle.crt" {
+		t.Fatalf("a cloud session must find a bundle, got %q", got)
+	}
+	t.Setenv(buildCAEnvName, "/explicit.crt")
+	if got := buildCAPath(); got != "/explicit.crt" {
+		t.Fatalf("an explicit bundle wins, got %q", got)
+	}
+	t.Setenv(buildCAEnvName, "")
+	if got := buildCAPath(); got != "" {
+		t.Fatalf("an explicit empty value turns it off, got %q", got)
+	}
+}
+
+func TestCCRCABundleMovesWhereACloudKeepsTheBundle(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "moved.crt")
+	if err := os.WriteFile(bundle, []byte("pem"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.Unsetenv(buildCAEnvName)
+	t.Setenv("CLAUDE_CODE_REMOTE", "1")
+	t.Setenv("SSL_CERT_FILE", "")
+	t.Setenv("CCR_CA_BUNDLE", bundle)
+	if got := buildCAPath(); got != bundle {
+		t.Fatalf("buildCAPath() = %q, want the CCR_CA_BUNDLE file %q", got, bundle)
+	}
+}

@@ -716,7 +716,8 @@ class TheRoutine(unittest.TestCase):
     def test_every_tier_runs_in_the_session_and_nothing_is_dispatched_to_ci(self):
         self.assertNotIn("gh workflow run", self.TEXT)
         self.assertIn("Never dispatch the tier to CI", self.TEXT)
-        self.assertIn("SYSTEM_K3S_OOM_FIX=1", self.TEXT)
+        self.assertIn("SYSTEM_K3S_OOM_FIX", self.TEXT)
+        self.assertIn("needs nothing set by hand", self.TEXT)
         self.assertIn("-timeout 150m", self.TEXT)
 
     def test_later_rounds_rerun_only_what_failed_and_one_full_run_judges(self):
