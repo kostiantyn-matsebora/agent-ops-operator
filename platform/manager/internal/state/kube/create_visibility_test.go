@@ -30,7 +30,7 @@ func brokenVisibilityPartLayout() Layout[string] {
 		Part: &Part[string]{
 			Locate: sourceKey,
 			Read:   func(client.Object, string) (string, bool) { return "", false },
-			Write: func(obj client.Object, _ string, v string) {
+			Write: func(obj client.Object, _, v string) {
 				ann := obj.GetAnnotations()
 				if ann == nil {
 					ann = map[string]string{}

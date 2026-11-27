@@ -84,9 +84,9 @@ func (createAlwaysFails) Create(context.Context, state.Key, state.ConversationRe
 }
 
 func TestCreateReturnsStoredRecordCatchesACreateFailure(t *testing.T) {
-	if passed := runIsolated(func(t *testing.T) {
+	if runIsolated(func(t *testing.T) {
 		testCreateReturnsStoredRecord(t, createAlwaysFails{newFakeConvCollection()}, conversationFixture)
-	}); passed {
+	}) {
 		t.Fatal("want the scenario to fail a backend whose Create genuinely errors")
 	}
 }
@@ -109,9 +109,9 @@ func (c createReturnsStaleRecord) Create(ctx context.Context, key state.Key, rec
 }
 
 func TestCreateReturnsStoredRecordCatchesCreateAnsweringWithTheWrongRecord(t *testing.T) {
-	if passed := runIsolated(func(t *testing.T) {
+	if runIsolated(func(t *testing.T) {
 		testCreateReturnsStoredRecord(t, createReturnsStaleRecord{newFakeConvCollection()}, conversationFixture)
-	}); passed {
+	}) {
 		t.Fatal("want the scenario to fail a Create whose returned record does not match what it stored")
 	}
 }
@@ -129,9 +129,9 @@ func (getAlwaysFails) Get(context.Context, state.Key) (state.ConversationRecord,
 }
 
 func TestCreateReturnsStoredRecordCatchesAGetFailureRightAfterCreate(t *testing.T) {
-	if passed := runIsolated(func(t *testing.T) {
+	if runIsolated(func(t *testing.T) {
 		testCreateReturnsStoredRecord(t, getAlwaysFails{newFakeConvCollection()}, conversationFixture)
-	}); passed {
+	}) {
 		t.Fatal("want the scenario to fail a backend whose Get right after Create genuinely errors")
 	}
 }
@@ -153,9 +153,9 @@ func (c getReturnsStaleRecord) Get(ctx context.Context, key state.Key) (state.Co
 }
 
 func TestCreateReturnsStoredRecordCatchesGetDisagreeingWithWhatCreateStored(t *testing.T) {
-	if passed := runIsolated(func(t *testing.T) {
+	if runIsolated(func(t *testing.T) {
 		testCreateReturnsStoredRecord(t, getReturnsStaleRecord{newFakeConvCollection()}, conversationFixture)
-	}); passed {
+	}) {
 		t.Fatal("want the scenario to fail a Get whose content disagrees with the record Create just stored")
 	}
 }
@@ -178,9 +178,9 @@ func (c createReturnsEmptyID) Create(ctx context.Context, key state.Key, rec sta
 }
 
 func TestCreateReturnsStoredRecordCatchesAnEmptyMintedID(t *testing.T) {
-	if passed := runIsolated(func(t *testing.T) {
+	if runIsolated(func(t *testing.T) {
 		testCreateReturnsStoredRecord(t, createReturnsEmptyID{newFakeConvCollection()}, conversationFixture)
-	}); passed {
+	}) {
 		t.Fatal("want the scenario to fail a Create whose returned record carries no ID")
 	}
 }
@@ -204,9 +204,9 @@ func (c createReturnsWrongID) Create(ctx context.Context, key state.Key, rec sta
 }
 
 func TestCreateReturnsStoredRecordCatchesCreatesIDDisagreeingWithGet(t *testing.T) {
-	if passed := runIsolated(func(t *testing.T) {
+	if runIsolated(func(t *testing.T) {
 		testCreateReturnsStoredRecord(t, createReturnsWrongID{newFakeConvCollection()}, conversationFixture)
-	}); passed {
+	}) {
 		t.Fatal("want the scenario to fail when Create's own returned ID disagrees with a Get right after")
 	}
 }
@@ -228,9 +228,9 @@ func (c createReturnsWrongCreatedAt) Create(ctx context.Context, key state.Key, 
 }
 
 func TestCreateReturnsStoredRecordCatchesCreatesCreatedAtDisagreeingWithGet(t *testing.T) {
-	if passed := runIsolated(func(t *testing.T) {
+	if runIsolated(func(t *testing.T) {
 		testCreateReturnsStoredRecord(t, createReturnsWrongCreatedAt{newFakeConvCollection()}, conversationFixture)
-	}); passed {
+	}) {
 		t.Fatal("want the scenario to fail when Create's own returned CreatedAt disagrees with a Get right after")
 	}
 }

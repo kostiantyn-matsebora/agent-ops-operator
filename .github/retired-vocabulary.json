@@ -1053,7 +1053,7 @@
     {
       "id": "signal-signature-hash-label",
       "pattern": "signature-hash\\b",
-      "says": "the agentops.dev/signature-hash label was removed with no successor label; equality routing reads an informer field index on spec.correlationId instead",
+      "says": "the agentops.dev/signature-hash label was removed with no successor label; equality routing reads spec.correlationId straight from the API server instead, never an informer index",
       "allow": [
         "removed",
         "retired",
@@ -1078,7 +1078,7 @@
     {
       "id": "signal-signature",
       "pattern": "\\bsignatures?\\b",
-      "says": "a conversation's correlation key is spec.correlationId, the adopted initiationId; its system identity is a separate, backend-minted field (metadata.uid under the kube backend), never a spec value — the manager-computed grouping signature (and Conversation.spec.signature) was removed",
+      "says": "a conversation's correlation key is spec.correlationId, the adopted initiationId; its system identity is a separate, backend-minted field, never a spec value — the manager-computed grouping signature (and Conversation.spec.signature) was removed",
       "allow": [
         "removed",
         "retired",

@@ -110,21 +110,7 @@ func TestReopenRefusedWhileAnOpenSuccessorSharesTheCorrelationID(t *testing.T) {
 		"initiationId": id, "kind": "chat", "payload": "/" + p.Name + " echo second-life",
 		"title": title, "labels": chatLabels,
 	})
-	var successor *agentopsv1alpha1.Conversation
-	waitFor(t, "a second life opened for the same correlationId", 2*time.Minute, func() (bool, error) {
-		items, err := e.K.Conversations(ctx)
-		if err != nil {
-			return false, err
-		}
-		for i := range items {
-			c := &items[i]
-			if c.Spec.CorrelationID == id && c.Name != first.Name {
-				successor = c
-				return true, nil
-			}
-		}
-		return false, nil
-	})
+	successor := waitSuccessorLife(t, ctx, e, id, first.Name)
 	names = append(names, successor.Name)
 	// The successor's name carries the SAME base as the first life's own
 	// stored name (which also carries namewords' own "<kind>-" prefix, never
@@ -141,8 +127,16 @@ func TestReopenRefusedWhileAnOpenSuccessorSharesTheCorrelationID(t *testing.T) {
 	// Reopening the FIRST life now, while its successor is open and shares
 	// its correlationId, must be refused rather than silently producing two
 	// open conversations claiming the same id.
+	requireReopenRefused(t, ctx, e, auth, first.Name)
+}
+
+// requireReopenRefused asks to reopen a closed conversation and requires the
+// request to be accepted, the task to die terminally precondition_failed and
+// the conversation to stay Closed.
+func requireReopenRefused(t *testing.T, ctx context.Context, e *Env, auth, name string) {
+	t.Helper()
 	reopenCode, reopenOut := e.do(t, "POST",
-		e.Manager.URL()+"/channel/conversations/"+url.PathEscape(first.Name)+"/reopen",
+		e.Manager.URL()+"/channel/conversations/"+url.PathEscape(name)+"/reopen",
 		[]byte(`{"channel":"`+ChannelConsole+`"}`), auth)
 	var accepted acceptedWire
 	_ = json.Unmarshal([]byte(reopenOut), &accepted)
@@ -158,11 +152,32 @@ func TestReopenRefusedWhileAnOpenSuccessorSharesTheCorrelationID(t *testing.T) {
 	}
 
 	// And the refusal actually refused: the first life is still Closed.
-	final, err := e.K.Conversation(ctx, first.Name)
+	final, err := e.K.Conversation(ctx, name)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if final.Status.Phase != agentopsv1alpha1.ConversationClosed {
 		t.Fatalf("the first life must still be Closed after the refused reopen, got %q", final.Status.Phase)
 	}
+}
+
+// waitSuccessorLife waits for a second conversation adopting correlationID.
+func waitSuccessorLife(t *testing.T, ctx context.Context, e *Env, id, firstName string) *agentopsv1alpha1.Conversation {
+	t.Helper()
+	var successor *agentopsv1alpha1.Conversation
+	waitFor(t, "a second life opened for the same correlationId", 2*time.Minute, func() (bool, error) {
+		items, err := e.K.Conversations(ctx)
+		if err != nil {
+			return false, err
+		}
+		for i := range items {
+			c := &items[i]
+			if c.Spec.CorrelationID == id && c.Name != firstName {
+				successor = c
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	return successor
 }

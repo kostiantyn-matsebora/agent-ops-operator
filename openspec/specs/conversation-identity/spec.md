@@ -168,6 +168,9 @@ SHALL be called `correlationId` everywhere it is named, on the `Conversation`
 spec, the stored record, the index that lists by it and the field of an
 adapter operation. The name `conversationId` for it is removed.
 
+The adapter wire reuses `conversationId` with a new meaning, the
+conversation's `ID`. It never again names the correlation key.
+
 Its meaning SHALL NOT change. It:
 
 - is written once at creation, never changed and never backfilled.
