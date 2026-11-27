@@ -507,6 +507,7 @@ class TheAdapter(unittest.TestCase):
         io.rest_comment = io.comment
         io.write_output = lambda k, v: self.outputs.__setitem__(k, v)
         # A CI checkout has no `origin/master`, so the diff is stubbed: no changed path unless a test says so.
+        self.real_changed_paths = ts.changed_paths
         self.addCleanup(setattr, ts, "changed_paths", ts.changed_paths)
         ts.changed_paths = lambda base: []
         self.cwd = os.getcwd()
@@ -682,6 +683,7 @@ class TheAdapter(unittest.TestCase):
         sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "change")
         sh(repo, "git", "update-ref", "refs/remotes/origin/master", "HEAD~1")
         os.chdir(repo)
+        ts.changed_paths = self.real_changed_paths  # these tests diff a real repository, not the stub
         names = ("CLAUDE_CODE_OAUTH_TOKEN", "AGENTOPS_REAL_MODEL_TOKEN")
         saved = {n: os.environ.pop(n, None) for n in names}
         if token is not None:
