@@ -18,15 +18,10 @@ import (
 // "verb-profile": this test mutates it after creation, and a profile
 // fixture other tests in this suite also read must stay untouched by that.
 //
-// It declares the DEPRECATED singular Repository, not Repositories — a
-// typed client always serializes a non-pointer struct field (Go's
-// encoding/json has no "empty" struct), so an AgentProfile built through
-// this suite's typed k8sClient with ONLY Repositories set would also send
-// an empty-but-PRESENT `repository: {}`, tripping the "mutually exclusive"
-// CEL rule on a field this fixture never meant to set. Repository alone
-// carries none of that risk (TestProfileRepositoryAloneStillAdmits pins the
-// same fact), and this test is about REOPEN leaving the Conversation's own
-// snapshot untouched, not about which spelling resolved it.
+// It declares the DEPRECATED singular Repository rather than Repositories
+// simply because this test is about REOPEN leaving the Conversation's own
+// snapshot untouched, not about which spelling resolved it —
+// TestProfileRepositoryAloneStillAdmits covers that spelling on its own.
 func mkMRWReopenProfile(t *testing.T, name string) {
 	t.Helper()
 	p := &agentopsv1alpha1.AgentProfile{}
@@ -34,7 +29,7 @@ func mkMRWReopenProfile(t *testing.T, name string) {
 	p.Spec.Agent = "tester"
 	p.Spec.MaxTurns = 5
 	p.Spec.OutputFormat = agentopsv1alpha1.OutputFormatNone
-	p.Spec.Repository = agentopsv1alpha1.RepositorySpec{URL: "https://example.com/original.git", Ref: "main"}
+	p.Spec.Repository = &agentopsv1alpha1.RepositorySpec{URL: "https://example.com/original.git", Ref: "main"}
 	if err := k8sClient.Create(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}

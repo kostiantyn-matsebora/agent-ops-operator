@@ -71,7 +71,7 @@ func mkExpectedRefsProfile(t *testing.T, name string) {
 	t.Helper()
 	p := &agentopsv1alpha1.AgentProfile{}
 	p.Name, p.Namespace = name, ns
-	p.Spec.Repository = agentopsv1alpha1.RepositorySpec{URL: "https://example.com/repo.git", Ref: "main"}
+	p.Spec.Repository = &agentopsv1alpha1.RepositorySpec{URL: "https://example.com/repo.git", Ref: "main"}
 	p.Spec.Repository.Auth = &agentopsv1alpha1.RepoAuth{
 		Type: agentopsv1alpha1.RepoAuthSSH, SecretRef: agentopsv1alpha1.ObjectRef{Name: "er-repo-key"},
 	}

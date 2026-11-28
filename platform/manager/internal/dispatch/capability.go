@@ -106,11 +106,11 @@ func ResolveRepositories(ctx context.Context, reader client.Reader, namespace st
 			WorkingDir:   profile.Spec.WorkingDir,
 		}
 	}
-	if profile.Spec.Repository.URL == "" {
+	if profile.Spec.Repository == nil || profile.Spec.Repository.URL == "" {
 		return ResolvedRepositories{}
 	}
 	return ResolvedRepositories{
-		Repositories: []agentopsv1alpha1.RepositoryEntry{deprecatedRepositoryEntry(profile.Spec.Repository)},
+		Repositories: []agentopsv1alpha1.RepositoryEntry{deprecatedRepositoryEntry(*profile.Spec.Repository)},
 		AgentFile:    profile.Spec.AgentFile,
 		WorkingDir:   profile.Spec.WorkingDir,
 	}

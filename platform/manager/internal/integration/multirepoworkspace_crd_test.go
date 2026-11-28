@@ -36,7 +36,7 @@ func TestProfileRepositoryAndRepositoriesAreMutuallyExclusive(t *testing.T) {
 	p := &agentopsv1alpha1.AgentProfile{}
 	p.Name, p.Namespace = "mrw-prof-both-repo-forms", ns
 	p.Spec.OutputFormat = agentopsv1alpha1.OutputFormatNone
-	p.Spec.Repository = agentopsv1alpha1.RepositorySpec{URL: "https://example.com/app.git"}
+	p.Spec.Repository = &agentopsv1alpha1.RepositorySpec{URL: "https://example.com/app.git"}
 	p.Spec.Repositories = []agentopsv1alpha1.RepositoryEntry{{Name: "app", URL: "https://example.com/app.git"}}
 
 	mustRefuse(t, p, "mutually exclusive")
@@ -48,7 +48,7 @@ func TestProfileRepositoryAloneStillAdmits(t *testing.T) {
 	p := &agentopsv1alpha1.AgentProfile{}
 	p.Name, p.Namespace = "mrw-prof-repository-alone", ns
 	p.Spec.OutputFormat = agentopsv1alpha1.OutputFormatNone
-	p.Spec.Repository = agentopsv1alpha1.RepositorySpec{URL: "https://example.com/app.git"}
+	p.Spec.Repository = &agentopsv1alpha1.RepositorySpec{URL: "https://example.com/app.git"}
 
 	if err := k8sClient.Create(context.Background(), p); err != nil {
 		t.Fatalf("a profile naming only the deprecated repository field must admit: %v", err)

@@ -46,7 +46,7 @@ func TestResolveRepositoriesPrecedence(t *testing.T) {
 
 	profileDeprecated := &agentopsv1alpha1.AgentProfile{}
 	profileDeprecated.Namespace, profileDeprecated.Name = capTestNS, "prof-deprecated"
-	profileDeprecated.Spec.Repository = agentopsv1alpha1.RepositorySpec{URL: "https://example.com/legacy.git", Ref: "main"}
+	profileDeprecated.Spec.Repository = &agentopsv1alpha1.RepositorySpec{URL: "https://example.com/legacy.git", Ref: "main"}
 
 	profileEmpty := &agentopsv1alpha1.AgentProfile{}
 	profileEmpty.Namespace, profileEmpty.Name = capTestNS, "prof-empty"

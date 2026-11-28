@@ -28,6 +28,7 @@ func valueFromConfigMap(name string) *corev1.EnvVarSource {
 // this function (it is never handed a client.Reader).
 func TestExpectedReferencesNamesEveryReferenceKindWithNoRead(t *testing.T) {
 	profile := &agentopsv1alpha1.AgentProfile{}
+	profile.Spec.Repository = &agentopsv1alpha1.RepositorySpec{}
 	profile.Spec.Repository.Auth = &agentopsv1alpha1.RepoAuth{
 		Type:      agentopsv1alpha1.RepoAuthSSH,
 		SecretRef: agentopsv1alpha1.ObjectRef{Name: "repo-key"},

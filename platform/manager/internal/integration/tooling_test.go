@@ -107,7 +107,7 @@ func mkIdentityProfile(t *testing.T, name string) {
 	p := &agentopsv1alpha1.AgentProfile{}
 	p.Name, p.Namespace = name, ns
 	p.Spec.OutputFormat = agentopsv1alpha1.OutputFormatNone
-	p.Spec.Repository = agentopsv1alpha1.RepositorySpec{URL: "https://example.com/repo.git", Ref: "main"}
+	p.Spec.Repository = &agentopsv1alpha1.RepositorySpec{URL: "https://example.com/repo.git", Ref: "main"}
 	p.Spec.Agent = "tester"
 	p.Spec.MaxTurns = 5
 	if err := k8sClient.Create(context.Background(), p); err != nil {

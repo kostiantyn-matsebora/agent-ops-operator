@@ -55,7 +55,7 @@ func expectedReferences(profile *agentopsv1alpha1.AgentProfile, runtimeEnv []cor
 	secretSet := map[string]bool{}
 	configMapSet := map[string]bool{}
 
-	if profile.Spec.Repository.Auth != nil {
+	if profile.Spec.Repository != nil && profile.Spec.Repository.Auth != nil {
 		secretSet[profile.Spec.Repository.Auth.SecretRef.Name] = true
 	}
 	for _, envVars := range [][]corev1.EnvVar{profile.Spec.Env, runtimeEnv, mcp.Env} {

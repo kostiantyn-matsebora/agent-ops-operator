@@ -138,8 +138,14 @@ type AgentProfileSpec struct {
 	// Deprecated: use Repositories. Setting both on one profile is refused
 	// — kept working indefinitely as shorthand, unlike RuntimeRef this is
 	// not slated for removal.
+	//
+	// A POINTER, not a value: `has(self.repository)` in the CEL rule above
+	// must see this as absent until a caller sets it. A non-pointer struct
+	// is never empty to `encoding/json`'s `omitempty`, so every profile
+	// written through a typed client would round-trip `repository: {}` and
+	// trip the exclusivity rule against any `repositories[]` it also set.
 	// +optional
-	Repository RepositorySpec `json:"repository,omitempty"`
+	Repository *RepositorySpec `json:"repository,omitempty"`
 
 	// Repositories lists every repository this agent's workspace checks
 	// out. Mutually exclusive with Repository — setting both is refused.

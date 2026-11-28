@@ -409,7 +409,7 @@ func mkProfile(t *testing.T, name string) {
 	t.Helper()
 	p := &agentopsv1alpha1.AgentProfile{}
 	p.Name, p.Namespace = name, ns
-	p.Spec.Repository = agentopsv1alpha1.RepositorySpec{URL: "https://example.com/repo.git", Ref: "main"}
+	p.Spec.Repository = &agentopsv1alpha1.RepositorySpec{URL: "https://example.com/repo.git", Ref: "main"}
 	p.Spec.Agent = "tester"
 	p.Spec.MaxTurns = 5
 	// REQUIRED, no default — the API refuses a profile that omits it. `none`

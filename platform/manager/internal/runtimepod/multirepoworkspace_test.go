@@ -55,7 +55,7 @@ func TestBuildReadsRepositoryFromTheConversationSnapshot(t *testing.T) {
 	// A profile that, if it were read, would leak a completely different
 	// repository into the pod.
 	profile := &agentopsv1alpha1.AgentProfile{}
-	profile.Spec.Repository = agentopsv1alpha1.RepositorySpec{URL: "https://example.com/STALE.git", Ref: "main"}
+	profile.Spec.Repository = &agentopsv1alpha1.RepositorySpec{URL: "https://example.com/STALE.git", Ref: "main"}
 	profile.Spec.Repository.Auth = &agentopsv1alpha1.RepoAuth{
 		Type: agentopsv1alpha1.RepoAuthSSH, SecretRef: agentopsv1alpha1.ObjectRef{Name: "stale-key"},
 	}
@@ -89,7 +89,7 @@ func TestBuildReadsRepositoryFromTheConversationSnapshot(t *testing.T) {
 func TestBuildWithNoSnapshottedRepositoriesLeavesRepoEnvEmpty(t *testing.T) {
 	conv := &state.ConversationRecord{Name: "conv-b", ID: "id-b"}
 	profile := &agentopsv1alpha1.AgentProfile{}
-	profile.Spec.Repository = agentopsv1alpha1.RepositorySpec{URL: "https://example.com/not-mine.git"}
+	profile.Spec.Repository = &agentopsv1alpha1.RepositorySpec{URL: "https://example.com/not-mine.git"}
 
 	pod := buildWithSnapshot(conv, profile)
 
