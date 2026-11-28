@@ -99,6 +99,10 @@ before the rule was touched.
 
 - `docs/CHANGELOG.md` — a `Security` entry. Nothing to migrate, but an operator
   reading what a chart version changed about permissions must find it.
+- `.claude/rules/retired-vocabulary.md` — records that the guard's scan set is a
+  definition of "published", not a list.
+- `docs/security.md` — read, edited only if a claim about the manager's rights
+  is no longer true.
 - `docs/concepts.md`, `.claude/rules/wiring.md`, `openspec/specs/pipeline-model/`
   — **read, not edited.** Their claim becomes true. That is the point, and
   editing them would be the wrong half of the fix.
