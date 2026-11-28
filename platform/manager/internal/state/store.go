@@ -182,13 +182,16 @@ type Collection[T any] interface {
 	// Get returns the current record and its revision, or ErrNotFound.
 	Get(ctx context.Context, key Key) (T, Revision, error)
 
-	// Create writes a new record and returns its revision. ErrAlreadyExists
-	// when key already names a record — including one marked for deletion
-	// and still held by a finalizer: a create carries no revision to lose a
-	// race over, it is refused outright. Identity and timestamps the record
-	// type carries as backend-minted (ID, CreatedAt, DeletionRequestedAt) are
-	// minted here, whatever rec holds.
-	Create(ctx context.Context, key Key, rec T) (Revision, error)
+	// Create writes a new record and returns the record as stored, together
+	// with its revision. ErrAlreadyExists when key already names a record —
+	// including one marked for deletion and still held by a finalizer: a
+	// create carries no revision to lose a race over, it is refused outright.
+	// Identity and timestamps the record type carries as backend-minted (ID,
+	// CreatedAt, DeletionRequestedAt) are minted here, whatever rec holds, and
+	// the returned record carries exactly what the backend minted — never
+	// what the caller passed in. The returned T is the zero value on
+	// ErrAlreadyExists.
+	Create(ctx context.Context, key Key, rec T) (T, Revision, error)
 
 	// Update writes rec in place of the record at rev, returning the new
 	// revision. ErrConflict when rev is not the record's current revision —

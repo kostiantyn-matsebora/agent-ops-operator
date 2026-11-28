@@ -429,6 +429,19 @@ func reconcile(t *testing.T, name string) {
 	}
 }
 
+// convoID reads a Conversation's own backend-minted UID off the real API
+// server — the value a runtime pod is actually handed as CONVO_ID and polls
+// /work and reports /work/done with, never the display Name a test fixture
+// is addressed by (conversation-identity Decision 1/7).
+func convoID(t *testing.T, name string) string {
+	t.Helper()
+	var conv agentopsv1alpha1.Conversation
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &conv); err != nil {
+		t.Fatal(err)
+	}
+	return string(conv.UID)
+}
+
 // waitForRoutingCacheToObserve blocks until routingClient's informer cache has
 // caught up to a write already confirmed by a direct (k8sClient) read — the
 // resourceVersion the write itself returned. Bridges the cache's inherent
@@ -520,9 +533,11 @@ func TestConversationLifecycle(t *testing.T) {
 		t.Fatalf("ownerRef missing: %+v", pod.OwnerReferences)
 	}
 
-	// dispatch via /work
+	// dispatch via /work -- convo= is the runtime's own CONVO_ID (the
+	// Conversation's UID), never its Name (conversation-identity Decision
+	// 1/7); a real pod never sends the Name here.
 	srv := apiServer()
-	req := httptest.NewRequest("GET", "/work?convo=life-1&pod="+pod.Name+"&wait=0", nil)
+	req := httptest.NewRequest("GET", "/work?convo="+string(conv.UID)+"&pod="+pod.Name+"&wait=0", nil)
 	rec := httptest.NewRecorder()
 	srvStartMux(srv).ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -539,14 +554,14 @@ func TestConversationLifecycle(t *testing.T) {
 
 	// second /work while inflight -> 204 (strictly serial)
 	rec2 := httptest.NewRecorder()
-	srvStartMux(srv).ServeHTTP(rec2, httptest.NewRequest("GET", "/work?convo=life-1&wait=0", nil))
+	srvStartMux(srv).ServeHTTP(rec2, httptest.NewRequest("GET", "/work?convo="+string(conv.UID)+"&wait=0", nil))
 	if rec2.Code != 204 {
 		t.Fatalf("expected 204 while inflight, got %d", rec2.Code)
 	}
 
 	// done
 	done, _ := json.Marshal(map[string]any{
-		"convo": "life-1", "runId": unit.RunID, "status": "succeeded",
+		"convo": string(conv.UID), "runId": unit.RunID, "status": "succeeded",
 		"sessionId": "sess-life", "result": "all good",
 	})
 	rec3 := httptest.NewRecorder()
@@ -574,7 +589,7 @@ func TestConversationLifecycle(t *testing.T) {
 // batch shape: several signals in ONE POST that share a single sender-minted
 // initiationId (a sender's own aggregation, e.g. several readings under one
 // incident) collapse to ONE conversation with ONE combined input — adopting
-// that id as spec.conversationId, never a derived signature. A repeat of the
+// that id as spec.correlationId, never a derived signature. A repeat of the
 // SAME id outside cooldown lands on that same OPEN conversation as a
 // recurrence.
 func TestSignalBatchSharingOneInitiationIDCombines(t *testing.T) {
@@ -610,7 +625,7 @@ func postBatchAndFindCombinedConversation(t *testing.T, ctx context.Context, h h
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	var conv *agentopsv1alpha1.Conversation
 	for i := range list.Items {
-		if list.Items[i].Spec.ConversationID == "batch-a" {
+		if list.Items[i].Spec.CorrelationID == "batch-a" {
 			conv = &list.Items[i]
 		}
 	}
@@ -672,13 +687,13 @@ func assertRepeatOutsideCooldownBecomesRecurrence(t *testing.T, ctx context.Cont
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	count := 0
 	for i := range list.Items {
-		if list.Items[i].Spec.ConversationID == "batch-a" {
+		if list.Items[i].Spec.CorrelationID == "batch-a" {
 			count++
 			conv = &list.Items[i]
 		}
 	}
 	if count != 1 {
-		t.Fatalf("duplicate conversation created: %d for one conversationId", count)
+		t.Fatalf("duplicate conversation created: %d for one correlationId", count)
 	}
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Name}, conv)
 	if len(conv.Spec.Inputs) != 2 || conv.Spec.Inputs[1].Type != agentopsv1alpha1.InputRecurrence {

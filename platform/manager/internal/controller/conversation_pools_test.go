@@ -65,6 +65,17 @@ func TestSplitPoolsBucketsPodsByTheirConversationsRecord(t *testing.T) {
 	}
 }
 
+// poolOfID reads the id BEFORE ever touching the store (design D-1's
+// conservative reading, extended to the pod's own label): a pod carrying no
+// conversation-id label at all — an absent or pre-upgrade one — must count
+// as a conversation without a single List call, never panic on a nil store.
+func TestPoolOfIDWithNoLabelFallsToConversationsWithoutReadingTheStore(t *testing.T) {
+	r := &ConversationReconciler{}
+	if got := r.poolOfID(context.Background(), ""); got != poolConversations {
+		t.Fatalf("an empty id must fall to conversations, got %q", got)
+	}
+}
+
 // capFor never adds the two pools together — each reads its own field, and
 // only its own.
 func TestCapForReadsTheMatchingPoolOnly(t *testing.T) {
@@ -80,14 +91,14 @@ func TestCapForReadsTheMatchingPoolOnly(t *testing.T) {
 func podNamed(conv string) corev1.Pod {
 	return corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 		Name:   "agentops-conv-" + conv,
-		Labels: map[string]string{runtimepod.LabelConversation: conv},
+		Labels: map[string]string{runtimepod.LabelConversationID: conv},
 	}}
 }
 
 func podNames(pods []corev1.Pod) []string {
 	out := make([]string, 0, len(pods))
 	for _, p := range pods {
-		out = append(out, p.Labels[runtimepod.LabelConversation])
+		out = append(out, p.Labels[runtimepod.LabelConversationID])
 	}
 	return out
 }

@@ -34,7 +34,7 @@ const (
 func oneShot(kind string) bool { return kind == kindChat || kind == kindTask }
 
 // routeOneClaimant attempts one claimant's own routing workflow for sig:
-// reuse an open conversation it already originated whose conversationId
+// reuse an open conversation it already originated whose correlationId
 // equals the signal's initiationId, or create one, then append the message.
 // Returns waiting=true when the create was refused because the pending
 // backlog is full — the caller leaves that claimant Routing (design D-13).
@@ -82,12 +82,12 @@ func messageOf(sig *state.SignalRecord) (text string, addressed bool) {
 }
 
 // findReusableConversation returns the OPEN conversation, originated by this
-// claimant, whose conversationId equals initiationID — pure equality, served
-// by the store's conversationId index. The store reads its source of truth
+// claimant, whose correlationId equals initiationID — pure equality, served
+// by the store's correlationId index. The store reads its source of truth
 // directly (never a cache): a pass repeated after a crash between create and
 // the status write must find the conversation it just made.
 func findReusableConversation(ctx context.Context, conversations state.Collection[state.ConversationRecord], claimant chat.Claimant, initiationID string) (*state.ConversationRecord, error) {
-	list, err := conversations.List(ctx, state.ByConversationID, initiationID)
+	list, err := conversations.List(ctx, state.ByCorrelationID, initiationID)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func wordsForSignal(sourceName, title string) string {
 }
 
 // createConversation opens a new conversation adopting sig's initiationId
-// as its own conversationId, resolving the claimant's capability and
+// as its own correlationId, resolving the claimant's capability and
 // execution wiring ONCE. Returns nil, nil only when the backlog is full is
 // checked by the caller — this function is never asked to create while
 // full.
@@ -215,8 +215,8 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 			Labels:    sig.Labels,
 			Severity:  sig.Severity,
 		},
-		Title:          title,
-		ConversationID: sig.InitiationID,
+		Title:         title,
+		CorrelationID: sig.InitiationID,
 	}
 	// An addressed conversation binds the addressing channel too, so the
 	// answer comes back to where the person is looking.

@@ -587,7 +587,7 @@ func TestOriginReaderIsStampedWhenTheThreadIsCreated(t *testing.T) {
 	}
 	// complete every ensure-topic this conversation produced
 	for {
-		rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-origin&contract=2&wait=0", nil, "test-adapter-token")
+		rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-origin&contract=3&wait=0", nil, "test-adapter-token")
 		if rec.Code != 200 {
 			break
 		}

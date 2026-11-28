@@ -24,10 +24,13 @@ const slotHoldTTL = 30 * time.Second
 //
 // Both maps are keyed by pool FIRST (separate-member-slot-pool design D-2):
 // a claim or an eviction only ever competes against its own pool's ceiling,
-// never the other's.
+// never the other's. The claim map is keyed by the conversation's ID, not its
+// Name: a pod lingering under a deleted conversation's Name must never be read
+// as the slot of a new conversation created under that same Name
+// (conversation-identity).
 type slots struct {
 	mu      sync.Mutex
-	claimed map[pool]map[string]time.Time    // pool -> conversation -> a pod about to exist
+	claimed map[pool]map[string]time.Time    // pool -> conversation ID -> a pod about to exist
 	evicted map[pool]map[types.UID]time.Time // pool -> pod UID -> deleted, may still be listed
 }
 
@@ -45,15 +48,15 @@ func (s *slots) ensure() {
 func (s *slots) occupancy(p pool, live []corev1.Pod, now time.Time) (pods []corev1.Pod, claimedOnly int) {
 	listed := map[string]bool{}
 	for _, pd := range live {
-		listed[pd.Labels[runtimepod.LabelConversation]] = true
+		listed[pd.Labels[runtimepod.LabelConversationID]] = true
 		if _, gone := s.evicted[p][pd.UID]; gone {
 			continue
 		}
 		pods = append(pods, pd)
 	}
-	for name, at := range s.claimed[p] {
-		if listed[name] || now.Sub(at) > slotHoldTTL {
-			delete(s.claimed[p], name)
+	for id, at := range s.claimed[p] {
+		if listed[id] || now.Sub(at) > slotHoldTTL {
+			delete(s.claimed[p], id)
 			continue
 		}
 		claimedOnly++
@@ -70,6 +73,8 @@ func (s *slots) occupancy(p pool, live []corev1.Pod, now time.Time) (pods []core
 // conversation may take a slot IN ITS OWN POOL, evicting an idle worker of
 // that same pool when that is what a slot costs (design D-3: eviction never
 // crosses pools). release undoes the claim when the pod could not be made.
+// The claim is keyed by the conversation's ID, matching the pod label
+// occupancy reads.
 func (r *ConversationReconciler) reserveSlot(ctx context.Context, conv *state.ConversationRecord) (ok bool, release func(), err error) {
 	p := poolOf(*conv, nil)
 	r.slots.mu.Lock()
@@ -81,17 +86,17 @@ func (r *ConversationReconciler) reserveSlot(ctx context.Context, conv *state.Co
 	}
 	live := r.splitPools(ctx, all)[p]
 	pods, claimed := r.slots.occupancy(p, live, time.Now())
-	if _, mine := r.slots.claimed[p][conv.Name]; !mine && len(pods)+claimed >= r.capFor(p) {
-		victim, made, err := r.evictIdleWorker(ctx, conv.Name, p, pods)
+	if _, mine := r.slots.claimed[p][conv.ID]; !mine && len(pods)+claimed >= r.capFor(p) {
+		victim, made, err := r.evictIdleWorker(ctx, conv.ID, p, pods)
 		if !made {
 			return false, nil, err
 		}
 		r.slots.evicted[p][victim] = time.Now()
 	}
-	r.slots.claimed[p][conv.Name] = time.Now()
+	r.slots.claimed[p][conv.ID] = time.Now()
 	return true, func() {
 		r.slots.mu.Lock()
-		delete(r.slots.claimed[p], conv.Name)
+		delete(r.slots.claimed[p], conv.ID)
 		r.slots.mu.Unlock()
 	}, nil
 }
@@ -114,8 +119,8 @@ func (r *ConversationReconciler) freeSlots(ctx context.Context, p pool) (live []
 // awaitVisible waits, briefly, until the pod just created shows up in the
 // pod list, then drops the claim: from then on the list itself counts it, and a
 // pod deleted straight after must free its slot at once rather than linger as
-// a claim.
-func (r *ConversationReconciler) awaitVisible(ctx context.Context, conv string, release func()) {
+// a claim. convID is the conversation's ID, matching the pod's own label.
+func (r *ConversationReconciler) awaitVisible(ctx context.Context, convID string, release func()) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		live, err := r.liveRuntimePods(ctx, r.Namespaces.Conversations)
@@ -123,7 +128,7 @@ func (r *ConversationReconciler) awaitVisible(ctx context.Context, conv string, 
 			return // the claim ages out on its own
 		}
 		for _, p := range live {
-			if p.Labels[runtimepod.LabelConversation] == conv {
+			if p.Labels[runtimepod.LabelConversationID] == convID {
 				release()
 				return
 			}

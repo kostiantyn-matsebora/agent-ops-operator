@@ -70,7 +70,7 @@ func seedSource(t testing.TB, source *Backend) (convKey, sourceKey state.Key, bl
 	t.Helper()
 	ctx := context.Background()
 	convKey = "conv-a"
-	if _, err := source.Stores.Conversations.Create(ctx, convKey, state.ConversationRecord{
+	if _, _, err := source.Stores.Conversations.Create(ctx, convKey, state.ConversationRecord{
 		ProfileRef: "p", Phase: "Working",
 		Inputs: []state.InputItem{{ID: "in-1", Type: "task", PayloadRef: "blob-1"}},
 	}); err != nil {
@@ -83,14 +83,14 @@ func seedSource(t testing.TB, source *Backend) (convKey, sourceKey state.Key, bl
 	if err := source.Stores.Runs.Append(ctx, convKey, state.Run{RunID: "run-1", Status: "succeeded"}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := source.Stores.Signals.Create(ctx, "sig-a", state.SignalRecord{SourceRef: "src-a", Adapter: "cron", InitiationID: "init-1"}); err != nil {
+	if _, _, err := source.Stores.Signals.Create(ctx, "sig-a", state.SignalRecord{SourceRef: "src-a", Adapter: "cron", InitiationID: "init-1"}); err != nil {
 		t.Fatalf("seed signal: %v", err)
 	}
 	sourceKey = "src-a"
-	if _, err := source.Stores.Cooldowns.Create(ctx, sourceKey, state.CooldownWindow{Entries: []state.CooldownEntry{{InitiationID: "init-1", At: time.Now().UTC().Truncate(time.Second)}}}); err != nil {
+	if _, _, err := source.Stores.Cooldowns.Create(ctx, sourceKey, state.CooldownWindow{Entries: []state.CooldownEntry{{InitiationID: "init-1", At: time.Now().UTC().Truncate(time.Second)}}}); err != nil {
 		t.Fatalf("seed cooldown: %v", err)
 	}
-	if _, err := source.Stores.Receipts.Create(ctx, sourceKey, state.Received{Total: 3}); err != nil {
+	if _, _, err := source.Stores.Receipts.Create(ctx, sourceKey, state.Received{Total: 3}); err != nil {
 		t.Fatalf("seed receipt: %v", err)
 	}
 	return convKey, sourceKey, blobKey
@@ -122,6 +122,19 @@ func TestImporterUpgradeKeepsEveryKind(t *testing.T) {
 	if conv.Phase != "Working" {
 		t.Fatalf("conversation phase = %q, want Working", conv.Phase)
 	}
+	assertImportedEveryKind(t, dest, convKey, sourceKey, blobKey, adapterKey)
+
+	// "The source is left intact": nothing the import does ever writes to
+	// Source; re-reading it back proves nothing moved.
+	srcConv, _, err := source.Stores.Conversations.Get(ctx, convKey)
+	if err != nil || srcConv.Phase != "Working" {
+		t.Fatalf("source conversation moved: %+v, %v", srcConv, err)
+	}
+}
+
+func assertImportedEveryKind(t *testing.T, dest *Backend, convKey, sourceKey, blobKey, adapterKey state.Key) {
+	t.Helper()
+	ctx := context.Background()
 	runs, err := dest.Stores.Runs.List(ctx, convKey)
 	if err != nil || len(runs) != 1 || runs[0].RunID != "run-1" {
 		t.Fatalf("runs = %+v, %v, want exactly run-1", runs, err)
@@ -145,13 +158,6 @@ func TestImporterUpgradeKeepsEveryKind(t *testing.T) {
 	adapterValue, _, err := dest.Stores.AdapterState.Get(ctx, adapterKey)
 	if err != nil || adapterValue != "42" {
 		t.Fatalf("adapter state = %q, %v, want 42", adapterValue, err)
-	}
-
-	// "The source is left intact": nothing the import does ever writes to
-	// Source; re-reading it back proves nothing moved.
-	srcConv, _, err := source.Stores.Conversations.Get(ctx, convKey)
-	if err != nil || srcConv.Phase != "Working" {
-		t.Fatalf("source conversation moved: %+v, %v", srcConv, err)
 	}
 }
 
@@ -186,10 +192,10 @@ func TestImporterLateOldReplicaWriteIsCaughtByTheFinalPass(t *testing.T) {
 		t.Fatalf("first pass: %v", err)
 	}
 	// An old-version replica writes after the first pass, before the final one.
-	if _, err := source.Stores.Signals.Create(ctx, "sig-late", state.SignalRecord{SourceRef: "src-a", Adapter: "cron", InitiationID: "late"}); err != nil {
+	if _, _, err := source.Stores.Signals.Create(ctx, "sig-late", state.SignalRecord{SourceRef: "src-a", Adapter: "cron", InitiationID: "late"}); err != nil {
 		t.Fatalf("late signal: %v", err)
 	}
-	if _, err := source.Stores.Conversations.Create(ctx, "conv-late", state.ConversationRecord{ProfileRef: "p"}); err != nil {
+	if _, _, err := source.Stores.Conversations.Create(ctx, "conv-late", state.ConversationRecord{ProfileRef: "p"}); err != nil {
 		t.Fatalf("late conversation: %v", err)
 	}
 	if err := im.pass(ctx); err != nil { // the final pass

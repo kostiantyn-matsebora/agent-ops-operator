@@ -268,7 +268,7 @@ func assertRoutedConversation(t *testing.T, e *sigEnv, got *agentopsv1alpha1.Sig
 		t.Fatalf("want exactly the recorded conversation, got %d", len(convs))
 	}
 	conv := convs[0]
-	if conv.Spec.ConversationID != "disk-full" || conv.Spec.PipelineRef == nil || conv.Spec.PipelineRef.Name != "ops" {
+	if conv.Spec.CorrelationID != "disk-full" || conv.Spec.PipelineRef == nil || conv.Spec.PipelineRef.Name != "ops" {
 		t.Fatalf("conversation must adopt the initiationId and record its claimant: %+v", conv.Spec)
 	}
 	if conv.Spec.Signal == nil || conv.Spec.Signal.Severity != agentopsv1alpha1.SeverityWarning {
@@ -311,7 +311,7 @@ func TestConsumerOneClaimantsConversationNeverAnswersForAnother(t *testing.T) {
 	// "one" already has an open conversation with the id; "two" does not.
 	existing := &agentopsv1alpha1.Conversation{}
 	existing.Name, existing.Namespace = "existing", sigNS
-	existing.Spec.ConversationID = "x"
+	existing.Spec.CorrelationID = "x"
 	existing.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: "one"}
 	e := newSigEnv(t, src, fxPipeline("one", "alerts"), fxPipeline("two", "alerts"), existing, fxSignal("sig-1", src, "x", time.Now()))
 	e.reconcile("sig-1")
@@ -484,7 +484,7 @@ func TestConsumerAddressedChatTakesTheNamedTargetAsItsOneClaimant(t *testing.T) 
 		t.Fatalf("the named target is the one claimant: %+v", got.Status)
 	}
 	convs := e.conversations()
-	if len(convs) != 1 || convs[0].Spec.ConversationID != "c-1" {
+	if len(convs) != 1 || convs[0].Spec.CorrelationID != "c-1" {
 		t.Fatalf("an addressed conversation adopts the initiationId: %+v", convs)
 	}
 	if ins := e.inputs(); len(ins) != 1 || ins[0].Spec.Payload != "check nodes" {
@@ -1266,10 +1266,10 @@ func (w *windowStore) Update(ctx context.Context, key state.Key, rev state.Revis
 	return w.Collection.Update(ctx, key, rev, rec)
 }
 
-func (w *windowStore) Create(ctx context.Context, key state.Key, rec state.CooldownWindow) (state.Revision, error) {
+func (w *windowStore) Create(ctx context.Context, key state.Key, rec state.CooldownWindow) (state.CooldownWindow, state.Revision, error) {
 	w.puts++
 	if w.putErr != nil {
-		return "", w.putErr
+		return state.CooldownWindow{}, "", w.putErr
 	}
 	return w.Collection.Create(ctx, key, rec)
 }

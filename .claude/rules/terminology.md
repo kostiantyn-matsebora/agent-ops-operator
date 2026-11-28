@@ -29,6 +29,14 @@
 **REFS are snapshotted onto the Conversation, CONTENT is not** — a
 re-wire mid-flight must never move an inflight pod's privilege.
 
+### A Conversation's three identifiers
+
+| Identifier | Is |
+|---|---|
+| `Name` | the readable word-chain — the store key and the pod name (`agentops-conv-<name>`). What a person types. Unique only among LIVE records |
+| `ID` | the system identity — backend-minted at `Create` (`metadata.uid` on kube), new for every life of a `Name`. What the system holds everywhere it refers to a conversation internally — the workspace subpath, `CONVO_ID`, the pod label, op ids, `causedBy.Parent` |
+| `CorrelationID` | the signal's adopted `initiationId` — a correlation key many conversations can share over time, never the identity |
+
 ### `Coordinator`: root, member, escalate
 
 | Word | Names |

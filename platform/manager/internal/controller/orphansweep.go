@@ -82,11 +82,15 @@ func (s *OrphanSweeper) Sweep(ctx context.Context, now time.Time) (int, error) {
 	return pods + cms, err
 }
 
+// sweepPods lists by the conversation-ID label (conversation-identity
+// Decision 7), never the display-name label: a pod outliving its own
+// deleted conversation must never be adopted by a same-named NEW one just
+// because the sweep happened to resolve "absent" by Name instead of ID.
 func (s *OrphanSweeper) sweepPods(ctx context.Context, now time.Time) (int, error) {
 	deleted := 0
 	pods := &corev1.PodList{}
 	if err := s.Client.List(ctx, pods, client.InNamespace(s.Namespace),
-		client.HasLabels{runtimepod.LabelConversation}); err != nil {
+		client.HasLabels{runtimepod.LabelConversationID}); err != nil {
 		return deleted, err
 	}
 	for i := range pods.Items {
@@ -94,7 +98,7 @@ func (s *OrphanSweeper) sweepPods(ctx context.Context, now time.Time) (int, erro
 		if now.Sub(pod.CreationTimestamp.Time) < orphanMinAge {
 			continue
 		}
-		ok, err := s.deleteIfOrphaned(ctx, pod, pod.Labels[runtimepod.LabelConversation], client.GracePeriodSeconds(0))
+		ok, err := s.deleteIfOrphanedByID(ctx, pod, pod.Labels[runtimepod.LabelConversationID], client.GracePeriodSeconds(0))
 		if err != nil {
 			return deleted, err
 		}
@@ -141,7 +145,9 @@ func (s *OrphanSweeper) sweepConfigMapsIn(ctx context.Context, now time.Time, na
 }
 
 // deleteIfOrphaned deletes obj when the named conversation has no record, and
-// reports whether it did.
+// reports whether it did. Still Name-keyed, for the MCP ConfigMap sweep
+// (sweepConfigMapsIn): a ConfigMap is named after the conversation's Name,
+// never its ID, and renaming that would be its own, unrelated change.
 func (s *OrphanSweeper) deleteIfOrphaned(ctx context.Context, obj client.Object, conversation string, opts ...client.DeleteOption) (bool, error) {
 	gone, err := s.recordAbsent(ctx, conversation)
 	if err != nil || !gone {
@@ -167,4 +173,36 @@ func (s *OrphanSweeper) recordAbsent(ctx context.Context, name string) (bool, er
 		return true, nil
 	}
 	return false, err
+}
+
+// deleteIfOrphanedByID is deleteIfOrphaned's own ID-keyed twin, for a pod
+// carrying LabelConversationID: resolving by ID (conversation-identity
+// Decision 7) is what keeps a pod outliving its own deleted conversation
+// from being adopted by a same-named NEW one — recordAbsentByID reports
+// "no LIVE record of this exact ID", never "no record of this Name".
+func (s *OrphanSweeper) deleteIfOrphanedByID(ctx context.Context, obj client.Object, id string, opts ...client.DeleteOption) (bool, error) {
+	gone, err := s.recordAbsentByID(ctx, id)
+	if err != nil || !gone {
+		return false, err
+	}
+	if err := s.Client.Delete(ctx, obj, opts...); err != nil && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	return true, nil
+}
+
+// recordAbsentByID is true only when the store says, definitely, that no
+// LIVE record carries this ID. An empty ID (an un-labelled or pre-upgrade
+// pod) is never treated as absent — list(ctx, ByID, "") matches nothing by
+// the index's own construction (state.ByID excludes an empty ID), which
+// would otherwise read as "always orphaned".
+func (s *OrphanSweeper) recordAbsentByID(ctx context.Context, id string) (bool, error) {
+	if id == "" {
+		return false, nil
+	}
+	list, err := s.Conversations.List(ctx, state.ByID, id)
+	if err != nil {
+		return false, err
+	}
+	return len(list) == 0, nil
 }

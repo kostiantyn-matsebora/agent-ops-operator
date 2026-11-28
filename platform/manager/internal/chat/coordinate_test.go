@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -25,10 +26,11 @@ func coordFixture(t *testing.T, objs ...client.Object) (*Router, client.Client) 
 // routed through funcs — a nil entry falls through to the fake unchanged.
 func coordFixtureIntercepting(t *testing.T, funcs interceptor.Funcs, objs ...client.Object) (*Router, client.Client) {
 	t.Helper()
+	assignUIDs(objs)
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(objs...).
-		WithInterceptorFuncs(funcs).Build()
+		WithInterceptorFuncs(withAutoUID(funcs)).Build()
 	q := &OpQueue{Conversations: newTestStore(c), Runs: newTestRuns(c), Registry: NewRegistry(), Bus: testBus()}
 	return &Router{Client: c, Reader: c, Conversations: newTestStore(c), Runs: newTestRuns(c), Blobs: newTestBlobs(c), Namespaces: namespace.Namespaces{Control: testNS, Conversations: testNS}, Ops: q}, c
 }
@@ -54,6 +56,24 @@ func (rec *statusPatchRecorder) update(ctx context.Context, cli client.Client, s
 
 func (rec *statusPatchRecorder) funcs() interceptor.Funcs {
 	return interceptor.Funcs{SubResourceUpdate: rec.update}
+}
+
+// withAutoUID mints a UID for a conversation CREATED mid-test (e.g. a new
+// coordinated member via InvokeMember), the way a real backend would —
+// the fake client never does. Falls through to any caller-supplied Create
+// func first, mirroring interceptor.Funcs' own nil-falls-through contract.
+func withAutoUID(funcs interceptor.Funcs) interceptor.Funcs {
+	inner := funcs.Create
+	funcs.Create = func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+		if obj.GetUID() == "" {
+			obj.SetUID(types.UID(obj.GetName()))
+		}
+		if inner != nil {
+			return inner(ctx, c, obj, opts...)
+		}
+		return c.Create(ctx, obj, opts...)
+	}
+	return funcs
 }
 
 // causedMember is a LIVE member conversation of parent, labelled and
@@ -647,7 +667,7 @@ func TestAppendMemberResultSkipsAClosedParent(t *testing.T) {
 	r, c := coordFixture(t, testCoordinator("co-a"), parent)
 
 	err := r.AppendMemberResult(context.Background(),
-		&state.Provenance{Parent: "root-1", Entry: "worker"}, "member-1", "member:member-1:r1", "the result")
+		&state.Provenance{Parent: "root-1", Entry: "worker"}, "member-1", "member-1", "member:member-1:r1", "the result")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,7 +684,7 @@ func TestAppendMemberResultIsIdempotentPerDedupID(t *testing.T) {
 
 	causedBy := &state.Provenance{Parent: "root-1", Entry: "worker"}
 	for i := 0; i < 2; i++ {
-		if err := r.AppendMemberResult(context.Background(), causedBy, "member-1", "member:member-1:r1", "the result"); err != nil {
+		if err := r.AppendMemberResult(context.Background(), causedBy, "member-1", "member-1", "member:member-1:r1", "the result"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -716,9 +736,9 @@ func TestInvokeMemberPropagatesABrokenAncestryChain(t *testing.T) {
 }
 
 // findReusableMember's reuse rule excludes a Closed conversation even when its
-// conversationId and (parent, entry) match — a stale closed member must never
+// correlationId and (parent, entry) match — a stale closed member must never
 // be reattached to.
-func TestInvokeMemberIgnoresAClosedMemberWithTheSameConversationID(t *testing.T) {
+func TestInvokeMemberIgnoresAClosedMemberWithTheSameCorrelationID(t *testing.T) {
 	entry := agentopsv1alpha1.CoordinatorAgentEntry{
 		Name: "worker", Description: "does the work",
 		CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
@@ -727,7 +747,7 @@ func TestInvokeMemberIgnoresAClosedMemberWithTheSameConversationID(t *testing.T)
 	caller := coordinatorRoot("root-1", "co-a")
 	closedMember := &agentopsv1alpha1.Conversation{}
 	closedMember.Name, closedMember.Namespace = "old-member", testNS
-	closedMember.Spec.ConversationID = "invoke:worker"
+	closedMember.Spec.CorrelationID = "invoke:worker"
 	closedMember.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: caller.Name, Entry: "worker"}
 	closedMember.Status.Phase = agentopsv1alpha1.ConversationClosed
 
@@ -738,7 +758,7 @@ func TestInvokeMemberIgnoresAClosedMemberWithTheSameConversationID(t *testing.T)
 		t.Fatalf("InvokeMember: %v", err)
 	}
 	if !result.Created || result.Member == closedMember.Name {
-		t.Fatalf("a closed member with the same conversationId must not be reused, got %+v", result)
+		t.Fatalf("a closed member with the same correlationId must not be reused, got %+v", result)
 	}
 }
 
@@ -850,11 +870,11 @@ func TestInvokeMemberKeepsALongTitleWhole(t *testing.T) {
 func TestAppendMemberResultSkipsNilOrSelfReferencingProvenance(t *testing.T) {
 	r, _ := coordFixture(t)
 
-	if err := r.AppendMemberResult(context.Background(), nil, "member-1", "id-1", "result"); err != nil {
+	if err := r.AppendMemberResult(context.Background(), nil, "member-1", "member-1", "id-1", "result"); err != nil {
 		t.Fatalf("a nil provenance must be a no-op, got %v", err)
 	}
 	self := &state.Provenance{Parent: "member-1", Entry: "worker"}
-	if err := r.AppendMemberResult(context.Background(), self, "member-1", "id-2", "result"); err != nil {
+	if err := r.AppendMemberResult(context.Background(), self, "member-1", "member-1", "id-2", "result"); err != nil {
 		t.Fatalf("a self-referencing provenance must be a no-op, got %v", err)
 	}
 }
@@ -863,9 +883,32 @@ func TestAppendMemberResultIgnoresAMissingParent(t *testing.T) {
 	r, _ := coordFixture(t)
 
 	err := r.AppendMemberResult(context.Background(),
-		&state.Provenance{Parent: "does-not-exist", Entry: "worker"}, "member-1", "id-1", "result")
+		&state.Provenance{Parent: "does-not-exist", Entry: "worker"}, "member-1", "member-1", "id-1", "result")
 	if err != nil {
 		t.Fatalf("a missing parent must be ignored, not error, got %v", err)
+	}
+}
+
+// A target a finalizer is still holding is not a live match (design
+// conversation-identity, Decision 5) — already departing, so a coordinated
+// close on it is a no-op, same as a target already gone.
+func TestCloseCoordinatedTargetMarkedForDeletionIsANoOp(t *testing.T) {
+	caller := coordinatorRoot("root-1", "co-a")
+	target := &agentopsv1alpha1.Conversation{}
+	target.Name, target.Namespace = "member-1", testNS
+	target.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "worker"}
+	target.Finalizers = []string{"test/hold"}
+	now := metav1.Now()
+	target.DeletionTimestamp = &now
+	r, c := coordFixture(t, testCoordinator("co-a"), caller, target)
+
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Conversations, caller.Name), "member-1", "reason"); err != nil {
+		t.Fatalf("a deletion-marked target must be a no-op, not error, got %v", err)
+	}
+	var got agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "member-1"}, &got)
+	if got.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		t.Fatal("a deletion-marked target must not be stamped Closed by a close racing its own delete")
 	}
 }
 
@@ -1050,6 +1093,39 @@ func TestDescendantsWalksMultipleLevelsAndSkipsStaleLabels(t *testing.T) {
 	}
 }
 
+// A conversation recreated under a reused Name gets a FRESH id (AllocateName
+// permits the reuse, UIDs never repeat) — so a decoy still labeled for the
+// OLD life's id must not attach to the NEW root sharing its name
+// (conversation-identity Decision 1/7). Descendants resolves strictly by ID;
+// a Name-keyed walk would have let the decoy through.
+func TestDescendantsExcludesADecoyLabeledForAPriorLifesID(t *testing.T) {
+	newRoot := coordinatorRoot("root-1", "co-a")
+	newRoot.UID = types.UID("root-1-new-id")
+
+	decoy := &agentopsv1alpha1.Conversation{}
+	decoy.Name, decoy.Namespace = "decoy-1", testNS
+	decoy.UID = types.UID("decoy-id")
+	// Labeled and spec'd for the OLD life of "root-1", which no longer exists
+	// under this id — only the NAME was reused, not the conversation.
+	decoy.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: "root-1-old-id"}
+	decoy.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1-old-id", Entry: "worker"}
+
+	liveMember := &agentopsv1alpha1.Conversation{}
+	liveMember.Name, liveMember.Namespace = "member-1", testNS
+	liveMember.UID = types.UID("member-1-id")
+	liveMember.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: "root-1-new-id"}
+	liveMember.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1-new-id", Entry: "worker"}
+
+	r, _ := coordFixture(t, testCoordinator("co-a"), newRoot, decoy, liveMember)
+	got, err := r.Descendants(context.Background(), string(newRoot.UID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "member-1" {
+		t.Fatalf("want member-1 only, the decoy's stale id excluded: %+v", got)
+	}
+}
+
 func TestDescendantsOfALeafIsEmpty(t *testing.T) {
 	root := coordinatorRoot("root-1", "co-a")
 	r, _ := coordFixture(t, testCoordinator("co-a"), root)
@@ -1059,6 +1135,24 @@ func TestDescendantsOfALeafIsEmpty(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("want no descendants, got %+v", got)
+	}
+}
+
+// causedByAncestry resolves each ancestor by conversationByID
+// (state.ByID), never Get-by-name (conversation-identity Decision 6) — a
+// store that cannot be listed must fail the whole walk rather than silently
+// stopping short, so ResolveActingCoordinator propagates the read failure
+// verbatim instead of answering "acts for no Coordinator".
+func TestResolveActingCoordinatorPropagatesAnUnreadableAncestry(t *testing.T) {
+	r, _ := coordFixture(t, testCoordinator("co-a"))
+	r.Conversations = unreadableConversations{r.Conversations}
+
+	member := &state.ConversationRecord{
+		Name:     "member-1",
+		CausedBy: &state.Provenance{Parent: "root-1-id", Entry: "worker"},
+	}
+	if _, err := r.ResolveActingCoordinator(context.Background(), member); !errors.Is(err, errNotReady) {
+		t.Fatalf("want the store's own read failure to propagate, got %v", err)
 	}
 }
 

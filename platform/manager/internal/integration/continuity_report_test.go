@@ -24,7 +24,7 @@ import (
 func reportContinuity(t *testing.T, srv *httpapi.Server, convo, runID, status, contextID, continuity, reason string) {
 	t.Helper()
 	body := map[string]any{
-		"convo": convo, "runId": runID, "status": status, "result": "ok",
+		"convo": convoID(t, convo), "runId": runID, "status": status, "result": "ok",
 		"runtimeContextId": contextID, "continuity": continuity,
 	}
 	if reason != "" {
@@ -110,7 +110,7 @@ func TestAFailedRunsReasonReachesTheThread(t *testing.T) {
 	srv := apiServer()
 
 	rec := adapterReq(srv, "POST", "/work/done", map[string]any{
-		"convo": conv.Name, "runId": "r-1", "status": "failed",
+		"convo": string(conv.UID), "runId": "r-1", "status": "failed",
 		"result":     "⚠️ **This conversation cannot be continued.** Its stored context is no longer available.",
 		"continuity": "unavailable", "continuityReason": "no session files",
 	}, testMasterToken)

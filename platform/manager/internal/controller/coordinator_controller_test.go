@@ -19,6 +19,7 @@ func fakeCoordinatorClient(t *testing.T, objs ...runtime.Object) *fake.ClientBui
 	if err := agentopsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
+	assignUIDs(objs)
 	return fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...)
 }
 

@@ -205,7 +205,7 @@ func TestAmbiguousBareChatNamesPipelineAndCoordinator(t *testing.T) {
 		t.Fatalf("an ambiguous message must open no conversation on either claimant, got %d", n)
 	}
 
-	rec2 := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token")
+	rec2 := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=3&wait=0", nil, "test-adapter-token")
 	if rec2.Code != 200 {
 		t.Fatalf("the refusal must reach the surface: %d", rec2.Code)
 	}

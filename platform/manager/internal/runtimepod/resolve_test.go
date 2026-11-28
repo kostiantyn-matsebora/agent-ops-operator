@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
@@ -57,17 +59,30 @@ func conv(profile, runtimeRef, sa string) *state.ConversationRecord {
 
 // seededStore is a kube-backed Conversations collection over a fake client,
 // holding recs. The fake client is the unit tier's apiserver: the same
-// mapping the manager runs, with no envtest.
+// mapping the manager runs, with no envtest — EXCEPT that it never mints a
+// UID on Create the way a real apiserver does, so the interceptor below
+// gives every seeded record one derived from its own Name when it carries
+// none (conversation-identity's trivial convention, ID == Name — a test
+// that cares about the two differing seeds a distinct ID on its own record
+// before calling this).
 func seededStore(t *testing.T, recs ...*state.ConversationRecord) state.Collection[state.ConversationRecord] {
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(resolveScheme(t)).
-		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).Build()
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if obj.GetUID() == "" {
+					obj.SetUID(types.UID(obj.GetName()))
+				}
+				return cl.Create(ctx, obj, opts...)
+			},
+		}).Build()
 	store, err := kube.Open(c, testNS, kube.ConversationLayout())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	for _, r := range recs {
-		if _, err := store.Create(context.Background(), state.Key(r.Name), *r); err != nil {
+		if _, _, err := store.Create(context.Background(), state.Key(r.Name), *r); err != nil {
 			t.Fatalf("seed %s: %v", r.Name, err)
 		}
 	}

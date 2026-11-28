@@ -28,7 +28,12 @@ const MaxAllocateAttempts = 20
 // create conflict from a genuine race between two concurrent creators
 // retries the same list-then-create step, bounded to MaxAllocateAttempts;
 // exhausting it returns the last conflict error, naming the base name.
-func AllocateName(ctx context.Context, store state.Collection[state.ConversationRecord], kind, words string, rec *state.ConversationRecord) (string, error) {
+//
+// The returned record is the one Create actually stored — rec's own fields
+// plus the backend-minted ID and CreatedAt the caller never set. *rec is
+// also brought up to date with it on success, so a caller already holding
+// rec sees the same values the return carries.
+func AllocateName(ctx context.Context, store state.Collection[state.ConversationRecord], kind, words string, rec *state.ConversationRecord) (state.ConversationRecord, error) {
 	base := kind + "-" + words
 	var lastErr error
 	for attempt := 0; attempt < MaxAllocateAttempts; attempt++ {
@@ -38,31 +43,32 @@ func AllocateName(ctx context.Context, store state.Collection[state.Conversation
 			// Create recomputes the SAME "next free" slot from the SAME
 			// stale list and collides again, attempt after attempt.
 			if err := sleepCtx(ctx, retryBackoff(attempt)); err != nil {
-				return "", err
+				return state.ConversationRecord{}, err
 			}
 		}
 		list, err := store.List(ctx, state.ByNameBase, base)
 		if err != nil {
-			return "", fmt.Errorf("name-base %s: list: %w", base, err)
+			return state.ConversationRecord{}, fmt.Errorf("name-base %s: list: %w", base, err)
 		}
 		name := nameForSuffix(base, nextSuffix(base, list))
 
 		rec.Name = name
 		rec.NameBase = base
 
-		_, err = store.Create(ctx, state.Key(name), *rec)
+		created, _, err := store.Create(ctx, state.Key(name), *rec)
 		if err == nil {
-			return name, nil
+			*rec = created
+			return created, nil
 		}
 		if !errors.Is(err, state.ErrAlreadyExists) {
-			return "", err
+			return state.ConversationRecord{}, err
 		}
 		lastErr = err
 		// A genuine race: another creator took this exact name between our
 		// List and our Create. Relist and try the next free name — the
 		// record was never persisted, so it is safe to retry as-is.
 	}
-	return "", fmt.Errorf("name-base %s: exhausted %d attempts: %w", base, MaxAllocateAttempts, lastErr)
+	return state.ConversationRecord{}, fmt.Errorf("name-base %s: exhausted %d attempts: %w", base, MaxAllocateAttempts, lastErr)
 }
 
 // nextSuffix reads the highest numeric suffix already in use among

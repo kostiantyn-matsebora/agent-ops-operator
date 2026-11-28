@@ -75,7 +75,7 @@ type SignalProvenance struct {
 
 	// Labels are the signal's own context, as the adapter sent them — opaque
 	// attribution only, rendered on signal cards. They feed no routing
-	// decision: the manager routes purely by ConversationID/InitiationID
+	// decision: the manager routes purely by CorrelationID/InitiationID
 	// equality, never by a label.
 	//
 	// BOUNDED at MaxSignalLabels. A Conversation is long-lived where the
@@ -366,7 +366,7 @@ type ConversationSpec struct {
 	//
 	// It exists because a source is SHAREABLE: two Pipelines listing one source
 	// both open a conversation per signal, and those conversations carry the
-	// same conversationId. Without the ref, the second Pipeline's next signal would
+	// same correlationId. Without the ref, the second Pipeline's next signal would
 	// be absorbed by the first Pipeline's conversation and run under the wrong
 	// profile with the wrong tools. It also replaces attribution-by-inference,
 	// which went blank exactly when two Pipelines wired identically.
@@ -384,7 +384,7 @@ type ConversationSpec struct {
 	// for display, and nothing is ever resolved through it.
 	//
 	// It is on the CONVERSATION because a conversation has exactly one
-	// originating signal — reuse is scoped to one conversationId and one
+	// originating signal — reuse is scoped to one correlationId and one
 	// pipeline, so every signal that lands here came from the same source
 	// carrying the same correlation id.
 	//
@@ -407,7 +407,7 @@ type ConversationSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=500
 	Title string `json:"title,omitempty"`
-	// ConversationID is the adopted initiationId of the signal that opened
+	// CorrelationID is the adopted initiationId of the signal that opened
 	// this conversation — the sender-minted correlation identity equality
 	// routing matches on. It replaces the derived Signature and the
 	// agentops.dev/signature-hash label: the manager routes by pure id
@@ -423,8 +423,12 @@ type ConversationSpec struct {
 	// backfilled — equality routing simply never matches a legacy
 	// conversation, so a recurrence opens a new one beside it rather than
 	// risking a wrong merge.
+	//
+	// Not to be confused with ID (metadata.uid), the conversation's system
+	// identity — this is the correlation key, shared by many conversations
+	// over time (conversation-identity).
 	// +optional
-	ConversationID string `json:"conversationId,omitempty"`
+	CorrelationID string `json:"correlationId,omitempty"`
 	// OriginReader records WHO started this conversation, so their own read
 	// watermark can be stamped the moment their thread is created — the person
 	// who typed the request has by definition seen it, and presenting it back
@@ -1247,7 +1251,7 @@ func (c *Conversation) BoundTo(channel string) bool {
 
 // SameOrigin reports whether c and other were originated by the SAME
 // Pipeline or the SAME Coordinator — the scoping equality routing and
-// reopen's at-most-one-open check both apply on top of a conversationId
+// reopen's at-most-one-open check both apply on top of a correlationId
 // match (pipeline-model: "a signal MAY only be appended to an open
 // conversation originated by the SAME Pipeline"). The two refs are mutually
 // exclusive, and a conversation naming NEITHER predates both fields — never

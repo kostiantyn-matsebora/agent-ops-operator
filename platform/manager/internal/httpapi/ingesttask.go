@@ -167,7 +167,7 @@ func (s *Server) publishOne(ctx context.Context, source *agentopsv1alpha1.Signal
 	// SourceID lets the store link the signal to its source (the kube backend
 	// turns it into the controller owner reference); the manager does not
 	// depend on that link, it releases a deleted source's signals itself.
-	_, err := s.Signals.Create(ctx, state.Key(name), state.SignalRecord{
+	_, _, err := s.Signals.Create(ctx, state.Key(name), state.SignalRecord{
 		SourceID:     string(source.UID),
 		SourceRef:    source.Name,
 		Adapter:      source.Spec.Adapter,

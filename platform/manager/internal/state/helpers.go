@@ -30,6 +30,18 @@ func (r *ConversationRecord) SetContextID(id string) {
 	r.SessionID = ""
 }
 
+// Live reports whether r is a genuine name-resolution match (design
+// conversation-identity, Decision 5): present in the store with no deletion
+// marker. A Closed conversation is still live — Phase is judged by the verb
+// AFTER resolution, never folded into this check — only a record a finalizer
+// is holding on its way out (DeletionRequestedAt set) is not. A person-typed
+// name must resolve through this before anything else, so a verb issued the
+// instant after a delete lands on the same "not found" a truly absent name
+// gets, rather than acting on a record that is already departing.
+func (r *ConversationRecord) Live() bool {
+	return r.DeletionRequestedAt == nil
+}
+
 // Thread returns the binding on a channel, or nil when the channel holds no
 // thread here. The pointer aliases the record's own slice.
 func (r *ConversationRecord) Thread(channel string) *ThreadBinding {

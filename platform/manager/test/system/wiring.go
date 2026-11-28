@@ -137,7 +137,7 @@ func waitPipelineReady(ctx context.Context, k *Kube, name string, timeout time.D
 // PostTask posts a task-lane signal to a source through the manager's own
 // ingest endpoint — an ordinary signal to a source a Ready Pipeline claims;
 // there is no route that names a Pipeline. id is this signal's initiationId,
-// adopted verbatim as the opened conversation's conversationId. Returns the
+// adopted verbatim as the opened conversation's correlationId. Returns the
 // response body.
 func (e *Env) PostTask(t *testing.T, source, id, payload string) map[string]any {
 	t.Helper()
@@ -172,7 +172,7 @@ func (e *Env) ConversationFor(t *testing.T, id string, timeout time.Duration) *a
 		}
 		for i := range items {
 			c := &items[i]
-			if c.Spec.Title == id || c.Spec.ConversationID == id {
+			if c.Spec.Title == id || c.Spec.CorrelationID == id {
 				found = c
 				return true, nil
 			}

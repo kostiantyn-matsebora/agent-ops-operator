@@ -53,12 +53,15 @@ func routerFor(t *testing.T, c client.WithWatch, ns string) *chat.Router {
 // a flat descendant list exactly as chat.Router.Descendants returns one
 // (any order, trusted only through CausedBy.Parent).
 func TestDeleteCascadeOrderIsDeepestFirstRootLast(t *testing.T) {
+	// CausedBy.Parent holds the parent's ID (conversation-identity Decision
+	// 6) — ID == Name here, the trivial case this pure-ordering test does
+	// not care to distinguish.
 	descendants := []state.ConversationRecord{
-		{Name: "grandchild", CausedBy: &state.Provenance{Parent: "mid"}},
-		{Name: "mid", CausedBy: &state.Provenance{Parent: "root"}},
-		{Name: "other-grandchild", CausedBy: &state.Provenance{Parent: "mid"}},
+		{ID: "grandchild", Name: "grandchild", CausedBy: &state.Provenance{Parent: "mid"}},
+		{ID: "mid", Name: "mid", CausedBy: &state.Provenance{Parent: "root"}},
+		{ID: "other-grandchild", Name: "other-grandchild", CausedBy: &state.Provenance{Parent: "mid"}},
 	}
-	got := deleteCascadeOrder("root", descendants)
+	got := deleteCascadeOrder("root", "root", descendants)
 	if len(got) != 4 || got[len(got)-1] != "root" {
 		t.Fatalf("want 4 names ending with root, got %v", got)
 	}
@@ -80,16 +83,16 @@ func TestDeleteCascadeOrderIsDeepestFirstRootLast(t *testing.T) {
 // is the fact deleteCascadeOrder trusts.
 func TestDeleteCascadeOrderTrustsTheFieldOverTheLabel(t *testing.T) {
 	decoy := state.ConversationRecord{Name: "decoy", CausedBy: &state.Provenance{Parent: "other"}}
-	got := deleteCascadeOrder("root", []state.ConversationRecord{decoy})
+	got := deleteCascadeOrder("root", "root", []state.ConversationRecord{decoy})
 	if len(got) != 1 || got[0] != "root" {
 		t.Fatalf("a decoy naming a DIFFERENT parent must never appear under root's own order, got %v", got)
 	}
 }
 
 func TestDeleteCascadeRequestsBuildsOneTaskPerConversationKeyedOnTheRoot(t *testing.T) {
-	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(
-		causedConv("root", ""), causedConv("mid", "root"), causedConv("leaf", "mid"),
-	).Build()
+	objs := []client.Object{causedConv("root", ""), causedConv("mid", "root"), causedConv("leaf", "mid")}
+	assignUIDs(objs)
+	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(objs...).Build()
 	s := &Server{Client: c, Reader: c, Conversations: testConversations(t, c, "agent-ops"),
 		Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Router: routerFor(t, c, "agent-ops")}
 

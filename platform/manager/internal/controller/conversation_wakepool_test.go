@@ -29,7 +29,7 @@ func pendingConv(name string, member bool, age time.Duration) *agentopsv1alpha1.
 func deletedPodFor(conv string) *corev1.Pod {
 	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 		Name: "agentops-conv-" + conv, Namespace: claimTestNS,
-		Labels: map[string]string{runtimepod.LabelConversation: conv},
+		Labels: map[string]string{runtimepod.LabelConversationID: conv},
 	}}
 }
 

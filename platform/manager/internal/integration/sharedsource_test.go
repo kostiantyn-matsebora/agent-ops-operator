@@ -96,7 +96,7 @@ func TestSharedAlertSourceFansOutToEveryPipeline(t *testing.T) {
 }
 
 // Two pipelines fanning out adopt the SAME initiationId as each of their own
-// conversations' conversationId. The recorded origin (pipelineRef) is what
+// conversations' correlationId. The recorded origin (pipelineRef) is what
 // keeps the second pipeline's next signal out of the first pipeline's
 // conversation — without it, a repeat would land under the wrong profile
 // with the wrong tools (pipeline-model: "Fanned-out conversations do not
@@ -125,9 +125,9 @@ func TestFannedOutConversationsNeverMerge(t *testing.T) {
 	if a[0].Name == b[0].Name {
 		t.Fatal("the two pipelines shared one conversation — provenance scoping is not applied")
 	}
-	if a[0].Spec.ConversationID != "merge-1" || b[0].Spec.ConversationID != "merge-1" {
-		t.Fatalf("both adopt the SAME initiationId as their own conversationId: a=%q b=%q",
-			a[0].Spec.ConversationID, b[0].Spec.ConversationID)
+	if a[0].Spec.CorrelationID != "merge-1" || b[0].Spec.CorrelationID != "merge-1" {
+		t.Fatalf("both adopt the SAME initiationId as their own correlationId: a=%q b=%q",
+			a[0].Spec.CorrelationID, b[0].Spec.CorrelationID)
 	}
 
 	// A repeat of the SAME id, once each conversation already has a session
@@ -171,7 +171,7 @@ func TestFannedOutConversationsNeverMerge(t *testing.T) {
 	}
 }
 
-// A conversation predating conversationId is structurally invisible to
+// A conversation predating correlationId is structurally invisible to
 // equality routing — its empty id never enters the field index — so a
 // repeat of the id it would once have groupable under opens a NEW
 // conversation instead, leaving the legacy one untouched
@@ -194,11 +194,11 @@ func TestLegacyConversationIsNeverMatchedByEqualityRouting(t *testing.T) {
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
 	}
-	// Clear conversationId to stand in for a conversation created before the
+	// Clear correlationId to stand in for a conversation created before the
 	// field existed — it is then structurally absent from the field index.
 	legacy := convs[0]
 	patch := client.MergeFrom(legacy.DeepCopy())
-	legacy.Spec.ConversationID = ""
+	legacy.Spec.CorrelationID = ""
 	if err := k8sClient.Patch(ctx, &legacy, patch); err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestAmbiguousBareChatMessageIsRefusedWithTheChoices(t *testing.T) {
 	}
 
 	// the refusal reaches the surface and names EVERY server with its profile
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("the refusal must reach the surface: %d", rec.Code)
 	}
@@ -335,7 +335,7 @@ func TestAgentsListingMatchesWhatTheTypeaheadOffers(t *testing.T) {
 		t.Fatalf("/agents: %d %s", rec.Code, rec.Body.String())
 	}
 	drainIngestTasks(t)
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token")
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("/agents must emit a send op: %d", rec.Code)
 	}

@@ -32,12 +32,19 @@ func poolOf(conv state.ConversationRecord, err error) pool {
 	return poolConversations
 }
 
-// poolOfName looks up the conversation a pod's label names and classifies
+// poolOfID looks up the conversation a pod's ID label names and classifies
 // it — the same per-pod lookup eviction already did, now also deciding
-// which pool the pod counts against.
-func (r *ConversationReconciler) poolOfName(ctx context.Context, name string) pool {
-	conv, _, err := r.Conversations.Get(ctx, state.Key(name))
-	return poolOf(conv, err)
+// which pool the pod counts against. An absent or unknown ID reads as a
+// conversation (poolOf's conservative reading).
+func (r *ConversationReconciler) poolOfID(ctx context.Context, id string) pool {
+	if id == "" {
+		return poolConversations
+	}
+	list, err := r.Conversations.List(ctx, state.ByID, id)
+	if err != nil || len(list) == 0 {
+		return poolConversations
+	}
+	return poolOf(list[0], nil)
 }
 
 // capFor is a pool's own ceiling. The two are never pooled together — no
@@ -56,7 +63,7 @@ func (r *ConversationReconciler) capFor(p pool) int {
 func (r *ConversationReconciler) splitPools(ctx context.Context, live []corev1.Pod) map[pool][]corev1.Pod {
 	out := map[pool][]corev1.Pod{poolConversations: nil, poolMembers: nil}
 	for i := range live {
-		p := r.poolOfName(ctx, live[i].Labels[runtimepod.LabelConversation])
+		p := r.poolOfID(ctx, live[i].Labels[runtimepod.LabelConversationID])
 		out[p] = append(out[p], live[i])
 	}
 	return out

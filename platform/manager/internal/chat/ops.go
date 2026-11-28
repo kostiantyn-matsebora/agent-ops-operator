@@ -75,16 +75,23 @@ type Op struct {
 	ID           string `json:"id"`
 	Channel      string `json:"channel"`
 	Conversation string `json:"conversation,omitempty"`
-	// ConversationID is the owning conversation's own spec.conversationId —
-	// the sender-minted correlation id, carried BESIDE Conversation (the
-	// object's name) rather than in place of it (channel-adapter-contract
-	// OPS-9). Additive and opaque: a conformant adapter ignores it exactly as
-	// it ignores any field it does not recognise. Empty on a conversation
-	// that predates the field (legacy — never synthesized) and on an op with
-	// no owning conversation at all (a general-surface notice).
-	ConversationID string  `json:"conversationId,omitempty"`
-	Kind           OpKind  `json:"kind"`
-	ThreadID       *string `json:"threadId,omitempty"` // send target; nil = general
+	// ConversationID is the owning conversation's own system identity
+	// (its ID, carried BESIDE Conversation, the display name) — opaque,
+	// never a name, never a correlation key (conversation-identity). Empty
+	// on an op with no owning conversation at all (a general-surface
+	// notice); never empty for a real conversation, since ID is
+	// backend-minted at create.
+	ConversationID string `json:"conversationId,omitempty"`
+	// CorrelationID is the owning conversation's own spec.correlationId —
+	// the sender-minted correlation id, carried BESIDE ConversationID
+	// (channel-adapter-contract OPS-9). Additive and opaque: a conformant
+	// adapter ignores it exactly as it ignores any field it does not
+	// recognise. Empty on a conversation that predates the field (legacy —
+	// never synthesized), on a chat-originated conversation, and on an op
+	// with no owning conversation at all.
+	CorrelationID string  `json:"correlationId,omitempty"`
+	Kind          OpKind  `json:"kind"`
+	ThreadID      *string `json:"threadId,omitempty"` // send target; nil = general
 
 	// Topic describes the thread to create (ensure-topic only).
 	Topic *TopicDescriptor `json:"topic,omitempty"`
@@ -161,11 +168,13 @@ var outKinds = []commandbus.Kind{commandbus.KindOutStable, commandbus.KindOutEph
 // command bus existed, kept byte-for-byte so the router, the reconciler and
 // httpapi's handlers need no change at all.
 //
-// Every op's id is its commandbus.CommandID verbatim: the published, stable
-// shapes in CloseTopicOpID/DeleteConversationOpID/InputOpID/RunReplyOpID
-// (channel-adapter-contract ADA-15) are what a producer derives and a
-// consumer parses back, same as always — the bus never sees or interprets
-// them beyond comparing for equality.
+// Every op's id is its commandbus.CommandID verbatim: InputOpID/RunReplyOpID
+// are the two shapes the channel-adapter contract actually PUBLISHES
+// (ADA-15, MGR-6.2) and must therefore keep byte-for-byte; CloseTopicOpID and
+// DeleteConversationOpID are producer/consumer-internal only — ADA-15 binds
+// every adapter to treat them as opaque — so they are free to carry whatever
+// this package needs, same as always: the bus never sees or interprets any
+// of them beyond comparing for equality.
 //
 // `delete-conversation` is the one exception to every other op being
 // DERIVED from CR state — see OpDeleteConversation's own doc comment — and
@@ -298,7 +307,7 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 		id += ":r" + strconv.Itoa(int(conv.Reopens))
 	}
 	op := &Op{
-		ID: id, Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.ConversationID,
+		ID: id, Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.ID, CorrelationID: conv.CorrelationID,
 		Kind: OpEnsureTopic, Topic: &topic, channelType: ch.Spec.Adapter, stable: true,
 	}
 	if q.IsReceipt(ch.Spec.Adapter) {
@@ -320,15 +329,21 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 func (q *OpQueue) EnqueueCloseTopic(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string, conv *state.ConversationRecord) {
 	tid := threadID
 	q.enqueue(ctx, &Op{
-		ID: CloseTopicOpID(conv.Name, ch.Name), Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.ConversationID,
+		ID: CloseTopicOpID(conv.Name, conv.ID, ch.Name), Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.ID, CorrelationID: conv.CorrelationID,
 		Kind: OpCloseTopic, ThreadID: &tid, channelType: ch.Spec.Adapter, stable: true,
 	})
 }
 
 // CloseTopicOpID is the stable id of a conversation's close-topic op on one
 // channel. Exported because the finalizer asks whether it is still outstanding.
-func CloseTopicOpID(conversation, channel string) string {
-	return "close:" + conversation + ":" + channel
+//
+// UNPUBLISHED SHAPE — unlike RunReplyOpID/InputOpID (ADA-15, MGR-6.2), this id
+// names no contract an adapter may parse, so it carries conv.ID for the same
+// reason EnsureTopic's does: a name AllocateName reuses once its holder is
+// deleted must not derive the same id as a PRIOR life's already-settled
+// close, or a recreated conversation's own close-topic silently dedups away.
+func CloseTopicOpID(conversation, id, channel string) string {
+	return "close:" + conversation + ":" + id + ":" + channel
 }
 
 // EnqueueDeleteConversation tells one bound thread that its conversation is
@@ -343,7 +358,7 @@ func (q *OpQueue) EnqueueDeleteConversation(ctx context.Context, ch *agentopsv1a
 	msg := Notice("🗑 This conversation has been deleted, along with everything it recorded. " +
 		"The thread stays here to read. A new message starts a NEW conversation — it will not continue this one.")
 	q.enqueue(ctx, &Op{
-		ID: DeleteConversationOpID(conv.Name, ch.Name), Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.ConversationID,
+		ID: DeleteConversationOpID(conv.Name, conv.ID, ch.Name), Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.ID, CorrelationID: conv.CorrelationID,
 		Kind: OpDeleteConversation, ThreadID: &tid, Message: &msg,
 		channelType: ch.Spec.Adapter, stable: true,
 	})
@@ -352,19 +367,25 @@ func (q *OpQueue) EnqueueDeleteConversation(ctx context.Context, ch *agentopsv1a
 // DeleteConversationOpID is the stable id of a conversation's
 // delete-conversation op on one channel. The finalizer asks whether it is still
 // outstanding.
-func DeleteConversationOpID(conversation, channel string) string {
-	return "gone:" + conversation + ":" + channel
+//
+// UNPUBLISHED SHAPE, same note as CloseTopicOpID: carries conv.ID so a
+// recreated conversation sharing a deleted one's name is never told "gone"
+// via an id the dedup window already settled for the conversation it replaced.
+func DeleteConversationOpID(conversation, id, channel string) string {
+	return "gone:" + conversation + ":" + id + ":" + channel
 }
 
 // ParseCloseTopicOpID splits a close-topic op id back into its parts. Channel
 // names cannot contain ":" (they are Kubernetes object names), so the split is
-// unambiguous.
+// unambiguous. The conversation's ID occupies the third segment but is of no
+// use to a caller that already has op.Conversation in hand, so it is not
+// returned.
 func ParseCloseTopicOpID(id string) (conversation, channel string, ok bool) {
 	parts := strings.Split(id, ":")
-	if len(parts) != 3 || parts[0] != "close" {
+	if len(parts) != 4 || parts[0] != "close" {
 		return "", "", false
 	}
-	return parts[1], parts[2], true
+	return parts[1], parts[3], true
 }
 
 // Settled reports whether an op id has already completed within the local
@@ -386,14 +407,14 @@ func (q *OpQueue) Settled(id string) bool {
 // into the manager.
 //
 // conv is nilable: a general-surface notice (command usage, an unwired-source
-// warning) belongs to no conversation, so both Conversation and
-// ConversationID stay empty on its op rather than being guessed.
+// warning) belongs to no conversation, so Conversation, ConversationID and
+// CorrelationID all stay empty on its op rather than being guessed.
 func (q *OpQueue) EnqueueMessage(ctx context.Context, ch *agentopsv1alpha1.Channel, conv *state.ConversationRecord, threadID *string, msg Message) {
-	name, conversationID := "", ""
+	name, conversationID, correlationID := "", "", ""
 	if conv != nil {
-		name, conversationID = conv.Name, conv.ConversationID
+		name, conversationID, correlationID = conv.Name, conv.ID, conv.CorrelationID
 	}
-	q.enqueueMessage(ctx, "send:"+sendEpoch+":"+strconv.FormatInt(sendSeq.Add(1), 36), ch, name, conversationID, threadID, msg, false)
+	q.enqueueMessage(ctx, "send:"+sendEpoch+":"+strconv.FormatInt(sendSeq.Add(1), 36), ch, name, conversationID, correlationID, threadID, msg, false)
 }
 
 // EnqueueFarewell posts a conversation's closing notice with a STABLE id, so a
@@ -413,7 +434,7 @@ func (q *OpQueue) EnqueueMessage(ctx context.Context, ch *agentopsv1alpha1.Chann
 func (q *OpQueue) EnqueueFarewell(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	conv *state.ConversationRecord, threadID *string, msg Message) {
 	id := fmt.Sprintf("farewell:%s:%s:%d", conv.Name, ch.Name, conv.Reopens)
-	q.enqueueMessage(ctx, id, ch, conv.Name, conv.ConversationID, threadID, msg, true)
+	q.enqueueMessage(ctx, id, ch, conv.Name, conv.ID, conv.CorrelationID, threadID, msg, true)
 }
 
 // EnqueueReopenNotice announces that a conversation is live again, on every
@@ -430,7 +451,7 @@ func (q *OpQueue) EnqueueFarewell(ctx context.Context, ch *agentopsv1alpha1.Chan
 func (q *OpQueue) EnqueueReopenNotice(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	conv *state.ConversationRecord, threadID *string, msg Message) {
 	id := fmt.Sprintf("reopened:%s:%s:%d", conv.Name, ch.Name, conv.Reopens)
-	q.enqueueMessage(ctx, id, ch, conv.Name, conv.ConversationID, threadID, msg, true)
+	q.enqueueMessage(ctx, id, ch, conv.Name, conv.ID, conv.CorrelationID, threadID, msg, true)
 }
 
 // EnqueueEscalationMessage posts the digest an `escalate` call supplied as the
@@ -445,7 +466,7 @@ func (q *OpQueue) EnqueueReopenNotice(ctx context.Context, ch *agentopsv1alpha1.
 func (q *OpQueue) EnqueueEscalationMessage(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	conv *state.ConversationRecord, threadID *string, msg Message) {
 	id := fmt.Sprintf("escalate:%s:%s:%d", conv.Name, ch.Name, conv.Reopens)
-	q.enqueueMessage(ctx, id, ch, conv.Name, conv.ConversationID, threadID, msg, true)
+	q.enqueueMessage(ctx, id, ch, conv.Name, conv.ID, conv.CorrelationID, threadID, msg, true)
 }
 
 // EnqueueInputDelivery queues ONE input's delivery to ONE channel — the event
@@ -461,7 +482,7 @@ func (q *OpQueue) EnqueueEscalationMessage(ctx context.Context, ch *agentopsv1al
 func (q *OpQueue) EnqueueInputDelivery(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	conv *state.ConversationRecord, inputID string, threadID *string, msg Message) {
 
-	q.enqueueMessage(ctx, InputOpID(conv.Name, inputID, ch.Name), ch, conv.Name, conv.ConversationID, threadID, msg, true)
+	q.enqueueMessage(ctx, InputOpID(conv.Name, inputID, ch.Name), ch, conv.Name, conv.ID, conv.CorrelationID, threadID, msg, true)
 }
 
 // InputOpID is the stable id of one input's delivery on one channel.
@@ -480,7 +501,7 @@ func InputOpID(conversation, inputID, channel string) string {
 func (q *OpQueue) EnqueueRunReply(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	conv *state.ConversationRecord, runID string, threadID *string, msg Message) {
 
-	q.enqueueMessage(ctx, RunReplyOpID(conv.Name, ch.Name, runID), ch, conv.Name, conv.ConversationID, threadID, msg, true)
+	q.enqueueMessage(ctx, RunReplyOpID(conv.Name, ch.Name, runID), ch, conv.Name, conv.ID, conv.CorrelationID, threadID, msg, true)
 }
 
 // RunReplyOpID is the stable id of one run's reply on one channel. Exported
@@ -503,10 +524,10 @@ func ParseRunReplyOpID(id string) (conversation, channel, runID string, ok bool)
 }
 
 func (q *OpQueue) enqueueMessage(ctx context.Context, id string, ch *agentopsv1alpha1.Channel,
-	conversation, conversationID string, threadID *string, msg Message, stable bool) {
+	conversation, conversationID, correlationID string, threadID *string, msg Message, stable bool) {
 
 	q.enqueue(ctx, &Op{
-		ID: id, Channel: ch.Name, Conversation: conversation, ConversationID: conversationID,
+		ID: id, Channel: ch.Name, Conversation: conversation, ConversationID: conversationID, CorrelationID: correlationID,
 		Kind: OpSend, ThreadID: threadID, Message: &msg, channelType: ch.Spec.Adapter, stable: stable,
 	})
 }
@@ -573,6 +594,7 @@ type opWire struct {
 	Channel        string           `json:"channel"`
 	Conversation   string           `json:"conversation,omitempty"`
 	ConversationID string           `json:"conversationId,omitempty"`
+	CorrelationID  string           `json:"correlationId,omitempty"`
 	Kind           OpKind           `json:"kind"`
 	ThreadID       *string          `json:"threadId,omitempty"`
 	Topic          *TopicDescriptor `json:"topic,omitempty"`
@@ -584,7 +606,7 @@ type opWire struct {
 // pointer/a Message), so callers compose it inline.
 func (op *Op) encode() []byte {
 	b, _ := json.Marshal(opWire{
-		Channel: op.Channel, Conversation: op.Conversation, ConversationID: op.ConversationID,
+		Channel: op.Channel, Conversation: op.Conversation, ConversationID: op.ConversationID, CorrelationID: op.CorrelationID,
 		Kind: op.Kind, ThreadID: op.ThreadID, Topic: op.Topic, Message: op.Message,
 		ChannelType: op.channelType,
 	})
@@ -600,7 +622,7 @@ func decodeOp(id string, raw []byte) (*Op, error) {
 		return nil, fmt.Errorf("decode channel op %s: %w", id, err)
 	}
 	return &Op{
-		ID: id, Channel: w.Channel, Conversation: w.Conversation, ConversationID: w.ConversationID,
+		ID: id, Channel: w.Channel, Conversation: w.Conversation, ConversationID: w.ConversationID, CorrelationID: w.CorrelationID,
 		Kind: w.Kind, ThreadID: w.ThreadID, Topic: w.Topic, Message: w.Message,
 		channelType: w.ChannelType,
 	}, nil

@@ -35,7 +35,7 @@ func TestCloseCascadeRequestsOrdersMembersBeforeTheRootAndSharesItsKey(t *testin
 		Queue: ConvQueue, CommandID: "root-task", Key: commandbus.Key("root-1"),
 		Payload: convtask.Payload{Verb: convtask.VerbClose, Conversation: "root-1"}.Encode(),
 	}
-	reqs, err := s.closeCascadeRequests(context.Background(), "root-1", "because", rootReq)
+	reqs, err := s.closeCascadeRequests(context.Background(), "root-1", "root-1", "because", rootReq)
 	if err != nil {
 		t.Fatal(err)
 	}

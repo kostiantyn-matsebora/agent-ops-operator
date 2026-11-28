@@ -77,7 +77,7 @@ func markMemberDispatched(t *testing.T, name, runID string) {
 func reportMemberRunDone(t *testing.T, srv *httpapi.Server, name, runID string) {
 	t.Helper()
 	rec := adapterReq(srv, "POST", "/work/done", map[string]any{
-		"convo": name, "runId": runID, "status": "succeeded", "result": "invoked its own child, then finished",
+		"convo": convoID(t, name), "runId": runID, "status": "succeeded", "result": "invoked its own child, then finished",
 	}, srv.AdapterToken)
 	if rec.Code != 200 {
 		t.Fatalf("work/done for %s: %d %s", name, rec.Code, rec.Body.String())

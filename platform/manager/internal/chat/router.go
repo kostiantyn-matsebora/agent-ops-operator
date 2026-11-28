@@ -392,7 +392,7 @@ func (r *Router) closeConversation(ctx context.Context, conv *state.Conversation
 	// cascade that fails part way leaves an OPEN, still-reachable root over a
 	// partly closed subtree (a retry resumes), never a Closed root over open
 	// members nothing can reach. Same order as closeWithCascade.
-	if err := r.cascadeCloseMembers(ctx, conv.Name, ""); err != nil {
+	if err := r.cascadeCloseMembers(ctx, conv.ID, ""); err != nil {
 		return err
 	}
 	if conv.Phase != state.PhaseClosed {
@@ -415,7 +415,7 @@ func (r *Router) closeConversation(ctx context.Context, conv *state.Conversation
 	// A run on the still-open root may have invoked a member after the walk
 	// listed; a closed root can invoke nothing more, so this sweep is the last
 	// word and finds only stragglers.
-	return r.cascadeCloseMembers(ctx, conv.Name, "")
+	return r.cascadeCloseMembers(ctx, conv.ID, "")
 }
 
 // DeleteTree deletes a conversation and its whole causedBy subtree, LEAVES
@@ -425,8 +425,20 @@ func (r *Router) closeConversation(ctx context.Context, conv *state.Conversation
 // before it goes, and a member created after the first listing is caught by
 // re-listing until nothing is left under the conversation.
 func (r *Router) DeleteTree(ctx context.Context, name string) error {
+	// The root's own ID, resolved ONCE: a retry re-reads it fresh, so a root
+	// deleted (ID gone) and recreated under the same Name mid-retry walks the
+	// NEW life's subtree, never the old one's orphaned descendants
+	// (conversation-identity Decision 6). Not found: rootID stays "", and
+	// Descendants/CascadeOrder treat that as "no subtree" rather than an error.
+	root, _, err := r.Conversations.Get(ctx, state.Key(name))
+	rootID := ""
+	if err == nil {
+		rootID = root.ID
+	} else if !errors.Is(err, state.ErrNotFound) {
+		return err
+	}
 	for pass := 0; pass < 5; pass++ {
-		descendants, err := r.Descendants(ctx, name)
+		descendants, err := r.Descendants(ctx, rootID)
 		if err != nil {
 			return err
 		}
@@ -437,7 +449,7 @@ func (r *Router) DeleteTree(ctx context.Context, name string) error {
 		for i := range descendants {
 			byName[descendants[i].Name] = &descendants[i]
 		}
-		for _, n := range convtask.CascadeOrder(name, descendants) {
+		for _, n := range convtask.CascadeOrder(rootID, name, descendants) {
 			m, ok := byName[n]
 			if !ok {
 				continue // the root itself, deleted last
@@ -453,7 +465,7 @@ func (r *Router) DeleteTree(ctx context.Context, name string) error {
 		}
 	}
 	// Last look before the root goes: a straggler left means a retry, never an orphan.
-	left, err := r.Descendants(ctx, name)
+	left, err := r.Descendants(ctx, rootID)
 	if err != nil {
 		return err
 	}
@@ -485,6 +497,13 @@ func (r *Router) ReopenConversation(ctx context.Context, conv *state.Conversatio
 	if conv.Phase != state.PhaseClosed {
 		return fmt.Errorf("conversation %s is not closed", conv.Name)
 	}
+	if !conv.Live() {
+		// A deletion-marked record is already on its way out under a
+		// finalizer (design conversation-identity, Decision 5) — reopening
+		// it would fight the delete that is still in flight rather than
+		// resolve to "not found" the way a genuinely absent name does.
+		return fmt.Errorf("conversation %s: %w", conv.Name, state.ErrNotFound)
+	}
 	if err := r.refuseReopenBehindOpenSuccessor(ctx, conv); err != nil {
 		return err
 	}
@@ -503,17 +522,17 @@ func (r *Router) ReopenConversation(ctx context.Context, conv *state.Conversatio
 // refuseReopenBehindOpenSuccessor is the ONE verb that could break equality
 // routing's at-most-one-open invariant (conversation-provenance: "Reopen
 // SHALL be refused while another open conversation carries the same
-// conversationId for that pipeline, with a reason naming the successor") —
-// reopening conv while a `-N` successor with the same conversationId is
+// correlationId for that pipeline, with a reason naming the successor") —
+// reopening conv while a `-N` successor with the same correlationId is
 // already open would let two conversations answer for one correlation id.
 //
-// A conversation carrying no conversationId (legacy, or never
+// A conversation carrying no correlationId (legacy, or never
 // signal-originated) has nothing to collide on and is never refused.
 func (r *Router) refuseReopenBehindOpenSuccessor(ctx context.Context, conv *state.ConversationRecord) error {
-	if conv.ConversationID == "" {
+	if conv.CorrelationID == "" {
 		return nil
 	}
-	list, err := r.Conversations.List(ctx, state.ByConversationID, conv.ConversationID)
+	list, err := r.Conversations.List(ctx, state.ByCorrelationID, conv.CorrelationID)
 	if err != nil {
 		return err
 	}
@@ -525,7 +544,7 @@ func (r *Router) refuseReopenBehindOpenSuccessor(ctx context.Context, conv *stat
 		if !conv.SameOrigin(successor) {
 			continue
 		}
-		return fmt.Errorf("cannot reopen %s: %s already carries the same conversationId and is open",
+		return fmt.Errorf("cannot reopen %s: %s already carries the same correlationId and is open",
 			conv.Name, successor.Name)
 	}
 	return nil

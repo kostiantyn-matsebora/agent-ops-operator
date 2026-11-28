@@ -31,11 +31,18 @@ func ResolveActingCoordinator(ctx context.Context, store state.Collection[state.
 		if cur.CausedBy == nil {
 			return cur.CoordinatorRef, nil
 		}
-		parent, _, err := store.Get(ctx, state.Key(cur.CausedBy.Parent))
+		// CausedBy.Parent holds the parent's ID, not its Name
+		// (conversation-identity Decision 6), so the walk resolves on ID —
+		// a parent since deleted and replaced under the same Name must
+		// never be mistaken for the live one.
+		parents, err := store.List(ctx, state.ByID, cur.CausedBy.Parent)
 		if err != nil {
 			return "", err
 		}
-		cur = &parent
+		if len(parents) == 0 {
+			return "", state.ErrNotFound
+		}
+		cur = &parents[0]
 	}
 	return "", fmt.Errorf("causedBy chain from %s did not terminate", conv.Name)
 }

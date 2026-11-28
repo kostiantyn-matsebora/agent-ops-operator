@@ -36,7 +36,13 @@ func NewManager(baseURL, token string) *Manager {
 // IT DOES NOT MOVE FOR THE BLOCK GRAMMAR. No field was added and none changed
 // meaning: a body that was markdown is now markdown plus a grammar, read by the
 // component that already read the markdown — this one.
-const ContractVersion = "2"
+//
+// Version 3 (conversation-identity): Op's `conversationId` changes meaning
+// from the correlation key to the conversation's system identity, and the
+// correlation key moves to a new `correlationId` field. This adapter reads
+// neither for its own logic, but an adapter still declaring 2 would be handed
+// a `conversationId` that quietly means something else, so it must move too.
+const ContractVersion = "3"
 
 // MessageKind names what the manager is saying.
 type MessageKind string
@@ -118,16 +124,22 @@ type Op struct {
 	ID           string `json:"id"`
 	Channel      string `json:"channel"`
 	Conversation string `json:"conversation,omitempty"`
-	// ConversationID is the conversation's manager-issued correlation id,
-	// carried beside Conversation. OPAQUE to this adapter — never parsed,
+	// ConversationID is the conversation's system identity (conversation-identity),
+	// carried beside Conversation, the display name. OPAQUE to this adapter —
+	// never parsed, never derived, never minted here. This adapter keys no
+	// state on it today; it is read, if at all, only to tell a reused
+	// conversation name apart from a stranger's.
+	ConversationID string `json:"conversationId,omitempty"`
+	// CorrelationID is the conversation's manager-issued correlation id,
+	// carried beside ConversationID. OPAQUE to this adapter — never parsed,
 	// never derived, never minted here (channel-adapter.md ADA-14). This
 	// adapter's own thread mapping stays exactly what it already was: the
 	// transport's ThreadID on one side, this id on the other, with nothing
 	// else keying it. Absent on an op for a conversation created before the
 	// field existed.
-	ConversationID string  `json:"conversationId,omitempty"`
-	Kind           string  `json:"kind"` // "ensure-topic" | "send" | "close-topic" | "delete-conversation"
-	ThreadID       *string `json:"threadId,omitempty"`
+	CorrelationID string  `json:"correlationId,omitempty"`
+	Kind          string  `json:"kind"` // "ensure-topic" | "send" | "close-topic" | "delete-conversation"
+	ThreadID      *string `json:"threadId,omitempty"`
 
 	Topic   *TopicDescriptor `json:"topic,omitempty"`   // ensure-topic
 	Message *Message         `json:"message,omitempty"` // send, delete-conversation

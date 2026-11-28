@@ -116,7 +116,7 @@ func TestTheConversationStreamOverNatsCarriesCloseReadAndArchive(t *testing.T) {
 	}
 
 	key := state.Key("stream-1")
-	if _, err := backend.Stores.Conversations.Create(ctx, key, state.ConversationRecord{Name: "stream-1", Phase: "Active"}); err != nil {
+	if _, _, err := backend.Stores.Conversations.Create(ctx, key, state.ConversationRecord{Name: "stream-1", Phase: "Active"}); err != nil {
 		t.Fatal(err)
 	}
 	wait("the create", `"stream-1"`)
@@ -170,7 +170,7 @@ func TestAQuietStreamWritesKeepAlives(t *testing.T) {
 func TestAStreamOpenedFromTheListedRevisionIsNotToldToResync(t *testing.T) {
 	ctx, backend := natsBackendForTest(t)
 	key := state.Key("listed-1")
-	if _, err := backend.Stores.Conversations.Create(ctx, key, state.ConversationRecord{Name: "listed-1", Phase: "Active"}); err != nil {
+	if _, _, err := backend.Stores.Conversations.Create(ctx, key, state.ConversationRecord{Name: "listed-1", Phase: "Active"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := backend.Stores.Runs.Append(ctx, key, state.Run{RunID: "r1"}); err != nil {

@@ -37,7 +37,7 @@ func toRecord(conv *agentopsv1alpha1.Conversation) state.ConversationRecord {
 		ProfileRef:            s.ProfileRef.Name,
 		PipelineRef:           objectRefToRef(s.PipelineRef),
 		Title:                 s.Title,
-		ConversationID:        s.ConversationID,
+		CorrelationID:         s.CorrelationID,
 		RuntimeRef:            objectRefToRef(s.RuntimeRef),
 		ServiceAccountName:    s.ServiceAccountName,
 		ContextClaimName:      s.ContextClaimName,
@@ -148,7 +148,7 @@ func applySpecAndMeta(conv *agentopsv1alpha1.Conversation, rec state.Conversatio
 		}
 	}
 	s.Title = rec.Title
-	s.ConversationID = rec.ConversationID
+	s.CorrelationID = rec.CorrelationID
 
 	s.OriginReader = nil
 	if rec.OriginReader != nil {

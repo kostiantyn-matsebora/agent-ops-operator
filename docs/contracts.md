@@ -194,7 +194,7 @@ is one, arrives later as an ordinary input.
 **`invoke(agent, task)`.** Starts, or attaches to, a member conversation
 running the named `agents[]` entry with `task` as its first input.
 
-Reports which happened — a live member carrying the same `conversationId` is
+Reports which happened — a live member carrying the same `correlationId` is
 ATTACHED to, never duplicated. Refused when the target is outside
 `agents[]`, when the caller's own `maxAgents` is exhausted, or when it would
 cycle the Coordinator graph (below).
@@ -826,5 +826,5 @@ its task's consumer runs.
 
 The `conversations` field is withdrawn, and every routing outcome lives on
 the `Signal`. See [Concepts](concepts.md#signal) for the kind and
-[the adapter specification](contracts/signal-adapter.md), version 2.5.0, for
+[the adapter specification](contracts/signal-adapter.md), version 2.6.0, for
 the contract.

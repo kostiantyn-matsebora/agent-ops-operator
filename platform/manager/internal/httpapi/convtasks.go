@@ -95,7 +95,7 @@ func (s *Server) closeBudgetExceeded(ctx context.Context, conv *state.Conversati
 			CloseKind: convtask.CloseBudgetExceeded, Reason: digest,
 		}.Encode(),
 	}
-	reqs, err := s.closeCascadeRequests(ctx, conv.Name, "budget-exceeded", rootReq)
+	reqs, err := s.closeCascadeRequests(ctx, conv.ID, conv.Name, "budget-exceeded", rootReq)
 	if err != nil {
 		return err
 	}

@@ -37,6 +37,10 @@ const (
 	LabelApp          = "app.kubernetes.io/name"
 	LabelAppValue     = "agentops-runtime"
 	LabelConversation = "agentops.dev/conversation"
+	// LabelConversationID carries the conversation's ID, not its Name — a pod
+	// of a reused name must still resolve to the conversation that created it
+	// (design Decision 7, conversation-identity).
+	LabelConversationID = "agentops.dev/conversation-id"
 )
 
 // Config is the resolved worker configuration (from a AgentRuntime CR merged
@@ -345,7 +349,7 @@ func Build(conv *state.ConversationRecord, profile *agentopsv1alpha1.AgentProfil
 
 	env := []corev1.EnvVar{
 		{Name: "ROLE", Value: "worker"},
-		{Name: "CONVO_ID", Value: conv.Name},
+		{Name: "CONVO_ID", Value: conv.ID},
 		{Name: "CONTROL_URL", Value: agentControlURL},
 		{Name: "REPO_URL", Value: profile.Spec.Repository.URL},
 		{Name: "REPO_REF", Value: profile.Spec.Repository.Ref},
@@ -386,15 +390,18 @@ func Build(conv *state.ConversationRecord, profile *agentopsv1alpha1.AgentProfil
 	// /data/workspace: Claude sessions are keyed by cwd — this matches the
 	// pre-operator claude-runner path so existing sessions resume seamlessly, and
 	// it is why the claim is mounted with a subPath rather than at a per-
-	// conversation path. The subPath is the conversation name, so concurrent
-	// runtime pods sharing one claim cannot observe each other's tree.
+	// conversation path. The subPath is the conversation's ID, not its Name: a
+	// name is unique only among LIVE conversations, so a recreated name would
+	// otherwise mount the previous conversation's tree (design Decision 1,
+	// conversation-identity). The ID is new for every life of a name, which is
+	// what actually isolates concurrent and successive runtime pods.
 	var volumes []corev1.Volume
 	workspaceMount := corev1.VolumeMount{Name: "workspace", MountPath: "/data/workspace"}
 	if cfg.WorkspacePVC != "" {
 		volumes = append(volumes, corev1.Volume{Name: "workspace", VolumeSource: corev1.VolumeSource{
 			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.WorkspacePVC},
 		}})
-		workspaceMount.SubPath = conv.Name
+		workspaceMount.SubPath = conv.ID
 	} else {
 		volumes = append(volumes, corev1.Volume{Name: "workspace",
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
@@ -473,8 +480,9 @@ func Build(conv *state.ConversationRecord, profile *agentopsv1alpha1.AgentProfil
 		ObjectMeta: metav1.ObjectMeta{
 			Name: PodName(conv.Name),
 			Labels: map[string]string{
-				LabelApp:          LabelAppValue,
-				LabelConversation: conv.Name,
+				LabelApp:            LabelAppValue,
+				LabelConversation:   conv.Name,
+				LabelConversationID: conv.ID,
 			},
 		},
 		Spec: corev1.PodSpec{

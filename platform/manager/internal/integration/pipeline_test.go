@@ -225,7 +225,7 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	defer cleanupConversation(t, conv.Name)
 
 	// gate: no bindings yet → no dispatch
-	if rec := adapterReq(srv, "GET", "/work?convo="+conv.Name+"&wait=0", nil, ""); rec.Code != 204 {
+	if rec := adapterReq(srv, "GET", "/work?convo="+string(conv.UID)+"&wait=0", nil, ""); rec.Code != 204 {
 		t.Fatalf("gate before any binding: %d", rec.Code)
 	}
 
@@ -245,7 +245,7 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 
 	// run completes → manager fans the result out to BOTH channels' threads
 	rec = adapterReq(srv, "POST", "/work/done",
-		map[string]any{"convo": conv.Name, "runId": unit.RunID, "status": "succeeded", "result": "the mirrored answer"}, "")
+		map[string]any{"convo": string(conv.UID), "runId": unit.RunID, "status": "succeeded", "result": "the mirrored answer"}, "")
 	if rec.Code != 200 {
 		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
 	}
@@ -273,7 +273,7 @@ func findConversationBoundToBoth(t *testing.T, ctx context.Context, chA, chB str
 // claimTopic answers a pending ensure-topic op for chanType with threadID.
 func claimTopic(t *testing.T, srv *httpapi.Server, convName, chanType, threadID string) {
 	t.Helper()
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=2&wait=0", nil, "test-adapter-token")
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("%s ensure-topic expected: %d", chanType, rec.Code)
 	}
@@ -297,7 +297,7 @@ func claimTopic(t *testing.T, srv *httpapi.Server, convName, chanType, threadID 
 // the same thread.
 func expectSend(t *testing.T, srv *httpapi.Server, chanType, threadID, contains string) chat.Op {
 	t.Helper()
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=2&wait=0", nil, "test-adapter-token")
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("%s send expected: %d", chanType, rec.Code)
 	}
@@ -318,7 +318,7 @@ func mirroringAssertDispatchAfterFirstBinding(t *testing.T, srv *httpapi.Server,
 	PromptText string  `json:"promptText"`
 } {
 	t.Helper()
-	rec := adapterReq(srv, "GET", "/work?convo="+convName+"&wait=0", nil, "")
+	rec := adapterReq(srv, "GET", "/work?convo="+convoID(t, convName)+"&wait=0", nil, "")
 	if rec.Code != 200 {
 		t.Fatalf("dispatch after first binding: %d %s", rec.Code, rec.Body.String())
 	}
@@ -363,7 +363,7 @@ func mirroringAssertOpeningMessageReachesLateChannelOnly(t *testing.T, ctx conte
 	if opening.Message.Kind != chat.MsgRelay || opening.Message.Origin != "mc-a" {
 		t.Fatalf("the opening message must arrive attributed to the surface it was typed on: %+v", opening.Message)
 	}
-	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=mc-ta&contract=2&wait=0", nil, "test-adapter-token"); rec.Code != 204 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=mc-ta&contract=3&wait=0", nil, "test-adapter-token"); rec.Code != 204 {
 		t.Fatalf("the originating surface displayed the message already: %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -405,7 +405,7 @@ func mirroringAssertThreadedReplyRelaysAndAcksBoth(t *testing.T, ctx context.Con
 	if ack.Message.Kind == chat.MsgRelay {
 		t.Fatalf("origin channel got a relay: %+v", ack.Message)
 	}
-	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=mc-tb&contract=2&wait=0", nil, "test-adapter-token"); rec.Code != 204 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=mc-tb&contract=3&wait=0", nil, "test-adapter-token"); rec.Code != 204 {
 		t.Fatalf("unexpected extra op on origin channel: %d", rec.Code)
 	}
 }
@@ -465,7 +465,7 @@ func TestBrokenChannelNeverDeadlocks(t *testing.T) {
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "bk-conv"}}); err != nil {
 		t.Fatal(err)
 	}
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=bk-tg&contract=2&wait=0", nil, "test-adapter-token")
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=bk-tg&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("good channel's ensure-topic expected: %d", rec.Code)
 	}
@@ -476,7 +476,8 @@ func TestBrokenChannelNeverDeadlocks(t *testing.T) {
 		t.Fatalf("done: %d", rec.Code)
 	}
 	// one binding is enough — the dangling channel never blocks dispatch
-	rec = adapterReq(srv, "GET", "/work?convo=bk-conv&wait=0", nil, "")
+	bkID := convoID(t, "bk-conv")
+	rec = adapterReq(srv, "GET", "/work?convo="+bkID+"&wait=0", nil, "")
 	if rec.Code != 200 {
 		t.Fatalf("dispatch with one broken channel: %d %s", rec.Code, rec.Body.String())
 	}
@@ -485,7 +486,7 @@ func TestBrokenChannelNeverDeadlocks(t *testing.T) {
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &unit)
 	if rec := adapterReq(srv, "POST", "/work/done",
-		map[string]any{"convo": "bk-conv", "runId": unit.RunID, "status": "succeeded", "result": "done"}, ""); rec.Code != 200 {
+		map[string]any{"convo": bkID, "runId": unit.RunID, "status": "succeeded", "result": "done"}, ""); rec.Code != 200 {
 		t.Fatalf("work done: %d", rec.Code)
 	}
 }
@@ -527,7 +528,7 @@ func TestSingleChannelResultIsDeliveredByTheOperator(t *testing.T) {
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: conv.Name}}); err != nil {
 		t.Fatal(err)
 	}
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=sc-tg&contract=2&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=sc-tg&contract=3&wait=0", nil, "test-adapter-token")
 	var op chat.Op
 	_ = json.Unmarshal(rec.Body.Bytes(), &op)
 	if op.Kind != chat.OpEnsureTopic {
@@ -538,7 +539,7 @@ func TestSingleChannelResultIsDeliveredByTheOperator(t *testing.T) {
 		t.Fatalf("topic done: %d", rec.Code)
 	}
 
-	rec = adapterReq(srv, "GET", "/work?convo="+conv.Name+"&pod=p-sc&wait=0", nil, "")
+	rec = adapterReq(srv, "GET", "/work?convo="+string(conv.UID)+"&pod=p-sc&wait=0", nil, "")
 	if rec.Code != 200 {
 		t.Fatalf("dispatch: %d %s", rec.Code, rec.Body.String())
 	}
@@ -552,11 +553,11 @@ func TestSingleChannelResultIsDeliveredByTheOperator(t *testing.T) {
 	}
 
 	rec = adapterReq(srv, "POST", "/work/done",
-		map[string]any{"convo": conv.Name, "runId": unit.RunID, "status": "succeeded", "result": "the single answer"}, "")
+		map[string]any{"convo": string(conv.UID), "runId": unit.RunID, "status": "succeeded", "result": "the single answer"}, "")
 	if rec.Code != 200 {
 		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=sc-tg&contract=2&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=sc-tg&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("operator must post the result itself: %d", rec.Code)
 	}

@@ -16,6 +16,15 @@ import (
 
 const maxWriteAttempts = 8
 
+// takeRecordRetries and takeRecordRetryDelay bound take's in-process wait for
+// Submit's own record write (see take's own comment on that race). 10×20ms
+// matches the 200ms a NACK would otherwise have cost, without round-tripping
+// through the broker.
+const (
+	takeRecordRetries    = 10
+	takeRecordRetryDelay = 20 * time.Millisecond
+)
+
 // Submit durably accepts a request: the message is stored in the stream, then
 // the task's record is written, and the call returns. It reads nothing from any
 // consumer, so no consumer's view can hold it up. A command id that is already
@@ -147,7 +156,27 @@ func (b *Bus) take(ctx context.Context, m *message.Message, holder string) (comm
 		b.nack(m, 500*time.Millisecond)
 		return commandbus.Task{}, false, nil
 	}
-	if doc == nil { // the record is written just after the message
+	// Submit publishes the message, THEN writes the task record (its own doc
+	// comment: the record needs the publish's own stream sequence) — a
+	// consumer already attached and idle can win that race and see the
+	// message before the record exists. Wait it out IN PROCESS rather than
+	// NACKing straight back to the broker: a NACK's resulting redelivery
+	// bumps the message's own NumDelivered, which attemptOf trusts as the
+	// task's own Attempt count, so bouncing a race nothing ever actually
+	// attempted would misreport the first real attempt as a retried one.
+	for i := 0; doc == nil && i < takeRecordRetries; i++ {
+		select {
+		case <-ctx.Done():
+			b.nack(m, 200*time.Millisecond)
+			return commandbus.Task{}, false, nil
+		case <-time.After(takeRecordRetryDelay):
+		}
+		if doc, rev, err = b.getDoc(ctx, rk); err != nil {
+			b.nack(m, 500*time.Millisecond)
+			return commandbus.Task{}, false, nil
+		}
+	}
+	if doc == nil { // the record genuinely never landed: let the broker redeliver
 		b.nack(m, 200*time.Millisecond)
 		return commandbus.Task{}, false, nil
 	}
@@ -443,34 +472,41 @@ func (b *Bus) Renew(ctx context.Context, taskUID, leaseToken string) error {
 		return commandbus.ErrNotFound
 	}
 	for i := 0; i < maxWriteAttempts; i++ {
-		doc, rev, err := b.getDoc(ctx, rk)
-		if err != nil {
-			return err
+		err := b.renewOnce(ctx, rk, taskUID, leaseToken)
+		if errors.Is(err, errConflict) {
+			continue
 		}
-		if doc == nil || doc.Task.UID != taskUID {
-			return commandbus.ErrNotFound
-		}
-		now := time.Now()
-		t := b.viewOf(doc.Task, now)
-		if t.State != commandbus.StateRunning || t.Lease == nil || t.Lease.Token != leaseToken {
-			return commandbus.ErrLeaseLost
-		}
-		decl, _ := commandbus.Resolve(b.cfg.inventory, t.Queue, t.Kind)
-		lease := b.cfg.leaseDuration
-		if decl.Policy.DeliveryTTL > 0 {
-			lease = decl.Policy.DeliveryTTL
-		}
-		doc.Task.Lease = &commandbus.Lease{Token: t.Lease.Token, Holder: t.Lease.Holder, Until: now.Add(lease)}
-		if _, err := b.putDoc(ctx, rk, *doc, rev); err != nil {
-			if errors.Is(err, errConflict) {
-				continue
-			}
-			return err
-		}
-		if strings.HasPrefix(leaseToken, "$JS.ACK.") {
-			_ = b.nc.Publish(leaseToken, []byte("+WPI"))
-		}
-		return nil
+		return err
 	}
 	return commandbus.ErrLeaseLost
+}
+
+// renewOnce is one read-modify-write attempt of Renew. A lost write race comes
+// back as errConflict, for the caller to retry.
+func (b *Bus) renewOnce(ctx context.Context, rk, taskUID, leaseToken string) error {
+	doc, rev, err := b.getDoc(ctx, rk)
+	if err != nil {
+		return err
+	}
+	if doc == nil || doc.Task.UID != taskUID {
+		return commandbus.ErrNotFound
+	}
+	now := time.Now()
+	t := b.viewOf(doc.Task, now)
+	if t.State != commandbus.StateRunning || t.Lease == nil || t.Lease.Token != leaseToken {
+		return commandbus.ErrLeaseLost
+	}
+	decl, _ := commandbus.Resolve(b.cfg.inventory, t.Queue, t.Kind)
+	lease := b.cfg.leaseDuration
+	if decl.Policy.DeliveryTTL > 0 {
+		lease = decl.Policy.DeliveryTTL
+	}
+	doc.Task.Lease = &commandbus.Lease{Token: t.Lease.Token, Holder: t.Lease.Holder, Until: now.Add(lease)}
+	if _, err := b.putDoc(ctx, rk, *doc, rev); err != nil {
+		return err
+	}
+	if strings.HasPrefix(leaseToken, "$JS.ACK.") {
+		_ = b.nc.Publish(leaseToken, []byte("+WPI"))
+	}
+	return nil
 }

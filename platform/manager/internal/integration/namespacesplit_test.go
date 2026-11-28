@@ -289,7 +289,11 @@ func TestOrphanSweeperDeletesAnUnrecordedPodInTheConversationsNamespace(t *testi
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: runtimepod.PodName(conv), Namespace: nsName,
-				Labels: map[string]string{runtimepod.LabelApp: runtimepod.LabelAppValue, runtimepod.LabelConversation: conv},
+				// The sweep now lists by the conversation-ID label
+				// (conversation-identity Decision 7), never the display-name
+				// one — conv stands in for an ID here too, since no record
+				// of either exists for this pod to match against.
+				Labels: map[string]string{runtimepod.LabelApp: runtimepod.LabelAppValue, runtimepod.LabelConversationID: conv},
 			},
 			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "runtime", Image: "busybox:stub"}}},
 		}

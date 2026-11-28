@@ -223,7 +223,7 @@ The profile, channels and capabilities a conversation runs with come from its ow
 
 The reference SHALL scope id-equality routing: a signal MAY only be appended to an open conversation originated by the SAME Pipeline, so two Pipelines fanning out from one source never share a conversation even when both adopted the same `initiationId`.
 
-A conversation predating `conversationId` SHALL NOT be matched by equality routing and SHALL NOT be backfilled by inference — a recurrence opens a new conversation beside it.
+A conversation predating `correlationId` SHALL NOT be matched by equality routing and SHALL NOT be backfilled by inference — a recurrence opens a new conversation beside it.
 
 Attribution displays SHALL read the recorded origin rather than inferring it from matching bindings.
 

@@ -18,7 +18,7 @@ import (
 // Open-match recurrence: once a conversation is open with a session, a
 // repeat of the SAME initiationId lands on it as a recurrence rather than
 // opening a second conversation.
-func TestOpenConversationWithMatchingConversationIDGetsRecurrence(t *testing.T) {
+func TestOpenConversationWithMatchingCorrelationIDGetsRecurrence(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-corr-open")
 	mkSignalSource(t, "src-corr-open", "corr-open", "")
@@ -37,8 +37,8 @@ func TestOpenConversationWithMatchingConversationIDGetsRecurrence(t *testing.T) 
 		t.Fatalf("want 1 conversation, got %d", len(convs))
 	}
 	conv := convs[0]
-	if conv.Spec.ConversationID != "corr-open-1" {
-		t.Fatalf("conversation must adopt the initiationId, got %q", conv.Spec.ConversationID)
+	if conv.Spec.CorrelationID != "corr-open-1" {
+		t.Fatalf("conversation must adopt the initiationId, got %q", conv.Spec.CorrelationID)
 	}
 	// a session now exists, as it would once the agent has run
 	conv.Status.SessionID = "sess-corr-open"
@@ -70,7 +70,7 @@ func TestOpenConversationWithMatchingConversationIDGetsRecurrence(t *testing.T) 
 }
 
 // Fresh-id creation: an initiationId never seen before opens a new
-// conversation, adopting it verbatim as conversationId.
+// conversation, adopting it verbatim as correlationId.
 func TestFreshInitiationIDOpensANewConversation(t *testing.T) {
 	mkProfile(t, "prof-corr-fresh")
 	mkSignalSource(t, "src-corr-fresh", "corr-fresh", "")
@@ -88,8 +88,8 @@ func TestFreshInitiationIDOpensANewConversation(t *testing.T) {
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
 	}
-	if convs[0].Spec.ConversationID != "corr-fresh-1" {
-		t.Fatalf("a fresh id must be adopted verbatim, got %q", convs[0].Spec.ConversationID)
+	if convs[0].Spec.CorrelationID != "corr-fresh-1" {
+		t.Fatalf("a fresh id must be adopted verbatim, got %q", convs[0].Spec.CorrelationID)
 	}
 }
 
@@ -118,7 +118,7 @@ func TestDistinctInitiationIDsNeverMerge(t *testing.T) {
 	}
 	ids := map[string]bool{}
 	for _, c := range convs {
-		ids[c.Spec.ConversationID] = true
+		ids[c.Spec.CorrelationID] = true
 		if len(c.Spec.Inputs) != 1 {
 			t.Fatalf("%s: each conversation owns exactly its own input, got %+v", c.Name, c.Spec.Inputs)
 		}
@@ -129,7 +129,7 @@ func TestDistinctInitiationIDsNeverMerge(t *testing.T) {
 }
 
 // Closed-conversation exclusion: a CLOSED conversation is never matched by
-// equality routing even though its conversationId still equals the incoming
+// equality routing even though its correlationId still equals the incoming
 // initiationId — the repeat opens a new conversation rather than reusing a
 // conversation somebody tidied away.
 func TestClosedConversationExcludedFromEqualityRouting(t *testing.T) {

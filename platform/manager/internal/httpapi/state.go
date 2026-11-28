@@ -91,7 +91,7 @@ func conversationSpecWire(r *state.ConversationRecord) agentopsv1alpha1.Conversa
 		ProfileRef:            agentopsv1alpha1.ObjectRef{Name: r.ProfileRef},
 		PipelineRef:           ref(r.PipelineRef),
 		Title:                 r.Title,
-		ConversationID:        r.ConversationID,
+		CorrelationID:         r.CorrelationID,
 		RuntimeRef:            ref(r.RuntimeRef),
 		ServiceAccountName:    r.ServiceAccountName,
 		ContextClaimName:      r.ContextClaimName,

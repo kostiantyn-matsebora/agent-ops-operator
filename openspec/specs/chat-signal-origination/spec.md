@@ -148,7 +148,7 @@ through the signal path, carrying that Pipeline's profile AND its
 capabilities.
 
 The named Pipeline is the `Signal`'s one claimant. Its conversation adopts
-the signal's `initiationId` as its `conversationId`, so a repeated pass
+the signal's `initiationId` as its `correlationId`, so a repeated pass
 finds it instead of opening a second.
 
 The retired listing spelling `/agents` SHALL keep answering. It SHALL NOT be
@@ -171,7 +171,7 @@ printed, offered or registered anywhere.
 - **WHEN** a user sends `/k8s-ops check nodes` naming a Ready Pipeline
 - **THEN** a task conversation is created for `k8s-ops`, carrying its profile,
   channel set and capabilities, with the `Signal`'s `initiationId` as its
-  `conversationId`
+  `correlationId`
 
 #### Scenario: A repeated pass over an addressed message opens one conversation
 
@@ -189,7 +189,7 @@ A chat surface applies the contract's one id rule — minted or propagated — a
 | Case | Instance of | The id |
 |---|---|---|
 | a new human request | minting — the request is its own aggregation unit | a FRESH `initiationId`, own conversation by construction |
-| a person writing into a thread the manager already bound | propagation — the thread carries the manager-issued id back | the `conversationId` the manager stamped on that thread binding, passed through verbatim |
+| a person writing into a thread the manager already bound | propagation — the thread carries the manager-issued id back | the `correlationId` the manager stamped on that thread binding, passed through verbatim |
 
 A fresh origination id SHALL be minted deterministically from the transport's own delivery identity, scoped to the matched SOURCE — never from the delivery identity alone.
 
@@ -216,7 +216,7 @@ No chat-specific routing branch and no second addressing mode SHALL exist manage
 
 #### Scenario: A thread reply echoes the stamped id
 
-- **WHEN** a person writes into a thread the manager bound, and the surface sends the `conversationId` stamped on that binding as the signal's `initiationId`
+- **WHEN** a person writes into a thread the manager bound, and the surface sends the `correlationId` stamped on that binding as the signal's `initiationId`
 - **THEN** equality routing appends the message to that open conversation, with no special inbound path
 
 #### Scenario: A re-delivered update is not a second question
@@ -279,7 +279,7 @@ Each adapter tags the ids it mints with its own tag, and this adapter's tag is `
 
 The `signalId` is the same string a fresh `initiationId` is minted as.
 
-For a thread reply the `initiationId` is the propagated `conversationId`
+For a thread reply the `initiationId` is the propagated `correlationId`
 while the `signalId` stays the delivery's own, so two replies in one thread
 are two messages that correlate to one conversation.
 
@@ -291,5 +291,5 @@ are two messages that correlate to one conversation.
 #### Scenario: Two replies in one thread are two messages
 
 - **WHEN** a person sends two replies in a bound thread
-- **THEN** both carry the thread's `conversationId` as `initiationId` and
+- **THEN** both carry the thread's `correlationId` as `initiationId` and
   different `signalId`s, and two `Signal`s exist

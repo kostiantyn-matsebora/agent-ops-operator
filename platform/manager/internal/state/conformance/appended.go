@@ -114,7 +114,7 @@ func RunAppended[P, T any](t *testing.T, open func() AppendedOpen[P, T], fx Appe
 func createParent[P, T any](t *testing.T, o AppendedOpen[P, T], fx AppendedFixture[P, T], name string) state.Key {
 	t.Helper()
 	key := state.Key(name)
-	if _, err := o.Parent.Create(context.Background(), key, fx.NewParent()); err != nil {
+	if _, _, err := o.Parent.Create(context.Background(), key, fx.NewParent()); err != nil {
 		t.Fatalf("Create parent %q: %v", name, err)
 	}
 	return key
@@ -632,7 +632,7 @@ func testDeleteTakesItems[P, T any](t *testing.T, o AppendedOpen[P, T], fx Appen
 		t.Fatalf("Append to a deleted parent = %v, want ErrNotFound", err)
 	}
 
-	if _, err := o.Parent.Create(ctx, key, fx.NewParent()); err != nil {
+	if _, _, err := o.Parent.Create(ctx, key, fx.NewParent()); err != nil {
 		t.Fatalf("recreate the parent: %v", err)
 	}
 	eventually(t, "the recreated parent has none of the old items", func() bool {

@@ -60,8 +60,14 @@ type Op struct {
 //
 // IT DOES NOT MOVE FOR THE BLOCK GRAMMAR. The body is markdown plus a grammar,
 // and the SPA parses both — see ui/src/api/blocks.ts. Nothing was added to the
-// wire, so there is nothing to version.
-const ContractVersion = "2"
+// wire for that, so there was nothing to version.
+//
+// Version 3 (conversation-identity): the op's `conversationId` field changes
+// meaning from the correlation key to the conversation's system identity, and
+// the correlation key moves to a new `correlationId` field. This console reads
+// neither today, but an adapter declaring 2 would be handed a `conversationId`
+// that quietly means something else, so it must move with the manager.
+const ContractVersion = "3"
 
 // VocabularyRevisionHeader carries the current vocabulary revision on every
 // /channel/ops long-poll response — the 200 that delivers an op, the 204 and

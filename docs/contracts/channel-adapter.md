@@ -15,7 +15,7 @@ next:
   url: /agent-ops-operator/crds/channel-adapter/
 ---
 
-**Version 2.0.0**
+**Version 3.0.0**
 
 This specification gives everything necessary to build and maintain a
 `ChannelAdapter` — a component agent-ops does not ship, that carries a
@@ -46,7 +46,7 @@ stable ID, prefixed by the section it belongs to:
 
 Long-polls for this adapter's next outbound operation, **without taking it**.
 
-`GET $MANAGER_URL/channel/ops?adapter=<name>&contract=2&wait=25`
+`GET $MANAGER_URL/channel/ops?adapter=<name>&contract=3&wait=25`
 
 | Param | Required | Meaning |
 |---|---|---|
@@ -83,7 +83,8 @@ that delivers an op and the `204` alike. See
 | `id` | string | yes | Dedup key. Delivery is at-least-once — tolerate a repeated id. |
 | `channel` | string | yes | The `Channel` CR this op targets. |
 | `conversation` | string | no | The `Conversation` this op belongs to. Empty for a manager notice bound to no conversation. |
-| `conversationId` | string | no | The conversation's manager-issued correlation id, carried beside `conversation`. OPAQUE to the adapter — carried, compared, never parsed. Absent on an operation for a conversation created before this field existed. |
+| `conversationId` | string | no | The conversation's system identity (`conversation-identity`), carried beside `conversation`. OPAQUE to the adapter — carried, compared for equality, never parsed, never shown to a person as a name. Absent on an operation for a conversation created before this field existed. |
+| `correlationId` | string | no | The signal's adopted correlation id — the old meaning of `conversationId`, renamed. OPAQUE to the adapter. Absent for a chat-originated conversation, or one created before the field existed. |
 | `kind` | string | yes | One of [the typed operations](#typed-operations). |
 | `threadId` | string | no | The send target. Absent means the channel's general surface. |
 | `topic` | object | no | A [topic descriptor](#the-topic-descriptor). Set only on `ensure-topic`. |
@@ -103,7 +104,7 @@ that delivers an op and the `204` alike. See
 | `OPS-1` | An adapter MUST long-poll this endpoint while able to accept ops. `204` is not an error. |
 | `OPS-2` | A `503` from a replica or a proxy in front of it MUST be treated exactly like a `204` — retried at once, on a fresh connection, never surfaced as an error. |
 | `OPS-3` | An adapter not implementing a kind MAY complete it with an `error`, or ignore it. |
-| `OPS-9` | Every operation additionally carries `conversationId`, beside the channel and conversation names it already carries. The field is ADDITIVE — an adapter that ignores it MUST remain fully conformant, declaring the same `contract` version. |
+| `OPS-9` | Every operation additionally carries `conversationId` (the system identity) and `correlationId` (the adopted correlation id), beside the channel and conversation names it already carries. `correlationId` is ADDITIVE, but `conversationId` changed meaning and that change is BREAKING (contract `3`). An adapter MUST declare `contract=3`. |
 
 ### Delivery operation ids are published shapes
 
@@ -220,7 +221,7 @@ connection. It is available to an adapter the manager is configured to treat as
 [receipt-only](#the-receipt-only-adapter), the console by default. Any other
 adapter is answered `404` and reads the long-poll.
 
-`GET $MANAGER_URL/channel/ops/stream?adapter=<name>&contract=2`
+`GET $MANAGER_URL/channel/ops/stream?adapter=<name>&contract=3`
 
 | Param | Required | Meaning |
 |---|---|---|
@@ -297,9 +298,9 @@ Pushes a user reply into an existing conversation thread.
 | `IN-1` | The manager MUST refuse a request with no `threadId` — this endpoint continues an existing conversation and never starts one. A general-surface message is an ORIGINATION, posted instead as a chat signal to `POST /signal/inbound` from a chat `SignalSource` a Ready Pipeline claims. |
 | `IN-2` | A message naming a thread the manager does not know MUST be dropped, not adopted. |
 | `IN-3` | The manager MUST refuse a message whose origin surface names the thread's own target conversation — the shape a self-feeding loop takes. |
-| `IN-4` | A reply on a bound thread is correlated by that binding's `conversationId`, not minted by the adapter — see `ADA-14`. |
+| `IN-4` | A reply on a bound thread is correlated by that binding's `correlationId`, not minted by the adapter — see `ADA-14`. |
 | `ADA-5` | An adapter MUST NOT re-ingest its own outbound post as inbound. Delivery to the other bound surfaces, and busy-acks, happen manager-side — a reply the adapter pushes is delivered back to it only when it declares `echoesOwnMessages: false`. |
-| `ADA-14` | A channel adapter MUST NOT create, derive, or alter any conversation id. The manager-issued `conversationId` reaches it already attached to the binding and its operations. The adapter's only id work is transport translation: `conversationId` on one side, the thread id on the other. Origination stays on the signal lane — no `/channel/*` route accepts a new conversation. |
+| `ADA-14` | A channel adapter MUST NOT create, derive, or alter any correlation id. The manager-issued `correlationId` reaches it already attached to the binding and its operations. The adapter's only id work is transport translation: `correlationId` on one side, the thread id on the other. Origination stays on the signal lane — no `/channel/*` route accepts a new conversation. |
 
 ## GET /channel/channels
 
@@ -552,7 +553,7 @@ All `/channel/*` calls carry `Authorization: Bearer <token>`.
 | `ADA-3`/`ADA-3.1`/`ADA-3.2`/`ADA-3.3`/`ADA-4` | **Absorb retryable backpressure inside the delivery TTL, PER OPERATION never per call**, and **own its outbound pacing** — see [Backpressure](#backpressure-is-the-adapters-to-absorb). |
 | `ADA-5` | **Never re-ingest its own outbound post as inbound.** |
 | `ADA-6` | **Declare `echoesOwnMessages` truthfully**, and decide for itself what its transport can express from the UNFILTERED vocabulary. |
-| `ADA-14` | **Never create, derive, or alter a `conversationId`** — translate it to and from the transport's own thread id, and nothing more. |
+| `ADA-14` | **Never create, derive, or alter a `correlationId`** — translate it to and from the transport's own thread id, and nothing more. |
 | `ADA-15` | **Treat an id matching no published shape as opaque** — see [Delivery operation ids](#delivery-operation-ids-are-published-shapes). |
 
 ### Optional capabilities
@@ -581,7 +582,7 @@ An adapter implementing none of these stays fully conformant — see
 | `MGR-6` | **Delivery recording** — completions land on the Conversation: the thread id in `status.threads[]`, the archive in `status.threadsArchived[]`, read watermarks on the thread bindings. |
 | `MGR-6.1` | **Delivery exclusion** — an input MUST be delivered to every bound channel except the surface it entered on, unless that surface declares `ChannelAdapter.spec.echoesOwnMessages: false`. |
 | `MGR-6.2` | **Idempotent reply ids** — a reply op's id MUST be stable per conversation × channel × run (`send:<conversation>:<channel>:<runId>`), so a manager restart between a run's completion and its delivery re-derives the answer, appending the channel to `status.runs[].delivered[]`. |
-| `MGR-12` | **`conversationId` on every op** — each operation delivered on `/channel/ops` additionally carries the conversation's correlation id, ADDITIVE and opaque to the adapter, absent only on a conversation created before the field existed. |
+| `MGR-12` | **`conversationId` and `correlationId` on every op** — each operation delivered on `/channel/ops` additionally carries the conversation's system identity (`conversationId`) and its adopted correlation id (`correlationId`), both opaque to the adapter (`correlationId` is additive, the changed meaning of `conversationId` is BREAKING, contract `3`), absent only on a conversation created before the field existed. |
 | `MGR-13` | **The op stream** — `GET /channel/ops/stream`, the long-poll's ops pushed to a receipt adapter in queue order, on any replica (`OPS-12` to `OPS-16`). OPTIONAL: an adapter that never calls it is unaffected. |
 | `MGR-14` | **The receipt-only exception** — adapters named by `CHANNEL_RECEIPT_ADAPTERS` acknowledge on receipt, with no delivery TTL and no report (`OPS-24` to `OPS-26`). |
 
@@ -648,6 +649,7 @@ Both stay fully conformant with this version unchanged.
 
 | Version | Date | Changed |
 |---|---|---|
+| 3.0.0 | 2026-11-22 | **BREAKING.** The wire `contract` value moves to `3`. `conversationId` on every `/channel/ops` operation now carries the conversation's system identity (`conversation-identity`), not the correlation key. The correlation key moves to the new `correlationId` field, carrying exactly what `conversationId` carried before. An adapter declaring `contract=2` is refused `400` naming the version to build against (`MGR-12`). `OPS-9`, `ADA-14` and `IN-4` are reworded for the rename. |
 | 2.0.0 | 2026-11-13 | **BREAKING.** An outbound operation is taken in three steps: a read that changes nothing, an acknowledgement (`POST /channel/ops/{id}/ack`) that hands it over and starts a per-kind delivery TTL, and a report (`/done`) that is done or failed. The manager never resends an acknowledged op, fails one with no report at its TTL, and a failure is final (`OPS-18` to `OPS-23`, `MGR-2`). `reclaimAfterSeconds` and the claim window are removed. An adapter that never acknowledges is offered the same op forever, so adapter images upgrade together with the manager. Added an optional push stream, `GET /channel/ops/stream`, and the receipt-only exception for the console (`OPS-12` to `OPS-16`, `OPS-24` to `OPS-26`, `MGR-13`, `MGR-14`). The wire `contract` value is unchanged. |
 | 1.3.0 | 2026-10-21 | The retry budget is explicitly PER OPERATION, never per transport call — every call an operation makes charges one total (`ADA-3.2`, `ADA-3.3`, `OPS-4`). Published the two delivery operation id shapes, `send:<conversation>:<channel>:<runId>` and `input:<conversation>:<input>:<channel>` (`OPS-10`, `OPS-11`, `ADA-15`) — any other id stays opaque. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the published shapes stays fully conformant. |
 | 1.2.0 | 2026-10-21 | The typed message's `signal` kind may carry an optional `severity` — one of `critical`, `error`, `warning`, `info`, mirroring the signal adapter contract's own field. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the field stays fully conformant. |

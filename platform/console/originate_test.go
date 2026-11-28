@@ -86,7 +86,7 @@ func TestOriginatorPostsAChatSignal(t *testing.T) {
 
 // TestOriginatorPropagatesAGivenInitiationIDVerbatim pins the console's
 // second case: a continuation into a conversation it already displays passes
-// that conversation's own conversationId through as initiationId, byte for
+// that conversation's own correlationId through as initiationId, byte for
 // byte — no re-mint, no re-derivation. Start has no way to tell the two
 // cases apart itself; the caller's choice of argument IS the decision.
 func TestOriginatorPropagatesAGivenInitiationIDVerbatim(t *testing.T) {

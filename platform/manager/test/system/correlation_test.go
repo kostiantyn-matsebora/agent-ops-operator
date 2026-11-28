@@ -84,11 +84,11 @@ func TestCorrelationDistinctIDsOpenSeparateConversations(t *testing.T) {
 	if convA.Name == convB.Name {
 		t.Fatalf("two distinct initiationIds must never share one conversation, both resolved to %s", convA.Name)
 	}
-	if convA.Spec.ConversationID != idA {
-		t.Fatalf("a fresh id must be adopted verbatim as conversationId, got %q want %q", convA.Spec.ConversationID, idA)
+	if convA.Spec.CorrelationID != idA {
+		t.Fatalf("a fresh id must be adopted verbatim as correlationId, got %q want %q", convA.Spec.CorrelationID, idA)
 	}
-	if convB.Spec.ConversationID != idB {
-		t.Fatalf("a fresh id must be adopted verbatim as conversationId, got %q want %q", convB.Spec.ConversationID, idB)
+	if convB.Spec.CorrelationID != idB {
+		t.Fatalf("a fresh id must be adopted verbatim as correlationId, got %q want %q", convB.Spec.CorrelationID, idB)
 	}
 	all, err := conversationsFromSource(ctx, e, "e2e-corr-distinct")
 	if err != nil {
@@ -119,12 +119,12 @@ func TestCorrelationMissingInitiationIDIsRejected(t *testing.T) {
 	}
 }
 
-// 9.1.c A thread binding carries the conversationId end to end: a signal
+// 9.1.c A thread binding carries the correlationId end to end: a signal
 // opens a conversation bound to two real channel threads (console and the
 // Telegram lane, through the fake Bot API), and the SAME conversation
-// object — identified by the conversationId it adopted from the posted
+// object — identified by the correlationId it adopted from the posted
 // initiationId — is the one that owns both bindings. The wire-level
-// conversationId field on each /channel/ops operation is pinned at the
+// correlationId field on each /channel/ops operation is pinned at the
 // dispatch/chat unit tier (task 3.5); what only a live cluster adds is that
 // a real signal POST really drives a real channel adapter into really
 // creating a real thread for that same object.
@@ -136,15 +136,15 @@ func TestCorrelationIDReachesThreadBinding(t *testing.T) {
 	e.PostTask(t, SourceFanout, id, "echo correlation-bind "+stamp)
 
 	conv := e.ConversationFor(t, id, 2*time.Minute)
-	if conv.Spec.ConversationID != id {
-		t.Fatalf("the opened conversation must adopt the posted initiationId verbatim, got %q want %q", conv.Spec.ConversationID, id)
+	if conv.Spec.CorrelationID != id {
+		t.Fatalf("the opened conversation must adopt the posted initiationId verbatim, got %q want %q", conv.Spec.CorrelationID, id)
 	}
 	waitFor(t, "two thread bindings on the conversation carrying this id", 2*time.Minute, func() (bool, error) {
 		c, err := e.K.Conversation(ctx, conv.Name)
 		if err != nil {
 			return false, err
 		}
-		return c.Spec.ConversationID == id && len(c.Status.Threads) == 2, nil
+		return c.Spec.CorrelationID == id && len(c.Status.Threads) == 2, nil
 	})
 	waitFor(t, "a forum topic opened for this signal-originated conversation", 2*time.Minute, func() (bool, error) {
 		return len(e.BotCalls(t, "createForumTopic")) > 0, nil

@@ -79,7 +79,10 @@ type WorkUnit struct {
 	// RunID is a unique id for this unit, echoed back in the completion
 	// report.
 	RunID string `json:"runId"`
-	// Convo is the Conversation this unit belongs to.
+	// Convo is the Conversation this unit belongs to, by its ID — a runtime
+	// that echoes this field back on its completion report (rather than its
+	// own CONVO_ID env var) must still resolve, since /work/done looks the
+	// report's convo up strictly by ID.
 	Convo string `json:"convo"`
 	// ThreadID is the bound channel's thread id, present only for a
 	// conversation bound to exactly one channel. The runtime never posts to
@@ -358,7 +361,7 @@ func Next(c *state.ConversationRecord, profile *agentopsv1alpha1.AgentProfile, t
 
 	runID := now.UTC().Format("2006-01-02T15-04-05-000Z")
 	unit := WorkUnit{
-		Convo:        c.Name,
+		Convo:        c.ID,
 		ThreadID:     singleThread(c),
 		AllowedTools: tools.AllowedTools,
 		ToolsMode:    tools.Mode,

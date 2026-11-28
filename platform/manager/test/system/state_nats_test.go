@@ -113,7 +113,7 @@ func conversationExistsFor(ctx context.Context, e *Env, id string) (bool, error)
 		return false, err
 	}
 	for i := range items {
-		if items[i].Spec.Title == id || items[i].Spec.ConversationID == id {
+		if items[i].Spec.Title == id || items[i].Spec.CorrelationID == id {
 			return true, nil
 		}
 	}
@@ -229,7 +229,7 @@ func TestNatsTwoServersDownHoldsWorkThenResumes(t *testing.T) {
 			return
 		}
 		for i := range items {
-			if items[i].Spec.Title == outageID || items[i].Spec.ConversationID == outageID {
+			if items[i].Spec.Title == outageID || items[i].Spec.CorrelationID == outageID {
 				_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: items[i].Name}})
 			}
 		}

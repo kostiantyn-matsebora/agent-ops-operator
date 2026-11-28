@@ -86,7 +86,7 @@ func TestContextSyncIsolatesTheAgentFromTheVolume(t *testing.T) {
 	assertLiveAndDurableContextVolumesExist(t, pod)
 	assertAgentContainerNeverMountsDurableVolume(t, pod)
 	assertAgentAndSidecarAgreeOnLiveContextPath(t, pod)
-	assertSidecarMountsDurableVolumePerConversation(t, pod, "c1")
+	assertSidecarMountsDurableVolumePerConversation(t, pod, idFor("c1"))
 }
 
 func assertLiveAndDurableContextVolumesExist(t *testing.T, pod *corev1.Pod) {
@@ -136,7 +136,7 @@ func assertAgentAndSidecarAgreeOnLiveContextPath(t *testing.T, pod *corev1.Pod) 
 	}
 }
 
-func assertSidecarMountsDurableVolumePerConversation(t *testing.T, pod *corev1.Pod, convName string) {
+func assertSidecarMountsDurableVolumePerConversation(t *testing.T, pod *corev1.Pod, convID string) {
 	t.Helper()
 	sc := container(pod, "context-sync")
 	if sc == nil {
@@ -151,9 +151,10 @@ func assertSidecarMountsDurableVolumePerConversation(t *testing.T, pod *corev1.P
 	if store == nil {
 		t.Fatal("the sidecar must mount the durable volume")
 	}
-	// Per conversation, or two concurrent pods erase each other's context.
-	if store.SubPath != convName {
-		t.Fatalf("store subPath = %q, want the conversation name", store.SubPath)
+	// Per conversation ID, or two concurrent pods erase each other's context,
+	// and a recreated name would resume a deleted conversation's.
+	if store.SubPath != convID {
+		t.Fatalf("store subPath = %q, want the conversation's ID", store.SubPath)
 	}
 }
 
@@ -180,8 +181,8 @@ func TestContextSyncRedirectsTheWorkContract(t *testing.T) {
 	if got := envOf(sc, "CONTEXT_SYNC_INTERVAL"); got != "2m0s" {
 		t.Fatalf("interval = %q", got)
 	}
-	if got := envOf(sc, "CONVO_ID"); got != "c1" {
-		t.Fatalf("convo = %q", got)
+	if got := envOf(sc, "CONVO_ID"); got != idFor("c1") {
+		t.Fatalf("convo = %q, want the conversation's ID", got)
 	}
 }
 

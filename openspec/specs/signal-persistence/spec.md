@@ -384,7 +384,7 @@ before. That is fire-and-forget: a lost notice loses no fact, because the
 Each claimant SHALL be routed idempotently by equality reuse:
 
 - the match is an open conversation the claimant itself originated whose
-  `conversationId` equals the signal's `initiationId`
+  `correlationId` equals the signal's `initiationId`
 - the lookup SHALL read the API server directly, never an informer cache
 - one claimant's conversation never satisfies another's lookup
 - a match means the conversation exists, so the consumer appends this
@@ -392,7 +392,7 @@ Each claimant SHALL be routed idempotently by equality reuse:
 - a repeat of an `initiationId` whose conversation is open is therefore
   routed by equality reuse, never dropped as a duplicate
 - an addressed claimant's conversation adopts the `initiationId` as its
-  `conversationId`, the same as every other claimant's
+  `correlationId`, the same as every other claimant's
 
 The append SHALL be idempotent per `Signal`. The consumer writes the
 `ConversationInput` under a name derived deterministically from the
@@ -418,13 +418,13 @@ The consumer SHALL move the source's `status.receivedTotal` and
 - **WHEN** a consumer creates a claimant's conversation and the leader stops
   before the status write
 - **THEN** the repeated pass's direct lookup finds the open conversation that
-  claimant originated whose `conversationId` equals the `initiationId`,
+  claimant originated whose `correlationId` equals the `initiationId`,
   creates no second conversation, and records `Routed`
 
 #### Scenario: A repeat of an open conversation's id is appended
 
 - **WHEN** a second `Signal` arrives whose `initiationId` equals an open
-  conversation's `conversationId` for the claimant, outside the cooldown
+  conversation's `correlationId` for the claimant, outside the cooldown
 - **THEN** its consumer appends the payload to that conversation as a
   recurrence, creates no second conversation, and records `Routed`
 
@@ -438,7 +438,7 @@ The consumer SHALL move the source's `status.receivedTotal` and
 #### Scenario: One claimant's conversation never answers for another
 
 - **WHEN** two claimants share a signal and only the first has an open
-  conversation with the matching `conversationId`
+  conversation with the matching `correlationId`
 - **THEN** the second claimant's attempt creates its own conversation, and
   the first's is left untouched
 
@@ -447,7 +447,7 @@ The consumer SHALL move the source's `status.receivedTotal` and
 - **WHEN** a consumer processes a chat `Signal` whose payload is
   `/k8s-ops check nodes` on a source two Pipelines serve
 - **THEN** `status.claimants[]` holds `k8s-ops` alone, `Routed` to a
-  conversation whose `conversationId` is the `initiationId`
+  conversation whose `correlationId` is the `initiationId`
 
 #### Scenario: A full backlog makes a machine signal wait
 

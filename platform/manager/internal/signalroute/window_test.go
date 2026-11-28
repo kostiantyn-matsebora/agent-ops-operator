@@ -34,15 +34,17 @@ func (m *memCollection[T]) Get(_ context.Context, k state.Key) (T, state.Revisio
 	return rec, state.Revision(strconv.Itoa(m.revs[k])), nil
 }
 
-func (m *memCollection[T]) Create(_ context.Context, k state.Key, rec T) (state.Revision, error) {
+func (m *memCollection[T]) Create(_ context.Context, k state.Key, rec T) (T, state.Revision, error) {
 	if m.gone {
-		return "", state.ErrNotFound
+		var zero T
+		return zero, "", state.ErrNotFound
 	}
 	if _, ok := m.recs[k]; ok {
-		return "", state.ErrAlreadyExists
+		var zero T
+		return zero, "", state.ErrAlreadyExists
 	}
 	m.recs[k], m.revs[k] = rec, 1
-	return "1", nil
+	return rec, "1", nil
 }
 
 func (m *memCollection[T]) Update(_ context.Context, k state.Key, rev state.Revision, rec T) (state.Revision, error) {
@@ -140,12 +142,13 @@ type racyCreate[T any] struct {
 	raced bool
 }
 
-func (r *racyCreate[T]) Create(ctx context.Context, k state.Key, rec T) (state.Revision, error) {
+func (r *racyCreate[T]) Create(ctx context.Context, k state.Key, rec T) (T, state.Revision, error) {
 	if !r.raced {
 		r.raced = true
 		// The other writer's create lands first, with whatever it had.
-		_, _ = r.memCollection.Create(ctx, k, rec)
-		return "", state.ErrAlreadyExists
+		_, _, _ = r.memCollection.Create(ctx, k, rec)
+		var zero T
+		return zero, "", state.ErrAlreadyExists
 	}
 	return r.memCollection.Create(ctx, k, rec)
 }

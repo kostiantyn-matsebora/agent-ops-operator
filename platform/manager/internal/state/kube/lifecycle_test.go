@@ -27,7 +27,7 @@ func getObject(t *testing.T, ns, name string) *agentopsv1alpha1.Conversation {
 func TestIdentityIsTheObjectUIDAndCreationTime(t *testing.T) {
 	ns, s := newTestNamespace(t)
 	rec := fixtureRecord("conv-identity-uid")
-	if _, err := s.Conversations.Create(context.Background(), state.Key(rec.Name), rec); err != nil {
+	if _, _, err := s.Conversations.Create(context.Background(), state.Key(rec.Name), rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got, _, err := s.Conversations.Get(context.Background(), state.Key(rec.Name))
@@ -45,7 +45,7 @@ func TestFinalizersRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	rec := fixtureRecord("conv-finalizers")
 	rec.Finalizers = []string{"example.com/hold"}
-	rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
+	_, rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestUpdateKeepsMetadataTheRecordDoesNotModel(t *testing.T) {
 	ns, s := newTestNamespace(t)
 	ctx := context.Background()
 	rec := fixtureRecord("conv-foreign-meta")
-	rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
+	_, rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestLookupLabelsMirrorTheRecord(t *testing.T) {
 	ns, s := newTestNamespace(t)
 	ctx := context.Background()
 	rec := fixtureRecord("conv-labels")
-	rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
+	_, rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestGrowWritesNothingWhenAlreadySatisfied(t *testing.T) {
 	ns, s := newTestNamespace(t)
 	ctx := context.Background()
 	key := state.Key("conv-run-noop")
-	if _, err := s.Conversations.Create(ctx, key, fixtureRecord("conv-run-noop")); err != nil {
+	if _, _, err := s.Conversations.Create(ctx, key, fixtureRecord("conv-run-noop")); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if err := s.Runs.Append(ctx, key, state.Run{RunID: "r1", DeliveryTracked: true, RoutedToParent: true, Delivered: []string{"chan-a"}}); err != nil {
@@ -163,7 +163,7 @@ func TestInstantsReadBackInUTCUnderANonUTCLocalZone(t *testing.T) {
 	ctx := context.Background()
 	rec := fixtureRecord("conv-utc-kube")
 	rec.Finalizers = nil
-	if _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
+	if _, _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got, _, err := s.Conversations.Get(ctx, state.Key(rec.Name))

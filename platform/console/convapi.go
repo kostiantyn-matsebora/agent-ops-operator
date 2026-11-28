@@ -676,7 +676,7 @@ func (a *API) handleStart(w http.ResponseWriter, r *http.Request) {
 	// the as-typed recovery were all standing in for.
 	// A fresh task from the start form is its own aggregation unit — a new
 	// conversation by construction, never a continuation of one the console
-	// already displays (that case propagates the bound conversationId
+	// already displays (that case propagates the bound correlationId
 	// instead; see Originator.Start).
 	reason, err := a.originator.Start(r.Context(), a.adapter.PrimaryChannel(), Identity(r),
 		a.adapter.ReaderKey(Identity(r)), in.Task, FreshInitiationID())

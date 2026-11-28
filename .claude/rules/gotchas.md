@@ -18,6 +18,7 @@
 | A hand-patched field survives `helm upgrade` | 3-way merge only patches diffs, check the OBJECT |
 | Kubelet remembers a pulled image ID forever | push a DERIVED image (extra `LABEL`) |
 | Cilium: EPERM not ECONNREFUSED on no endpoint | a rollout race, check endpoint/ReplicaSet age |
+| A member-result dedup id built from `conv.Name` | reopens the exact name-reuse hazard `conversation-identity` closes — key it on `conv.ID` in BOTH the fast path (`internal/httpapi/server.go`) and the reconciler backstop (`internal/controller/conversation_controller.go`'s `deliverMemberResults`), which must agree on the string or the backstop never recognizes the fast path's append |
 | HA config-entry failures log under `config_entries` | parse the domain from the MESSAGE TEXT |
 | Telegram's `reply_to_message` never nests | name the addressed form in the menu text |
 | Two `getUpdates` consumers, one bot token | 409s — stop the old poller, confirm, then start new |

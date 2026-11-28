@@ -35,9 +35,26 @@ func closeTestScheme(t *testing.T) *runtime.Scheme {
 	return s
 }
 
+// assignUIDs gives every pre-seeded fixture a UID derived from its own Name
+// when it carries none — the fake client, unlike a real apiserver, never
+// mints one for an object seeded through WithObjects. conversation-identity
+// moved CausedBy.Parent to the parent's ID, and most fixtures in this
+// package still write it as the parent's Name — the trivial, legitimate
+// case the design permits, where a test does not care whether the two
+// differ. A test that DOES care sets a distinct UID itself, which this never
+// overrides.
+func assignUIDs(objs []client.Object) {
+	for _, o := range objs {
+		if o.GetUID() == "" {
+			o.SetUID(types.UID(o.GetName()))
+		}
+	}
+}
+
 // closeFixture builds a conversation bound to two channels, each with a thread.
 func closeFixture(t *testing.T, objs ...client.Object) (*Router, *OpQueue, client.Client) {
 	t.Helper()
+	assignUIDs(objs)
 	// WithStatusSubresource: closing is a STATUS write now, and the fake client
 	// silently drops status patches for types it does not know have the
 	// subresource — which would make every assertion here pass for the wrong

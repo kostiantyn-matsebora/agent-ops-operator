@@ -436,7 +436,7 @@ func TestStateSignalsListIncludesTheRecord(t *testing.T) {
 	srv := apiServer()
 
 	name := "state-list-sig"
-	if _, err := stores.Signals.Create(ctx, state.Key(name), state.SignalRecord{
+	if _, _, err := stores.Signals.Create(ctx, state.Key(name), state.SignalRecord{
 		Name: name, SourceRef: "state-list-src", Adapter: "cron", InitiationID: name,
 	}); err != nil {
 		t.Fatal(err)
@@ -498,7 +498,7 @@ func TestStateSignalsStreamResyncsOnUnknownSinceThenCarriesPutAndDelete(t *testi
 	}
 
 	name := "state-stream-sig"
-	if _, err := stores.Signals.Create(ctx, state.Key(name), state.SignalRecord{
+	if _, _, err := stores.Signals.Create(ctx, state.Key(name), state.SignalRecord{
 		Name: name, SourceRef: "state-stream-src", Adapter: "cron", InitiationID: name,
 	}); err != nil {
 		t.Fatal(err)

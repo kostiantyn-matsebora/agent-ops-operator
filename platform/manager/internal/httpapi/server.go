@@ -437,19 +437,19 @@ func (s *Server) resolvePayload(ctx context.Context) dispatch.PayloadResolver {
 }
 
 func (s *Server) handleWork(w http.ResponseWriter, r *http.Request) {
-	convoName := r.URL.Query().Get("convo")
+	convoID := r.URL.Query().Get("convo")
 	podName := r.URL.Query().Get("pod")
 	wait, _ := strconv.Atoi(r.URL.Query().Get("wait"))
 	if wait > 30 {
 		wait = 30
 	}
-	if convoName == "" {
+	if convoID == "" {
 		writeJSON(w, 400, map[string]string{"error": "missing convo"})
 		return
 	}
 	deadline := time.Now().Add(time.Duration(wait) * time.Second)
 	for {
-		unit, served, err := s.tryDispatch(r.Context(), convoName, podName)
+		unit, served, err := s.tryDispatch(r.Context(), convoID, podName)
 		if err != nil {
 			writeJSON(w, 500, map[string]string{"error": err.Error()})
 			return
@@ -518,8 +518,42 @@ func (s *Server) setToolingCondition(ctx context.Context, conv *state.Conversati
 	})
 }
 
-func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (dispatch.WorkUnit, bool, error) {
-	conv, rev, err := s.Conversations.Get(ctx, state.Key(convoName))
+// conversationByID resolves /work's convo= strictly by the runtime's own
+// CONVO_ID (conversation-identity Decision 1/7), never by the display Name a
+// reused name could share with an unrelated, later conversation. The runtime
+// pod is handed its CONVO_ID once, at creation (podspec.go), and echoes it
+// back on every poll for the rest of its life — a Name-keyed lookup here
+// would let a pod outlive its own Conversation's deletion and recreation
+// under the same name, and start polling a stranger's work queue.
+//
+// List has no revision, so this is Get's own compare-and-swap lookup done in
+// two steps: resolve the id to the record's current Name, then Get that Name
+// for the Revision the caller's own Update below is conditioned on.
+func (s *Server) conversationByID(ctx context.Context, id string) (state.ConversationRecord, state.Revision, error) {
+	matches, err := s.Conversations.List(ctx, state.ByID, id)
+	if err != nil {
+		return state.ConversationRecord{}, "", err
+	}
+	if len(matches) == 0 {
+		return state.ConversationRecord{}, "", fmt.Errorf("conversation id %q: %w", id, state.ErrNotFound)
+	}
+	return s.Conversations.Get(ctx, state.Key(matches[0].Name))
+}
+
+// anyChatChannel reports whether at least one named Channel resolves to an
+// adapter. A dangling ref counts as chat-less.
+func (s *Server) anyChatChannel(ctx context.Context, refs []string) bool {
+	for _, ref := range refs {
+		var ch agentopsv1alpha1.Channel
+		if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: ref}, &ch); err == nil && ch.Spec.Adapter != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) tryDispatch(ctx context.Context, convoID, podName string) (dispatch.WorkUnit, bool, error) {
+	conv, rev, err := s.conversationByID(ctx, convoID)
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -537,18 +571,8 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	// would deadlock on one broken channel; late topics catch up). Dangling
 	// channelRefs stay chat-less. Delivery itself needs no channel lookup — the
 	// operator routes every result to the bound channels after /work/done.
-	if len(conv.ChannelRefs) > 0 {
-		chatBound := false
-		for _, ref := range conv.ChannelRefs {
-			var ch agentopsv1alpha1.Channel
-			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: ref}, &ch); err != nil || ch.Spec.Adapter == "" {
-				continue
-			}
-			chatBound = true
-		}
-		if chatBound && len(conv.Threads) == 0 {
-			return dispatch.WorkUnit{}, false, nil
-		}
+	if len(conv.Threads) == 0 && s.anyChatChannel(ctx, conv.ChannelRefs) {
+		return dispatch.WorkUnit{}, false, nil
 	}
 	var profile agentopsv1alpha1.AgentProfile
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespaces.Control, Name: conv.ProfileRef}, &profile); err != nil {
@@ -754,8 +778,11 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	key := state.Key(d.Convo)
-	conv, _, err := s.Conversations.Get(ctx, key)
+	// d.Convo is the runtime's own CONVO_ID, echoed back verbatim from the
+	// value GET /work handed it — resolved the same way, by ID, never by a
+	// Name a deleted-and-recreated conversation could share with the one
+	// this report is actually for (conversation-identity Decision 1/7).
+	conv, _, err := s.conversationByID(ctx, d.Convo)
 	if err != nil {
 		code := 500
 		if errors.Is(err, state.ErrNotFound) {
@@ -764,6 +791,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
+	key := state.Key(conv.Name)
 	now := time.Now().UTC()
 	// An unavailable context during an OUTAGE holds its work instead of losing
 	// it: the input stays pending so it can be dispatched once contexts are
@@ -880,7 +908,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// landing after close's own silently reverted phase to Idle/Queued while
 	// leaving ClosedAt stamped — measured live on the chart-v14.0.0 release
 	// smoke (TestConsoleLifecycle/close_then_delete).
-	if err := s.setPhaseUnlessClosed(ctx, d.Convo, desiredPhase); err != nil {
+	if err := s.setPhaseUnlessClosed(ctx, conv.Name, desiredPhase); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -918,10 +946,14 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// nothing to route. The reconciler backstop re-derives a missed append from
 	// `causedBy and !RoutedToParent`.
 	if conv.CausedBy != nil && s.Router != nil {
-		dedup := "member:" + conv.Name + ":" + d.RunID
-		if err := s.Router.AppendMemberResult(ctx, conv.CausedBy, conv.Name, dedup, result); err != nil {
+		// Keyed on conv.ID, not conv.Name (conversation-identity Decision 6):
+		// a member deleted and recreated under the same name while its
+		// parent is still open must never have its first run's result
+		// skipped as a dup of its predecessor's.
+		dedup := "member:" + conv.ID + ":" + d.RunID
+		if err := s.Router.AppendMemberResult(ctx, conv.CausedBy, conv.ID, conv.Name, dedup, result); err != nil {
 			log.FromContext(ctx).Info("routing member result to parent (backstop will retry)",
-				"conversation", conv.Name, "parent", conv.CausedBy.Parent, "error", err.Error())
+				"conversation", conv.Name, "parentId", conv.CausedBy.Parent, "error", err.Error())
 		} else if err := s.Runs.Grow(ctx, key, d.RunID, state.Run{RoutedToParent: true}); err != nil &&
 			!errors.Is(err, state.ErrNotFound) {
 			log.FromContext(ctx).Info("marking run routed to parent (backstop will retry)",
@@ -1468,7 +1500,11 @@ func (s *Server) reachConversation(w http.ResponseWriter, r *http.Request) (*sta
 		return nil, false
 	}
 	conv, _, err := s.Conversations.Get(ctx, state.Key(name))
-	if err != nil {
+	if err != nil || !conv.Live() {
+		// A deletion-marked record (a finalizer still holding it) is not a
+		// live match (design conversation-identity, Decision 5) — answered
+		// identically to an absent name, never acted on while it is on its
+		// way out.
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown conversation %q", name)})
 		return nil, false
 	}
@@ -1528,12 +1564,17 @@ func (s *Server) handleConversationReopen(w http.ResponseWriter, r *http.Request
 // is never claimed before its own descendants have settled.
 func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if _, _, err := s.Conversations.Get(r.Context(), state.Key(name)); err != nil {
-		if errors.Is(err, state.ErrNotFound) {
-			writeJSON(w, 202, map[string]any{"ok": true, "invocationId": "", "taskIds": []string{}})
-			return
-		}
+	pre, _, err := s.Conversations.Get(r.Context(), state.Key(name))
+	if err != nil && !errors.Is(err, state.ErrNotFound) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, state.ErrNotFound) || !pre.Live() {
+		// A target already gone, or already on its way out under a
+		// finalizer, is the outcome delete wanted — same idempotent success
+		// as a genuinely absent name (design conversation-identity,
+		// Decision 5's live-match rule).
+		writeJSON(w, 202, map[string]any{"ok": true, "invocationId": "", "taskIds": []string{}})
 		return
 	}
 	conv, ok := s.reachConversation(w, r)
@@ -1566,22 +1607,31 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 // reaches is already Closed by the time its ancestor is (the close cascade
 // closes a whole subtree before any of it can be deleted), so there is no
 // "not yet closed" case to refuse here.
+//
+// Descendants resolves on the ROOT'S ID now (conversation-identity Decision
+// 6: causedBy.Parent holds ID, not Name), so the root's own record is read
+// FIRST, ahead of the subtree walk rather than after it — a root already
+// gone (another racing delete) yields an empty rootID, and Descendants of
+// an empty ID is empty by the index's own construction (state.ByCausedBy
+// excludes an empty Parent), so the walk degenerates to "just the root's
+// own delete" rather than erroring.
 func (s *Server) deleteCascadeRequests(ctx context.Context, rootName string) ([]commandbus.SubmitRequest, error) {
-	descendants, err := s.Router.Descendants(ctx, rootName)
+	var rootID string
+	if root, _, err := s.Conversations.Get(ctx, state.Key(rootName)); err == nil {
+		rootID = root.ID
+	}
+	descendants, err := s.Router.Descendants(ctx, rootID)
 	if err != nil {
 		return nil, err
 	}
-	names := deleteCascadeOrder(rootName, descendants)
+	names := deleteCascadeOrder(rootID, rootName, descendants)
 	// A name is reused by a later conversation, and the queue suppresses a
 	// repeated command id for its dedup window. The record's ID is new for
 	// every life of a name, so a delete of the next conversation under the
 	// same name is never swallowed as a repeat of the previous one's.
-	ids := map[string]string{}
+	ids := map[string]string{rootName: rootID}
 	for i := range descendants {
 		ids[descendants[i].Name] = descendants[i].ID
-	}
-	if root, _, err := s.Conversations.Get(ctx, state.Key(rootName)); err == nil {
-		ids[rootName] = root.ID
 	}
 	reqs := make([]commandbus.SubmitRequest, 0, len(names))
 	for _, name := range names {
@@ -1607,8 +1657,8 @@ func (s *Server) deleteCascadeRequests(ctx context.Context, rootName string) ([]
 // so it is written once and shared rather than kept as two copies that
 // could drift (this function stays, under its own name, only because
 // cascade_delete_test.go already pins it).
-func deleteCascadeOrder(rootName string, descendants []state.ConversationRecord) []string {
-	return convtask.CascadeOrder(rootName, descendants)
+func deleteCascadeOrder(rootID, rootName string, descendants []state.ConversationRecord) []string {
+	return convtask.CascadeOrder(rootID, rootName, descendants)
 }
 
 func phaseOrOpen(conv *state.ConversationRecord) string {
@@ -1813,7 +1863,7 @@ func putAdapterState(ctx context.Context, coll state.Collection[string], key sta
 	if !errors.Is(err, state.ErrNotFound) {
 		return err
 	}
-	_, err = coll.Create(ctx, key, v)
+	_, _, err = coll.Create(ctx, key, v)
 	if errors.Is(err, state.ErrAlreadyExists) {
 		// Lost a race against another writer's first Create: it exists now,
 		// so Mutate can get-modify-CAS it.

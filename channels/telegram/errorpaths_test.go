@@ -125,15 +125,15 @@ func nonLeaderManager(t *testing.T) *Manager {
 	return NewManager(srv.URL, "tok")
 }
 
-// TestNextOpCarriesConversationIDVerbatim pins the wire round-trip for
-// channel-adapter.md's OPS-9/MGR-12: the manager-issued conversationId
+// TestNextOpCarriesCorrelationIDVerbatim pins the wire round-trip for
+// channel-adapter.md's OPS-9/MGR-12: the manager-issued correlationId
 // reaches this adapter attached to the op, unparsed, and this adapter does
 // not mint, derive or substitute anything in its place -- the thread mapping
-// stays keyed on ThreadID alone (see Op.ConversationID's own comment).
-func TestNextOpCarriesConversationIDVerbatim(t *testing.T) {
+// stays keyed on ThreadID alone (see Op.CorrelationID's own comment).
+func TestNextOpCarriesCorrelationIDVerbatim(t *testing.T) {
 	mgr := opAndFailingComplete(t, Op{
 		ID: "op-1", Channel: "telegram-ops", Conversation: "conv-a",
-		ConversationID: "alertmanager/group-key-123", Kind: "send",
+		CorrelationID: "alertmanager/group-key-123", Kind: "send",
 	})
 	op, _, err := mgr.NextOp(context.Background(), "telegram-ops", 0)
 	if err != nil {
@@ -142,8 +142,8 @@ func TestNextOpCarriesConversationIDVerbatim(t *testing.T) {
 	if op == nil {
 		t.Fatal("NextOp returned no op")
 	}
-	if op.ConversationID != "alertmanager/group-key-123" {
-		t.Fatalf("ConversationID = %q, want the manager's own value carried verbatim", op.ConversationID)
+	if op.CorrelationID != "alertmanager/group-key-123" {
+		t.Fatalf("CorrelationID = %q, want the manager's own value carried verbatim", op.CorrelationID)
 	}
 }
 

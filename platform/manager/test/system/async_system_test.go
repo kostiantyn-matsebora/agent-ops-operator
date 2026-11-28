@@ -810,7 +810,7 @@ func readConsoleOpStream(t *testing.T, e *Env, auth string, want int, idle, limi
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	url := e.Manager.URL() + "/channel/ops/stream?adapter=console&contract=2"
+	url := e.Manager.URL() + "/channel/ops/stream?adapter=console&contract=3"
 	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
 	req.Header.Set("Authorization", auth)
 	resp, err := http.DefaultClient.Do(req)
@@ -907,7 +907,7 @@ func sendOwnEnsureTopic(ctx context.Context, data string, frames chan<- consoleO
 // report follows.
 func ackConsoleOp(t *testing.T, e *Env, auth string, f consoleOpFrame) {
 	t.Helper()
-	code, out := e.do(t, "POST", e.Manager.URL()+"/channel/ops/"+url.PathEscape(f.OpID)+"/ack?adapter=console&contract=2", nil, auth)
+	code, out := e.do(t, "POST", e.Manager.URL()+"/channel/ops/"+url.PathEscape(f.OpID)+"/ack?adapter=console&contract=3", nil, auth)
 	if code != 200 || !strings.Contains(out, `"consumed":true`) {
 		t.Fatalf("acknowledging %s: %d %s (a receipt adapter's acknowledgement must consume it)", f.OpID, code, out)
 	}

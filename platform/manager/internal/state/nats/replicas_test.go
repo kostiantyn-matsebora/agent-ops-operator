@@ -24,7 +24,7 @@ func TestAReplicaThatIsNotTheLeaderServesReadsAndFeeds(t *testing.T) {
 		t.Fatalf("follower feed: %v", err)
 	}
 	key := state.Key("shared-1")
-	if _, err := leader.Stores.Conversations.Create(ctx, key, state.ConversationRecord{Name: "shared-1", Phase: "Active"}); err != nil {
+	if _, _, err := leader.Stores.Conversations.Create(ctx, key, state.ConversationRecord{Name: "shared-1", Phase: "Active"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := leader.Stores.Runs.Append(ctx, key, state.Run{RunID: "r1"}); err != nil {
@@ -84,7 +84,7 @@ func TestAFeedResumesOnAnotherReplicaFromATokenTheFirstHandedOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := state.Key("hop-1")
-	if _, err := first.Stores.Conversations.Create(ctx, key, state.ConversationRecord{Name: "hop-1", Phase: "Active"}); err != nil {
+	if _, _, err := first.Stores.Conversations.Create(ctx, key, state.ConversationRecord{Name: "hop-1", Phase: "Active"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := first.Stores.Runs.Append(ctx, key, state.Run{RunID: "r1"}); err != nil {

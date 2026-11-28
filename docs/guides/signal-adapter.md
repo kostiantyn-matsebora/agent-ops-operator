@@ -40,7 +40,7 @@ Each entry carries `config` and `credentialEnvPrefix`.
 
 | Field | Meaning |
 |-------|----------|
-| `initiationId` | Correlation id for the THING, not occurrence. Same issue reuses same id. For round-trips, propagate `conversationId` verbatim. |
+| `initiationId` | Correlation id for the THING, not occurrence. Same issue reuses same id. For round-trips, propagate `correlationId` verbatim. |
 | `signalId` | Id for this MESSAGE, stable across re-sends. Manager stores once per `signalId`. |
 | `kind` | Picks the lane. `chat` signals must carry `agentops.dev/channel`. |
 

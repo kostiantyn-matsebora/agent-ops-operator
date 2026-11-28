@@ -15,7 +15,7 @@ next:
   url: /agent-ops-operator/crds/agent-runtime/
 ---
 
-**Version 2.0.2**
+**Version 3.0.0**
 
 This specification gives everything necessary to build and maintain an
 `AgentRuntime` — a harness agent-ops does not ship.
@@ -66,7 +66,7 @@ Long-polls for this conversation's next work unit.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `runId` | `string` | **yes** | A unique id for this unit, echoed back in the completion report. |
-| `convo` | `string` | **yes** | The Conversation this unit belongs to. |
+| `convo` | `string` | **yes** | The Conversation this unit belongs to, by its ID — a runtime that echoes this field back on its completion report (rather than its own CONVO_ID env var) must still resolve, since /work/done looks the report's convo up strictly by ID. |
 | `threadId` | `string` |  | The bound channel's thread id, present only for a conversation bound to exactly one channel. |
 | `runtimeContextId` | `string` |  | The runtime's OWN handle for this conversation's accumulated context, echoed back from the last run. |
 | `resumeSessionId` | `string` |  | The former name of `runtimeContextId`, sent alongside it for ONE release so a runtime image can be upgraded independently of the manager. |
@@ -283,6 +283,9 @@ A runtime implementing none of these stays fully conformant — see
 | conditional | `GIT_AUTH_TYPE` + `GIT_TOKEN` | HTTPS repository auth. |
 | conditional | `AOPS_MCP_TOKEN` | Set when the conversation's wiring binds the `aops` MCP toolset. |
 
+`CONVO_ID` carries the conversation's system identity (its `ID`), never its
+display name — a runtime holds it opaque either way.
+
 | ID | Requirement |
 |---|---|
 | `MGR-5` | An empty `REPO_URL` MUST NOT be read as an error or as "clone the default" — a runtime skips cloning. |
@@ -380,6 +383,7 @@ verdict, never an impression of the whole:
 
 | Version | Date | Changed |
 |---|---|---|
+| 3.0.0 | 2026-11-22 | BREAKING: `CONVO_ID` now carries the conversation's system identity (its `ID`), never its display name (`conversation-identity`), so the value's meaning changed. The "always present" row is unchanged and a runtime holding the value opaque keeps working, but one that parsed it as the name stops conforming. |
 | 2.0.2 | 2026-11-17 | Named `runtimes/claude-cli` and `runtimes/pi` among the runtimes reading `.claude/agents/<agent>.md` (`RT-3.4`). Clarifies an obligation, changes none. |
 | 2.0.1 | 2026-10-25 | Clarified `RT-3` (Composing the allowlist): a per-invocation decision satisfies it as well as passing a flag, provided the callback is reached for every governed call and denies by default. Clarifies an obligation, changes none. |
 | 2.0.0 | 2026-10-22 | Added the startup-configuration-failure crash ruling (`LC-4`, `LC-5`) — missing or unusable required config before the first poll is a nonzero crash, not a lifecycle exit. Added the `/work/done` definitive-rejection table (`API-10`, `API-11`, `API-12`) — a definitive `4xx` is never retried, a transient failure keeps its bounded retry, and every undelivered report is logged. The work-unit and completion-report tables are now GENERATED from the manager's own Go structs, and [Conformance](#conformance) is now a numbered checklist reaching every requirement on this page. BREAKING: `API-10`/`11`/`12` constrain a `/work/done` 4xx response that 1.0.0 left unconstrained — a runtime that retried a definitive rejection forever was conformant with 1.0.0 and stops conforming here, per this page's own Compatibility rule. |

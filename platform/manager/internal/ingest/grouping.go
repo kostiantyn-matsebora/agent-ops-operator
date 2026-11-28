@@ -1,7 +1,7 @@
 // Package ingest: initiationId cooldown — the one piece of per-source policy
 // the manager still owns. Grouping/signature derivation is gone: equality
 // routing matches a signal's initiationId against a conversation's own
-// spec.conversationId directly, with no manager-side computation at all
+// spec.correlationId directly, with no manager-side computation at all
 // (signal-correlation-id).
 package ingest
 

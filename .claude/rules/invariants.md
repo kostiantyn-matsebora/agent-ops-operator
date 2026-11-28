@@ -36,5 +36,6 @@
 | No coordination loops | `invoke` refuses a cycle by walking `causedBy` to the root before allowing a call. NO depth limit — only a repeat is refused |
 | Coordinator budgets are per-level, never pooled | `maxAgents`/`maxTurns`/`deadline` enforced on the Coordinator-root conversation alone. A caused conversation binds NO human channel — only the uncaused root does |
 | Runtime pods | ownerRef → Conversation, but the manager releases pod and ConfigMap EXPLICITLY under every backend — no behaviour depends on GC. Checkout at `/data/workspace` — never move it |
+| A conversation's identity is its `ID`, never its `Name` | `Name` is display, the store key and the pod name — reusable once a prior life under that name is deleted. `ID` is backend-minted, new for every life, and is what every SYSTEM reference holds: the workspace subpath, `CONVO_ID`, the pod label (`agentops.dev/conversation-id`), op ids, `causedBy.Parent` |
 | Dispatch/ingest semantics | pinned by test fixtures, change deliberately |
 | Signal rule vocabulary | `.claude/rules/signal-rules.md` |

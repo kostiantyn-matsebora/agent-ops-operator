@@ -18,18 +18,32 @@ import (
 // CascadeOrder turns a flat descendant list into deepest-first post-order,
 // rootName last — a child's own children are visited (and so ordered)
 // before it, and rootName is visited only once every other name has been.
-// Built from CausedBy.Parent alone (an index the caller resolved the list
-// against, such as state.ByCausedBy, is a hint, never trusted twice here).
-// The algorithm httpapi's own deleteCascadeOrder first walked for delete
-// (task 5.10), lifted here so the close cascade (task 5.3) does not
+//
+// rootID is the root's own ID: CausedBy.Parent holds a conversation's ID,
+// not its Name (conversation-identity Decision 6), so the parent/child
+// relation is built keyed on ID and translated back to the Name every
+// caller (a cascade task's Conversation field, a delete request) actually
+// needs. Built from CausedBy.Parent alone (an index the caller resolved the
+// list against, such as state.ByCausedBy, is a hint, never trusted twice
+// here). The algorithm httpapi's own deleteCascadeOrder first walked for
+// delete (task 5.10), lifted here so the close cascade (task 5.3) does not
 // reimplement it.
-func CascadeOrder(rootName string, descendants []state.ConversationRecord) []string {
+func CascadeOrder(rootID, rootName string, descendants []state.ConversationRecord) []string {
+	nameOf := map[string]string{rootID: rootName}
+	for i := range descendants {
+		nameOf[descendants[i].ID] = descendants[i].Name
+	}
 	children := map[string][]string{}
 	for i := range descendants {
 		d := &descendants[i]
-		if d.CausedBy != nil {
-			children[d.CausedBy.Parent] = append(children[d.CausedBy.Parent], d.Name)
+		if d.CausedBy == nil {
+			continue
 		}
+		parentName, known := nameOf[d.CausedBy.Parent]
+		if !known {
+			continue // a parent outside this resolved subtree — not rootID's own descendant
+		}
+		children[parentName] = append(children[parentName], d.Name)
 	}
 	var out []string
 	var visit func(name string)
@@ -56,8 +70,8 @@ func CascadeOrder(rootName string, descendants []state.ConversationRecord) []str
 // An already-Closed descendant gets no task: CloseConversationReason is
 // idempotent on one anyway, but a task that can only ever no-op is a
 // /state/tasks entry with nothing to show for itself.
-func CloseMemberRequests(rootName, reason string, descendants []state.ConversationRecord) []commandbus.SubmitRequest {
-	names := CascadeOrder(rootName, descendants)
+func CloseMemberRequests(rootID, rootName, reason string, descendants []state.ConversationRecord) []commandbus.SubmitRequest {
+	names := CascadeOrder(rootID, rootName, descendants)
 	live := make(map[string]bool, len(descendants))
 	for i := range descendants {
 		if descendants[i].Phase != state.PhaseClosed {

@@ -34,13 +34,16 @@ func bareConversationObject() *agentopsv1alpha1.Conversation {
 }
 
 func TestAllocateNameFirstAllocationHasNoSuffix(t *testing.T) {
-	name, err := namewords.AllocateName(context.Background(), stores.Conversations, "alert", "allocate-first-abc", newBareConversation())
+	created, err := namewords.AllocateName(context.Background(), stores.Conversations, "alert", "allocate-first-abc", newBareConversation())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cleanupConversation(t, name) })
-	if name != "alert-allocate-first-abc" {
-		t.Errorf("name = %q, want the bare base name", name)
+	t.Cleanup(func() { cleanupConversation(t, created.Name) })
+	if created.Name != "alert-allocate-first-abc" {
+		t.Errorf("name = %q, want the bare base name", created.Name)
+	}
+	if created.ID == "" {
+		t.Errorf("ID is empty, want the backend-minted identity")
 	}
 }
 
@@ -52,27 +55,33 @@ func TestAllocateNameRecurringBaseGetsTheNextNumber(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cleanupConversation(t, first) })
-	if first != "alert-allocate-recur-abc" {
-		t.Errorf("first = %q", first)
+	t.Cleanup(func() { cleanupConversation(t, first.Name) })
+	if first.Name != "alert-allocate-recur-abc" {
+		t.Errorf("first = %q", first.Name)
 	}
 
 	second, err := namewords.AllocateName(ctx, stores.Conversations, kind, words, newBareConversation())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cleanupConversation(t, second) })
-	if second != "alert-allocate-recur-abc-2" {
-		t.Errorf("second = %q", second)
+	t.Cleanup(func() { cleanupConversation(t, second.Name) })
+	if second.Name != "alert-allocate-recur-abc-2" {
+		t.Errorf("second = %q", second.Name)
 	}
 
 	third, err := namewords.AllocateName(ctx, stores.Conversations, kind, words, newBareConversation())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cleanupConversation(t, third) })
-	if third != "alert-allocate-recur-abc-3" {
-		t.Errorf("third = %q", third)
+	t.Cleanup(func() { cleanupConversation(t, third.Name) })
+	if third.Name != "alert-allocate-recur-abc-3" {
+		t.Errorf("third = %q", third.Name)
+	}
+	if first.ID == "" || second.ID == "" || third.ID == "" {
+		t.Errorf("ID is empty on one of first=%q second=%q third=%q, want every one backend-minted", first.ID, second.ID, third.ID)
+	}
+	if first.ID == second.ID || second.ID == third.ID || first.ID == third.ID {
+		t.Errorf("two of first=%q second=%q third=%q share an ID, want each distinct", first.ID, second.ID, third.ID)
 	}
 }
 
@@ -100,7 +109,8 @@ func TestAllocateNameRetriesAGenuineCreateConflict(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			names[i], errs[i] = namewords.AllocateName(ctx, stores.Conversations, kind, words, newBareConversation())
+			created, err := namewords.AllocateName(ctx, stores.Conversations, kind, words, newBareConversation())
+			names[i], errs[i] = created.Name, err
 		}(i)
 	}
 	wg.Wait()

@@ -15,7 +15,7 @@ next:
   url: /agent-ops-operator/crds/signal-adapter/
 ---
 
-**Version 2.5.0**
+**Version 2.6.0**
 
 This specification gives everything necessary to build and maintain a
 `SignalAdapter` — a container agent-ops does not ship, normalizing one
@@ -30,7 +30,7 @@ Every signal carries `initiationId`, the sender's own correlation id.
 
 An adapter either MINTS one where its own aggregation already happens, or
 PROPAGATES one verbatim when a round trip hands back a manager-issued
-`conversationId` — never deriving, defaulting, or re-computing it.
+`correlationId` — never deriving, defaulting, or re-computing it.
 
 The manager routes by pure equality and owns no grouping policy of its own.
 
@@ -103,7 +103,7 @@ surface.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `initiationId` | string | yes | The sender's own correlation id — MINTED where its aggregation already happens, or PROPAGATED verbatim from a round trip carrying a manager-issued `conversationId` back. See `ADP-2`. |
+| `initiationId` | string | yes | The sender's own correlation id — MINTED where its aggregation already happens, or PROPAGATED verbatim from a round trip carrying a manager-issued `correlationId` back. See `ADP-2`. |
 | `labels` | map of string to string | no | Opaque context carried onto the conversation and its topic descriptor. Bounded to 32 keys, sorted before truncation. |
 | `title` | string | no | Overrides the conversation title when this signal opens one. Bounded to 500 runes. |
 | `payload` | string | no | The raw content handed to the agent, stored out of band. Never parsed as prose by the manager. |
@@ -122,7 +122,7 @@ surface.
 ## Lanes
 
 `kind` selects only the prompt template an input dispatches with. Routing
-itself is uniform — pure `initiationId`/`conversationId` equality for every
+itself is uniform — pure `initiationId`/`correlationId` equality for every
 kind, with no manager-side branch by lane.
 
 | `kind` | Subject | Prompt | Recurs when |
@@ -130,7 +130,7 @@ kind, with no manager-side branch by lane.
 | `alert` (default) | a problem that recurs | the read-only investigation template | the adapter reuses the same `initiationId` for the same recurring problem |
 | `job` | a job that recurs | the task-lane prompt | the adapter reuses the same `initiationId` across ticks, resuming the agent |
 | `task` | a caller asking once | the task-lane prompt | never by default — each task mints its own `initiationId`, per `ADP-2` |
-| `chat` | a person asking once | the task-lane prompt | only when a thread reply propagates the manager-stamped `conversationId` back as `initiationId` |
+| `chat` | a person asking once | the task-lane prompt | only when a thread reply propagates the manager-stamped `correlationId` back as `initiationId` |
 
 | ID | Requirement |
 |---|---|
@@ -198,7 +198,7 @@ condition.
 | ID | Requirement |
 |---|---|
 | `ADP-1` | Read sources from [`GET /signal/sources`](#get-signalsources) — never assume connectivity or credentials, both are the manager's to serve. |
-| `ADP-2` | Supply `initiationId` one of two ways: MINTED where the adapter's own aggregation already happens — the same recurring problem reusing the same id across occurrences — or PROPAGATED verbatim when a round trip hands back a manager-issued `conversationId`, with no re-derivation. For example, a chat reply in a bound thread propagates the `conversationId` stamped on that binding, and an adapter fronting an external system that accepts input can carry a `conversationId` outward and propagate it back unchanged when that system's response arrives — both are the propagated case, not a special lane. The manager never determines an id and treats it opaquely either way. |
+| `ADP-2` | Supply `initiationId` one of two ways: MINTED where the adapter's own aggregation already happens — the same recurring problem reusing the same id across occurrences — or PROPAGATED verbatim when a round trip hands back a manager-issued `correlationId`, with no re-derivation. For example, a chat reply in a bound thread propagates the `correlationId` stamped on that binding, and an adapter fronting an external system that accepts input can carry a `correlationId` outward and propagate it back unchanged when that system's response arrives — both are the propagated case, not a special lane. The manager never determines an id and treats it opaquely either way. |
 | `ADP-3` | Normalize and push. An adapter MUST NOT implement dedup, cooldown, or recurrence itself — those are the manager's, per `MGR-2`. The one named carve-out is the [post-emit refractory window](#post-emit-refractory-window), `ADP-8`. |
 | `ADP-4` | An observing adapter MUST NOT emit a signal about agent-ops' own machinery — see [Self-exclusion](#self-exclusion). |
 | `ADP-9` | A shipped adapter MUST send a `signalId` on every signal, stable across a re-send of the same delivery (including after a `5xx` or a transport error) and different between two messages the sender regards as distinct. An adapter written elsewhere SHOULD. Each adapter's own page states what a message is for it. |
@@ -274,7 +274,7 @@ An adapter implementing none of these stays fully conformant — see
 | ID | Requirement |
 |---|---|
 | `MGR-1` | The manager owns the one inbound endpoint: `POST /signal/inbound` accepts every normalized signal by durably ENQUEUEING it as one task, and replies `202` before a `Signal` exists. A consumer then stores it as a `Signal` and a separate consumer routes it afterwards, and it is the ONLY way work originates from outside a chat surface. No route names a `Pipeline` directly — a caller posts to a `SignalSource`, and the Ready Pipeline claiming it decides which agent answers. |
-| `MGR-2` | Routing and cooldown are pure id equality, evaluated by the consumer once per source above every claiming Pipeline — never once per Pipeline, or the first one starves the rest. An OPEN conversation whose `conversationId` equals the signal's `initiationId`, for the claiming pipeline, receives the signal as a recurrence. Otherwise a new conversation is created, adopting the `initiationId` as its `conversationId`. Cooldown keys on `initiationId`. |
+| `MGR-2` | Routing and cooldown are pure id equality, evaluated by the consumer once per source above every claiming Pipeline — never once per Pipeline, or the first one starves the rest. An OPEN conversation whose `correlationId` equals the signal's `initiationId`, for the claiming pipeline, receives the signal as a recurrence. Otherwise a new conversation is created, adopting the `initiationId` as its `correlationId`. Cooldown keys on `initiationId`. |
 | `MGR-3` | The manager MUST NOT mint, derive, or default an `initiationId`. A signal arriving without one is rejected `4xx`, naming the missing field — including from a `1.x` adapter during rollout. There is no compatibility shim: a manager-synthesized id would re-mint grouping policy the manager no longer owns. |
 | `MGR-4` | A `SignalSource` naming no served adapter carries `Served=False`. One claimed by no Ready Pipeline carries `Wired=False`, and every signal posted to it is stored, then dropped, its `Signal` recording reason `unclaimed`. |
 | `MGR-5` | The manager MUST supply every variable in [Environment](#environment). |
@@ -365,6 +365,7 @@ deduplicated for the `Signal`'s life, and a changed alert carries a new
 
 | Version | Date | Changed |
 |---|---|---|
+| 2.6.0 | 2026-11-22 | Wording only: every current reference to the manager-issued correlation id is now spelled `correlationId` (the 2.0.0 entry below keeps its original `conversationId` wording as history), matching the channel adapter contract's own rename (`conversation-identity`). The wire is unchanged — `initiationId` is untouched, and this page never had a JSON field called `conversationId`. Every shipped signal adapter's claimed version moves to `2.6.0` in the same change. |
 | 2.5.0 | 2026-11-14 | `POD_NAMESPACE` and `CONVERSATION_NAMESPACE` join [Environment](#environment) — the second is new, the first was always injected but undocumented. `ADP-10` adds the conversations-namespace exclusion mechanism, not configurable. `ADP-7` is reworded to name `POD_NAMESPACE` explicitly and state that it alone may be disabled. ADDITIVE: `CONVERSATION_NAMESPACE` is absent or equal to `POD_NAMESPACE` outside a split release, and `ADP-10` never applies there, so no shipped adapter stops conforming. `signals/k8s-events`, the one observing adapter with a namespace-scoped exclusion to extend, implements `ADP-10`. Every shipped adapter's claimed version moves to `2.5.0` in the same change. |
 | 2.4.0 | 2026-11-14 | `POST /signal/inbound` accepts, then processes. The success status moves from `200` to `202`, and the body gains `invocationId` and one `taskId` per admitted signal, enqueued on `in.signal` before the reply is written. `queued` now means accepted, not stored — a `Signal` is created afterwards by the `in.signal` consumer, with the bus's bounded retry and dead-letter record. `API-2` and `API-3` are REPLACED, and `MGR-1` says the storing is a consumer's. ADDITIVE by the page's own rule: no shipped adapter checks for exactly `200` (verified over `signals/*`), and the new fields are ignorable, so none stops conforming. Every shipped adapter's claimed version moves to `2.4.0` in the same change. |
 | 2.3.1 | 2026-11-04 | Wording only: `API-7` says the manager's per-phase TTL expires a terminal `Signal`, where it said the TTL deletes it. Behaviour is unchanged. |

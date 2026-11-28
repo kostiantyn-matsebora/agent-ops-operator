@@ -47,7 +47,7 @@ func fixtureRecord(name string) state.ConversationRecord {
 			Severity:  "warning",
 		},
 		Title:              "a fixture conversation",
-		ConversationID:     "conv-id-1",
+		CorrelationID:      "conv-id-1",
 		OriginReader:       &state.OriginReader{Channel: "chan-a", Key: "reader-key"},
 		Toolsets:           &state.ToolsetBinding{Mode: "merge", Refs: []state.Ref{"toolset-1"}},
 		MCPConfigs:         &state.ToolingBinding{Refs: []state.Ref{"mcp-1"}},

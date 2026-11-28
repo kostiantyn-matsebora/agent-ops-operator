@@ -24,7 +24,7 @@ func TestAppendRunRoundTripsEveryField(t *testing.T) {
 	ctx := context.Background()
 
 	rec := fixtureRecord("conv-run-fields")
-	if _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
+	if _, _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -71,7 +71,7 @@ func TestAppendRunKeepsOnlyTheNewestRuns(t *testing.T) {
 	_, s := newTestNamespace(t)
 	ctx := context.Background()
 	rec := fixtureRecord("conv-append-bound")
-	if _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
+	if _, _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	for i := 0; i < maxRunHistory+3; i++ {

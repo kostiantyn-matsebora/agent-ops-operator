@@ -40,7 +40,10 @@ channelAdapter:
     # 0.27.0 is BREAKING with manager 0.62.0: it reads, acknowledges, then
     # reports each op (channel adapter specification 2.0.0). An older adapter
     # never acknowledges and delivers nothing against the new manager.
-    tag: 0.27.0
+    # 0.28.0 is BREAKING with manager 0.66.0: it reads correlationId instead
+    # of conversationId for the signal's correlation key, and carries the new
+    # conversationId identity field (channel adapter specification 3.0.0).
+    tag: 0.28.0
   # Port the router pushes topic updates to. The reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080
@@ -163,6 +166,6 @@ surface:
     # Empty = the surface name itself.
     name: ""
     # Chat defaults: cooldown OFF, so each message opens its own conversation
-    # (or, on a bound-thread reply, propagates the stamped conversationId) —
+    # (or, on a bound-thread reply, propagates the stamped correlationId) —
     # a person repeating a request means it twice.
     cooldownHours: 0

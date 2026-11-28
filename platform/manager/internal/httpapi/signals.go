@@ -33,10 +33,10 @@ type NormalizedSignal struct {
 	// InitiationID is the sender-minted correlation id, REQUIRED on every
 	// signal — the manager rejects one that omits it rather than synthesize
 	// or default it. Cooldown keys on it, and equality routing matches it
-	// against an open conversation's own spec.conversationId: the SAME id,
+	// against an open conversation's own spec.correlationId: the SAME id,
 	// minted where the sender's own aggregation already happens, or
 	// propagated verbatim when a round trip hands back a manager-issued
-	// conversationId. Replaces the retired Fingerprint.
+	// correlationId. Replaces the retired Fingerprint.
 	InitiationID string `json:"initiationId"`
 	// SignalID is the sender's OPTIONAL id for this one MESSAGE, stable across
 	// every re-send of it. It is not the InitiationID, which correlates many

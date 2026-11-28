@@ -18,7 +18,7 @@ func benchConversation(b *testing.B) (state.Stores, state.Key) {
 	_, store := newTestNamespace(b)
 	ctx := context.Background()
 	key := state.Key("bench-conv")
-	if _, err := store.Conversations.Create(ctx, key, state.ConversationRecord{Name: "bench-conv", ProfileRef: "p"}); err != nil {
+	if _, _, err := store.Conversations.Create(ctx, key, state.ConversationRecord{Name: "bench-conv", ProfileRef: "p"}); err != nil {
 		b.Fatal(err)
 	}
 	for i := 0; i < 5; i++ { // a conversation with some history

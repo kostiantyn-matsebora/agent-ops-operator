@@ -102,7 +102,7 @@ func TestRestartBetweenCompletionAndDeliveryReDerivesTheReply(t *testing.T) {
 
 	before := apiServer()
 	rec := adapterReq(before, "POST", "/work/done", map[string]any{
-		"convo": conv.Name, "runId": "r-lost", "status": "succeeded", "result": "scaled `api` to 3",
+		"convo": string(conv.UID), "runId": "r-lost", "status": "succeeded", "result": "scaled `api` to 3",
 	}, testMasterToken)
 	if rec.Code != 200 {
 		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
@@ -151,7 +151,7 @@ func TestPartiallyDeliveredFanOutCompletesWithoutDuplicating(t *testing.T) {
 
 	before := apiServer()
 	if rec := adapterReq(before, "POST", "/work/done", map[string]any{
-		"convo": conv.Name, "runId": "r-part", "status": "succeeded", "result": "done",
+		"convo": string(conv.UID), "runId": "r-part", "status": "succeeded", "result": "done",
 	}, testMasterToken); rec.Code != 200 {
 		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
 	}

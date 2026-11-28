@@ -67,12 +67,15 @@ func decodeCoordinateInvokeResponse(t *testing.T, rec *httptest.ResponseRecorder
 
 // assertMemberCausedByInvoke checks that a member conversation created by
 // /coordinate/invoke round-trips its provenance through the real schema.
-func assertMemberCausedByInvoke(t *testing.T, member *agentopsv1alpha1.Conversation, rootName string) {
+// rootID is the root's own UID: CausedBy.Parent holds the parent's ID, not
+// its Name (conversation-identity Decision 6), and the mirrored label
+// (kube/mapping.go's applySpecAndMeta) carries exactly what the field does.
+func assertMemberCausedByInvoke(t *testing.T, member *agentopsv1alpha1.Conversation, rootID string) {
 	t.Helper()
-	if member.Spec.CausedBy == nil || member.Spec.CausedBy.Parent != rootName || member.Spec.CausedBy.Entry != "worker" {
+	if member.Spec.CausedBy == nil || member.Spec.CausedBy.Parent != rootID || member.Spec.CausedBy.Entry != "worker" {
 		t.Fatalf("causedBy must round-trip through the real schema: %+v", member.Spec.CausedBy)
 	}
-	if member.Labels[agentopsv1alpha1.LabelCausedBy] != rootName {
+	if member.Labels[agentopsv1alpha1.LabelCausedBy] != rootID {
 		t.Fatalf("the caused-by label must be set for the close cascade to find it: %+v", member.Labels)
 	}
 	if len(member.Spec.Inputs) != 1 || member.Spec.Inputs[0].Origin == nil ||
@@ -110,7 +113,7 @@ func TestCoordinateInvokeCreatesAMemberAndRoutesItsResultBack(t *testing.T) {
 		map[string]any{"conversation": root.Name, "agent": "worker", "task": "look into the disk usage"})
 	out := decodeCoordinateInvokeResponse(t, rec)
 	member := getConv(t, out["member"])
-	assertMemberCausedByInvoke(t, member, root.Name)
+	assertMemberCausedByInvoke(t, member, string(root.UID))
 
 	// Report the member's work done, and the fast path in /work/done must route
 	// the result to the parent as an input, admitted by the real CRD schema.
@@ -119,7 +122,7 @@ func TestCoordinateInvokeCreatesAMemberAndRoutesItsResultBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec2 := adapterReq(srv, "POST", "/work/done", map[string]any{
-		"convo": member.Name, "runId": "r1", "status": "succeeded", "result": "disk is at 40%, nothing to worry about",
+		"convo": string(member.UID), "runId": "r1", "status": "succeeded", "result": "disk is at 40%, nothing to worry about",
 	}, srv.AdapterToken)
 	if rec2.Code != 200 {
 		t.Fatalf("work/done: %d %s", rec2.Code, rec2.Body.String())
@@ -154,8 +157,11 @@ func TestCoordinateReconcileBackstopRoutesAMissedMemberResult(t *testing.T) {
 	member := &agentopsv1alpha1.Conversation{}
 	member.Name, member.Namespace = "co-backstop-member", ns
 	member.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-backstop-co"}
-	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: root.Name, Entry: "worker"}
-	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
+	// CausedBy.Parent holds the parent's ID, not its Name
+	// (conversation-identity Decision 6) — root.UID, minted by the real
+	// apiserver on the Create just above.
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: string(root.UID), Entry: "worker"}
+	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: string(root.UID)}
 	if err := k8sClient.Create(context.Background(), member); err != nil {
 		t.Fatal(err)
 	}
@@ -202,16 +208,18 @@ func TestCoordinateCloseCascadesThroughTheRealAPI(t *testing.T) {
 	member := &agentopsv1alpha1.Conversation{}
 	member.Name, member.Namespace = "co-close-member", ns
 	member.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-close-co"}
-	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: root.Name, Entry: "worker"}
-	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
+	// CausedBy.Parent holds the parent's ID, not its Name
+	// (conversation-identity Decision 6).
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: string(root.UID), Entry: "worker"}
+	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: string(root.UID)}
 	if err := k8sClient.Create(context.Background(), member); err != nil {
 		t.Fatal(err)
 	}
 	grandchild := &agentopsv1alpha1.Conversation{}
 	grandchild.Name, grandchild.Namespace = "co-close-grandchild", ns
 	grandchild.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-close-co"}
-	grandchild.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: member.Name, Entry: "helper"}
-	grandchild.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: member.Name}
+	grandchild.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: string(member.UID), Entry: "helper"}
+	grandchild.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: string(member.UID)}
 	if err := k8sClient.Create(context.Background(), grandchild); err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +270,7 @@ func TestCoordinateEscalateDeliversTheDigestThroughARealReconcile(t *testing.T) 
 	// The topic exists BEFORE any escalate call — the channel was bound at
 	// creation, not by escalating.
 	reconcileConversation(t, srv, root.Name)
-	opRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc-ta&contract=2&wait=0", nil, srv.AdapterToken)
+	opRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc-ta&contract=3&wait=0", nil, srv.AdapterToken)
 	var topicOp chat.Op
 	if err := json.Unmarshal(opRec.Body.Bytes(), &topicOp); err != nil || topicOp.Kind != chat.OpEnsureTopic {
 		t.Fatalf("want an ensure-topic op before any escalation, got %d %s", opRec.Code, opRec.Body.String())
@@ -293,7 +301,7 @@ func TestCoordinateEscalateDeliversTheDigestThroughARealReconcile(t *testing.T) 
 	// The thread already existed, so the digest is queued as an ordinary send
 	// op into it — never a second ensure-topic.
 	reconcileConversation(t, srv, root.Name)
-	msgRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc-ta&contract=2&wait=0", nil, srv.AdapterToken)
+	msgRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc-ta&contract=3&wait=0", nil, srv.AdapterToken)
 	var msgOp chat.Op
 	if err := json.Unmarshal(msgRec.Body.Bytes(), &msgOp); err != nil || msgOp.Kind != chat.OpSend {
 		t.Fatalf("want the digest queued as a send op, got %d %s", msgRec.Code, msgRec.Body.String())
@@ -491,7 +499,7 @@ func finishMemberRun(t *testing.T, srv *httpapi.Server, member, runID, result st
 		t.Fatal(err)
 	}
 	if rec := adapterReq(srv, "POST", "/work/done", map[string]any{
-		"convo": member, "runId": runID, "status": "succeeded", "result": result,
+		"convo": string(memberConv.UID), "runId": runID, "status": "succeeded", "result": result,
 	}, srv.AdapterToken); rec.Code != 200 {
 		t.Fatalf("work/done: %d %s", rec.Code, rec.Body.String())
 	}
@@ -502,7 +510,7 @@ func finishMemberRun(t *testing.T, srv *httpapi.Server, member, runID, result st
 func openEsc3Thread(t *testing.T, srv *httpapi.Server, root string) {
 	t.Helper()
 	reconcileConversation(t, srv, root)
-	topicRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc3-ta&contract=2&wait=0", nil, srv.AdapterToken)
+	topicRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc3-ta&contract=3&wait=0", nil, srv.AdapterToken)
 	var topicOp chat.Op
 	if err := json.Unmarshal(topicRec.Body.Bytes(), &topicOp); err != nil || topicOp.Kind != chat.OpEnsureTopic {
 		t.Fatalf("want an ensure-topic op, got %d %s", topicRec.Code, topicRec.Body.String())
@@ -517,7 +525,7 @@ func openEsc3Thread(t *testing.T, srv *httpapi.Server, root string) {
 // nextEsc3SendOp reads the next queued op for the esc3 adapter and requires a send.
 func nextEsc3SendOp(t *testing.T, srv *httpapi.Server, want string) chat.Op {
 	t.Helper()
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=esc3-ta&contract=2&wait=0", nil, srv.AdapterToken)
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=esc3-ta&contract=3&wait=0", nil, srv.AdapterToken)
 	var op chat.Op
 	if err := json.Unmarshal(rec.Body.Bytes(), &op); err != nil || op.Kind != chat.OpSend {
 		t.Fatalf("want %s, got %d %s", want, rec.Code, rec.Body.String())

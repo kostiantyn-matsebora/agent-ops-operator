@@ -25,7 +25,7 @@ func drainOps(t *testing.T, srv *httpapi.Server, adapter string) []chat.Op {
 	t.Helper()
 	var out []chat.Op
 	for i := 0; i < 50; i++ {
-		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+adapter+"&contract=2&wait=0", nil, testMasterToken)
+		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+adapter+"&contract=3&wait=0", nil, testMasterToken)
 		if rec.Code != 200 {
 			return out
 		}
@@ -298,7 +298,7 @@ func TestAnswerFansOutAsOneSemanticMessagePerChannel(t *testing.T) {
 	}
 
 	rec := adapterReq(srv, "POST", "/work/done", map[string]any{
-		"convo": conv.Name, "runId": "r-1", "status": "succeeded", "result": "**restarted** `api`",
+		"convo": string(conv.UID), "runId": "r-1", "status": "succeeded", "result": "**restarted** `api`",
 	}, testMasterToken)
 	if rec.Code != 200 {
 		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
@@ -320,7 +320,7 @@ func TestAnswerFansOutAsOneSemanticMessagePerChannel(t *testing.T) {
 
 	// a failed run is a notice, not an empty answer
 	if rec := adapterReq(srv, "POST", "/work/done", map[string]any{
-		"convo": conv.Name, "runId": "r-2", "status": "failed",
+		"convo": string(conv.UID), "runId": "r-2", "status": "failed",
 	}, testMasterToken); rec.Code != 200 {
 		t.Fatalf("failed work done: %d", rec.Code)
 	}

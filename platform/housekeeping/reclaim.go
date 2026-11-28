@@ -91,8 +91,16 @@ func (r Report) String() string {
 	return s
 }
 
-// ReclaimWorkspaces removes <root>/<name> directories with no Conversation of
-// that name.
+// ReclaimWorkspaces removes <root>/<id> directories with no Conversation of
+// that ID.
+//
+// NAMED FOR THE ID, NOT THE NAME (conversation-identity Decision 1/7): a
+// runtime pod's workspace subPath is the conversation's own backend-minted
+// ID, never its display Name, because a Name can be reused by a later,
+// unrelated conversation after the first is deleted — matching on Name
+// here would let that new conversation's live record protect the OLD
+// conversation's orphaned directory forever, under cover of a name both
+// happen to share. An ID is never reused.
 //
 // THE ORDER IS THE CORRECTNESS ARGUMENT, not a precaution. A workspace
 // directory is created by the kubelet mounting a subPath for a runtime pod, and
@@ -108,7 +116,9 @@ func (r Report) String() string {
 func ReclaimWorkspaces(ctx context.Context, root string, lister Lister, opts Options) (Report, error) {
 	rep := Report{Kind: "workspaces", DryRun: opts.DryRun}
 
-	// T0 — the disk.
+	// T0 — the disk. couldBeConversation's own name validates an object
+	// name, which an ID (NUID, UUID or a kube UID) satisfies too — both
+	// are lowercase alphanumeric plus '-', well inside what it accepts.
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -116,12 +126,7 @@ func ReclaimWorkspaces(ctx context.Context, root string, lister Lister, opts Opt
 		}
 		return rep, fmt.Errorf("scanning %s: %w", root, err)
 	}
-	var dirs []string
-	for _, e := range entries {
-		if e.IsDir() && couldBeConversation(e.Name()) {
-			dirs = append(dirs, e.Name())
-		}
-	}
+	dirs := conversationDirs(entries)
 	rep.Scanned = len(dirs)
 	if len(dirs) == 0 {
 		return rep, nil
@@ -133,14 +138,11 @@ func ReclaimWorkspaces(ctx context.Context, root string, lister Lister, opts Opt
 	if err != nil {
 		return rep, fmt.Errorf("listing conversations: %w", err)
 	}
-	live := make(map[string]bool, len(convs))
-	for _, c := range convs {
-		live[c.Name] = true
-	}
+	live := liveIDs(convs)
 
 	sort.Strings(dirs) // deterministic, so a bounded run makes progress in order
-	for _, name := range dirs {
-		if live[name] {
+	for _, id := range dirs {
+		if live[id] {
 			rep.Retained++
 			continue
 		}
@@ -148,15 +150,38 @@ func ReclaimWorkspaces(ctx context.Context, root string, lister Lister, opts Opt
 			rep.Skipped++
 			continue
 		}
-		path := filepath.Join(root, name)
+		path := filepath.Join(root, id)
 		if !opts.DryRun {
 			if err := os.RemoveAll(path); err != nil {
 				return rep, fmt.Errorf("removing %s: %w", path, err)
 			}
 		}
-		rep.Removed = append(rep.Removed, name)
+		rep.Removed = append(rep.Removed, id)
 	}
 	return rep, nil
+}
+
+// conversationDirs keeps the directory entries whose name could be a
+// conversation ID.
+func conversationDirs(entries []os.DirEntry) []string {
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() && couldBeConversation(e.Name()) {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	return dirs
+}
+
+// liveIDs is the set of IDs of every listed conversation.
+func liveIDs(convs []Conversation) map[string]bool {
+	live := make(map[string]bool, len(convs))
+	for _, c := range convs {
+		if c.ID != "" {
+			live[c.ID] = true
+		}
+	}
+	return live
 }
 
 // ReclaimSessions removes transcript files whose session id no longer appears

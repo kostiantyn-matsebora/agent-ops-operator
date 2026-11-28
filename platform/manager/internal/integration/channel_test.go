@@ -92,15 +92,30 @@ func rawAdapterReq(srv *httpapi.Server, method, path string, body any, token str
 
 func TestChannelAuthRequired(t *testing.T) {
 	srv := apiServer()
-	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&contract=2&wait=0", nil, ""); rec.Code != 401 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&contract=3&wait=0", nil, ""); rec.Code != 401 {
 		t.Fatalf("missing token: %d", rec.Code)
 	}
-	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&contract=2&wait=0", nil, "wrong"); rec.Code != 401 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&contract=3&wait=0", nil, "wrong"); rec.Code != 401 {
 		t.Fatalf("wrong token: %d", rec.Code)
 	}
 	srv.AdapterToken = ""
-	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&contract=2&wait=0", nil, "anything"); rec.Code != 503 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&contract=3&wait=0", nil, "anything"); rec.Code != 503 {
 		t.Fatalf("unconfigured auth must 503: %d", rec.Code)
+	}
+}
+
+// channel-adapter-contract "An outdated adapter is refused, not served": the
+// retired contract value (2, where conversationId still meant the
+// correlation key) must not be silently served a conversationId that now
+// means something else.
+func TestOutdatedContractIsRefused(t *testing.T) {
+	srv := apiServer()
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&contract=2&wait=0", nil, "test-adapter-token")
+	if rec.Code != 400 {
+		t.Fatalf("contract 2 must be refused, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), chat.ContractVersion) {
+		t.Fatalf("the refusal must name the version to build against: %s", rec.Body.String())
 	}
 }
 
@@ -147,7 +162,7 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 		t.Fatalf("agents inbound: %d", rec.Code)
 	}
 	drainIngestTasks(t)
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-inb&contract=2&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-inb&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("expected queued send op: %d", rec.Code)
 	}
@@ -175,14 +190,14 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-topic"}
 	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "chan-topic"}}
 	conv.Spec.Title = "needs a topic"
-	conv.Spec.ConversationID = "corr-topic-1"
+	conv.Spec.CorrelationID = "corr-topic-1"
 	conv.Spec.Inputs = []agentopsv1alpha1.InputItem{{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "do"}}
 	if err := k8sClient.Create(ctx, conv); err != nil {
 		t.Fatal(err)
 	}
 
 	// pending topic gates dispatch (inputs stay queued)
-	rec := adapterReq(srv, "GET", "/work?convo=topic-1&wait=0", nil, "")
+	rec := adapterReq(srv, "GET", "/work?convo="+string(conv.UID)+"&wait=0", nil, "")
 	if rec.Code != 204 {
 		t.Fatalf("dispatch must wait for the thread id: %d %s", rec.Code, rec.Body.String())
 	}
@@ -192,7 +207,7 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "topic-1"}}); err != nil {
 		t.Fatal(err)
 	}
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-topic&contract=2&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-topic&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("ensure-topic op expected: %d", rec.Code)
 	}
@@ -203,9 +218,9 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 		t.Fatalf("op: %+v", op)
 	}
 	// OPS-9: every op leaving /channel/ops for a known conversation carries
-	// its conversationId beside its name.
-	if op.ConversationID != "corr-topic-1" {
-		t.Fatalf("op must carry the owning conversation's conversationId: %+v", op)
+	// its identity and correlationId beside its name.
+	if op.ConversationID != string(conv.UID) || op.CorrelationID != "corr-topic-1" {
+		t.Fatalf("op must carry the owning conversation's identity and correlationId: %+v", op)
 	}
 
 	// adapter completes with a non-numeric thread id (string id space)
@@ -221,18 +236,10 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	}
 
 	// duplicate completion is tolerated
-	rec = adapterReq(srv, "POST", fmt.Sprintf("/channel/ops/%s/done", op.ID),
-		chat.OpResult{ThreadID: "9999"}, "test-adapter-token")
-	if rec.Code != 200 {
-		t.Fatalf("duplicate done: %d", rec.Code)
-	}
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "topic-1"}, &after)
-	if tid := after.ThreadFor("chan-topic"); *tid != "1234567890.000200" {
-		t.Fatalf("duplicate done overwrote thread binding: %v", *tid)
-	}
+	assertDuplicateDoneKeepsThread(t, srv, op.ID)
 
 	// gate lifted — the unit dispatches with the string thread id
-	rec = adapterReq(srv, "GET", "/work?convo=topic-1&wait=0", nil, "")
+	rec = adapterReq(srv, "GET", "/work?convo="+string(conv.UID)+"&wait=0", nil, "")
 	if rec.Code != 200 {
 		t.Fatalf("dispatch after topic: %d %s", rec.Code, rec.Body.String())
 	}
@@ -248,9 +255,25 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	// finish the run so the conversation goes idle (keeps the shared pod pool
 	// evictable for later tests)
 	rec = adapterReq(srv, "POST", "/work/done",
-		map[string]any{"convo": "topic-1", "runId": unit.RunID, "status": "succeeded", "result": "ok"}, "")
+		map[string]any{"convo": string(conv.UID), "runId": unit.RunID, "status": "succeeded", "result": "ok"}, "")
 	if rec.Code != 200 {
 		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// assertDuplicateDoneKeepsThread completes an op a second time with another
+// thread id and checks the first binding stands.
+func assertDuplicateDoneKeepsThread(t *testing.T, srv *httpapi.Server, opID string) {
+	t.Helper()
+	rec := adapterReq(srv, "POST", fmt.Sprintf("/channel/ops/%s/done", opID),
+		chat.OpResult{ThreadID: "9999"}, "test-adapter-token")
+	if rec.Code != 200 {
+		t.Fatalf("duplicate done: %d", rec.Code)
+	}
+	var after agentopsv1alpha1.Conversation
+	_ = k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: "topic-1"}, &after)
+	if tid := after.ThreadFor("chan-topic"); tid == nil || *tid != "1234567890.000200" {
+		t.Fatalf("duplicate done overwrote thread binding: %v", tid)
 	}
 }
 
@@ -290,7 +313,7 @@ func TestThreadedReplyQueuesInputWithBusyAck(t *testing.T) {
 	}
 
 	// busy ack queued for the adapter, addressed to the thread
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-reply&contract=2&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-reply&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("busy ack op expected: %d", rec.Code)
 	}
@@ -359,7 +382,7 @@ func TestAcknowledgedOpStatesItsDeliveryTTL(t *testing.T) {
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "conv-reclaim"}}); err != nil {
 		t.Fatal(err)
 	}
-	rec := rawAdapterReq(srv, "GET", "/channel/ops?adapter=tg-reclaim&contract=2&wait=0", nil, "test-adapter-token")
+	rec := rawAdapterReq(srv, "GET", "/channel/ops?adapter=tg-reclaim&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("expected an offered op: %d", rec.Code)
 	}
@@ -374,7 +397,7 @@ func TestAcknowledgedOpStatesItsDeliveryTTL(t *testing.T) {
 		t.Fatalf("the op payload changed shape: %+v", got)
 	}
 	// Reading changed nothing: the same op is offered again.
-	again := rawAdapterReq(srv, "GET", "/channel/ops?adapter=tg-reclaim&contract=2&wait=0", nil, "test-adapter-token")
+	again := rawAdapterReq(srv, "GET", "/channel/ops?adapter=tg-reclaim&contract=3&wait=0", nil, "test-adapter-token")
 	if again.Code != 200 || !strings.Contains(again.Body.String(), got.ID) {
 		t.Fatalf("a read op must be offered again until acknowledged: %d %s", again.Code, again.Body.String())
 	}
@@ -391,7 +414,7 @@ func TestAcknowledgedOpStatesItsDeliveryTTL(t *testing.T) {
 	if want := int((5 * time.Minute).Seconds()); reply.TTL != want { // a topic operation
 		t.Fatalf("deliveryTtlSeconds=%d, want %d", reply.TTL, want)
 	}
-	if gone := rawAdapterReq(srv, "GET", "/channel/ops?adapter=tg-reclaim&contract=2&wait=0", nil, "test-adapter-token"); gone.Code != 204 {
+	if gone := rawAdapterReq(srv, "GET", "/channel/ops?adapter=tg-reclaim&contract=3&wait=0", nil, "test-adapter-token"); gone.Code != 204 {
 		t.Fatalf("an acknowledged op must never be offered again: %d", gone.Code)
 	}
 }
@@ -435,7 +458,7 @@ func TestDeliveryPendingSurfacesAnOwedReply(t *testing.T) {
 	}
 
 	// The adapter takes it and succeeds; the next reconcile clears the condition.
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-owed&contract=2&wait=0", nil, "test-adapter-token")
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-owed&contract=3&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("expected the reply op: %d", rec.Code)
 	}

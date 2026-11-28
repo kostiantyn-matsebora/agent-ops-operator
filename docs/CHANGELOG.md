@@ -8,7 +8,9 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
-## [Unreleased]
+## [25.0.0] — 2026-11-22
+
+Images: manager 0.66.0, console 0.46.0, channel-telegram 0.28.0.
 
 ### Added
 
@@ -19,6 +21,22 @@ for the source and the reference material beside this file.
   tested against a real one. The fixing loop now also merges the base branch in.
   Delivery tooling only: no chart value, image or CRD changes, and no upgrade step.
 
+### Changed
+
+- **BREAKING.** A conversation's `ID` is now its system identity, minted once
+  by the backend at `Create` and never reused. `Name` stays the readable
+  word-chain — the store key and the pod name — reusable once a prior life
+  under that name is deleted. Every internal reference moves to `ID`: the
+  workspace subpath, `CONVO_ID`, the runtime pod's
+  `agentops.dev/conversation-id` label, op ids and `causedBy.Parent`. The
+  signal and chat correlation key, formerly `ConversationID`/`conversationId`,
+  is renamed to `CorrelationID`/`correlationId` throughout the API types, the
+  CRD and both contract pages. The channel adapter wire field
+  `conversationId` is repurposed to carry the new system identity instead of
+  the correlation key — the correlation key moves to a new `correlationId`
+  field on the same operation. The channel adapter contract moves to wire
+  `contract=3`, and an adapter still declaring `contract=2` is refused `400`.
+
 ### Fixed
 
 - **`runtime-claude` read a failed resume against an unreadable context store as
@@ -26,6 +44,18 @@ for the source and the reference material beside this file.
   result, and that id was counted as a recovery, so the outage check never ran. A
   failed turn now counts as recovered only when it says something, and the run
   reports the outage. Takes effect with the next `runtime-claude` image.
+
+### Upgrade
+
+1. **Delete every `Conversation` before upgrading.** The old CRD has no
+   `correlationId` field, and `kubectl apply` would prune it from any object
+   still carrying the renamed one.
+2. **Apply the CRDs before running `helm upgrade`**:
+   `kubectl apply -f chart/crds/`. Helm never upgrades an existing CRD on its
+   own.
+3. **Rolling back** to the previous chart version needs the same step in
+   reverse: delete every `Conversation` again first, since the old CRD would
+   otherwise prune `spec.correlationId` from each one.
 
 ## [24.0.0] — 2026-11-22
 

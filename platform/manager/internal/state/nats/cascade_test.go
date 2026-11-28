@@ -34,7 +34,7 @@ func (e *cascadeEnv) children() *children {
 
 func (e *cascadeEnv) conversation(t *testing.T, name string, finalizers ...string) {
 	t.Helper()
-	if _, err := e.b.Stores.Conversations.Create(e.ctx, state.Key(name), state.ConversationRecord{ProfileRef: "default", Finalizers: finalizers}); err != nil {
+	if _, _, err := e.b.Stores.Conversations.Create(e.ctx, state.Key(name), state.ConversationRecord{ProfileRef: "default", Finalizers: finalizers}); err != nil {
 		t.Fatalf("create conversation %q: %v", name, err)
 	}
 }
@@ -109,20 +109,8 @@ func TestRunHistoryUnderTheLimitIsUntouched(t *testing.T) {
 
 func TestDeletingAConversationRemovesItsRunsAndBlobsOnly(t *testing.T) {
 	cases := map[string]func(t *testing.T, e *cascadeEnv){
-		"Delete": func(t *testing.T, e *cascadeEnv) {
-			if err := e.b.Stores.Conversations.Delete(e.ctx, "doomed"); err != nil {
-				t.Fatalf("Delete: %v", err)
-			}
-		},
-		"DeleteAt": func(t *testing.T, e *cascadeEnv) {
-			_, rev, err := e.b.Stores.Conversations.Get(e.ctx, "doomed")
-			if err != nil {
-				t.Fatalf("Get: %v", err)
-			}
-			if err := e.b.Stores.Conversations.DeleteAt(e.ctx, "doomed", rev); err != nil {
-				t.Fatalf("DeleteAt: %v", err)
-			}
-		},
+		"Delete":   deleteDoomed,
+		"DeleteAt": deleteDoomedAt,
 	}
 	for name, remove := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -136,19 +124,40 @@ func TestDeletingAConversationRemovesItsRunsAndBlobsOnly(t *testing.T) {
 
 			remove(t, e)
 
-			if n := e.runKeysOf(t, "doomed"); n != 0 {
-				t.Errorf("%d runs of the deleted conversation remain", n)
-			}
-			if e.hasBlob(t, "doomed-input") {
-				t.Error("a blob of the deleted conversation remains")
-			}
-			if n := e.runKeysOf(t, "bystander"); n != 2 {
-				t.Errorf("the other conversation has %d runs, want 2", n)
-			}
-			if !e.hasBlob(t, "bystander-input") {
-				t.Error("the other conversation's blob was removed")
-			}
+			assertDoomedGoneBystanderKept(t, e)
 		})
+	}
+}
+
+func deleteDoomed(t *testing.T, e *cascadeEnv) {
+	if err := e.b.Stores.Conversations.Delete(e.ctx, "doomed"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+}
+
+func deleteDoomedAt(t *testing.T, e *cascadeEnv) {
+	_, rev, err := e.b.Stores.Conversations.Get(e.ctx, "doomed")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if err := e.b.Stores.Conversations.DeleteAt(e.ctx, "doomed", rev); err != nil {
+		t.Fatalf("DeleteAt: %v", err)
+	}
+}
+
+func assertDoomedGoneBystanderKept(t *testing.T, e *cascadeEnv) {
+	t.Helper()
+	if n := e.runKeysOf(t, "doomed"); n != 0 {
+		t.Errorf("%d runs of the deleted conversation remain", n)
+	}
+	if e.hasBlob(t, "doomed-input") {
+		t.Error("a blob of the deleted conversation remains")
+	}
+	if n := e.runKeysOf(t, "bystander"); n != 2 {
+		t.Errorf("the other conversation has %d runs, want 2", n)
+	}
+	if !e.hasBlob(t, "bystander-input") {
+		t.Error("the other conversation's blob was removed")
 	}
 }
 

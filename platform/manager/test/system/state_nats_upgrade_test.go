@@ -231,7 +231,7 @@ func countConversationsFor(ctx context.Context, e *Env, convID string) (int, err
 	}
 	n := 0
 	for i := range items {
-		if items[i].Spec.ConversationID == convID {
+		if items[i].Spec.CorrelationID == convID {
 			n++
 		}
 	}
@@ -348,7 +348,7 @@ func TestNatsRollingServerImageUpgradeKeepsWritesSucceeding(t *testing.T) {
 		}
 		for i := range items {
 			if strings.HasPrefix(items[i].Spec.Title, "e2e-nats-rolling-"+stamp) ||
-				strings.HasPrefix(items[i].Spec.ConversationID, "e2e-nats-rolling-"+stamp) {
+				strings.HasPrefix(items[i].Spec.CorrelationID, "e2e-nats-rolling-"+stamp) {
 				_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: items[i].Name}})
 			}
 		}

@@ -1133,8 +1133,9 @@ console:
     # only, selection counts roots, and "Archive" reads "Closed".
     # 0.45.0: the Queues work table pages, long titles clip with a hover tooltip,
     # and the narrow columns stop wrapping.
-    # 0.46.0: the Queues work-queue card shows the conversations and members
-    # pools side by side.
+    # 0.46.0: reads correlationId, the conversation's identity moved off it to
+    # conversationId, and the channel adapter contract moves to 3. The Queues
+    # work-queue card shows the conversations and members pools side by side.
     tag: 0.46.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080

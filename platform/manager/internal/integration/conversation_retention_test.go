@@ -196,7 +196,7 @@ func TestAutoDeleteRespectsTheClosedWindowAndAReopenResetsIt(t *testing.T) {
 }
 
 // The rule that makes closing mean anything: a CLOSED conversation is excluded
-// from equality routing even though its conversationId still equals the
+// from equality routing even though its correlationId still equals the
 // incoming initiationId — the repeat opens a NEW conversation rather than
 // waking the one somebody tidied away.
 func TestAClosedConversationIsNotReused(t *testing.T) {

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namespace"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
@@ -27,8 +29,10 @@ func workReportServer(t *testing.T) (*Server, *activity.Log) {
 	rt.Name, rt.Namespace = "claude", "agent-ops"
 	rt.Spec.Image = "example/runtime-claude:1"
 
+	objs := []client.Object{conv, rt}
+	assignUIDs(objs)
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
-		WithObjects(conv, rt).WithStatusSubresource(conv).Build()
+		WithObjects(objs...).WithStatusSubresource(conv).Build()
 	log := activity.New(64)
 	return &Server{Reader: c, Conversations: testConversations(t, c, "agent-ops"), Runs: testRuns(t, c, "agent-ops"), Client: c, Namespaces: namespace.Namespaces{Control: "agent-ops", Conversations: "agent-ops"}, Activity: log}, log
 }
@@ -253,5 +257,59 @@ func TestWorkIsNotServedToAClosedConversation(t *testing.T) {
 	if got.Status.Phase != agentopsv1alpha1.ConversationClosed || got.Status.Inflight != nil {
 		t.Fatalf("polling must leave a closed conversation closed with nothing in flight, got phase %q inflight %+v",
 			got.Status.Phase, got.Status.Inflight)
+	}
+}
+
+// A runtime pod is handed its CONVO_ID once, at creation, and polls /work
+// with it for the pod's whole life (runtime-spec, podspec.go). If the
+// conversation it names is deleted and a NEW, unrelated conversation is
+// created under the same reused Name — AllocateName permits exactly this —
+// the stale pod's own id must resolve to NOTHING, never to the new
+// conversation's queue. Resolving by Name instead of ID (the bug conversation-
+// identity Decision 1/7 fixes) would hand the old pod the new conversation's
+// work.
+func TestWorkDoesNotResolveAStalePodsIDToAConversationThatReusedItsName(t *testing.T) {
+	s, _ := workReportServer(t)
+	oldConv := &agentopsv1alpha1.Conversation{}
+	if err := s.Client.Get(t.Context(), types.NamespacedName{Namespace: "agent-ops", Name: "conv-a"}, oldConv); err != nil {
+		t.Fatal(err)
+	}
+	staleID := string(oldConv.UID)
+	if err := s.Client.Delete(t.Context(), oldConv); err != nil {
+		t.Fatal(err)
+	}
+
+	reborn := &agentopsv1alpha1.Conversation{}
+	reborn.Name, reborn.Namespace = "conv-a", "agent-ops"
+	reborn.UID = types.UID("conv-a-reborn")
+	reborn.Spec.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: "claude"}
+	if err := s.Client.Create(t.Context(), reborn); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, served, err := s.tryDispatch(t.Context(), staleID, "pod-a"); err == nil || served {
+		t.Fatalf("a stale CONVO_ID must never resolve to a reborn conversation sharing its old name: served=%v err=%v", served, err)
+	}
+}
+
+// The complement: an id naming no conversation at all — never deleted,
+// simply unknown — is refused the same way, never silently served as if it
+// named the first record List happened to see.
+func TestWorkRefusesAnUnknownConvoID(t *testing.T) {
+	s, _ := workReportServer(t)
+	if _, served, err := s.tryDispatch(t.Context(), "never-existed", "pod-a"); err == nil || served {
+		t.Fatalf("an unknown convo id must be refused, got served=%v err=%v", served, err)
+	}
+}
+
+// conversationByID resolves convo= through state.ByID (conversation-
+// identity Decision 1/7) — a genuine failure reading that index must
+// propagate verbatim, never be folded into "unknown id" the way a merely
+// empty match is.
+func TestTryDispatchPropagatesAListFailureResolvingTheConvoID(t *testing.T) {
+	s, _ := workReportServer(t)
+	s.Conversations = listFailsConversations{s.Conversations}
+	if _, served, err := s.tryDispatch(t.Context(), "conv-a", "pod-a"); !errors.Is(err, errAncestryUnreadable) || served {
+		t.Fatalf("a List failure resolving the convo id must propagate, got served=%v err=%v", served, err)
 	}
 }
