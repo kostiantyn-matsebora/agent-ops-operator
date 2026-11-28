@@ -72,6 +72,27 @@ type AgentCapabilitySpec struct {
 	// reads a Pipeline or Coordinator at pod-build time.
 	// +optional
 	Persistence *PipelinePersistence `json:"persistence,omitempty"`
+	// Repositories lists every repository this capability's conversations
+	// check out — the SAME shape and resolution rule
+	// AgentProfileSpec.Repositories carries: a non-empty list here REPLACES
+	// the profile's, never merging (multi-repo-workspace).
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Repositories []RepositoryEntry `json:"repositories,omitempty"`
+	// AgentFile names the agent definition file by its location, taking
+	// precedence over both the profile's AgentFile and its Agent name form
+	// when set. Travels with Repositories: declaring none here, while
+	// Repositories replaces the profile's list, leaves the conversation
+	// with no agent file — it never inherits the profile's.
+	// +optional
+	AgentFile *AgentFileRef `json:"agentFile,omitempty"`
+	// WorkingDir names a Repositories entry this capability's conversations
+	// start in, instead of the workspace root — same rule as
+	// AgentProfileSpec.WorkingDir.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	WorkingDir string `json:"workingDir,omitempty"`
 }
 
 // ProfileName returns the referenced profile's name, or empty when this

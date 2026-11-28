@@ -37,6 +37,10 @@ type RepoAuth struct {
 // checks it out as its working directory, so the agent has access to the whole
 // repo (CLAUDE.md, .claude/agents, skills, any assets). Optional: without a
 // repository the agent runs as a pure advisor over its tools.
+//
+// Deprecated: superseded by RepositoryEntry / `repositories[]`
+// (multi-repo-workspace). This stays as `AgentProfileSpec.Repository`'s
+// deprecated one-entry shorthand — not slated for removal.
 type RepositorySpec struct {
 	// URL of the repository to check out, in any form git understands
 	// (ssh://, git@host:path, https://). Empty means no checkout.
@@ -50,18 +54,123 @@ type RepositorySpec struct {
 	Auth *RepoAuth `json:"auth,omitempty"`
 }
 
+// MaxRepoName bounds RepositoryEntry.Name, a DNS label.
+const MaxRepoName = 63
+
+// RepositoryEntry is one repository in a `repositories[]` list
+// (multi-repo-workspace), replacing the deprecated single-repository
+// RepositorySpec. A `repositories[]` list on one holder REPLACES another's,
+// never merging — see the "capability's list replaces the profile's list"
+// requirement.
+type RepositoryEntry struct {
+	// Name is this entry's identity within the list — a DNS label, and the
+	// list's map key, so the API server itself refuses two entries sharing
+	// one name.
+	//
+	// INERT for a single repository: there is no `/workspace/<name>` alias
+	// for it. It exists to be addressed once a SECOND repository joins the
+	// list — by `agentFile.repo`, `workingDir`, or a `<repo>:<path>` prompt
+	// qualifier.
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+	// URL of the repository to check out, in any form git understands
+	// (ssh://, git@host:path, https://).
+	// +kubebuilder:validation:MinLength=1
+	URL string `json:"url"`
+	// Ref: branch, tag or commit to check out.
+	// +kubebuilder:default=main
+	// +optional
+	Ref string `json:"ref,omitempty"`
+	// +optional
+	Auth *RepoAuth `json:"auth,omitempty"`
+	// KeepGit keeps the `.git` directory after the clone. Absent means
+	// TRUE — the agent can inspect history and the tree still looks like
+	// an ordinary checkout. False has the workspace-sync init container
+	// remove `.git` once the clone completes.
+	// +kubebuilder:default=true
+	// +optional
+	KeepGit *bool `json:"keepGit,omitempty"`
+}
+
+// KeepsGit reports whether e keeps its `.git` directory after the clone.
+// Absent (nil) means true — see KeepGit's own comment.
+func (e RepositoryEntry) KeepsGit() bool {
+	return e.KeepGit == nil || *e.KeepGit
+}
+
+// AgentFileRef names an agent definition file by its location, instead of
+// the conventional `agent` name form (multi-repo-workspace). Mutually
+// exclusive with `agent` on a profile — see AgentProfileSpec's own CEL rule.
+//
+// +kubebuilder:validation:XValidation:rule="!self.path.startsWith('/') && !self.path.contains('..')",message="agentFile.path must be relative to the repository root and must not contain '..'"
+type AgentFileRef struct {
+	// Repo names the `repositories[]` entry holding the file. Optional
+	// when exactly one repository resolves, required with two or more —
+	// enforced on the holder's Ready condition (multi-repo-workspace),
+	// never here: admission sees only this object, never the resolved
+	// list a Pipeline or Coordinator reaches it through.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	Repo string `json:"repo,omitempty"`
+	// Path to the file, relative to Repo's root. Never absolute, never
+	// containing `..`. A path that passes this check yet resolves outside
+	// the repository through a symlink is refused at pod start instead,
+	// naming the path — admission cannot see the checked-out tree.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=1024
+	Path string `json:"path"`
+}
+
 // AgentProfileSpec is an addressable agent IDENTITY: repository, agent role,
 // prompts, credentials and limits. It carries NO capabilities — what an agent
 // may DO (its tool allowlist and MCP servers) comes exclusively from the
 // Pipeline routing its conversation, so one profile serves routes with
 // genuinely different capabilities without being cloned or edited.
+//
+// +kubebuilder:validation:XValidation:rule="!(has(self.repository) && has(self.repositories))",message="repository and repositories are mutually exclusive: repository is the deprecated one-entry shorthand repositories replaces"
+// +kubebuilder:validation:XValidation:rule="!(has(self.agent) && has(self.agentFile))",message="agent and agentFile are mutually exclusive: agent is the conventional single-repository name form, agentFile names a file by location"
 type AgentProfileSpec struct {
+	// Repository is the single-repository shorthand for Repositories below
+	// — resolving as a one-entry list named `default`, inert since there
+	// is only one entry (multi-repo-workspace).
+	//
+	// Deprecated: use Repositories. Setting both on one profile is refused
+	// — kept working indefinitely as shorthand, unlike RuntimeRef this is
+	// not slated for removal.
 	// +optional
 	Repository RepositorySpec `json:"repository,omitempty"`
+
+	// Repositories lists every repository this agent's workspace checks
+	// out. Mutually exclusive with Repository — setting both is refused.
+	// See multi-repo-workspace for resolution (a capability's list
+	// replaces a profile's, never merging), the snapshot onto the
+	// Conversation, and the workspace layout the count produces.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Repositories []RepositoryEntry `json:"repositories,omitempty"`
+
+	// AgentFile names the agent definition file by its location, instead
+	// of the conventional Agent name form below — mutually exclusive with
+	// it. Travels with Repositories: a capability that replaces the list
+	// also replaces (or clears) this.
+	// +optional
+	AgentFile *AgentFileRef `json:"agentFile,omitempty"`
+
+	// WorkingDir names a Repositories entry the agent starts in, instead
+	// of the workspace root. Valid only once the resolved list holds two
+	// or more repositories — enforced on the holder's (Pipeline or
+	// Coordinator) Ready condition, not here: admission sees only this
+	// profile, never the resolved list.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	WorkingDir string `json:"workingDir,omitempty"`
 
 	// Agent is the agent to adopt: name of `.claude/agents/<agent>.md` in the
 	// repository. A profile names one agent and a Pipeline names one profile,
 	// so the agent comes from the wiring and no message may select another.
+	// Mutually exclusive with AgentFile.
 	// +optional
 	Agent string `json:"agent,omitempty"`
 

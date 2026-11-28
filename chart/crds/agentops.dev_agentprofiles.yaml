@@ -62,7 +62,40 @@ spec:
                   Agent is the agent to adopt: name of `.claude/agents/<agent>.md` in the
                   repository. A profile names one agent and a Pipeline names one profile,
                   so the agent comes from the wiring and no message may select another.
+                  Mutually exclusive with AgentFile.
                 type: string
+              agentFile:
+                description: |-
+                  AgentFile names the agent definition file by its location, instead
+                  of the conventional Agent name form below — mutually exclusive with
+                  it. Travels with Repositories: a capability that replaces the list
+                  also replaces (or clears) this.
+                properties:
+                  path:
+                    description: |-
+                      Path to the file, relative to Repo's root. Never absolute, never
+                      containing `..`. A path that passes this check yet resolves outside
+                      the repository through a symlink is refused at pod start instead,
+                      naming the path — admission cannot see the checked-out tree.
+                    maxLength: 1024
+                    minLength: 1
+                    type: string
+                  repo:
+                    description: |-
+                      Repo names the `repositories[]` entry holding the file. Optional
+                      when exactly one repository resolves, required with two or more —
+                      enforced on the holder's Ready condition (multi-repo-workspace),
+                      never here: admission sees only this object, never the resolved
+                      list a Pipeline or Coordinator reaches it through.
+                    maxLength: 63
+                    type: string
+                required:
+                - path
+                type: object
+                x-kubernetes-validations:
+                - message: agentFile.path must be relative to the repository root
+                    and must not contain '..'
+                  rule: '!self.path.startsWith(''/'') && !self.path.contains(''..'')'
               env:
                 description: |-
                   Env: extra environment for the agent process; values may use valueFrom
@@ -242,12 +275,95 @@ spec:
                   ReplyPrompt wraps a follow-up in an existing conversation, where Prompt
                   wraps the first unit.
                 type: string
+              repositories:
+                description: |-
+                  Repositories lists every repository this agent's workspace checks
+                  out. Mutually exclusive with Repository — setting both is refused.
+                  See multi-repo-workspace for resolution (a capability's list
+                  replaces a profile's, never merging), the snapshot onto the
+                  Conversation, and the workspace layout the count produces.
+                items:
+                  description: |-
+                    RepositoryEntry is one repository in a `repositories[]` list
+                    (multi-repo-workspace), replacing the deprecated single-repository
+                    RepositorySpec. A `repositories[]` list on one holder REPLACES another's,
+                    never merging — see the "capability's list replaces the profile's list"
+                    requirement.
+                  properties:
+                    auth:
+                      description: RepoAuth references credentials for a (possibly
+                        private) git repository.
+                      properties:
+                        secretRef:
+                          description: |-
+                            SecretRef points to a Secret holding either key `sshKey` (type=ssh,
+                            private deploy key) or key `token` (type=https, PAT; optional `username`).
+                          properties:
+                            name:
+                              description: Name of the referenced object.
+                              minLength: 1
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type:
+                          description: RepoAuthType selects the git auth mechanism.
+                          enum:
+                          - ssh
+                          - https
+                          type: string
+                      required:
+                      - secretRef
+                      - type
+                      type: object
+                    keepGit:
+                      default: true
+                      description: |-
+                        KeepGit keeps the `.git` directory after the clone. Absent means
+                        TRUE — the agent can inspect history and the tree still looks like
+                        an ordinary checkout. False has the workspace-sync init container
+                        remove `.git` once the clone completes.
+                      type: boolean
+                    name:
+                      description: |-
+                        Name is this entry's identity within the list — a DNS label, and the
+                        list's map key, so the API server itself refuses two entries sharing
+                        one name.
+
+                        INERT for a single repository: there is no `/workspace/<name>` alias
+                        for it. It exists to be addressed once a SECOND repository joins the
+                        list — by `agentFile.repo`, `workingDir`, or a `<repo>:<path>` prompt
+                        qualifier.
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    ref:
+                      default: main
+                      description: 'Ref: branch, tag or commit to check out.'
+                      type: string
+                    url:
+                      description: |-
+                        URL of the repository to check out, in any form git understands
+                        (ssh://, git@host:path, https://).
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  - url
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               repository:
                 description: |-
-                  RepositorySpec identifies the git repository an agent runs from. The runtime
-                  checks it out as its working directory, so the agent has access to the whole
-                  repo (CLAUDE.md, .claude/agents, skills, any assets). Optional: without a
-                  repository the agent runs as a pure advisor over its tools.
+                  Repository is the single-repository shorthand for Repositories below
+                  — resolving as a one-entry list named `default`, inert since there
+                  is only one entry (multi-repo-workspace).
+
+                  Deprecated: use Repositories. Setting both on one profile is refused
+                  — kept working indefinitely as shorthand, unlike RuntimeRef this is
+                  not slated for removal.
                 properties:
                   auth:
                     description: RepoAuth references credentials for a (possibly private)
@@ -384,9 +500,25 @@ spec:
                   definition file instead, which is version-controlled and can declare
                   tools; this exists so a repo-less profile is not silently personality-free.
                 type: string
+              workingDir:
+                description: |-
+                  WorkingDir names a Repositories entry the agent starts in, instead
+                  of the workspace root. Valid only once the resolved list holds two
+                  or more repositories — enforced on the holder's (Pipeline or
+                  Coordinator) Ready condition, not here: admission sees only this
+                  profile, never the resolved list.
+                maxLength: 63
+                type: string
             required:
             - outputFormat
             type: object
+            x-kubernetes-validations:
+            - message: 'repository and repositories are mutually exclusive: repository
+                is the deprecated one-entry shorthand repositories replaces'
+              rule: '!(has(self.repository) && has(self.repositories))'
+            - message: 'agent and agentFile are mutually exclusive: agent is the conventional
+                single-repository name form, agentFile names a file by location'
+              rule: '!(has(self.agent) && has(self.agentFile))'
           status:
             description: AgentProfileStatus reports validation/resolution state.
             properties:

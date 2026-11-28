@@ -63,6 +63,37 @@ spec:
               profile, and carries its queue of work units (append-only; pruned once
               processed).
             properties:
+              agentFile:
+                description: |-
+                  AgentFile is the RESOLVED agent file location, snapshotted alongside
+                  Repositories — travels with it, so a conversation whose capability
+                  replaced the list with no file of its own carries none.
+                properties:
+                  path:
+                    description: |-
+                      Path to the file, relative to Repo's root. Never absolute, never
+                      containing `..`. A path that passes this check yet resolves outside
+                      the repository through a symlink is refused at pod start instead,
+                      naming the path — admission cannot see the checked-out tree.
+                    maxLength: 1024
+                    minLength: 1
+                    type: string
+                  repo:
+                    description: |-
+                      Repo names the `repositories[]` entry holding the file. Optional
+                      when exactly one repository resolves, required with two or more —
+                      enforced on the holder's Ready condition (multi-repo-workspace),
+                      never here: admission sees only this object, never the resolved
+                      list a Pipeline or Coordinator reaches it through.
+                    maxLength: 63
+                    type: string
+                required:
+                - path
+                type: object
+                x-kubernetes-validations:
+                - message: agentFile.path must be relative to the repository root
+                    and must not contain '..'
+                  rule: '!self.path.startsWith(''/'') && !self.path.contains(''..'')'
               causedBy:
                 description: |-
                   CausedBy is set when this conversation was created by the `invoke`
@@ -428,6 +459,83 @@ spec:
                 required:
                 - name
                 type: object
+              repositories:
+                description: |-
+                  Repositories is the RESOLVED repository list this conversation's
+                  workspace checks out, snapshotted at creation exactly as RuntimeRef
+                  and the claim names above — a later edit to the originating profile
+                  or capability moves only conversations created afterwards
+                  (multi-repo-workspace). Empty means no checkout.
+                items:
+                  description: |-
+                    RepositoryEntry is one repository in a `repositories[]` list
+                    (multi-repo-workspace), replacing the deprecated single-repository
+                    RepositorySpec. A `repositories[]` list on one holder REPLACES another's,
+                    never merging — see the "capability's list replaces the profile's list"
+                    requirement.
+                  properties:
+                    auth:
+                      description: RepoAuth references credentials for a (possibly
+                        private) git repository.
+                      properties:
+                        secretRef:
+                          description: |-
+                            SecretRef points to a Secret holding either key `sshKey` (type=ssh,
+                            private deploy key) or key `token` (type=https, PAT; optional `username`).
+                          properties:
+                            name:
+                              description: Name of the referenced object.
+                              minLength: 1
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type:
+                          description: RepoAuthType selects the git auth mechanism.
+                          enum:
+                          - ssh
+                          - https
+                          type: string
+                      required:
+                      - secretRef
+                      - type
+                      type: object
+                    keepGit:
+                      default: true
+                      description: |-
+                        KeepGit keeps the `.git` directory after the clone. Absent means
+                        TRUE — the agent can inspect history and the tree still looks like
+                        an ordinary checkout. False has the workspace-sync init container
+                        remove `.git` once the clone completes.
+                      type: boolean
+                    name:
+                      description: |-
+                        Name is this entry's identity within the list — a DNS label, and the
+                        list's map key, so the API server itself refuses two entries sharing
+                        one name.
+
+                        INERT for a single repository: there is no `/workspace/<name>` alias
+                        for it. It exists to be addressed once a SECOND repository joins the
+                        list — by `agentFile.repo`, `workingDir`, or a `<repo>:<path>` prompt
+                        qualifier.
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    ref:
+                      default: main
+                      description: 'Ref: branch, tag or commit to check out.'
+                      type: string
+                    url:
+                      description: |-
+                        URL of the repository to check out, in any form git understands
+                        (ssh://, git@host:path, https://).
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  - url
+                  type: object
+                type: array
               runtimeRef:
                 description: |-
                   RuntimeRef / ServiceAccountName are the originating Pipeline's execution
@@ -579,6 +687,13 @@ spec:
                 required:
                 - refs
                 type: object
+              workingDir:
+                description: |-
+                  WorkingDir is the RESOLVED working directory, naming an entry in
+                  Repositories, snapshotted alongside it. Empty means the workspace
+                  root.
+                maxLength: 63
+                type: string
               workspaceClaimName:
                 description: |-
                   WorkspaceClaimName is the resolved workspace claim, materialized at

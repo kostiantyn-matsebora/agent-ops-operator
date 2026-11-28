@@ -39,6 +39,33 @@ type Provenance struct {
 	Entry  string
 }
 
+// RepoAuth mirrors api/v1alpha1.RepoAuth: the git auth mechanism and a
+// Secret reference — a name, never the credential itself.
+type RepoAuth struct {
+	Type      string
+	SecretRef Ref
+}
+
+// RepositoryEntry mirrors api/v1alpha1.RepositoryEntry: one of a
+// conversation's snapshotted repositories. KeepGit is the RESOLVED value
+// (never nil-meaning-default, unlike the CRD's optional pointer) — every
+// field here is frozen at creation like the rest of ConversationRecord's
+// publication fields.
+type RepositoryEntry struct {
+	Name    string
+	URL     string
+	Ref     string
+	Auth    *RepoAuth
+	KeepGit bool
+}
+
+// AgentFileRef mirrors api/v1alpha1.AgentFileRef: where a conversation's
+// agent definition file lives, resolved and snapshotted at creation.
+type AgentFileRef struct {
+	Repo string
+	Path string
+}
+
 // OriginReader names the reader who started a conversation, in the key space
 // of the channel they started it from. See api/v1alpha1.OriginReader.
 type OriginReader struct {
@@ -245,6 +272,9 @@ type ConversationRecord struct {
 	ServiceAccountName    string
 	ContextClaimName      string
 	WorkspaceClaimName    string
+	Repositories          []RepositoryEntry
+	AgentFile             *AgentFileRef
+	WorkingDir            string
 	Inputs                []InputItem
 
 	Phase                   string

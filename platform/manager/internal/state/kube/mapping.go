@@ -42,6 +42,9 @@ func toRecord(conv *agentopsv1alpha1.Conversation) state.ConversationRecord {
 		ServiceAccountName:    s.ServiceAccountName,
 		ContextClaimName:      s.ContextClaimName,
 		WorkspaceClaimName:    s.WorkspaceClaimName,
+		Repositories:          toStateRepositories(s.Repositories),
+		AgentFile:             toStateAgentFile(s.AgentFile),
+		WorkingDir:            s.WorkingDir,
 		Inputs:                toStateInputItems(s.Inputs),
 
 		Phase:                   string(st.Phase),
@@ -168,6 +171,9 @@ func applySpecAndMeta(conv *agentopsv1alpha1.Conversation, rec state.Conversatio
 	s.ServiceAccountName = rec.ServiceAccountName
 	s.ContextClaimName = rec.ContextClaimName
 	s.WorkspaceClaimName = rec.WorkspaceClaimName
+	s.Repositories = toAPIRepositories(rec.Repositories)
+	s.AgentFile = toAPIAgentFile(rec.AgentFile)
+	s.WorkingDir = rec.WorkingDir
 	s.Inputs = toAPIInputItems(rec.Inputs)
 }
 
@@ -277,6 +283,71 @@ func toRunStatus(r state.Run) agentopsv1alpha1.RunStatus {
 		RoutedToParent:  r.RoutedToParent,
 		Inputs:          toAPIRecordedInputs(r.Inputs),
 	}
+}
+
+// toStateRepositories/toAPIRepositories map a conversation's snapshotted
+// repository list (api -> state, state -> api). KeepGit's pointer-vs-bool
+// asymmetry is deliberate (state.RepositoryEntry's own doc): the CRD side
+// carries the CRD's optional-with-default shape, the record side carries
+// the already-resolved value.
+func toStateRepositories(rs []agentopsv1alpha1.RepositoryEntry) []state.RepositoryEntry {
+	if rs == nil {
+		return nil
+	}
+	out := make([]state.RepositoryEntry, len(rs))
+	for i, r := range rs {
+		out[i] = state.RepositoryEntry{
+			Name: r.Name, URL: r.URL, Ref: r.Ref,
+			Auth: toStateRepoAuth(r.Auth), KeepGit: r.KeepsGit(),
+		}
+	}
+	return out
+}
+
+func toAPIRepositories(rs []state.RepositoryEntry) []agentopsv1alpha1.RepositoryEntry {
+	if rs == nil {
+		return nil
+	}
+	out := make([]agentopsv1alpha1.RepositoryEntry, len(rs))
+	for i, r := range rs {
+		keepGit := r.KeepGit
+		out[i] = agentopsv1alpha1.RepositoryEntry{
+			Name: r.Name, URL: r.URL, Ref: r.Ref,
+			Auth: toAPIRepoAuth(r.Auth), KeepGit: &keepGit,
+		}
+	}
+	return out
+}
+
+func toStateRepoAuth(a *agentopsv1alpha1.RepoAuth) *state.RepoAuth {
+	if a == nil {
+		return nil
+	}
+	return &state.RepoAuth{Type: string(a.Type), SecretRef: a.SecretRef.Name}
+}
+
+func toAPIRepoAuth(a *state.RepoAuth) *agentopsv1alpha1.RepoAuth {
+	if a == nil {
+		return nil
+	}
+	return &agentopsv1alpha1.RepoAuth{
+		Type:      agentopsv1alpha1.RepoAuthType(a.Type),
+		SecretRef: agentopsv1alpha1.ObjectRef{Name: a.SecretRef},
+	}
+}
+
+func toStateAgentFile(f *agentopsv1alpha1.AgentFileRef) *state.AgentFileRef {
+	if f == nil {
+		return nil
+	}
+	return &state.AgentFileRef{Repo: f.Repo, Path: f.Path}
+}
+
+func toAPIAgentFile(f *state.AgentFileRef) *agentopsv1alpha1.AgentFileRef {
+	if f == nil {
+		return nil
+	}
+	return &agentopsv1alpha1.AgentFileRef{Repo: f.Repo, Path: f.Path}
 }
 
 func toStateInputItems(items []agentopsv1alpha1.InputItem) []state.InputItem {

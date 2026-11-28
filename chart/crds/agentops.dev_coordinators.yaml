@@ -67,6 +67,39 @@ spec:
               Coordinator's own declared set. A member (one `invoke` created) still
               binds no channel at all.
             properties:
+              agentFile:
+                description: |-
+                  AgentFile names the agent definition file by its location, taking
+                  precedence over both the profile's AgentFile and its Agent name form
+                  when set. Travels with Repositories: declaring none here, while
+                  Repositories replaces the profile's list, leaves the conversation
+                  with no agent file — it never inherits the profile's.
+                properties:
+                  path:
+                    description: |-
+                      Path to the file, relative to Repo's root. Never absolute, never
+                      containing `..`. A path that passes this check yet resolves outside
+                      the repository through a symlink is refused at pod start instead,
+                      naming the path — admission cannot see the checked-out tree.
+                    maxLength: 1024
+                    minLength: 1
+                    type: string
+                  repo:
+                    description: |-
+                      Repo names the `repositories[]` entry holding the file. Optional
+                      when exactly one repository resolves, required with two or more —
+                      enforced on the holder's Ready condition (multi-repo-workspace),
+                      never here: admission sees only this object, never the resolved
+                      list a Pipeline or Coordinator reaches it through.
+                    maxLength: 63
+                    type: string
+                required:
+                - path
+                type: object
+                x-kubernetes-validations:
+                - message: agentFile.path must be relative to the repository root
+                    and must not contain '..'
+                  rule: '!self.path.startsWith(''/'') && !self.path.contains(''..'')'
               agents:
                 description: Agents this Coordinator's own conversation may invoke.
                 items:
@@ -342,6 +375,85 @@ spec:
                 required:
                 - name
                 type: object
+              repositories:
+                description: |-
+                  Repositories lists every repository this capability's conversations
+                  check out — the SAME shape and resolution rule
+                  AgentProfileSpec.Repositories carries: a non-empty list here REPLACES
+                  the profile's, never merging (multi-repo-workspace).
+                items:
+                  description: |-
+                    RepositoryEntry is one repository in a `repositories[]` list
+                    (multi-repo-workspace), replacing the deprecated single-repository
+                    RepositorySpec. A `repositories[]` list on one holder REPLACES another's,
+                    never merging — see the "capability's list replaces the profile's list"
+                    requirement.
+                  properties:
+                    auth:
+                      description: RepoAuth references credentials for a (possibly
+                        private) git repository.
+                      properties:
+                        secretRef:
+                          description: |-
+                            SecretRef points to a Secret holding either key `sshKey` (type=ssh,
+                            private deploy key) or key `token` (type=https, PAT; optional `username`).
+                          properties:
+                            name:
+                              description: Name of the referenced object.
+                              minLength: 1
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type:
+                          description: RepoAuthType selects the git auth mechanism.
+                          enum:
+                          - ssh
+                          - https
+                          type: string
+                      required:
+                      - secretRef
+                      - type
+                      type: object
+                    keepGit:
+                      default: true
+                      description: |-
+                        KeepGit keeps the `.git` directory after the clone. Absent means
+                        TRUE — the agent can inspect history and the tree still looks like
+                        an ordinary checkout. False has the workspace-sync init container
+                        remove `.git` once the clone completes.
+                      type: boolean
+                    name:
+                      description: |-
+                        Name is this entry's identity within the list — a DNS label, and the
+                        list's map key, so the API server itself refuses two entries sharing
+                        one name.
+
+                        INERT for a single repository: there is no `/workspace/<name>` alias
+                        for it. It exists to be addressed once a SECOND repository joins the
+                        list — by `agentFile.repo`, `workingDir`, or a `<repo>:<path>` prompt
+                        qualifier.
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    ref:
+                      default: main
+                      description: 'Ref: branch, tag or commit to check out.'
+                      type: string
+                    url:
+                      description: |-
+                        URL of the repository to check out, in any form git understands
+                        (ssh://, git@host:path, https://).
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  - url
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               runtimeRef:
                 description: |-
                   RuntimeRef selects the AgentRuntime executing this capability's
@@ -434,14 +546,22 @@ spec:
                 required:
                 - refs
                 type: object
+              workingDir:
+                description: |-
+                  WorkingDir names a Repositories entry this capability's conversations
+                  start in, instead of the workspace root — same rule as
+                  AgentProfileSpec.WorkingDir.
+                maxLength: 63
+                type: string
             type: object
             x-kubernetes-validations:
             - message: capabilityRef and the inline capability fields (profileRef,
-                runtimeRef, serviceAccountName, toolsets, mcpConfigs, persistence)
-                are mutually exclusive
+                runtimeRef, serviceAccountName, toolsets, mcpConfigs, persistence,
+                repositories, agentFile, workingDir) are mutually exclusive
               rule: '!(has(self.capabilityRef) && (has(self.profileRef) || has(self.runtimeRef)
                 || has(self.serviceAccountName) || has(self.toolsets) || has(self.mcpConfigs)
-                || has(self.persistence)))'
+                || has(self.persistence) || has(self.repositories) || has(self.agentFile)
+                || has(self.workingDir)))'
           status:
             description: |-
               CoordinatorStatus reports whether this Coordinator's own capability and

@@ -55,6 +55,15 @@ func fixtureRecord(name string) state.ConversationRecord {
 		ServiceAccountName: "sa-1",
 		ContextClaimName:   "ctx-claim",
 		WorkspaceClaimName: "ws-claim",
+		Repositories: []state.RepositoryEntry{
+			{
+				Name: "app", URL: "https://example.com/app.git", Ref: "main",
+				Auth: &state.RepoAuth{Type: "https", SecretRef: "app-token"}, KeepGit: true,
+			},
+			{Name: "infra", URL: "git@example.com:team/infra.git", Ref: "release-2", KeepGit: false},
+		},
+		AgentFile:  &state.AgentFileRef{Repo: "infra", Path: "agents/ops.md"},
+		WorkingDir: "infra",
 		Inputs: []state.InputItem{
 			{
 				ID: "input-1", Type: "task", Agent: "legacy-agent", Payload: "inline payload",

@@ -82,7 +82,7 @@ type CoordinatorLimits struct {
 // Coordinator's own declared set. A member (one `invoke` created) still
 // binds no channel at all.
 //
-// +kubebuilder:validation:XValidation:rule="!(has(self.capabilityRef) && (has(self.profileRef) || has(self.runtimeRef) || has(self.serviceAccountName) || has(self.toolsets) || has(self.mcpConfigs) || has(self.persistence)))",message="capabilityRef and the inline capability fields (profileRef, runtimeRef, serviceAccountName, toolsets, mcpConfigs, persistence) are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="!(has(self.capabilityRef) && (has(self.profileRef) || has(self.runtimeRef) || has(self.serviceAccountName) || has(self.toolsets) || has(self.mcpConfigs) || has(self.persistence) || has(self.repositories) || has(self.agentFile) || has(self.workingDir)))",message="capabilityRef and the inline capability fields (profileRef, runtimeRef, serviceAccountName, toolsets, mcpConfigs, persistence, repositories, agentFile, workingDir) are mutually exclusive"
 type CoordinatorSpec struct {
 	// SignalSourceRefs: the sources this Coordinator claims, exactly as a
 	// Pipeline's own — shareable, so a Pipeline and a Coordinator may claim

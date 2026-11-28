@@ -513,6 +513,24 @@ type ConversationSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=253
 	WorkspaceClaimName string `json:"workspaceClaimName,omitempty"`
+	// Repositories is the RESOLVED repository list this conversation's
+	// workspace checks out, snapshotted at creation exactly as RuntimeRef
+	// and the claim names above — a later edit to the originating profile
+	// or capability moves only conversations created afterwards
+	// (multi-repo-workspace). Empty means no checkout.
+	// +optional
+	Repositories []RepositoryEntry `json:"repositories,omitempty"`
+	// AgentFile is the RESOLVED agent file location, snapshotted alongside
+	// Repositories — travels with it, so a conversation whose capability
+	// replaced the list with no file of its own carries none.
+	// +optional
+	AgentFile *AgentFileRef `json:"agentFile,omitempty"`
+	// WorkingDir is the RESOLVED working directory, naming an entry in
+	// Repositories, snapshotted alongside it. Empty means the workspace
+	// root.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	WorkingDir string `json:"workingDir,omitempty"`
 	// Inputs is the serial work queue — one inflight unit at a time, each
 	// entry pruned once status.runs[].inputs[] records it.
 	// +optional
