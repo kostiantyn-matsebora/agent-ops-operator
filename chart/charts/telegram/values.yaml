@@ -166,6 +166,6 @@ surface:
     # Empty = the surface name itself.
     name: ""
     # Chat defaults: cooldown OFF, so each message opens its own conversation
-    # (or, on a bound-thread reply, propagates the stamped conversationId) —
+    # (or, on a bound-thread reply, propagates the stamped correlationId) —
     # a person repeating a request means it twice.
     cooldownHours: 0

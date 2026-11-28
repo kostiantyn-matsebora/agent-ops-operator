@@ -472,34 +472,41 @@ func (b *Bus) Renew(ctx context.Context, taskUID, leaseToken string) error {
 		return commandbus.ErrNotFound
 	}
 	for i := 0; i < maxWriteAttempts; i++ {
-		doc, rev, err := b.getDoc(ctx, rk)
-		if err != nil {
-			return err
+		err := b.renewOnce(ctx, rk, taskUID, leaseToken)
+		if errors.Is(err, errConflict) {
+			continue
 		}
-		if doc == nil || doc.Task.UID != taskUID {
-			return commandbus.ErrNotFound
-		}
-		now := time.Now()
-		t := b.viewOf(doc.Task, now)
-		if t.State != commandbus.StateRunning || t.Lease == nil || t.Lease.Token != leaseToken {
-			return commandbus.ErrLeaseLost
-		}
-		decl, _ := commandbus.Resolve(b.cfg.inventory, t.Queue, t.Kind)
-		lease := b.cfg.leaseDuration
-		if decl.Policy.DeliveryTTL > 0 {
-			lease = decl.Policy.DeliveryTTL
-		}
-		doc.Task.Lease = &commandbus.Lease{Token: t.Lease.Token, Holder: t.Lease.Holder, Until: now.Add(lease)}
-		if _, err := b.putDoc(ctx, rk, *doc, rev); err != nil {
-			if errors.Is(err, errConflict) {
-				continue
-			}
-			return err
-		}
-		if strings.HasPrefix(leaseToken, "$JS.ACK.") {
-			_ = b.nc.Publish(leaseToken, []byte("+WPI"))
-		}
-		return nil
+		return err
 	}
 	return commandbus.ErrLeaseLost
+}
+
+// renewOnce is one read-modify-write attempt of Renew. A lost write race comes
+// back as errConflict, for the caller to retry.
+func (b *Bus) renewOnce(ctx context.Context, rk, taskUID, leaseToken string) error {
+	doc, rev, err := b.getDoc(ctx, rk)
+	if err != nil {
+		return err
+	}
+	if doc == nil || doc.Task.UID != taskUID {
+		return commandbus.ErrNotFound
+	}
+	now := time.Now()
+	t := b.viewOf(doc.Task, now)
+	if t.State != commandbus.StateRunning || t.Lease == nil || t.Lease.Token != leaseToken {
+		return commandbus.ErrLeaseLost
+	}
+	decl, _ := commandbus.Resolve(b.cfg.inventory, t.Queue, t.Kind)
+	lease := b.cfg.leaseDuration
+	if decl.Policy.DeliveryTTL > 0 {
+		lease = decl.Policy.DeliveryTTL
+	}
+	doc.Task.Lease = &commandbus.Lease{Token: t.Lease.Token, Holder: t.Lease.Holder, Until: now.Add(lease)}
+	if _, err := b.putDoc(ctx, rk, *doc, rev); err != nil {
+		return err
+	}
+	if strings.HasPrefix(leaseToken, "$JS.ACK.") {
+		_ = b.nc.Publish(leaseToken, []byte("+WPI"))
+	}
+	return nil
 }
