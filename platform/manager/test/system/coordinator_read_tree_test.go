@@ -76,7 +76,7 @@ func TestCoordinatorReadAndGetTreeScopedToCallersOwnSubtree(t *testing.T) {
 
 	// `read`, two hops deep: the root reading m2, its own grandchild.
 	code, out := e.coordinateCall(t, "/coordinate/read", rootToken,
-		map[string]any{"conversation": root.Name, "target": m2})
+		map[string]any{"conversation": string(root.UID), "target": m2})
 	if code != 200 {
 		t.Fatalf("read(root -> m2, two hops deep): %d %v", code, out)
 	}
@@ -89,7 +89,7 @@ func TestCoordinatorReadAndGetTreeScopedToCallersOwnSubtree(t *testing.T) {
 	// sibling branch" (this verb's own doc comment) — never a 404, since
 	// `other` genuinely exists and is live.
 	code, out = e.coordinateCall(t, "/coordinate/read", rootToken,
-		map[string]any{"conversation": root.Name, "target": other.Name})
+		map[string]any{"conversation": string(root.UID), "target": other.Name})
 	if code != 403 {
 		t.Fatalf("read(root -> an unrelated root) must be refused out of scope, got %d %v", code, out)
 	}
@@ -97,7 +97,7 @@ func TestCoordinatorReadAndGetTreeScopedToCallersOwnSubtree(t *testing.T) {
 	// `get_tree` with no target: the caller's own subtree, nested — the
 	// root's tree must contain m1, and m1's own nested members must contain
 	// m2 (buildTree's recursion actually recursing, not just a flat list).
-	code, out = e.coordinateCall(t, "/coordinate/tree", rootToken, map[string]any{"conversation": root.Name})
+	code, out = e.coordinateCall(t, "/coordinate/tree", rootToken, map[string]any{"conversation": string(root.UID)})
 	if code != 200 {
 		t.Fatalf("get_tree(root): %d %v", code, out)
 	}
@@ -114,7 +114,7 @@ func TestCoordinatorReadAndGetTreeScopedToCallersOwnSubtree(t *testing.T) {
 	// descendsFrom-gated target-resolution branch, never the no-target
 	// default path the call above took).
 	code, out = e.coordinateCall(t, "/coordinate/tree", rootToken,
-		map[string]any{"conversation": root.Name, "target": m2})
+		map[string]any{"conversation": string(root.UID), "target": m2})
 	if code != 200 {
 		t.Fatalf("get_tree(root, target=m2): %d %v", code, out)
 	}
@@ -125,7 +125,7 @@ func TestCoordinatorReadAndGetTreeScopedToCallersOwnSubtree(t *testing.T) {
 	// `get_tree` refuses the same out-of-scope target `read` does: the root
 	// asking for the tree rooted at the unrelated second root.
 	code, out = e.coordinateCall(t, "/coordinate/tree", rootToken,
-		map[string]any{"conversation": root.Name, "target": other.Name})
+		map[string]any{"conversation": string(root.UID), "target": other.Name})
 	if code != 403 {
 		t.Fatalf("get_tree(root -> an unrelated root) must be refused out of scope, got %d %v", code, out)
 	}

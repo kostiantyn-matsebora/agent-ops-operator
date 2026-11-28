@@ -308,7 +308,7 @@ func TestWorkRefusesAnUnknownConvoID(t *testing.T) {
 // empty match is.
 func TestTryDispatchPropagatesAListFailureResolvingTheConvoID(t *testing.T) {
 	s, _ := workReportServer(t)
-	s.Conversations = listFailsConversations{s.Conversations}
+	s.Conversations = listFailsConversations{Collection: s.Conversations, okID: "\x00"}
 	if _, served, err := s.tryDispatch(t.Context(), "conv-a", "pod-a"); !errors.Is(err, errAncestryUnreadable) || served {
 		t.Fatalf("a List failure resolving the convo id must propagate, got served=%v err=%v", served, err)
 	}

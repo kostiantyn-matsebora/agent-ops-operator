@@ -351,11 +351,17 @@ func TestHandleCoordinateReadReachesADescendantAtAnyDepth(t *testing.T) {
 // state.ByID) from the Get calls authentication and target resolution make.
 type listFailsConversations struct {
 	state.Collection[state.ConversationRecord]
+	// okID is the one ID whose List still succeeds: the caller's own, which
+	// authentication resolves by ID before the ancestry walk begins.
+	okID string
 }
 
 var errAncestryUnreadable = errors.New("ancestry unreadable")
 
-func (listFailsConversations) List(context.Context, state.Index[state.ConversationRecord], string) ([]state.ConversationRecord, error) {
+func (l listFailsConversations) List(ctx context.Context, idx state.Index[state.ConversationRecord], v string) ([]state.ConversationRecord, error) {
+	if v == l.okID {
+		return l.Collection.List(ctx, idx, v)
+	}
 	return nil, errAncestryUnreadable
 }
 
@@ -372,7 +378,7 @@ func TestHandleCoordinateReadReturns500WhenTheAncestryCannotBeRead(t *testing.T)
 	grandchild.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "member-1", Entry: "helper"}
 	s, _ := coordServer(t, coordCoordinator("co-a"), root, member, grandchild)
 	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
-	s.Conversations = listFailsConversations{s.Conversations}
+	s.Conversations = listFailsConversations{Collection: s.Conversations, okID: "root-1"}
 
 	rec := postCoordinate(s, "/coordinate/read", token,
 		map[string]any{"conversation": "root-1", "target": "grandchild-1"})
@@ -1191,4 +1197,26 @@ func TestHandleCoordinateCloseStampsTheMoveEvenWhenItsTaskLaterFails(t *testing.
 	// The stamp survives the task's own refusal — it was never conditioned
 	// on the eventual outcome.
 	assertMoved(t, c, "reaper-1", true)
+}
+
+// The aops MCP server forwards the runtime's CONVO_ID, which is the
+// conversation's system ID and not its name (conversation-identity). A caller
+// is authenticated by that ID; its token is still derived from the name. The
+// other fixtures here set ID == name, which is how a lookup by name passed
+// for a release before this test existed.
+func TestHandleCoordinateAuthenticatesTheCallerByItsSystemID(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	root.UID = "0b1c-system-id"
+	s, _ := coordServer(t, coordCoordinator("co-a"), root)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	for _, path := range []string{"/coordinate/agents", "/coordinate/read", "/coordinate/tree"} {
+		if rec := postCoordinate(s, path, token, map[string]any{"conversation": "0b1c-system-id"}); rec.Code != 200 {
+			t.Fatalf("%s by system ID: want 200, got %d: %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	// The name is not an identity: a caller declaring it is refused.
+	if rec := postCoordinate(s, "/coordinate/agents", token, map[string]any{"conversation": "root-1"}); rec.Code != 401 {
+		t.Fatalf("a name must not authenticate a caller, got %d: %s", rec.Code, rec.Body.String())
+	}
 }

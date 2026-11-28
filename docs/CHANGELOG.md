@@ -39,6 +39,12 @@ Images: manager 0.66.0, console 0.46.0, channel-telegram 0.28.0.
 
 ### Fixed
 
+- **A Coordinator's `aops` tool calls were refused with "token does not match
+  the declared identity".** The chart's `aops` MCPConfig forwards `CONVO_ID` as
+  the caller's identity, which is now the conversation's system ID, and the
+  `/coordinate/*` handlers still looked the caller up by name. They now resolve
+  the caller by ID; the token is still derived from the name. A target a tool
+  names stays a name.
 - **`runtime-claude` read a failed resume against an unreadable context store as
   `continued`.** The vendor opens a new session and returns its id on the error
   result, and that id was counted as a recovery, so the outage check never ran. A

@@ -58,16 +58,17 @@ func bearerToken(r *http.Request) string {
 var errWrongToken = errors.New("token does not match the declared identity")
 
 // callerConversation resolves and authenticates the CALLING conversation: the
-// caller declares its own name, and the manager re-derives
+// caller declares its own ID (the runtime's CONVO_ID, which the chart's aops
+// MCPConfig forwards as X-Aops-Conversation), and the manager re-derives
 // `coordinator:<coordinatorRef>:<name>` from the master key and compares
 // constant-time. A name naming no coordinator-rooted conversation, or a token
 // that does not match, both fail identically — the caller learns nothing
 // about which.
-func (s *Server) callerConversation(ctx context.Context, name, token string) (*state.ConversationRecord, error) {
-	if s.AdapterToken == "" || name == "" || token == "" {
+func (s *Server) callerConversation(ctx context.Context, id, token string) (*state.ConversationRecord, error) {
+	if s.AdapterToken == "" || id == "" || token == "" {
 		return nil, errWrongToken
 	}
-	conv, _, err := s.Conversations.Get(ctx, state.Key(name))
+	conv, _, err := s.conversationByID(ctx, id)
 	if err != nil || !conv.Live() {
 		// A deletion-marked record is not a live match (design
 		// conversation-identity, Decision 5) — a caller naming it fails
@@ -99,11 +100,11 @@ func (s *Server) callerConversation(ctx context.Context, name, token string) (*s
 // name to re-derive a token against, so it fails identically to a wrong
 // token — the server has made no decision either way
 // (coordinator-owner-reach: "A Pipeline-addressed conversation is refused").
-func (s *Server) callerActingForCoordinator(ctx context.Context, name, token string) (*state.ConversationRecord, error) {
-	if s.AdapterToken == "" || name == "" || token == "" {
+func (s *Server) callerActingForCoordinator(ctx context.Context, id, token string) (*state.ConversationRecord, error) {
+	if s.AdapterToken == "" || id == "" || token == "" {
 		return nil, errWrongToken
 	}
-	conv, _, err := s.Conversations.Get(ctx, state.Key(name))
+	conv, _, err := s.conversationByID(ctx, id)
 	if err != nil || !conv.Live() {
 		// Same live-match exclusion as callerConversation above.
 		return nil, errWrongToken

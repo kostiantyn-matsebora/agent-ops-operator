@@ -110,7 +110,7 @@ func TestCoordinateInvokeCreatesAMemberAndRoutesItsResultBack(t *testing.T) {
 	srv := apiServer()
 	token := chat.DeriveCoordinatorToken(srv.AdapterToken, "co-invoke", root.Name)
 	rec := postCoordinateReq(t, srv, "/coordinate/invoke", token,
-		map[string]any{"conversation": root.Name, "agent": "worker", "task": "look into the disk usage"})
+		map[string]any{"conversation": string(root.UID), "agent": "worker", "task": "look into the disk usage"})
 	out := decodeCoordinateInvokeResponse(t, rec)
 	member := getConv(t, out["member"])
 	assertMemberCausedByInvoke(t, member, string(root.UID))
@@ -227,7 +227,7 @@ func TestCoordinateCloseCascadesThroughTheRealAPI(t *testing.T) {
 	srv := apiServer()
 	token := chat.DeriveCoordinatorToken(srv.AdapterToken, "co-close", root.Name)
 	rec := postCoordinateReq(t, srv, "/coordinate/close", token,
-		map[string]any{"conversation": root.Name, "target": member.Name, "reason": "resolved: done"})
+		map[string]any{"conversation": string(root.UID), "target": member.Name, "reason": "resolved: done"})
 	if rec.Code != 200 {
 		t.Fatalf("close: %d %s", rec.Code, rec.Body.String())
 	}
@@ -283,7 +283,7 @@ func TestCoordinateEscalateDeliversTheDigestThroughARealReconcile(t *testing.T) 
 
 	token := chat.DeriveCoordinatorToken(srv.AdapterToken, "co-esc", root.Name)
 	rec := postCoordinateReq(t, srv, "/coordinate/escalate", token,
-		map[string]any{"conversation": root.Name, "message": "three members failed, see the tree"})
+		map[string]any{"conversation": string(root.UID), "message": "three members failed, see the tree"})
 	if rec.Code != 200 {
 		t.Fatalf("escalate: %d %s", rec.Code, rec.Body.String())
 	}
@@ -403,7 +403,7 @@ func TestCoordinateMemberResultsReachTheAlreadyBoundThreadBeforeAndAfterEscalati
 	// Invoke and finish BEFORE any escalate call: this member's result must
 	// reach the thread right away, with no fence to hold it.
 	rec := postCoordinateReq(t, srv, "/coordinate/invoke", token,
-		map[string]any{"conversation": root.Name, "agent": "worker", "task": "look into the disk usage"})
+		map[string]any{"conversation": string(root.UID), "agent": "worker", "task": "look into the disk usage"})
 	member := decodeCoordinateInvokeResponse(t, rec)["member"]
 	finishMemberRun(t, srv, member, "r1", "early result, delivered at once")
 	reconcileConversation(t, srv, root.Name)
@@ -417,7 +417,7 @@ func TestCoordinateMemberResultsReachTheAlreadyBoundThreadBeforeAndAfterEscalati
 
 	// escalate posts its digest into the SAME thread — no second ensure-topic.
 	rec = postCoordinateReq(t, srv, "/coordinate/escalate", token,
-		map[string]any{"conversation": root.Name, "message": "three members failed, see the tree"})
+		map[string]any{"conversation": string(root.UID), "message": "three members failed, see the tree"})
 	if rec.Code != 200 {
 		t.Fatalf("escalate: %d %s", rec.Code, rec.Body.String())
 	}
@@ -561,7 +561,7 @@ func TestCoordinateInvokeRefusesAChannelReaderTokenThroughTheRealAPI(t *testing.
 	srv := apiServer()
 	token := chat.DeriveChannelReaderToken(srv.AdapterToken, "chread-desk")
 	rec := postCoordinateReq(t, srv, "/coordinate/invoke", token,
-		map[string]any{"conversation": root.Name, "agent": "worker", "task": "do it"})
+		map[string]any{"conversation": string(root.UID), "agent": "worker", "task": "do it"})
 	if rec.Code != 401 {
 		t.Fatalf("a channel-reader token must be refused for invoke, got %d %s", rec.Code, rec.Body.String())
 	}

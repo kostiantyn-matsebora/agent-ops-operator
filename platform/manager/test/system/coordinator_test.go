@@ -204,7 +204,7 @@ func TestCoordinatorSelfHealSurveyExcludesAncestorRoot(t *testing.T) {
 	// conversation objects the controller built, over the LIVE deployed
 	// manager reached through its Service.
 	reaperToken := coordinatorToken(e, coordName, reaperName)
-	code, out := e.coordinateCall(t, "/coordinate/open-roots", reaperToken, map[string]any{"conversation": reaperName})
+	code, out := e.coordinateCall(t, "/coordinate/open-roots", reaperToken, map[string]any{"conversation": string(e.waitForConversation(t, reaperName, time.Minute).UID)})
 	if code != 200 {
 		t.Fatalf("list_open_roots: %d %v", code, out)
 	}
@@ -214,7 +214,7 @@ func TestCoordinatorSelfHealSurveyExcludesAncestorRoot(t *testing.T) {
 	// it, as a plain member of the cron-triggered root — scripted here to
 	// report the condition cleared.
 	healCode, healOut := e.coordinateCall(t, "/coordinate/invoke", reaperToken,
-		map[string]any{"conversation": reaperName, "agent": "domain-agent", "task": "echo healed-" + stamp})
+		map[string]any{"conversation": string(e.waitForConversation(t, reaperName, time.Minute).UID), "agent": "domain-agent", "task": "echo healed-" + stamp})
 	if healCode != 200 {
 		t.Fatalf("reaper re-check invoke refused (%d %v)", healCode, healOut)
 	}
@@ -226,7 +226,7 @@ func TestCoordinatorSelfHealSurveyExcludesAncestorRoot(t *testing.T) {
 	// never the ordinary bound, since the incident is a sibling the reaper
 	// did not directly cause.
 	closeCode, closeOut := e.coordinateCall(t, "/coordinate/close", reaperToken,
-		map[string]any{"conversation": reaperName, "target": incident.Name, "reason": "resolved by the reaper's re-check"})
+		map[string]any{"conversation": string(e.waitForConversation(t, reaperName, time.Minute).UID), "target": incident.Name, "reason": "resolved by the reaper's re-check"})
 	if closeCode != 200 {
 		t.Fatalf("reaper close of the healed incident root: %d %v", closeCode, closeOut)
 	}
@@ -249,7 +249,7 @@ func TestCoordinatorSelfHealSurveyExcludesAncestorRoot(t *testing.T) {
 func requireOwnRootCloseRefused(t *testing.T, ctx context.Context, e *Env, reaperToken, reaperName, rootName string) {
 	t.Helper()
 	ownCode, ownOut := e.coordinateCall(t, "/coordinate/close", reaperToken,
-		map[string]any{"conversation": reaperName, "target": rootName, "reason": "trying to close my own root"})
+		map[string]any{"conversation": string(e.waitForConversation(t, reaperName, time.Minute).UID), "target": rootName, "reason": "trying to close my own root"})
 	// The scope check runs INSIDE the queued task (async-command-bus), so the
 	// call is accepted and the refusal is the task's own terminal outcome: it
 	// goes dead, never retried, and the root is never closed.
