@@ -266,7 +266,7 @@ vocabulary file, and SHALL grant nothing:
 
 | On | Says | Values |
 |---|---|---|
-| the issue | which station the line is at | implement, testing, fix, merge, archive, done, stalled |
+| the issue | which station the line is at | `station:implement`, `station:testing`, `station:fix`, `station:merge`, `station:archive`, `station:done`, `station:stalled` |
 | the pull request | what the fixing loop is doing | running, waiting, stalled, capped, mergeable |
 
 `waiting` SHALL mean a person's answer is owed. Every remaining item is a
