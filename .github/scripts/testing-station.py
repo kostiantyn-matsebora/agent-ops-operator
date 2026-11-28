@@ -132,6 +132,23 @@ def cmd_begin(args, vocab) -> int:
         print(f"#{issue} is stalled, and no `{keep}` asks for more testing rounds")
         io.write_output("active", "false")
         return 0
+    if used >= cap and state["testing"] in io.rest_labels(args.repo, issue):
+        # THE STATE MUST NOT CONTRADICT ITS OWN BUDGET. A station at `testing` with every round spent
+        # and no grant to take would otherwise sit there, firing nothing, while the fixing loop
+        # waits behind it. It is capped: `stalled`, and a person is told how to grant more.
+        io.apply_events(args.repo, issue, station_event="testing:capped", vocabulary_path=args.vocabulary)
+        io.rest_comment(args.repo, issue, f"The testing station spent its {cap} rounds. It is stalled; "
+                   f"`{keep}` on pull request #{args.pr} grants another {vocab['testing']['max_rounds']}.")
+        print(f"#{issue}: {used} of {cap} testing rounds used; stalled")
+        io.write_output("active", "false")
+        return 0
+    # A SESSION OF AN EARLIER ROUND IS OVER, SO THIS START MAY FIRE ANOTHER. The fire record is
+    # permanent; whether a session is AT WORK is read from the thread, and a station returned to
+    # `testing` after its last round ended (a new head, a base merge) has none (#547).
+    fire_marker, round_marker = io.FIRE_MARKERS["testing"], vocab["testing"]["round_marker"]
+    ended = (not conveyor.testing_session_at_work(thread, fire_marker, round_marker)
+             and any(fire_marker in (c.get("body") or "") for c in thread))
+    io.write_output("restart", "true" if (resumed or ended) else "false")
     io.write_output("active", "true")
     io.write_output("issue", str(issue))
     io.write_output("round", str(used + 1))

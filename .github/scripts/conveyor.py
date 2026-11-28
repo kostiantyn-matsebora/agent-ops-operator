@@ -883,6 +883,25 @@ def testing_cap(max_rounds: int, grants: int) -> int:
     return cap_for(max_rounds, grants)
 
 
+def testing_session_at_work(comments, fire_marker: str, round_marker: str) -> bool:
+    """Is a testing session still at work on the issue. `comments` are the issue's comments
+    (`body`, `created_at`).
+
+    A SESSION IS AT WORK FROM ITS FIRE COMMENT UNTIL ITS NEXT ROUND MARKER. The station used to
+    read a permanent fire record as "a session is at work" forever, so a pull request returned
+    to `testing` by a new head (#547: the line went implement -> testing a day after the last
+    session ended) waited for a session nobody had started, and the fixing loop waited behind
+    it. A session ends by posting its round marker (`record-round`), so a round marker after
+    the latest fire comment means that session is over and the next start may fire another.
+    Nothing fired at all is not at work either; the caller's own fire path handles that.
+    Timestamps are ISO-8601 UTC, which order as strings."""
+    fired = [c.get("created_at") or "" for c in comments if fire_marker in (c.get("body") or "")]
+    if not fired:
+        return False
+    ended = [c.get("created_at") or "" for c in comments if round_marker in (c.get("body") or "")]
+    return not ended or max(ended) < max(fired)
+
+
 def models_independent(tester_model: str, author_model: str) -> bool:
     """The tester must be a different model from the one that wrote the code. An empty name on
     either side is a configuration gap, and it fails closed: independence cannot be shown."""
