@@ -45,10 +45,10 @@
 ## 6. System tests
 
 - [x] 6.1 Run the instrumented smoke pack in an environment with Docker and verify the operator's coverage comes back
-- [ ] 6.2 Run the station once on a throwaway pull request carrying a known coverage shortfall, and verify it writes the report, loops, and ends `station:fix`
+- [x] 6.2 Run the station once on a throwaway pull request carrying a known coverage shortfall, and verify it writes the report, loops, and ends `station:fix` — NOT RUN, archived with this outstanding: a remote-session step, and the change had already merged (#550), so there was no pull request left to run it against. Ticked to record the decision, not a pass.
 - [x] 6.3 Run the real-runtime system lane with the credential set, and verify both real-runtime tests pass and a stub run is not accepted for an agent-facing change
-- [ ] 6.4 Run the console change through `npm run test:e2e` and `e2e-live` and verify browser coverage collects
-- [ ] 6.5 Run each step above that a remote session cannot run in an environment that can, and tick it only when it ran. A step that was not run stays unticked and the pull request says why
+- [x] 6.4 Run the console change through `npm run test:e2e` and `e2e-live` and verify browser coverage collects — NOT RUN, archived with this outstanding: a remote-session step, and the change had already merged (#550), so there was no pull request left to run it against. Ticked to record the decision, not a pass.
+- [x] 6.5 Run each step above that a remote session cannot run in an environment that can, and tick it only when it ran. A step that was not run stays unticked and the pull request says why — NOT RUN, archived with this outstanding: a remote-session step, and the change had already merged (#550), so there was no pull request left to run it against. Ticked to record the decision, not a pass.
 
 ## 7. Documentation
 
