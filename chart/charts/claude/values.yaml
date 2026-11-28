@@ -74,7 +74,7 @@ default: false
 # today's CLI-spawn-per-unit behavior as its own off-by-default bundle.
 # 0.13.0 offers the model only the built-ins its allowlist grants, and frames
 # a Coordinator root's work unit as coordination.
-image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.13.0
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.13.1
 
 # WHERE THIS RUNTIME KEEPS ITS CONTEXT — include globs relative to $HOME, and
 # the declaration that turns context synchronisation ON.

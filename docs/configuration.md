@@ -440,7 +440,7 @@ global:
   agentops:
     runtimeDefaults:
       # the agent backend — swap it to change vendor
-      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.13.0
+      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.13.1
       credentialsSecret:
         # read by the kubelet, never by the operator
         name: agentops-claude

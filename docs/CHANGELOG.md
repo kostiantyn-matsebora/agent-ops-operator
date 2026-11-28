@@ -10,7 +10,7 @@ for the source and the reference material beside this file.
 
 ## [25.0.0] — 2026-11-22
 
-Images: manager 0.66.0, console 0.46.0, channel-telegram 0.28.0.
+Images: manager 0.67.0, console 0.47.0, channel-telegram 0.28.0, housekeeping 0.3.1, runtime-claude 0.13.1.
 
 ### Added
 
@@ -43,7 +43,7 @@ Images: manager 0.66.0, console 0.46.0, channel-telegram 0.28.0.
   `continued`.** The vendor opens a new session and returns its id on the error
   result, and that id was counted as a recovery, so the outage check never ran. A
   failed turn now counts as recovered only when it says something, and the run
-  reports the outage. Takes effect with the next `runtime-claude` image.
+  reports the outage. Takes effect with `runtime-claude` 0.13.1.
 
 ### Upgrade
 

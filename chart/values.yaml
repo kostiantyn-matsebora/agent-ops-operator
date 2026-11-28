@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
-  tag: 0.66.0
+  tag: 0.67.0
 
 # How many manager pods run at once. Safe above 1 now (durable-chat-ops-broker):
 # the Conversation reconciler claims an ensure-topic op on the Conversation CR
@@ -1133,10 +1133,12 @@ console:
     # only, selection counts roots, and "Archive" reads "Closed".
     # 0.45.0: the Queues work table pages, long titles clip with a hover tooltip,
     # and the narrow columns stop wrapping.
-    # 0.46.0: reads correlationId, the conversation's identity moved off it to
-    # conversationId, and the channel adapter contract moves to 3. The Queues
-    # work-queue card shows the conversations and members pools side by side.
-    tag: 0.46.0
+    # 0.46.0: the Queues work-queue card shows the conversations and members
+    # pools side by side.
+    # 0.47.0: reads correlationId, the conversation's identity moved off it to
+    # conversationId, and the channel adapter contract moves to 3. The workspace
+    # look becomes the build default.
+    tag: 0.47.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
@@ -1582,7 +1584,9 @@ housekeeping:
     repository: ghcr.io/kostiantyn-matsebora/agentops-housekeeping
     # 0.3.0: lists conversations through the manager's /state/* surface and
     # holds no Kubernetes RBAC at all.
-    tag: 0.3.0
+    # 0.3.1: reads the conversation's system identity (ID) for its workspace
+    # subpath.
+    tag: 0.3.1
   # Reports what it would remove and removes nothing. Take it off only after a
   # run has named no directory belonging to a conversation you are keeping.
   dryRun: true
