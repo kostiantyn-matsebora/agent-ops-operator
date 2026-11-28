@@ -1109,7 +1109,7 @@
     },
     {
       "id": "conversation-id-correlation-claim",
-      "pattern": "conversationId.{0,80}(correlation|initiationId|adopted)|(correlation|initiationId|adopted).{0,80}conversationId",
+      "pattern": "conversationId[`\\s]*(is|carries|holds|names|=|:)\\s*(the |a )?(signal's |adopted |conversation's )*(correlation|initiationId)|(correlation key|adopted initiationId|initiationId)[`\\s]*(is|as|called|named)\\s*(the |a )?`?conversationId",
       "says": "conversationId is the conversation's system identity now (the backend-minted ID, conversation-identity); the signal's correlation key — the adopted initiationId — moved to correlationId",
       "allow": [
         "removed",
