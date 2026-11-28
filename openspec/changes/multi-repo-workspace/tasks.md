@@ -1,9 +1,9 @@
 ## 1. API types and snapshot — api-architect
 
-- [ ] 1.1 Add `Repositories`, `AgentFile` and `WorkingDir` to `AgentProfileSpec` and `AgentCapabilitySpec` with the entry fields `name`, `url`, `ref`, `auth`, `keepGit`. Verify the CRDs regenerate (`controller-gen object` and `crd`) and `chart/crds/` shows the fields.
-- [ ] 1.2 Mark `AgentProfileSpec.Repository` deprecated and treat it as a one-entry list. Verify with a unit test that `repository` and `repositories` together are refused by CEL.
-- [ ] 1.3 Add the CEL rules: unique and safe repo names, `agent` exclusive with `agentFile`, and no `..` or leading `/` in a path. Verify with envtest cases for each refusal.
-- [ ] 1.4 Add the resolved list, `agentFile` and `workingDir` to the Conversation record and its CRD mapping in both state backends. Verify the conformance suite round-trips them.
+- [x] 1.1 Add `Repositories`, `AgentFile` and `WorkingDir` to `AgentProfileSpec` and `AgentCapabilitySpec` with the entry fields `name`, `url`, `ref`, `auth`, `keepGit`. Verify the CRDs regenerate (`controller-gen object` and `crd`) and `chart/crds/` shows the fields.
+- [x] 1.2 Mark `AgentProfileSpec.Repository` deprecated and treat it as a one-entry list. Verify with a unit test that `repository` and `repositories` together are refused by CEL.
+- [x] 1.3 Add the CEL rules: unique and safe repo names, `agent` exclusive with `agentFile`, and no `..` or leading `/` in a path. Verify with envtest cases for each refusal.
+- [x] 1.4 Add the resolved list, `agentFile` and `workingDir` to the Conversation record and its CRD mapping in both state backends. Verify the conformance suite round-trips them.
 
 ## 2. Resolution, snapshot and readiness — backend-developer
 
@@ -13,12 +13,12 @@
 
 ## 3. The workspace-sync component — backend-developer
 
-- [ ] 3.1 Create `platform/workspace-sync` as its own module and image, discovered by `.github/components.sh` as `agentops-workspace-sync`. Verify `components.sh images` and `modules` list it and the multi-arch build is wired.
-- [ ] 3.2 Implement the manifest read and the layout: one repo is the workspace root, two or more clone to `<name>/`. Verify with tests against local bare repositories for the zero, one and many cases.
-- [ ] 3.3 Implement credentials without persisting them: `GIT_ASKPASS` or a per-command header for https, a 0600 key file outside `/workspace` with `GIT_SSH_COMMAND` for ssh. Verify no file under the workspace and no git config contains the token or key after a clone.
-- [ ] 3.4 Implement the re-run rule: completion marker per repo written last, a completed clone is never touched, a partial one is removed and cloned again, `.agentops/` excluded in git, `keepGit: false` removes `.git`. Verify with tests that kill a clone midway and re-run, and that uncommitted edits survive a re-run.
-- [ ] 3.5 Verify the agent file exists, is regular and stays inside its repository after symlinks. Verify with tests for a missing file, a symlink escape and a directory.
-- [ ] 3.6 Write the termination message naming the repository and the cause and never an env value. Verify with a test that plants a token in the environment and a failing clone.
+- [x] 3.1 Create `platform/workspace-sync` as its own module and image, discovered by `.github/components.sh` as `agentops-workspace-sync`. Verify `components.sh images` and `modules` list it and the multi-arch build is wired.
+- [x] 3.2 Implement the manifest read and the layout: one repo is the workspace root, two or more clone to `<name>/`. Verify with tests against local bare repositories for the zero, one and many cases.
+- [x] 3.3 Implement credentials without persisting them: `GIT_ASKPASS` or a per-command header for https, a 0600 key file outside `/workspace` with `GIT_SSH_COMMAND` for ssh. Verify no file under the workspace and no git config contains the token or key after a clone.
+- [x] 3.4 Implement the re-run rule: completion marker per repo written last, a completed clone is never touched, a partial one is removed and cloned again, `.agentops/` excluded in git, `keepGit: false` removes `.git`. Verify with tests that kill a clone midway and re-run, and that uncommitted edits survive a re-run.
+- [x] 3.5 Verify the agent file exists, is regular and stays inside its repository after symlinks. Verify with tests for a missing file, a symlink escape and a directory.
+- [x] 3.6 Write the termination message naming the repository and the cause and never an env value. Verify with a test that plants a token in the environment and a failing clone.
 
 ## 4. Pod builder and contract — backend-developer
 
