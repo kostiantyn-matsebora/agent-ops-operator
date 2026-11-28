@@ -310,8 +310,9 @@ whether the loop had given up or was waiting on them.
 
 - **WHEN** a station starts, when the testing station passes, when its pull
   request goes green, when a person merges, and when the archive lands
-- **THEN** the issue's station label reads implement, testing, fix, merge, archive and
-  done in turn — or stalled in place of archive, when the merge left nothing
+- **THEN** the issue's station label reads `station:implement`, `station:testing`, `station:fix`,
+  `station:merge`, `station:archive` and `station:done` in turn — or
+  `station:stalled` in place of archive, when the merge left nothing
   to carry the line onward — and never two at once
 
 #### Scenario: The loop label follows the round
