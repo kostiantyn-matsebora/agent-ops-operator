@@ -62,7 +62,7 @@ func TestCoordinateOpenRootsAuthenticatesAPlainMemberOverTheRealAPI(t *testing.T
 
 	srv := apiServer()
 	token := chat.DeriveCoordinatorToken(srv.AdapterToken, "co-oproots", reaper.Name)
-	rec := postCoordinateReq(t, srv, "/coordinate/open-roots", token, map[string]any{"conversation": reaper.Name})
+	rec := postCoordinateReq(t, srv, "/coordinate/open-roots", token, map[string]any{"conversation": string(reaper.UID)})
 	if rec.Code != 200 {
 		t.Fatalf("open-roots: %d %s", rec.Code, rec.Body.String())
 	}
@@ -125,7 +125,7 @@ func TestCoordinateCloseWidenedBoundOverTheRealAPI(t *testing.T) {
 
 	// The reaper closes the sibling root it did not directly cause.
 	rec := postCoordinateReq(t, srv, "/coordinate/close", token,
-		map[string]any{"conversation": reaper.Name, "target": sibling.Name, "reason": "resolved by the reaper"})
+		map[string]any{"conversation": string(reaper.UID), "target": sibling.Name, "reason": "resolved by the reaper"})
 	if rec.Code != 200 {
 		t.Fatalf("close sibling root: %d %s", rec.Code, rec.Body.String())
 	}
@@ -146,7 +146,7 @@ func TestCoordinateCloseWidenedBoundOverTheRealAPI(t *testing.T) {
 	// other close. The refusal now surfaces on the TASK (forbidden, terminal,
 	// never retried).
 	recOwn := postCoordinateReq(t, srv, "/coordinate/close", token,
-		map[string]any{"conversation": reaper.Name, "target": root.Name, "reason": "trying to close my own root"})
+		map[string]any{"conversation": string(reaper.UID), "target": root.Name, "reason": "trying to close my own root"})
 	if recOwn.Code != 200 {
 		t.Fatalf("close accept must still succeed synchronously, got %d %s", recOwn.Code, recOwn.Body.String())
 	}
@@ -159,7 +159,7 @@ func TestCoordinateCloseWidenedBoundOverTheRealAPI(t *testing.T) {
 
 	// Refused: a member, even one within the caller's own Coordinator's tree.
 	recMember := postCoordinateReq(t, srv, "/coordinate/close", token,
-		map[string]any{"conversation": reaper.Name, "target": siblingMember.Name, "reason": "trying to reach a member"})
+		map[string]any{"conversation": string(reaper.UID), "target": siblingMember.Name, "reason": "trying to reach a member"})
 	if recMember.Code != 200 {
 		t.Fatalf("close accept must still succeed synchronously, got %d %s", recMember.Code, recMember.Body.String())
 	}

@@ -132,7 +132,7 @@ func (e *Env) invokeMember(t *testing.T, callerCoordinator, caller, agent, task 
 	t.Helper()
 	token := coordinatorToken(e, callerCoordinator, caller)
 	code, out := e.coordinateCall(t, "/coordinate/invoke", token,
-		map[string]any{"conversation": caller, "agent": agent, "task": task})
+		map[string]any{"conversation": string(e.waitForConversation(t, caller, time.Minute).UID), "agent": agent, "task": task})
 	if code != 200 {
 		t.Fatalf("invoke(%s) from %s: %d %v", agent, caller, code, out)
 	}

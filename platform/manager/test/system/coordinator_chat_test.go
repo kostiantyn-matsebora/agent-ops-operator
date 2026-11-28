@@ -60,19 +60,19 @@ func runsRecordInput(c *agentopsv1alpha1.Conversation, text string) bool {
 	return false
 }
 
-// 1. A coordinator conversation is addressable from chat, end to end
-//    (coordinator-unconditional-channels): `/<coordinator-name> <task>` on a
-//    chat-capable source opens a ROOT whose `spec.channelRefs` already carry
-//    the Coordinator's own declared channel PLUS the addressing surface, with
-//    NO wait for `escalate` — and a reply landing before anything escalates
-//    is delivered as an ordinary input (`DeliverInputs`'s removed escalation
-//    fence).
+//  1. A coordinator conversation is addressable from chat, end to end
+//     (coordinator-unconditional-channels): `/<coordinator-name> <task>` on a
+//     chat-capable source opens a ROOT whose `spec.channelRefs` already carry
+//     the Coordinator's own declared channel PLUS the addressing surface, with
+//     NO wait for `escalate` — and a reply landing before anything escalates
+//     is delivered as an ordinary input (`DeliverInputs`'s removed escalation
+//     fence).
 //
-// 2. Escalation still works, and no longer (re)binds anything
-//    (coordination-escalation, superseded by coordinator-unconditional-
-//    channels): the digest posts into the thread ALREADY open — no new
-//    Telegram topic — `status.escalatedAt` is stamped, and a member result
-//    delivered AFTER escalate still reaches the thread normally.
+//  2. Escalation still works, and no longer (re)binds anything
+//     (coordination-escalation, superseded by coordinator-unconditional-
+//     channels): the digest posts into the thread ALREADY open — no new
+//     Telegram topic — `status.escalatedAt` is stamped, and a member result
+//     delivered AFTER escalate still reaches the thread normally.
 func TestCoordinatorAddressedChatBindsChannelsAtCreationAndEscalates(t *testing.T) {
 	fullTier(t)
 	e := requireEnv(t)
@@ -172,7 +172,7 @@ func TestCoordinatorAddressedChatBindsChannelsAtCreationAndEscalates(t *testing.
 	// status.escalatedAt, binds nothing new.
 	token := coordinatorToken(e, coordName, root.Name)
 	code, out := e.coordinateCall(t, "/coordinate/escalate", token,
-		map[string]any{"conversation": root.Name, "message": "escalating-" + stamp})
+		map[string]any{"conversation": string(root.UID), "message": "escalating-" + stamp})
 	if code != 200 {
 		t.Fatalf("escalate: %d %v", code, out)
 	}

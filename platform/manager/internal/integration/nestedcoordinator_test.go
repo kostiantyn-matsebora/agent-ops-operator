@@ -30,11 +30,20 @@ import (
 // authenticated as acting for callerCoordinatorRef, exactly the token a
 // running agent's own `invoke` tool call would present — and returns the
 // created member's name.
+func convSystemID(t *testing.T, name string) string {
+	t.Helper()
+	var conv agentopsv1alpha1.Conversation
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &conv); err != nil {
+		t.Fatalf("get conversation %s: %v", name, err)
+	}
+	return string(conv.UID)
+}
+
 func invokeChild(t *testing.T, srv *httpapi.Server, callerName, callerCoordinatorRef, agent, task string) string {
 	t.Helper()
 	token := chat.DeriveCoordinatorToken(srv.AdapterToken, callerCoordinatorRef, callerName)
 	rec := postCoordinateReq(t, srv, "/coordinate/invoke", token,
-		map[string]any{"conversation": callerName, "agent": agent, "task": task})
+		map[string]any{"conversation": convSystemID(t, callerName), "agent": agent, "task": task})
 	out := decodeCoordinateInvokeResponse(t, rec)
 	member := out["member"]
 	t.Cleanup(func() { cleanupConversation(t, member) })
