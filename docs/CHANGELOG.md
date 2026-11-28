@@ -23,6 +23,15 @@ Images: manager 0.66.0, console 0.46.0, channel-telegram 0.28.0.
 
 ### Changed
 
+- **The Home Assistant bundle's MCP server now defaults to streamable HTTP at
+  `/api/mcp`.** It was the legacy SSE transport at `/mcp_server/sse`, and a
+  POST there is refused with `405`, which is all the pi runtime (the default
+  runtime) can send. `ha-control` and every agent bound to `ha-api` lost all its
+  Home Assistant tools under pi, silently. `home-assistant.mcp.transport: sse`
+  keeps the old endpoint for a runtime that speaks it, and a `home-assistant.mcp.url`
+  you set is untouched. `home-assistant.mcp.transport: http` with no `url` used
+  to resolve to `/mcp`, which Home Assistant does not serve, and now resolves to
+  `/api/mcp`.
 - **BREAKING.** A conversation's `ID` is now its system identity, minted once
   by the backend at `Create` and never reused. `Name` stays the readable
   word-chain — the store key and the pod name — reusable once a prior life
