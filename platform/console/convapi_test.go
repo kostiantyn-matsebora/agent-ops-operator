@@ -191,3 +191,53 @@ func TestHandleStartPostsAFreshInitiationID(t *testing.T) {
 		t.Fatalf("payload: %v", s["payload"])
 	}
 }
+
+// The console's API names a member's parent by NAME, which is what its tree,
+// scopes and breadcrumbs resolve against. The cluster now records the
+// parent's system ID there (conversation-identity), so the list and the
+// detail view translate it.
+func TestConversationsNameAMembersParentNotItsID(t *testing.T) {
+	root := obj("conversations", "coord-root", "1",
+		`{"profileRef":{"name":"ops"},"coordinatorRef":{"name":"triage"}}`, `{"phase":"Idle"}`)
+	member := obj("conversations", "member-1", "1",
+		`{"profileRef":{"name":"ops"},"causedBy":{"parent":"uid-coord-root","entry":"worker"}}`, `{"phase":"Idle"}`)
+	api, _, _, _ := apiWithOptions(t, "tok", true, root, member)
+	h := api.Handler(http.NotFoundHandler())
+
+	var list struct {
+		Items []ConversationSummary `json:"items"`
+	}
+	getJSON(t, h, "/api/conversations", &list)
+	found := false
+	for _, it := range list.Items {
+		if it.Name == "member-1" {
+			found = true
+			if it.CausedBy == nil || it.CausedBy.Parent != "coord-root" {
+				t.Fatalf("the list must name the parent, got %+v", it.CausedBy)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("member missing from the list: %+v", list.Items)
+	}
+
+	var one struct {
+		Conversation ConversationSummary `json:"conversation"`
+	}
+	getJSON(t, h, "/api/conversations/member-1", &one)
+	if one.Conversation.CausedBy == nil || one.Conversation.CausedBy.Parent != "coord-root" {
+		t.Fatalf("the detail view must name the parent, got %+v", one.Conversation.CausedBy)
+	}
+}
+
+func TestNameTheParentLeavesAnUnknownOrAlreadyNamedParentAlone(t *testing.T) {
+	ids := map[string]string{"id-1": "root"}
+	for _, parent := range []string{"root", "gone-id"} {
+		s := ConversationSummary{CausedBy: &Provenance{Parent: parent}}
+		nameTheParent(&s, ids)
+		if s.CausedBy.Parent != parent {
+			t.Fatalf("%q must stay as it was, got %q", parent, s.CausedBy.Parent)
+		}
+	}
+	nameTheParent(&ConversationSummary{}, ids) // a root has no provenance
+}

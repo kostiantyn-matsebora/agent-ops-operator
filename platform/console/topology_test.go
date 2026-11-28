@@ -378,3 +378,20 @@ func TestAttributeCoordinatorSurvivesCoordinatorDeletion(t *testing.T) {
 		t.Fatalf("attribution must not depend on the live list naming it, got %q", got)
 	}
 }
+
+// A member's causedBy.parent is its parent's system ID since
+// conversation-identity, not its name. The members must still count toward
+// their root's Coordinator.
+func TestActivityBadgesCountMembersThatNameTheirParentByID(t *testing.T) {
+	busy := obj("coordinators", "incident", "1", `{"profileRef":{"name":"lead"}}`, cond("Ready", "True", ""))
+	c := staticCache(busy,
+		obj("conversations", "root", "1", `{"coordinatorRef":{"name":"incident"},"profileRef":{"name":"lead"}}`,
+			`{"phase":"Idle"}`),
+		obj("conversations", "triage", "1", `{"causedBy":{"parent":"uid-root","entry":"triage"},"profileRef":{"name":"lead"}}`,
+			`{"phase":"Working","inflight":{"runId":"r1"}}`),
+	)
+	n := findNode(BuildTopology(c), "coordinators", "incident")
+	if n == nil || n.Active != 1 || n.Recent != 2 {
+		t.Fatalf("a member naming its parent by ID must count toward the coordinator: %+v", n)
+	}
+}

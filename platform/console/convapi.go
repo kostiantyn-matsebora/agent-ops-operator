@@ -133,8 +133,11 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	var all []ConversationSummary
 	parents := map[string]string{}
 	scopes := map[string]int{}
-	for _, o := range a.cache.List("conversations") {
+	convs := a.cache.List("conversations")
+	ids := conversationNamesByID(convs)
+	for _, o := range convs {
 		s := summarize(o, pipelines, coordinators, consoleChannel, reader, a.transcripts)
+		nameTheParent(&s, ids)
 		s.RunCount = len(s.Runs)
 		// Run history is DROPPED from list rows: a result is a whole agent
 		// message, and thousands of them do not belong in a listing.
@@ -346,6 +349,7 @@ func (a *API) handleChannelFeed(w http.ResponseWriter, r *http.Request) {
 // later delta.
 func (a *API) ConversationView(obj *Object, reader string) map[string]any {
 	summary := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader, a.transcripts)
+	nameTheParent(&summary, conversationNamesByID(a.cache.List("conversations")))
 	// Per-run model/tool-call diagnostics, derived here so the STREAMED view
 	// carries them exactly as the REST snapshot does. This used to run only in
 	// handleConversation, so the moment any delta touched an open
@@ -401,6 +405,7 @@ func (a *API) ConversationView(obj *Object, reader string) map[string]any {
 // heavier than the re-fetch it replaces.
 func (a *API) ConversationRow(obj *Object, reader string) ConversationSummary {
 	s := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader, a.transcripts)
+	nameTheParent(&s, conversationNamesByID(a.cache.List("conversations")))
 	s.RunCount = len(s.Runs)
 	s.Runs = nil
 	return s
@@ -1282,4 +1287,33 @@ func pageByTree(rows []ConversationSummary, parents map[string]string, offset, l
 		page = append(page, trees[root]...)
 	}
 	return page
+}
+
+// conversationNamesByID maps each conversation's system ID (its UID here) to
+// its name. A member's spec.causedBy.parent holds its parent's ID since
+// conversation-identity, while every console surface keys a conversation by
+// name.
+func conversationNamesByID(convs []*Object) map[string]string {
+	ids := make(map[string]string, len(convs))
+	for _, o := range convs {
+		if o.Metadata.UID != "" {
+			ids[o.Metadata.UID] = o.Metadata.Name
+		}
+	}
+	return ids
+}
+
+// nameTheParent rewrites a member's causedBy.parent from the parent's ID to
+// the parent's name, which is what the console's API has always carried and
+// what the browser's tree, scopes and breadcrumbs resolve against. A parent
+// the cache does not hold, or one already a name, is left as it was.
+func nameTheParent(s *ConversationSummary, ids map[string]string) {
+	if s.CausedBy == nil {
+		return
+	}
+	if name, ok := ids[s.CausedBy.Parent]; ok {
+		p := *s.CausedBy
+		p.Parent = name
+		s.CausedBy = &p
+	}
 }

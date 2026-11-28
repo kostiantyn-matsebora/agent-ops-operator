@@ -39,6 +39,12 @@ Images: manager 0.66.0, console 0.46.0, channel-telegram 0.28.0.
 
 ### Fixed
 
+- **The console lost the parent-child relation between a Coordinator root and
+  its members.** A member's `causedBy.parent` is its parent's system ID now, and
+  the console's tree, scopes, breadcrumbs and Coordinator counts resolve it by
+  name, so every member sat at the top level beside its root. The console's API
+  names the parent by name again, and a member counts toward its root's
+  Coordinator.
 - **A Coordinator's `aops` tool calls were refused with "token does not match
   the declared identity".** The chart's `aops` MCPConfig forwards `CONVO_ID` as
   the caller's identity, which is now the conversation's system ID, and the

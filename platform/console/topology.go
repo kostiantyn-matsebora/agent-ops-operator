@@ -797,6 +797,10 @@ func activityByPipeline(c *Cache) map[string]activityCount {
 	byName := make(map[string]*Object, len(convs))
 	for _, conv := range convs {
 		byName[conv.Metadata.Name] = conv
+		// causedBy.parent holds the parent's system ID (conversation-identity).
+		if conv.Metadata.UID != "" {
+			byName[conv.Metadata.UID] = conv
+		}
 	}
 	for _, conv := range convs {
 		var id string
