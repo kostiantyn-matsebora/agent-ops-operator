@@ -1,6 +1,9 @@
 import { expect, test, type Page } from './support/coverage'
 import { TESTID, testid } from '../src/model/testids'
 import { at, base, startHarness, type Harness } from './support/mock'
+import { VIEWPORTS } from './support/viewports'
+
+const PHONE = VIEWPORTS.find((v) => v.name === 'phone')!
 
 // The workspace look must STAY OPERABLE. A real browser, a realistic install
 // (dozens of coordinator trees, each with members), the activity stream
@@ -174,7 +177,7 @@ test.describe('a busy install', () => {
 // Nothing a person opens may be left covering the page: a drawer's scrim and a
 // dialog's scrim each swallow every click until dismissed, which looks exactly
 // like a frozen UI.
-for (const [label, size] of [['a tablet', { width: 1000, height: 800 }], ['a phone', { width: 390, height: 844 }]] as const) {
+for (const [label, size] of [['a tablet', { width: 1000, height: 800 }], ['a phone', { width: PHONE.width, height: PHONE.height }]] as const) {
   test.describe(label, () => {
     test.use({ viewport: size })
 

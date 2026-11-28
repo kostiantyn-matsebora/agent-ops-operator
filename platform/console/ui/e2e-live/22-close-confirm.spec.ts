@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './support/test'
 import { TESTID } from '../src/model/testids'
 import { loadFixtures } from './support/fixtures'
 

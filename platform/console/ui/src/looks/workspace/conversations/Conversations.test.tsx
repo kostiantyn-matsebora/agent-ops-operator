@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import type { ConversationSummary } from '../../../api/types'
-import { useConversationList } from '../../../model/conversationList'
+import { useArrivals, useConversationList } from '../../../model/conversationList'
 import { TESTID, testid } from '../../../model/testids'
 import { buildTree } from '../../../model/tree'
 import { DEFAULT_WORKSPACE_LAYOUT, useWorkspaceLayout } from '../layout'
@@ -30,7 +30,7 @@ vi.mock('../../../model/conversationList', async (importOriginal) => ({
     const tree = buildTree(ITEMS, true)
     return { data: { items: ITEMS, total: 2 }, isLoading: false, error: null, items: ITEMS, tree, rows: tree, collapsibleNames: [] }
   }),
-  useArrivals: () => ({ newNames: new Set(), clear: () => undefined }),
+  useArrivals: vi.fn(() => ({ newNames: new Set(), clear: () => undefined })),
   useInboxScopes: () => ({ general: { scope: { kind: 'general' }, label: 'General feed' }, fixed: [], targets: [], closed: { scope: { kind: 'closed' }, label: 'Closed' } }),
 }))
 vi.mock('../../../model/session', () => ({
@@ -289,6 +289,31 @@ describe('the conversations page', () => {
     mount('/conversations/channel:general')
     expect(screen.getByRole('heading', { name: 'General feed' })).toBeInTheDocument()
     expect(screen.getByText('No messages on the console thread yet')).toBeInTheDocument()
+  })
+})
+
+describe('a conversation a signal opens (console-workspace-feedback: "A new conversation is not announced")', () => {
+  it('arrives at its sorted position with a brief highlight, and raises no banner, toast or modal', () => {
+    // `source` set, no `causedBy`: a root a SignalSource opened, never the
+    // viewer's own action — the server lists it first, newest activity first.
+    const opened = conv('signal-row', { source: 'cron' })
+    ITEMS.unshift(opened)
+    try {
+      vi.mocked(useArrivals).mockReturnValueOnce({ newNames: new Set(['signal-row']), clear: () => undefined })
+      mount('/conversations')
+      const rows = document.querySelectorAll('.wk-rows > .wk-row')
+      expect(rows[0]).toHaveAttribute('data-testid', testid.row('signal-row'))
+      expect(rows[0]).toHaveClass('arrived')
+      // Neither existing row shares the emphasis: it is the arrival's alone.
+      expect(rows[1]).not.toHaveClass('arrived')
+      expect(rows[2]).not.toHaveClass('arrived')
+      expect(screen.queryByTestId(TESTID.toast)).toBeNull()
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(screen.queryByRole('alertdialog')).toBeNull()
+      expect(screen.queryByRole('alert')).toBeNull()
+    } finally {
+      ITEMS.shift()
+    }
   })
 })
 

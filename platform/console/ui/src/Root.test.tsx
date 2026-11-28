@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { LookEntry, LookModule } from './looks/registry'
+import { BUILD_DEFAULT_LOOK, type LookEntry, type LookModule } from './looks/registry'
 import { LookSwitcher } from './looks/shared/LookSwitcher'
 import { Root } from './Root'
 import { LOOK_STORAGE_KEY, useLookStore } from './theme/useLook'
@@ -105,6 +105,22 @@ describe('the resolution, through the root', () => {
     expect(await screen.findByText('alpha look')).toBeInTheDocument()
     expect(useLookStore.getState().choice).toBeUndefined()
     expect(JSON.parse(localStorage.getItem(LOOK_STORAGE_KEY)!).state.choice).toBeUndefined()
+  })
+})
+
+describe('a first visit', () => {
+  // No query, no stored choice, no install default, and Root's own default
+  // parameter left untouched — task 7.4's claim that this resolves to
+  // workspace, the real BUILD_DEFAULT_LOOK, not a test override.
+  it('opens in the build default look, workspace', async () => {
+    const firstVisitLooks: LookEntry[] = ['classic', 'workspace'].map((id) => ({
+      id, label: id, load: vi.fn(() => Promise.resolve(moduleFor(id))),
+    }))
+    session.current = { isLoading: false, data: {} }
+    render(<Root looks={firstVisitLooks} />)
+    expect(await screen.findByText('workspace look')).toBeInTheDocument()
+    expect(document.documentElement.getAttribute('data-look')).toBe('workspace')
+    expect(BUILD_DEFAULT_LOOK).toBe('workspace')
   })
 })
 

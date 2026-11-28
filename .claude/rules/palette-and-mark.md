@@ -43,3 +43,23 @@ document and inherits no custom properties.
 **Integration marks sit beside it**, committed unaltered from each project's own
 source with their terms in that directory's README, and the PAGE names each
 file. A vendor list in the stylesheet would be product knowledge in the theme.
+
+### `--ao-*` is shared, `--wk-*` is a look's own
+
+| Prefix | Owned by | Copied to the site |
+|---|---|---|
+| `--ao-*` | `platform/console/ui/src/theme/theme.css` | yes — `docs/assets/css/agentops.css` |
+| `--wk-*` | `platform/console/ui/src/looks/workspace/workspace.css` | never |
+
+**A `--wk-*` token belongs to the `workspace` look alone.** It is not
+console-wide, so it never moves to `theme.css`, and it never gets a copy of
+its own in the site CSS — not today, and not for a second look later.
+
+**Verify the split by grep**, same spirit as the `#hex` check above:
+
+```sh
+grep -n '\-\-wk-' platform/console/ui/src/theme/theme.css docs/assets/css/agentops.css
+```
+
+That must return nothing. A hit means a look-owned token leaked into the
+shared palette or the site's copy of it.

@@ -48,6 +48,6 @@ describe('the look switcher', () => {
 
   it('renders from the real registry with no provider', () => {
     render(<LookSwitcher />)
-    expect(screen.getByRole('option', { name: 'Classic' })).toHaveProperty('selected', true)
+    expect(screen.getByRole('option', { name: 'Workspace' })).toHaveProperty('selected', true)
   })
 })

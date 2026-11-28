@@ -1,4 +1,4 @@
-import { test } from '@playwright/test'
+import { test } from './support/test'
 
 // Issue #250's 18-item bug table, indexed against this suite.
 //

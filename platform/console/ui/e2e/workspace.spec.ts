@@ -1,6 +1,12 @@
 import { expect, test, type Page } from './support/coverage'
 import { TESTID, testid } from '../src/model/testids'
-import { MEMBER, REPLY_TEXT, OWN_TEXT, ROOT, ROWS, SIGNAL_TEXT, startHarness, type Harness } from './support/mock'
+import { at, base, MEMBER, REPLY_TEXT, OWN_TEXT, ROOT, ROWS, SIGNAL_TEXT, startHarness, type Harness } from './support/mock'
+import { VIEWPORTS, viewportUse } from './support/viewports'
+
+// console-looks names six viewports once; a viewport literal below that
+// matches one of them exactly is drawn from there, so a drift against the
+// openspec table (viewport-matrix.spec.ts) catches this file too.
+const named = (name: string) => VIEWPORTS.find((v) => v.name === name)!
 
 // The workspace look in a real browser, against a mocked API — the checks
 // jsdom cannot make: geometry (the panes fill the window and the page never
@@ -23,7 +29,7 @@ async function open(page: Page, path = `/conversations/${ROOT.name}`) {
 const reply = (page: Page) => page.locator(`[data-testid="${TESTID.message}"][data-kind="agent"]`)
 
 test.describe('on a wide screen', () => {
-  test.use({ viewport: { width: 2560, height: 1300 } })
+  test.use(viewportUse(named('wide')))
 
   test('fills the viewport: the panes reach both edges less the gutter, and the page does not scroll', async ({ page }) => {
     await open(page)
@@ -53,7 +59,7 @@ test.describe('on a wide screen', () => {
 })
 
 test.describe('on a laptop', () => {
-  test.use({ viewport: { width: 1280, height: 800 } })
+  test.use(viewportUse(named('laptop')))
 
   test('a finished reply shows only the reply, its Invoked row and the collapsed Run details', async ({ page }) => {
     await open(page)
@@ -140,7 +146,7 @@ test.describe('on a laptop', () => {
 })
 
 test.describe('on a tablet in landscape', () => {
-  test.use({ viewport: { width: 1024, height: 768 }, hasTouch: true })
+  test.use(viewportUse(named('tablet landscape')))
 
   test('keeps the list beside the thread, and the navigation is a drawer', async ({ page }) => {
     await open(page)
@@ -155,7 +161,7 @@ test.describe('on a tablet in landscape', () => {
 })
 
 test.describe('on a phone', () => {
-  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  test.use(viewportUse(named('phone')))
 
   test('shows one pane at a time, with a way back, and every message\u2019s copy control at touch size', async ({ page }) => {
     await open(page)
@@ -176,4 +182,33 @@ test.describe('on a phone', () => {
 test('opens on a row the thread a link names', async ({ page }) => {
   await open(page, `/conversations/${ROOT.name}`)
   await expect(page.getByTestId(testid.row(ROOT.name))).toHaveAttribute('aria-current', 'true')
+})
+
+// console-workspace-feedback: "Motion respects the viewer" — an arrival still
+// lands and is still a real row (the state), but the OS's reduced-motion
+// request means the class driving its animation (workspace.css's
+// `.wk-row.arrived`) never applies.
+test('reduced motion: a conversation a signal opens still arrives in place, with no arrival animation', async ({ page }) => {
+  // `test.use({ reducedMotion: 'reduce' })` does not reach `matchMedia` in
+  // this browser/config — emulate the media feature directly, which is what
+  // `prefersReducedMotion()` itself reads.
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await open(page, '/conversations')
+  const arriving = {
+    ...base, name: 'signal-row', title: 'checkout-api is restarting again', source: 'cron', phase: 'Idle',
+    created: at(50), lastActivity: at(50),
+  }
+  h.push('delta', { type: 'ADDED', kind: 'conversations', name: arriving.name, conversationRow: arriving })
+  const row = page.getByTestId(testid.row('signal-row'))
+  // The state is correct — the row exists, with its own content — whether
+  // or not the browser allows the motion that would otherwise mark it.
+  await expect(row).toBeVisible()
+  await expect(row).toContainText('checkout-api is restarting again')
+  // The row's `arrived` state itself times out after a few seconds
+  // (`ARRIVAL_HOLD_MS`), so a retrying `not.toHaveClass` would pass once that
+  // holds elapses even if motion were never respected — take one snapshot,
+  // well inside the hold, instead of polling for the class to go away.
+  await page.waitForTimeout(500)
+  expect(await row.getAttribute('class')).not.toMatch(/arrived/)
+  await expect(page.getByTestId(TESTID.toast)).toHaveCount(0)
 })

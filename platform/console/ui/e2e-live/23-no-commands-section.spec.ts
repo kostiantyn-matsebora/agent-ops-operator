@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 import { TESTID, testid } from '../src/model/testids'
 
 // Item #23 — there is no "COMMANDS" section in the sidebar, and `/help` /

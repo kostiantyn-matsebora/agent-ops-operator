@@ -843,6 +843,7 @@ hand-written copy is not.
 | `controlPlaneAuth.secretName` | `agentops-control-plane-token` | the token guarding `/control-plane/*` (`docs/contracts.md`). Generated the same way as `adapterAuth`, into its own Secret. Unset, the surface refuses every request with 503 |
 | `stateReadAuth.secretName` | `agentops-state-read-token` | the token guarding `/state/*` for a caller that is not an adapter — today, housekeeping and the console. Generated the same way, into its own Secret, and refused at render if it equals `adapterAuth.token` or `controlPlaneAuth.token` |
 | `console.enabled` | `true` | the browser console, on by default |
+| `console.defaultLook` | `workspace` | the look a viewer who chose none gets — `workspace` or `classic`. A viewer's own choice always wins |
 
 The console's own values — its token, ingress, TLS and forward-auth — are in
 [console.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/console.md),

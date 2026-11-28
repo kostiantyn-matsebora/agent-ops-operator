@@ -482,3 +482,23 @@
   overflow-wrap: anywhere;
   min-width: 0;
 }
+
+/* ---- touch: every control at least 44px in its smaller dimension ------
+   (console-looks: "Every look is responsive and tested at set viewports")
+   The page's own toolbar, zoom controls and card folds carry a compact
+   desktop size nowhere pinned by workspace.css's own touch block, since
+   none of them share a class with anything listed there. */
+
+@media (pointer: coarse), (hover: none) {
+  .wk-tp select,
+  .wk-tp input[type='text'],
+  .wk-tp input:not([type]),
+  .wk-tp-fold {
+    min-height: var(--wk-touch);
+  }
+
+  .wk-tp-zoom .wk-btn,
+  .wk-tp-sidebtn {
+    min-width: var(--wk-touch);
+  }
+}

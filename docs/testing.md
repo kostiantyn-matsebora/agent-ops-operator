@@ -45,7 +45,7 @@ An openspec change's `tasks.md` ends with, in order:
 
 ## The console's browser tier (`e2e-live`), and why it exists beside the other three
 
-`platform/console/ui/e2e-live/` — 21 Playwright specs, `global-setup.ts` and
+`platform/console/ui/e2e-live/` — 24 Playwright specs, `global-setup.ts` and
 `support/` — was added for `chat-shaped-conversations` because unit tests and
 envtest both missed a defect only a real API server and a real rendered page,
 together, could expose:
@@ -90,12 +90,14 @@ together, could expose:
   npx playwright test --config e2e-live/playwright.config.ts
   ```
 
-- **It is WORKSTATION-ONLY**, on the same footing `.claude/rules/remote-session.md`
-  gives the local cluster and any deploy. `global-setup.ts` hard-requires an
-  already-running cluster — `kubectl` on PATH against a real context, a
-  reachable manager Service — that the cloud bootstrap does not provide: it
-  installs no `k3d`/docker and deploys nothing, so a remote session cannot
-  satisfy it.
+- **It needs an already-running cluster.** `global-setup.ts` hard-requires
+  `kubectl` on PATH against a real context and a reachable manager Service —
+  it provisions neither. A plain session that never stood up a cluster has
+  nothing to point it at.
+- **A cloud session runs it too, once the pack has stood up a cluster.**
+  `remote-session.md`'s bootstrap installs `k3d`/`kubectl` and starts docker,
+  and the testing station runs every tier — the system pack and this one —
+  in the session itself, never dispatched to CI.
 - **It owns no cluster lifecycle.** Point it at any already-running install —
   the Go system pack's own cluster (`SYSTEM_REUSE=1`), a local `rancher-desktop`
   deploy, anything reachable — it arranges its own fixtures through
@@ -108,6 +110,23 @@ together, could expose:
 | `E2E_LIVE_KUBE_CONTEXT` | the `kubectl` context to use — default `k3d-agentops-e2e` |
 | `E2E_LIVE_NAMESPACE` | the namespace fixtures are created in — default `agent-ops` |
 | `E2E_LIVE_KUBECTL` | overrides the `kubectl` binary resolved from an absolute `PATH` entry |
+
+**It runs once per registered look, at the desktop viewport.**
+`e2e-live/playwright.config.ts` declares one project per look (`classic`,
+`workspace`), each pinned at 1440 by 900 — the desktop row of `console-looks`'
+own viewport table (see below).
+
+`support/test.ts` wraps navigation so every spec's `page.goto` carries the
+project's `?look=`, with no per-spec change needed.
+
+`npx playwright test --config e2e-live/playwright.config.ts`, with no
+`--project` flag, already runs both — `system.yml`'s full tier does exactly
+that, so the nightly run covers both looks with no extra step.
+
+Console-only rendering — which look, which viewport, which motion plays —
+needs no new system-pack lane: nothing about it is decided by a kubelet, RBAC
+or an informer. The real-cluster-plus-real-browser proof it needs is this
+tier, run once per look.
 
 ## The testing station: coverage of the lines a change adds
 
@@ -122,14 +141,19 @@ A tier that ran but left no coverage file fails as a collection failure. It neve
 reads as zero changed lines.
 
 **Every tier runs in the session, the system tier included, and none is dispatched to CI.**
-In a cloud sandbox the pack turns `SYSTEM_K3S_OOM_FIX` on (pods cannot lower `oom_score_adj`
-there) and finds the host's trust bundle for `SYSTEM_BUILD_CA` by itself, so nothing is set by
-hand; an explicit value always wins. If it still cannot run, the station stops and says why.
+In a cloud sandbox the pack turns `SYSTEM_K3S_OOM_FIX` on, since pods there cannot lower
+`oom_score_adj`.
+
+It also finds the host's trust bundle for `SYSTEM_BUILD_CA` by itself, so nothing is set by
+hand, and an explicit value still always wins. If it still cannot run, the station stops and
+says why.
 
 **Rounds are incremental.** Round 1 runs each tier in full and keeps its coverage profile.
-A later round re-runs only the tests that failed and the tests the tester added, and adds their
-profiles to the kept ones (a block counts as covered when any profile covers it). One full run
-of each tier closes the station, and only that run is judged passed.
+A later round re-runs only the tests that failed and the tests the tester added.
+
+Each later round adds its profiles to the kept ones — a block counts as covered when any
+profile covers it. One full run of each tier closes the station, and only that run is judged
+passed.
 
 A lane that also fails on the base branch is not the change's work: the report lists it
 separately. `testing.excluded_from_tier` in `.github/review-triage.json` names code a tier
@@ -164,6 +188,23 @@ from a fork too — and reports through `ci-green`, the one required check.
 
 The console's mocked-API browser smoke (`console-e2e`) gates the same way,
 for a console pull request only — a real browser, but no cluster either.
+
+**It includes the viewport matrix** (`e2e/viewport-matrix.spec.ts`), every
+registered look's every page loaded at six named sizes:
+
+| Name | Size | Pointer |
+|---|---|---|
+| phone | 390 by 844 | touch |
+| tablet portrait | 768 by 1024 | touch |
+| tablet landscape | 1024 by 768 | touch |
+| laptop | 1280 by 800 | mouse |
+| desktop | 1440 by 900 | mouse |
+| wide | 2560 by 1300 | mouse |
+
+The list lives once in `e2e/support/viewports.ts`, pinned against
+`console-looks`' own table so the two cannot drift. At every size, no page
+scrolls sideways, every control stays reachable, and on a touch viewport every
+control is at least 44 pixels in its smaller dimension.
 
 The cluster smoke — a thin k3s run on the stub runtime — gates a **release**
 instead: it runs on the tagged commit before an image or
@@ -297,10 +338,13 @@ matching coverage.
 ## The command bus's system lanes
 
 What a real cluster decides about the bus is the system tier's job
-(`test/system/async_system_test.go`), never unit tests: credential
-projection, network policy, a claim completed on a different replica,
-ordering under parallel consumers, restart durability, a genuine channel
-failure ending as a final failure in a dead letter.
+(`test/system/async_system_test.go`), never unit tests:
+
+- credential projection and network policy
+- a claim completed on a different replica
+- ordering under parallel consumers
+- restart durability
+- a genuine channel failure ending as a final failure in a dead letter
 
 | Lane | Decides |
 |---|---|

@@ -6,8 +6,8 @@ describe('the look registry', () => {
     expect(LOOKS.map((l) => [l.id, l.label])).toEqual([['classic', 'Classic'], ['workspace', 'Workspace']])
   })
 
-  it('defaults to a registered look, classic until the flip (task 7.4)', () => {
-    expect(BUILD_DEFAULT_LOOK).toBe('classic')
+  it('defaults to workspace, the registered look a first visit opens in since task 7.4', () => {
+    expect(BUILD_DEFAULT_LOOK).toBe('workspace')
     expect(LOOKS.map((l) => l.id)).toContain(BUILD_DEFAULT_LOOK)
   })
 
