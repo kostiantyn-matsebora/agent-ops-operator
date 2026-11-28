@@ -554,11 +554,36 @@ class TheAdapter(unittest.TestCase):
         self.begin()
         self.assertEqual("1", self.outputs["round"])
 
-    def test_a_spent_budget_with_no_keep_going_is_exhausted(self):
+    def test_a_spent_budget_with_no_keep_going_is_capped_not_left_at_testing(self):
+        # THE STATE MUST NOT CONTRADICT ITS BUDGET: every round used, nothing to take, nothing fires.
         self.labels = frozenset({"conveyor:run", "station:testing"})
         self.thread = [self.round_marker(i) for i in range(5)]
         self.begin()
-        self.assertEqual("true", self.outputs["exhausted"])
+        self.assertEqual(("false", ["testing:capped"]), (self.outputs["active"], self.events))
+        self.assertEqual(1, len(self.posted))
+
+    def fire_comment(self):
+        return {"body": FIRE, "created_at": "2026-11-27T01:00:00Z"}
+
+    def ended_round(self, n, hour=2):
+        return {"body": f"{V['testing']['round_marker']} {n} -->", "created_at": f"2026-11-27T{hour:02d}:00:00Z"}
+
+    def test_a_station_back_at_testing_after_its_last_round_fires_another_session(self):
+        # THE #547 DEADLOCK: fired once, that round ended, a new head returned the line to testing.
+        self.labels = frozenset({"conveyor:run", "station:testing"})
+        self.thread = [self.fire_comment(), self.ended_round(1)]
+        self.begin()
+        self.assertEqual(("true", "true", []), (self.outputs["active"], self.outputs["restart"], self.events))
+
+    def test_a_session_still_at_work_is_not_fired_over(self):
+        self.labels = frozenset({"conveyor:run", "station:testing"})
+        self.thread = [self.fire_comment()]
+        self.begin()
+        self.assertEqual("false", self.outputs["restart"])
+
+    def test_a_first_start_asks_for_no_restart(self):
+        self.begin()
+        self.assertEqual("false", self.outputs["restart"])
 
     def test_keep_going_on_a_stalled_station_is_consumed_and_resumes_it(self):
         self.labels = frozenset({"conveyor:run", "station:stalled"})
@@ -567,7 +592,7 @@ class TheAdapter(unittest.TestCase):
         self.begin()
         self.assertEqual(["testing:resume"], self.events)
         self.assertIn(("api", "--method", "DELETE", "repos/o/r/issues/5/labels/conveyor:keep-going"), self.gh_calls)
-        self.assertEqual(("10", "6", "false"), (self.outputs["cap"], self.outputs["round"], self.outputs["exhausted"]))
+        self.assertEqual(("10", "6", "true"), (self.outputs["cap"], self.outputs["round"], self.outputs["restart"]))
 
     def test_a_stalled_line_without_keep_going_stays_stalled(self):
         self.labels = frozenset({"conveyor:run", "station:stalled"})
@@ -836,6 +861,29 @@ class TheRestReaders(unittest.TestCase):
 
     def test_a_fork_reads_as_cross_repository(self):
         self.assertTrue(self.pr(head={"ref": "x", "repo": {"full_name": "someone/r"}})["isCrossRepository"])
+
+
+FIRE = "<!-- remote-implement:fired:testing -->"
+ROUND = V["testing"]["round_marker"]
+
+
+def at(n, body):
+    return {"body": body, "created_at": f"2026-11-27T{n:02d}:00:00Z"}
+
+
+class TheSessionAtWork(unittest.TestCase):
+    def test_a_fire_with_no_round_marker_is_a_session_at_work(self):
+        self.assertTrue(conveyor.testing_session_at_work([at(1, FIRE)], FIRE, ROUND))
+
+    def test_a_round_marker_after_the_fire_ends_the_session(self):
+        self.assertFalse(conveyor.testing_session_at_work([at(1, FIRE), at(2, ROUND + " 1 -->")], FIRE, ROUND))
+
+    def test_a_second_fire_after_the_marker_is_at_work_again(self):
+        thread = [at(1, FIRE), at(2, ROUND + " 1 -->"), at(3, FIRE)]
+        self.assertTrue(conveyor.testing_session_at_work(thread, FIRE, ROUND))
+
+    def test_nothing_fired_is_no_session(self):
+        self.assertFalse(conveyor.testing_session_at_work([at(1, "hello")], FIRE, ROUND))
 
 
 if __name__ == "__main__":

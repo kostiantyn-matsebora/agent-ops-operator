@@ -51,6 +51,7 @@
 
 | Gotcha | Fix |
 |---|---|
+| A station returned to `testing` by a new head waited forever: the fire record was permanent, so `fire()` read "a session is at work" from a session that ended a day earlier, and the fixing loop waited behind it (#547) | a session is at work from its fire comment until its next round marker (`conveyor.testing_session_at_work`); `testing-station.py begin` sends `restart` when a round has ended, and caps a station whose rounds are spent instead of leaving it at `testing` |
 | A tier that ran but left no coverage file reads as "0 lines changed" and passes | no data is `collection_failed`, never a pass |
 | A stub-runtime run proves plumbing only | an agent-facing diff needs a real-model run, and without one no tier passes |
 | The tester's model equal to the author's tests the author's beliefs | `testing-station.py models` exits 5 on equal or unset |

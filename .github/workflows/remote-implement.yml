@@ -209,8 +209,11 @@ jobs:
       # issue from implement to testing (and does nothing once the station has passed), so
       # the carry below finds `station:testing` and carries nothing. Run the other way round,
       # the carry would hand the pull request to the fixing loop before a single test ran.
-      # The session is fired once: the fire record refuses a second, and only a granted
-      # `conveyor:keep-going` (the resume job below) starts another.
+      # ONE SESSION AT A TIME: a session is at work from its fire comment until its round marker,
+      # so a second is refused meanwhile. Once a round has ended, a station returned to testing
+      # (a new head, a base merge) fires the next -- `begin` says so in its `restart` output --
+      # until the station's five rounds are spent, when `begin` caps it and only a granted
+      # `conveyor:keep-going` (the resume job below) starts more.
       - id: testing
         name: Start the testing station
         if: github.event_name == 'workflow_run'
@@ -241,13 +244,13 @@ jobs:
           ROUTINE_FIRE_URL_ARCHIVE: ${{ vars.ROUTINE_FIRE_URL_ARCHIVE }}
           ROUTINE_FIRE_TOKEN_ARCHIVE: ${{ secrets.ROUTINE_FIRE_TOKEN_ARCHIVE }}
           ISSUE: ${{ steps.testing.outputs.issue }}
-          RESUMED: ${{ steps.testing.outputs.resumed }}
+          RESTART: ${{ steps.testing.outputs.restart }}
         run: |
           set -euo pipefail
           RUN_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["run_label"])')
           payload=$(mktemp)
           printf '{"label":{"name":"%s"},"issue":{"number":%s},"sender":{"login":"github-actions[bot]"},"restart":%s}' \
-            "$RUN_LABEL" "$ISSUE" "$RESUMED" > "$payload"
+            "$RUN_LABEL" "$ISSUE" "$RESTART" > "$payload"
           python3 .github/scripts/remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"
       - id: carry
         name: Carry the standing instruction onto the pull request
@@ -333,13 +336,13 @@ jobs:
           ROUTINE_FIRE_URL_ARCHIVE: ${{ vars.ROUTINE_FIRE_URL_ARCHIVE }}
           ROUTINE_FIRE_TOKEN_ARCHIVE: ${{ secrets.ROUTINE_FIRE_TOKEN_ARCHIVE }}
           ISSUE: ${{ steps.testing.outputs.issue }}
-          RESUMED: ${{ steps.testing.outputs.resumed }}
+          RESTART: ${{ steps.testing.outputs.restart }}
         run: |
           set -euo pipefail
           RUN_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["run_label"])')
           payload=$(mktemp)
           printf '{"label":{"name":"%s"},"issue":{"number":%s},"sender":{"login":"github-actions[bot]"},"restart":%s}' \
-            "$RUN_LABEL" "$ISSUE" "$RESUMED" > "$payload"
+            "$RUN_LABEL" "$ISSUE" "$RESTART" > "$payload"
           python3 .github/scripts/remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"
 
   archive:
