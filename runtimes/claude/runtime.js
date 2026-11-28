@@ -44,30 +44,30 @@
 //        assistant, subtype/num_turns/duration_ms/result on result) line up
 //        with the SDK's typed messages without any change.
 //
-// The repository is checked out at /data/workspace — the SAME path the
-// pre-operator claude-runner used, so Claude session files (keyed by cwd
-// under $HOME/.claude/projects/-data-workspace/) resume seamlessly across
-// systems and across the CLI/SDK split.
+// The workspace at WORKSPACE (/workspace) arrives already populated —
+// multi-repo-workspace moves cloning into the `workspace-sync` init
+// container, ahead of this process ever starting. This runtime holds no
+// git credential and runs no clone/fetch of its own; it reads WORKSPACE
+// (always set) and START_DIR (set only when the conversation's
+// `workingDir` resolves) to learn where the agent starts, and a work
+// unit's `agentFile` (an absolute path, exclusive with `agent`) names the
+// definition to read instead of resolving `agent` under WORKSPACE itself.
 
 'use strict';
 
-const { spawn } = require('child_process');
 const fs = require('fs');
-const path = require('path');
-const { agentDeclaredTools, composeAllowedTools, offeredBuiltins, safeJoin, sanitizeLog, logUngrantedTools } = require('./tools');
+const { agentDeclaredTools, agentFileDeclaredTools, composeAllowedTools, offeredBuiltins, safeJoin, sanitizeLog, logUngrantedTools } = require('./tools');
 const { DEFAULT_LIMIT, newSpinWatch, noteToolUse, spinMessage, discardedNotice } = require('./spin');
 const { newCallRecorder } = require('./report');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
 const POD_NAME = process.env.POD_NAME || '';
-const REPO_URL = process.env.REPO_URL || '';
-const REPO_REF = process.env.REPO_REF || 'master';
-const GIT_AUTH_TYPE = process.env.GIT_AUTH_TYPE || '';
-const GIT_SSH_KEY = process.env.GIT_SSH_KEY || '';
-const GIT_TOKEN = process.env.GIT_TOKEN || '';
 const TTL_MS = (Number.parseInt(process.env.RUNTIME_IDLE_TTL_M || '10', 10)) * 60 * 1000;
-const WORKSPACE = process.env.WORKSPACE || '/data/workspace';
+const WORKSPACE = process.env.WORKSPACE || '/workspace';
+// START_DIR is only ever set by the manager when the conversation's
+// `workingDir` resolves — absent means start in WORKSPACE itself.
+const START_DIR = process.env.START_DIR || '';
 const MCP_CONFIG = process.env.MCP_CONFIG || '/etc/agentops/mcp.json';
 // Same floor the pre-SDK shape passed as `--max-turns` when a unit carried
 // none — kept identical so a unit with no turn budget behaves the same.
@@ -90,59 +90,14 @@ if (require.main === module && (!CONTROL_URL || !CONVO_ID)) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ---------------------------------------------------------------------------
-// Git checkout. Unchanged from the pre-SDK shape — the SDK drives claude-code
-// in-process, but this process still owns syncing the profile's repo before
-// any unit runs, exactly as before.
-// ---------------------------------------------------------------------------
-
-function gitEnv() {
-  const env = { ...process.env };
-  if (GIT_AUTH_TYPE === 'ssh' && GIT_SSH_KEY) {
-    env.GIT_SSH_COMMAND = `ssh -i ${GIT_SSH_KEY} -o UserKnownHostsFile=/tmp/known_hosts -o StrictHostKeyChecking=accept-new`;
-  }
-  return env;
-}
-
-function repoURL() {
-  if (GIT_AUTH_TYPE === 'https' && GIT_TOKEN && REPO_URL.startsWith('https://')) {
-    return REPO_URL.replace('https://', `https://x-access-token:${GIT_TOKEN}@`);
-  }
-  return REPO_URL;
-}
-
-function run(cmd, args, opts = {}) {
-  return new Promise((resolve) => {
-    const p = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '', err = '';
-    p.stdout.on('data', (c) => { out += c; });
-    p.stderr.on('data', (c) => { err += c; });
-    p.on('error', (e) => resolve({ code: -1, out, err: String(e.message) }));
-    p.on('close', (code) => resolve({ code, out, err }));
-  });
-}
-
-// WORKSPACE may itself be a volume mount point — never remove the directory,
-// only its contents.
-function clearDir(dir) {
-  for (const e of fs.readdirSync(dir)) {
-    fs.rmSync(path.join(dir, e), { recursive: true, force: true });
-  }
-}
-
-async function syncRepo() {
-  if (!REPO_URL) return;
-  if (!fs.existsSync(path.join(WORKSPACE, '.git'))) {
-    fs.mkdirSync(WORKSPACE, { recursive: true });
-    clearDir(WORKSPACE);
-    const r = await run('git', ['clone', '--depth', '1', '-b', REPO_REF, repoURL(), '.'], { cwd: WORKSPACE, env: gitEnv() });
-    if (r.code !== 0) throw new Error(`git clone: ${r.err.slice(-400)}`);
-  } else {
-    const f = await run('git', ['fetch', '--depth', '1', 'origin', REPO_REF], { cwd: WORKSPACE, env: gitEnv() });
-    if (f.code !== 0) throw new Error(`git fetch: ${f.err.slice(-400)}`);
-    const rs = await run('git', ['reset', '--hard', `origin/${REPO_REF}`], { cwd: WORKSPACE, env: gitEnv() });
-    if (rs.code !== 0) throw new Error(`git reset: ${rs.err.slice(-400)}`);
-  }
+// startDirectory is where the agent starts (D7): START_DIR when the
+// conversation's `workingDir` resolved one, WORKSPACE otherwise. Read fresh
+// at every call site rather than cached, matching how every other per-unit
+// fact here is re-read — the two env vars are themselves fixed for the
+// pod's life (snapshotted onto the Conversation at creation), so this is
+// just naming the one decision in one place.
+function startDirectory() {
+  return START_DIR || WORKSPACE;
 }
 
 // MAX_BRIEF mirrors ConversationStatus.Brief's MaxLength — bounding here means
@@ -321,8 +276,11 @@ function computeFingerprint(unit, mcpServers, allowed) {
     systemPrompt: unit.systemPrompt || '',
     mcpServers: mcpServers || {},
     maxTurns: normalizedMaxTurns(unit),
-    cwd: WORKSPACE,
-    agent: unit.agent || '',
+    cwd: startDirectory(),
+    // `agent` and `agentFile` are mutually exclusive on a unit (D7), so one
+    // field carries whichever named the definition — a unit that switches
+    // from one to the other is still a session-affecting change.
+    agent: unit.agent || unit.agentFile || '',
     offeredTools: [...offeredBuiltins(allowed)].sort((a, b) => a.localeCompare(b)),
   };
 }
@@ -417,7 +375,7 @@ function openSession(unit, fingerprint, allowed, mcpServers) {
     // fallback would need the vendor's full built-in list to subtract from,
     // so it is not wired here.
     tools: offeredBuiltins(allowed),
-    cwd: WORKSPACE,
+    cwd: startDirectory(),
     mcpServers,
     // Matches the CLI shape's `--strict-mcp-config`: only the servers named
     // in MCP_CONFIG are honoured, ignoring project/user/plugin MCP config.
@@ -762,7 +720,12 @@ async function executeUnit(unit) {
   // across a reused session — since the allowlist is kept out of the
   // fingerprint precisely so a wiring edit heals without a re-open (D4).
   // The built-in set it OFFERS is the one part that does fingerprint (D-F).
-  const declared = agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
+  // `agentFile` (an absolute path, exclusive with `agent`) is used as-is
+  // when present — the manager already resolved it, so this process has
+  // nothing of its own left to locate under WORKSPACE.
+  const declared = unit.agentFile
+    ? agentFileDeclaredTools(unit.agentFile, (m) => console.log(sanitizeLog(m)))
+    : agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
   const allowed = composeAllowedTools(declared, unit.allowedTools, unit.toolsMode);
   const mcpServers = readMcpServers(MCP_CONFIG, (m) => console.log(sanitizeLog(m)));
   const fingerprint = computeFingerprint(unit, mcpServers, allowed);
@@ -770,7 +733,7 @@ async function executeUnit(unit) {
   const isResumeAttempt = Boolean(contextId);
 
   console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${contextId ? ' continue=' + sanitizeLog(contextId) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
-  console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')} offered=${sanitizeLog(fingerprint.offeredTools.length ? fingerprint.offeredTools.join(',') : '(no built-in)')}`);
+  console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || unit.agentFile || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')} offered=${sanitizeLog(fingerprint.offeredTools.length ? fingerprint.offeredTools.join(',') : '(no built-in)')}`);
   if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
 
   openOrReuseSession(unit, fingerprint, allowed, mcpServers);
@@ -853,9 +816,9 @@ async function executeUnit(unit) {
 // for its pure/subprocess-driving pieces without the IIFE below ever running
 // — that only happens when this file is the process entry point.
 module.exports = {
-  gitEnv, repoURL, run, clearDir, syncRepo, formatEvent,
+  formatEvent,
   checkContextPresence, sessionFileExists, contextIdOf, strip, extractBrief,
-  SESSIONS_DIR, WORKSPACE,
+  SESSIONS_DIR, WORKSPACE, START_DIR, startDirectory,
   // the SDK-import seam
   getQuery, __setQueryForTest,
   // streaming input
@@ -959,24 +922,22 @@ module.exports.pollNextUnit = pollNextUnit;
 module.exports.reportDone = reportDone;
 module.exports.isDefinitiveRejection = isDefinitiveRejection;
 
-// A sync failure here (a bad ref, an unreachable origin, a rejected
-// fetch/reset) must FAIL THIS RUN with that reason — proceeding to
-// executeUnit anyway would run the agent against a missing or stale
-// checkout and report whatever confusion that produces, attributing
-// nothing to the real cause.
+// A unit that throws (a bug, a malformed MCP config, a torn-down SDK
+// session) must FAIL THAT RUN with a reason rather than take the whole pod
+// process down — the next poll must still happen. The workspace itself is
+// no longer this process's concern: workspace-sync populates it before this
+// pod ever starts, and a clone that failed there never reaches Running.
 async function runUnit(unit) {
   try {
-    await syncRepo();
     return await executeUnit(unit);
   } catch (e) {
-    console.error(`[runtime] sync: ${e.message}`);
-    return { status: 'failed', result: `workspace sync failed: ${e.message}` };
+    console.error(`[runtime] run ${sanitizeLog(unit.runId)}: ${e.message}`);
+    return { status: 'failed', result: `run failed: ${e.message}` };
   }
 }
 
 async function runLoop() {
-  console.log(`[runtime] claude runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE}`);
-  try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
+  console.log(`[runtime] claude runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE} start=${startDirectory()}`);
 
   let lastWork = Date.now();
   let idle = false;

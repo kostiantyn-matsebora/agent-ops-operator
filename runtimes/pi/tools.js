@@ -154,6 +154,29 @@ function readAgentDefinition(workspace, agent, log = () => {}) {
   return { tools: parsed.tools, body: parsed.body };
 }
 
+// agentFileDefinition reads { tools, body } from an explicit absolute path —
+// the resolved `agentFile` a work unit carries in place of `agent` once the
+// wiring names one (multi-repo-workspace). Exclusive with
+// readAgentDefinition's own workspace+name lookup: the caller picks one or
+// the other per unit, never both. Same tolerant contract as
+// readAgentDefinition — a missing or unparseable file yields { tools: [],
+// body: '' }, logged rather than failing the run.
+function agentFileDefinition(agentFile, log = () => {}) {
+  if (!agentFile) return { tools: [], body: '' };
+  let text;
+  try {
+    text = fs.readFileSync(agentFile, 'utf8');
+  } catch {
+    return { tools: [], body: '' }; // no definition — the wiring's tools stand alone, no body to append
+  }
+  const parsed = parseFrontmatter(text);
+  if (parsed.error) {
+    log(`[runtime] agent file ${agentFile}: ${parsed.error} — treating it as declaring no tools and no body`);
+    return { tools: [], body: '' };
+  }
+  return { tools: parsed.tools, body: parsed.body };
+}
+
 // composeAllowedTools joins the agent's declared tools with the wiring's per
 // mode: overwrite passes the wiring's alone, merge unions them with the
 // agent's keeping their position. Any mode we do not recognise — including an
@@ -181,6 +204,6 @@ function dedup(list) {
 
 module.exports = {
   MODE_MERGE, MODE_OVERWRITE,
-  splitList, parseFrontmatter, definitionPath, readAgentDefinition, composeAllowedTools,
+  splitList, parseFrontmatter, definitionPath, readAgentDefinition, agentFileDefinition, composeAllowedTools,
   safeJoin, sanitizeLog,
 };

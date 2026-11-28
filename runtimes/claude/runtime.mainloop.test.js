@@ -47,7 +47,6 @@ test('with RUNTIME_IDLE_TTL_M=0 the process exits immediately, before ever polli
       CONVO_ID: 'conv-idle',
       POD_NAME: 'pod-idle',
       WORKSPACE: tmp('agentops-mainloop-idle-'),
-      REPO_URL: '',
       RUNTIME_IDLE_TTL_M: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

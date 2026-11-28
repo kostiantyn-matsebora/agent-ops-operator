@@ -58,16 +58,14 @@ test('with RUNTIME_IDLE_TTL_M=0 the process eventually reports the idle TTL and 
   // sleeps out its 5s retry before the idle check gets a second, successful
   // look — the same shape runtime-claude's identical test accepts (no
   // fixed-duration kill, just a wait for the real exit event). Exercises the
-  // main loop's own scaffolding (console.log, syncRepo, the fetch-failure
-  // retry, the idle-TTL branch, process.exit(0)) without ever touching the
-  // Copilot SDK.
+  // main loop's own scaffolding (console.log, the fetch-failure retry, the
+  // idle-TTL branch, process.exit(0)) without ever touching the Copilot SDK.
   const child = spawn(process.execPath, [RUNTIME], {
     env: {
       ...process.env,
       CONTROL_URL: 'http://127.0.0.1:1',
       CONVO_ID: 'conv-idle',
       COPILOT_GITHUB_TOKEN: 'test-token',
-      REPO_URL: '',
       HOME: tmp('agentops-copilot-idle-home-'),
       WORKSPACE: tmp('agentops-copilot-idle-ws-'),
       RUNTIME_IDLE_TTL_M: '0',

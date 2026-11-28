@@ -1,9 +1,18 @@
 // agentops copilot agent runtime — implements the AgentRuntime /work contract:
 //   1. long-poll  GET  $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25
-//   2. run GitHub Copilot (through its SDK, in-process) against the profile's
-//      repo checkout, streaming a formatted transcript to STDOUT
+//   2. run GitHub Copilot (through its SDK, in-process) against the
+//      already-populated workspace at WORKSPACE, streaming a formatted
+//      transcript to STDOUT
 //   3. report     POST $CONTROL_URL/work/done
 //   4. exit 0 after RUNTIME_IDLE_TTL_M minutes without work
+//
+// multi-repo-workspace moved cloning into the `workspace-sync` init
+// container, ahead of this process ever starting — this runtime holds no
+// git credential and runs no clone/fetch of its own. It reads WORKSPACE
+// (always set) and START_DIR (set only when the conversation's
+// `workingDir` resolves), and a work unit's `agentFile` (an absolute path,
+// exclusive with `agent`) names the definition to read instead of
+// resolving `agent` under WORKSPACE itself.
 //
 // THE THIRD RUNTIME, and the first whose vendor owns its own tool vocabulary,
 // its own agent-definition format and its own session store. Every one of
@@ -18,11 +27,10 @@
 
 'use strict';
 
-const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog } = require('./tools');
+const { agentDeclaredTools, agentFileDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog } = require('./tools');
 const { translate, decide, inventoryGaps } = require('./vocabulary');
 const { loadMcpServers } = require('./mcp');
 const { confirmContextMissing } = require('./continuity');
@@ -31,13 +39,11 @@ const { newCallRecorder, extractBrief } = require('./report');
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
 const POD_NAME = process.env.POD_NAME || '';
-const REPO_URL = process.env.REPO_URL || '';
-const REPO_REF = process.env.REPO_REF || 'master';
-const GIT_AUTH_TYPE = process.env.GIT_AUTH_TYPE || '';
-const GIT_SSH_KEY = process.env.GIT_SSH_KEY || '';
-const GIT_TOKEN = process.env.GIT_TOKEN || '';
 const TTL_MS = (Number.parseInt(process.env.RUNTIME_IDLE_TTL_M || '10', 10)) * 60 * 1000;
-const WORKSPACE = process.env.WORKSPACE || '/data/workspace';
+const WORKSPACE = process.env.WORKSPACE || '/workspace';
+// START_DIR is only ever set by the manager when the conversation's
+// `workingDir` resolves — absent means start in WORKSPACE itself.
+const START_DIR = process.env.START_DIR || '';
 const MCP_CONFIG = process.env.MCP_CONFIG || '/etc/agentops/mcp.json';
 const HOME = process.env.HOME || '/data/context';
 // COPILOT_HOME is the SDK's own name for its state root. Set explicitly so the
@@ -81,55 +87,10 @@ if (!COPILOT_GITHUB_TOKEN && !PROVIDER) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ---- repo checkout ----------------------------------------------------------
-
-function gitEnv() {
-  const env = { ...process.env };
-  if (GIT_AUTH_TYPE === 'ssh' && GIT_SSH_KEY) {
-    env.GIT_SSH_COMMAND = `ssh -i ${GIT_SSH_KEY} -o UserKnownHostsFile=/tmp/known_hosts -o StrictHostKeyChecking=accept-new`;
-  }
-  return env;
-}
-
-function repoURL() {
-  if (GIT_AUTH_TYPE === 'https' && GIT_TOKEN && REPO_URL.startsWith('https://')) {
-    return REPO_URL.replace('https://', `https://x-access-token:${GIT_TOKEN}@`);
-  }
-  return REPO_URL;
-}
-
-function run(cmd, args, opts = {}) {
-  return new Promise((resolve) => {
-    const p = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '', err = '';
-    p.stdout.on('data', (c) => { out += c; });
-    p.stderr.on('data', (c) => { err += c; });
-    p.on('error', (e) => resolve({ code: -1, out, err: String(e.message) }));
-    p.on('close', (code) => resolve({ code, out, err }));
-  });
-}
-
-// WORKSPACE may itself be a volume mount point — never remove the directory,
-// only its contents.
-function clearDir(dir) {
-  for (const e of fs.readdirSync(dir)) {
-    fs.rmSync(path.join(dir, e), { recursive: true, force: true });
-  }
-}
-
-async function syncRepo() {
-  if (!REPO_URL) { fs.mkdirSync(WORKSPACE, { recursive: true }); return; }
-  if (!fs.existsSync(path.join(WORKSPACE, '.git'))) {
-    fs.mkdirSync(WORKSPACE, { recursive: true });
-    clearDir(WORKSPACE);
-    const r = await run('git', ['clone', '--depth', '1', '-b', REPO_REF, repoURL(), '.'], { cwd: WORKSPACE, env: gitEnv() });
-    if (r.code !== 0) throw new Error(`git clone: ${r.err.slice(-400)}`);
-  } else {
-    const fetch = await run('git', ['fetch', '--depth', '1', 'origin', REPO_REF], { cwd: WORKSPACE, env: gitEnv() });
-    if (fetch.code !== 0) throw new Error(`git fetch: ${fetch.err.slice(-400)}`);
-    const reset = await run('git', ['reset', '--hard', `origin/${REPO_REF}`], { cwd: WORKSPACE, env: gitEnv() });
-    if (reset.code !== 0) throw new Error(`git reset: ${reset.err.slice(-400)}`);
-  }
+// startDirectory is where the agent starts (D7): START_DIR when the
+// conversation's `workingDir` resolved one, WORKSPACE otherwise.
+function startDirectory() {
+  return START_DIR || WORKSPACE;
 }
 
 // ---- the SDK client ---------------------------------------------------------
@@ -150,7 +111,7 @@ async function getClient() {
   client = new sdk.CopilotClient({
     mode: 'empty',
     baseDirectory: COPILOT_HOME,
-    workingDirectory: WORKSPACE,
+    workingDirectory: startDirectory(),
     ...(COPILOT_GITHUB_TOKEN ? { gitHubToken: COPILOT_GITHUB_TOKEN } : {}),
     useLoggedInUser: false,
     logLevel: process.env.COPILOT_LOG_LEVEL || 'warning',
@@ -258,7 +219,7 @@ function sessionConfig(unit, grant, mcp, denials) {
   // composition that produced nothing, and Copilot's own "no declaration means
   // everything" never gets a chance to apply.
   const cfg = {
-    workingDirectory: WORKSPACE,
+    workingDirectory: startDirectory(),
     availableTools: grant.available,
     streaming: false,
     enableConfigDiscovery: false,
@@ -346,14 +307,18 @@ async function runCopilot(unit) {
   // No `exitCode`: the prompt could not even be assembled, so nothing ran.
   if (p.error) return { status: 'failed', result: p.error };
 
-  const declared = agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
+  // `agentFile` (an absolute path, exclusive with `agent`) is used as-is
+  // when present — the manager already resolved it.
+  const declared = unit.agentFile
+    ? agentFileDeclaredTools(unit.agentFile, (m) => console.log(sanitizeLog(m)))
+    : agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
   const allowed = composeAllowedTools(declared, unit.allowedTools, unit.toolsMode);
   const grant = translate(allowed);
   const mcp = loadMcpServers(MCP_CONFIG);
 
   const id = contextIdOf(unit);
   console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${id ? ' continue=' + sanitizeLog(id) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
-  console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
+  console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || unit.agentFile || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
   console.log(`[runtime] copilot available=${sanitizeLog(grant.available.length ? grant.available.join(',') : '(none)')}${grant.shell ? ` shell=${grant.shell.all ? 'any' : sanitizeLog(grant.shell.prefixes.map((x) => `"${x} *"`).join('|'))}` : ''}`);
   for (const u of grant.unmapped) console.log(`[runtime] UNMAPPED pattern withheld: ${sanitizeLog(u)} — no Copilot equivalent, granting nothing`);
   for (const r of grant.refused) console.log(`[runtime] REFUSED per-server wildcard: ${sanitizeLog(r)} — Copilot admits mcp:* or an exact name, and mcp:* would grant every bound server`);
@@ -438,9 +403,9 @@ function finish(out, continuity) {
 // for its pure/subprocess-driving pieces without the IIFE below ever running
 // — that only happens when this file is the process entry point.
 module.exports = {
-  gitEnv, repoURL, run, clearDir, syncRepo, onEvent, resolvePrompt, contextIdOf,
+  onEvent, resolvePrompt, contextIdOf,
   sessionConfig, finish, resolveContinuity, attempt,
-  SESSIONS_DIR, WORKSPACE, COPILOT_HOME,
+  SESSIONS_DIR, WORKSPACE, START_DIR, startDirectory, COPILOT_HOME,
 };
 
 // Extracted to a NAMED top-level function rather than left as an inline
@@ -519,21 +484,21 @@ async function reportDone(unit, out) {
 module.exports.pollNextUnit = pollNextUnit;
 module.exports.reportDone = reportDone;
 
-// A checkout the run cannot trust must fail the run, with a reason, never
-// proceed with whatever the workspace happened to hold from before.
+// A unit that throws (a bug, an SDK error) must FAIL THAT RUN with a reason
+// rather than take the whole pod process down — the next poll must still
+// happen. The workspace itself is no longer this process's concern:
+// workspace-sync populates it before this pod ever starts.
 async function runUnit(unit) {
   try {
-    await syncRepo();
+    return await runCopilot(unit);
   } catch (e) {
-    console.error(`[runtime] sync: ${e.message}`);
-    return { status: 'failed', result: `repository checkout: ${e.message}` };
+    console.error(`[runtime] run ${sanitizeLog(unit.runId)}: ${e.message}`);
+    return { status: 'failed', result: `run failed: ${e.message}` };
   }
-  return runCopilot(unit);
 }
 
 async function runLoop() {
-  console.log(`[runtime] copilot runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE} state=${SESSIONS_DIR}`);
-  try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
+  console.log(`[runtime] copilot runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE} start=${startDirectory()} state=${SESSIONS_DIR}`);
 
   let lastWork = Date.now();
   let idle = false;

@@ -782,6 +782,14 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		conv.ServiceAccountName = snap.ServiceAccountName
 		conv.ContextClaimName = snap.ContextClaimName
 		conv.WorkspaceClaimName = snap.WorkspaceClaimName
+		// Repositories, agentFile and workingDir are resolved and snapshotted
+		// here too (multi-repo-workspace design D2) — an addressed command
+		// grants its wiring in full, and the workspace layout is part of that
+		// wiring exactly as the claims above it are.
+		repos := dispatch.ResolveRepositories(ctx, r.Reader, r.Namespaces.Control, capability)
+		conv.Repositories = dispatch.RepositoriesOf(repos.Repositories)
+		conv.AgentFile = dispatch.AgentFileOf(repos.AgentFile)
+		conv.WorkingDir = repos.WorkingDir
 		// Provenance, written once at creation like the bindings above it and
 		// read for the same reasons they are not: attribution and reuse
 		// scoping, never to resolve wiring. An addressed command is the one

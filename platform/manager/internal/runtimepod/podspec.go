@@ -1,6 +1,8 @@
-// Package runtimepod builds the per-conversation runtime pod from an
-// AgentProfile: repository checkout config, compiled MCP, credentials via
-// valueFrom (the manager never touches secret material).
+// Package runtimepod builds the per-conversation runtime pod from a
+// Conversation's own snapshot (execution identity, persistence claims, the
+// resolved repository list — multi-repo-workspace design D2) plus its
+// AgentProfile (env, resources), compiled MCP, credentials via valueFrom
+// (the manager never touches secret material).
 package runtimepod
 
 import (
@@ -347,12 +349,26 @@ func Build(conv *state.ConversationRecord, profile *agentopsv1alpha1.AgentProfil
 		agentControlURL = "http://127.0.0.1:" + itoa(contextSyncPort)
 	}
 
+	// The repository this conversation checks out is its OWN snapshot
+	// (multi-repo-workspace design D2), never the profile read live above —
+	// an edit to the profile after creation must change nothing a rebuilt
+	// pod does. REPO_URL/REPO_REF/GIT_* still carry only the FIRST resolved
+	// entry: the single-repository shape every existing runtime still
+	// expects, pending the runtime contract's own change (multi-repo-
+	// workspace tasks 4/5) that retires them for WORKSPACE_REPOS. A
+	// conversation with no repositories resolves both to empty, exactly as
+	// "no checkout" already did.
+	var primaryRepo state.RepositoryEntry
+	if len(conv.Repositories) > 0 {
+		primaryRepo = conv.Repositories[0]
+	}
+
 	env := []corev1.EnvVar{
 		{Name: "ROLE", Value: "worker"},
 		{Name: "CONVO_ID", Value: conv.ID},
 		{Name: "CONTROL_URL", Value: agentControlURL},
-		{Name: "REPO_URL", Value: profile.Spec.Repository.URL},
-		{Name: "REPO_REF", Value: profile.Spec.Repository.Ref},
+		{Name: "REPO_URL", Value: primaryRepo.URL},
+		{Name: "REPO_REF", Value: primaryRepo.Ref},
 		{Name: "RUNTIME_IDLE_TTL_M", Value: itoa(cfg.IdleTTLMinutes)},
 		{Name: "HOME", Value: contextLiveMount},
 		{Name: "MCP_CONFIG", Value: "/etc/agentops/mcp.json"},
@@ -419,8 +435,8 @@ func Build(conv *state.ConversationRecord, profile *agentopsv1alpha1.AgentProfil
 	volumes = append(volumes, contextVolumes(cfg, sidecar)...)
 	mounts = append(mounts, corev1.VolumeMount{Name: "context", MountPath: contextLiveMount})
 
-	// repository auth
-	authVolumes, authMounts, authEnv := repoAuthParts(profile.Spec.Repository.Auth)
+	// repository auth — the snapshotted entry's own, never the profile's.
+	authVolumes, authMounts, authEnv := repoAuthParts(primaryRepo.Auth)
 	volumes = append(volumes, authVolumes...)
 	mounts = append(mounts, authMounts...)
 	env = append(env, authEnv...)
@@ -562,25 +578,27 @@ func contextVolumes(cfg Config, sidecar bool) []corev1.Volume {
 }
 
 // repoAuthParts is the volume, mounts and environment the repository's auth
-// declaration adds. Nothing for no auth.
-func repoAuthParts(a *agentopsv1alpha1.RepoAuth) ([]corev1.Volume, []corev1.VolumeMount, []corev1.EnvVar) {
+// declaration adds. Nothing for no auth. Takes the CONVERSATION's own
+// snapshotted entry (state.RepoAuth — a Secret NAME, never the credential),
+// not the profile's live one; see Build's own comment.
+func repoAuthParts(a *state.RepoAuth) ([]corev1.Volume, []corev1.VolumeMount, []corev1.EnvVar) {
 	if a == nil {
 		return nil, nil, nil
 	}
 	switch a.Type {
-	case agentopsv1alpha1.RepoAuthSSH:
+	case string(agentopsv1alpha1.RepoAuthSSH):
 		mode := int32(0o400)
 		return []corev1.Volume{{Name: "repo-auth", VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{SecretName: a.SecretRef.Name, DefaultMode: &mode},
+				Secret: &corev1.SecretVolumeSource{SecretName: a.SecretRef, DefaultMode: &mode},
 			}}},
 			[]corev1.VolumeMount{{Name: "repo-auth", MountPath: "/repo-auth", ReadOnly: true}},
 			[]corev1.EnvVar{{Name: "GIT_AUTH_TYPE", Value: "ssh"}, {Name: "GIT_SSH_KEY", Value: "/repo-auth/sshKey"}}
-	case agentopsv1alpha1.RepoAuthHTTPS:
+	case string(agentopsv1alpha1.RepoAuthHTTPS):
 		return nil, nil, []corev1.EnvVar{
 			{Name: "GIT_AUTH_TYPE", Value: "https"},
 			{Name: "GIT_TOKEN", ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: a.SecretRef.Name}, Key: "token",
+					LocalObjectReference: corev1.LocalObjectReference{Name: a.SecretRef}, Key: "token",
 				},
 			}},
 		}

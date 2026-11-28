@@ -127,10 +127,22 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	apimeta.RemoveStatusCondition(&p.Status.Conditions, "SourceConflict")
 
 	ready := metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "WiringValid"}
-	if len(missing) > 0 {
+	switch {
+	case len(missing) > 0:
 		ready.Status = metav1.ConditionFalse
 		ready.Reason = "MissingReferences"
 		ready.Message = "unresolved references: " + strings.Join(missing, ", ")
+	default:
+		// The workspace layout (multi-repo-workspace's "An inconsistent
+		// declaration is refused at resolution") needs the RESOLVED
+		// capability, which every ref above already proved readable —
+		// checking it against a holder with a dangling ref would just
+		// repeat that refusal under a different name.
+		if reason, message, bad := workspaceLayoutProblem(ctx, r.Client, p.Namespace, resolvedCapability); bad {
+			ready.Status = metav1.ConditionFalse
+			ready.Reason = reason
+			ready.Message = message
+		}
 	}
 	apimeta.SetStatusCondition(&p.Status.Conditions, ready)
 	return ctrl.Result{}, r.Status().Patch(ctx, &p, patch)

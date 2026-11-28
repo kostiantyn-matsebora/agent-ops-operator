@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 )
 
 // notReadySuffix and coordinatorRefLabel are the recurring fragments of a
@@ -54,10 +55,25 @@ func (r *CoordinatorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	patch := client.MergeFrom(co.DeepCopy())
 	ready := metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "WiringValid"}
-	if len(missing) > 0 {
+	switch {
+	case len(missing) > 0:
 		ready.Status = metav1.ConditionFalse
 		ready.Reason = "MissingReferences"
 		ready.Message = "unresolved references: " + strings.Join(missing, ", ")
+	default:
+		// dispatch.ResolveCapability rather than the manual AgentRef-or-
+		// inline branch pipeline_controller.go runs: coordinatorProblems
+		// above already proved every ref on this Coordinator's OWN
+		// capability resolves, so re-resolving it here the same way every
+		// other reader of a capability does is exactly ResolveCapability's
+		// purpose, not a second rule for the same fact.
+		if resolvedCapability, err := dispatch.ResolveCapability(ctx, r.Client, &co); err == nil {
+			if reason, message, bad := workspaceLayoutProblem(ctx, r.Client, co.Namespace, resolvedCapability); bad {
+				ready.Status = metav1.ConditionFalse
+				ready.Reason = reason
+				ready.Message = message
+			}
+		}
 	}
 	apimeta.SetStatusCondition(&co.Status.Conditions, ready)
 	return ctrl.Result{}, r.Status().Patch(ctx, &co, patch)

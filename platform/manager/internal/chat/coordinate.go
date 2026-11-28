@@ -583,6 +583,11 @@ func (r *Router) createMember(ctx context.Context, caller *state.ConversationRec
 	}
 
 	snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespaces.Control, persistenceName, capability, r.Runtime)
+	// Resolved and snapshotted once, like every other field SnapshotFor
+	// returns above (multi-repo-workspace design D2): a member's workspace
+	// layout is fixed at its own creation, never re-read at its next pod
+	// build.
+	repos := dispatch.ResolveRepositories(ctx, r.Reader, r.Namespaces.Control, capability)
 	// The word-chain and the actual Create are AllocateName's below —
 	// readable-conversation-names: an object name is a deterministic
 	// word-chain, never metadata.generateName's random suffix. The word
@@ -596,6 +601,9 @@ func (r *Router) createMember(ctx context.Context, caller *state.ConversationRec
 		ServiceAccountName: snap.ServiceAccountName,
 		ContextClaimName:   snap.ContextClaimName,
 		WorkspaceClaimName: snap.WorkspaceClaimName,
+		Repositories:       dispatch.RepositoriesOf(repos.Repositories),
+		AgentFile:          dispatch.AgentFileOf(repos.AgentFile),
+		WorkingDir:         repos.WorkingDir,
 		CausedBy:           &state.Provenance{Parent: caller.ID, Entry: entry.Name},
 		Title:              memberTitle(entry.Name, task),
 		CorrelationID:      initiationID,

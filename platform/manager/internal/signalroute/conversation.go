@@ -201,6 +201,12 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 		return nil, fmt.Errorf("%s: resolve capability: %w", claimant.GetName(), err)
 	}
 	snap := runtimepod.SnapshotFor(ctx, deps.Reader, deps.Namespace, claimant.GetName(), capability, deps.Runtime)
+	// The repository list, agent file and working directory are resolved and
+	// snapshotted ONCE, here, like every other field SnapshotFor returns
+	// (multi-repo-workspace design D2) — every later pod build reads this
+	// Conversation's own copy, never the Pipeline/Coordinator's capability or
+	// its profile again.
+	repos := dispatch.ResolveRepositories(ctx, deps.Reader, deps.Namespace, capability)
 	conv := &state.ConversationRecord{
 		ProfileRef:         capability.ProfileName(),
 		ChannelRefs:        append([]state.Ref{}, claimant.BoundChannelRefs()...),
@@ -210,6 +216,9 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 		ServiceAccountName: snap.ServiceAccountName,
 		ContextClaimName:   snap.ContextClaimName,
 		WorkspaceClaimName: snap.WorkspaceClaimName,
+		Repositories:       dispatch.RepositoriesOf(repos.Repositories),
+		AgentFile:          dispatch.AgentFileOf(repos.AgentFile),
+		WorkingDir:         repos.WorkingDir,
 		Signal: &state.SignalProvenance{
 			SourceRef: sourceName,
 			Labels:    sig.Labels,

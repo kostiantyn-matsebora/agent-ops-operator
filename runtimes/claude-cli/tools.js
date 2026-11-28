@@ -156,6 +156,29 @@ function agentDeclaredTools(workspace, agent, log = () => {}) {
   return parsed.tools;
 }
 
+// agentFileDeclaredTools reads the tools: frontmatter from an explicit
+// absolute path — the resolved `agentFile` a work unit carries in place of
+// `agent` once the wiring names one (multi-repo-workspace). Exclusive with
+// agentDeclaredTools's own workspace+name lookup: the caller picks one or
+// the other per unit, never both. Same tolerant contract — a missing or
+// unparseable file contributes nothing, logged rather than failing the run.
+function agentFileDeclaredTools(agentFile, log = () => {}) {
+  if (!agentFile) return [];
+  let text;
+  try {
+    text = fs.readFileSync(agentFile, 'utf8');
+  } catch (e) {
+    log(`[runtime] agent file ${agentFile}: ${e.message} — treating it as declaring no tools`);
+    return [];
+  }
+  const parsed = parseFrontmatterTools(text);
+  if (parsed.error) {
+    log(`[runtime] agent file ${agentFile}: ${parsed.error} — treating it as declaring no tools`);
+    return [];
+  }
+  return parsed.tools;
+}
+
 // composeAllowedTools joins the agent's declared tools with the wiring's per
 // mode: overwrite passes the wiring's alone, merge unions them with the
 // agent's keeping their position. Any mode we do not recognise — including an
@@ -243,6 +266,6 @@ function buildClaudeArgs({ contextId, systemPrompt, allowed, maxTurns, mcpConfig
 
 module.exports = {
   MODE_MERGE, MODE_OVERWRITE,
-  splitList, parseFrontmatterTools, agentDeclaredTools, composeAllowedTools,
+  splitList, parseFrontmatterTools, agentDeclaredTools, agentFileDeclaredTools, composeAllowedTools,
   safeJoin, sanitizeLog, resolveBin, buildClaudeArgs, logUngrantedTools,
 };

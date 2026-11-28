@@ -5,29 +5,31 @@
 //   3. report     POST $CONTROL_URL/work/done
 //   4. exit 0 after RUNTIME_IDLE_TTL_M minutes without work
 //
-// The repository is checked out at /data/workspace — the SAME path the
-// pre-operator claude-runner used, so Claude session files (keyed by cwd under
-// $HOME/.claude/projects/-data-workspace/) resume seamlessly across systems.
+// The workspace at WORKSPACE (/workspace) arrives already populated —
+// multi-repo-workspace moves cloning into the `workspace-sync` init
+// container, ahead of this process ever starting. This runtime holds no
+// git credential and runs no clone/fetch of its own; it reads WORKSPACE
+// (always set) and START_DIR (set only when the conversation's
+// `workingDir` resolves) to learn where the agent starts, and a work
+// unit's `agentFile` (an absolute path, exclusive with `agent`) names the
+// definition to read instead of resolving `agent` under WORKSPACE itself.
 
 'use strict';
 
 const { spawn } = require('child_process');
 const fs = require('fs');
-const path = require('path');
-const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog, resolveBin, buildClaudeArgs, logUngrantedTools } = require('./tools');
+const { agentDeclaredTools, agentFileDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog, resolveBin, buildClaudeArgs, logUngrantedTools } = require('./tools');
 const { DEFAULT_LIMIT, newSpinWatch, noteToolUse, spinMessage, discardedNotice } = require('./spin');
 const { newCallRecorder } = require('./report');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
 const POD_NAME = process.env.POD_NAME || '';
-const REPO_URL = process.env.REPO_URL || '';
-const REPO_REF = process.env.REPO_REF || 'master';
-const GIT_AUTH_TYPE = process.env.GIT_AUTH_TYPE || '';
-const GIT_SSH_KEY = process.env.GIT_SSH_KEY || '';
-const GIT_TOKEN = process.env.GIT_TOKEN || '';
 const TTL_MS = (Number.parseInt(process.env.RUNTIME_IDLE_TTL_M || '10', 10)) * 60 * 1000;
-const WORKSPACE = process.env.WORKSPACE || '/data/workspace';
+const WORKSPACE = process.env.WORKSPACE || '/workspace';
+// START_DIR is only ever set by the manager when the conversation's
+// `workingDir` resolves — absent means start in WORKSPACE itself.
+const START_DIR = process.env.START_DIR || '';
 const MCP_CONFIG = process.env.MCP_CONFIG || '/etc/agentops/mcp.json';
 // How many identical unparsable tool calls in a row end a run. 0 disables the
 // breaker entirely, which is a decision an install can make and this file will
@@ -49,53 +51,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const CLAUDE_BIN = resolveBin('claude');
 
-function gitEnv() {
-  const env = { ...process.env };
-  if (GIT_AUTH_TYPE === 'ssh' && GIT_SSH_KEY) {
-    env.GIT_SSH_COMMAND = `ssh -i ${GIT_SSH_KEY} -o UserKnownHostsFile=/tmp/known_hosts -o StrictHostKeyChecking=accept-new`;
-  }
-  return env;
-}
-
-function repoURL() {
-  if (GIT_AUTH_TYPE === 'https' && GIT_TOKEN && REPO_URL.startsWith('https://')) {
-    return REPO_URL.replace('https://', `https://x-access-token:${GIT_TOKEN}@`);
-  }
-  return REPO_URL;
-}
-
-function run(cmd, args, opts = {}) {
-  return new Promise((resolve) => {
-    const p = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '', err = '';
-    p.stdout.on('data', (c) => { out += c; });
-    p.stderr.on('data', (c) => { err += c; });
-    p.on('error', (e) => resolve({ code: -1, out, err: String(e.message) }));
-    p.on('close', (code) => resolve({ code, out, err }));
-  });
-}
-
-// WORKSPACE may itself be a volume mount point — never remove the directory,
-// only its contents.
-function clearDir(dir) {
-  for (const e of fs.readdirSync(dir)) {
-    fs.rmSync(path.join(dir, e), { recursive: true, force: true });
-  }
-}
-
-async function syncRepo() {
-  if (!REPO_URL) return;
-  if (!fs.existsSync(path.join(WORKSPACE, '.git'))) {
-    fs.mkdirSync(WORKSPACE, { recursive: true });
-    clearDir(WORKSPACE);
-    const r = await run('git', ['clone', '--depth', '1', '-b', REPO_REF, repoURL(), '.'], { cwd: WORKSPACE, env: gitEnv() });
-    if (r.code !== 0) throw new Error(`git clone: ${r.err.slice(-400)}`);
-  } else {
-    const f = await run('git', ['fetch', '--depth', '1', 'origin', REPO_REF], { cwd: WORKSPACE, env: gitEnv() });
-    if (f.code !== 0) throw new Error(`git fetch: ${f.err.slice(-400)}`);
-    const rs = await run('git', ['reset', '--hard', `origin/${REPO_REF}`], { cwd: WORKSPACE, env: gitEnv() });
-    if (rs.code !== 0) throw new Error(`git reset: ${rs.err.slice(-400)}`);
-  }
+// startDirectory is where the agent starts (D7): START_DIR when the
+// conversation's `workingDir` resolved one, WORKSPACE otherwise.
+function startDirectory() {
+  return START_DIR || WORKSPACE;
 }
 
 // MAX_BRIEF mirrors ConversationStatus.Brief's MaxLength — bounding here means
@@ -162,7 +121,11 @@ function runClaude(unit) {
 
     // The work unit carries the WIRING's tools and the mode; the agent's own
     // definition carries the rest, and only this process can read it.
-    const declared = agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
+    // `agentFile` (an absolute path, exclusive with `agent`) is used as-is
+    // when present — the manager already resolved it.
+    const declared = unit.agentFile
+      ? agentFileDeclaredTools(unit.agentFile, (m) => console.log(sanitizeLog(m)))
+      : agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
     const allowed = composeAllowedTools(declared, unit.allowedTools, unit.toolsMode);
 
     // --allowedTools is passed ALWAYS, even empty: nothing is substituted for
@@ -189,7 +152,7 @@ function runClaude(unit) {
       prompt,
     });
     console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${contextIdOf(unit) ? ' continue=' + sanitizeLog(contextIdOf(unit)) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
-    console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
+    console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || unit.agentFile || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
     if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
     resolve(spawnClaude(args, unit, Boolean(contextIdOf(unit)), allowed));
   });
@@ -244,7 +207,7 @@ async function spawnClaude(args, unit, isResume, allowed) {
   const attempt = (argv) =>
     new Promise((resolve) => {
       const p = spawn(CLAUDE_BIN, argv, {
-        cwd: WORKSPACE,
+        cwd: startDirectory(),
         env: { ...process.env, RUN_ID: unit.runId, TG_THREAD_ID: unit.threadId != null ? String(unit.threadId) : '' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -470,9 +433,9 @@ function strip({ stderr, ...rest }) {
 // for its pure/subprocess-driving pieces without the IIFE below ever running
 // — that only happens when this file is the process entry point.
 module.exports = {
-  gitEnv, repoURL, run, clearDir, syncRepo, formatEvent, runClaude, spawnClaude,
+  formatEvent, runClaude, spawnClaude,
   checkContextPresence, sessionFileExists, contextIdOf, strip, extractBrief,
-  SESSIONS_DIR, CLAUDE_BIN, WORKSPACE,
+  SESSIONS_DIR, CLAUDE_BIN, WORKSPACE, START_DIR, startDirectory,
 };
 
 // Extracted to a NAMED top-level function rather than left as an inline
@@ -559,24 +522,21 @@ module.exports.pollNextUnit = pollNextUnit;
 module.exports.reportDone = reportDone;
 module.exports.isDefinitiveRejection = isDefinitiveRejection;
 
-// A sync failure here (a bad ref, an unreachable origin, a rejected
-// fetch/reset) must FAIL THIS RUN with that reason — proceeding to
-// runClaude anyway would run the agent against a missing or stale
-// checkout and report whatever confusion that produces, attributing
-// nothing to the real cause.
+// A unit that throws (a bug, a malformed spawn) must FAIL THAT RUN with a
+// reason rather than take the whole pod process down — the next poll must
+// still happen. The workspace itself is no longer this process's concern:
+// workspace-sync populates it before this pod ever starts.
 async function runUnit(unit) {
   try {
-    await syncRepo();
     return await runClaude(unit);
   } catch (e) {
-    console.error(`[runtime] sync: ${e.message}`);
-    return { status: 'failed', result: `workspace sync failed: ${e.message}` };
+    console.error(`[runtime] run ${sanitizeLog(unit.runId)}: ${e.message}`);
+    return { status: 'failed', result: `run failed: ${e.message}` };
   }
 }
 
 async function runLoop() {
-  console.log(`[runtime] claude runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE}`);
-  try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
+  console.log(`[runtime] claude runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE} start=${startDirectory()}`);
 
   let lastWork = Date.now();
   let idle = false;

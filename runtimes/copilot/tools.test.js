@@ -9,7 +9,7 @@ const path = require('path');
 
 const {
   MODE_MERGE, MODE_OVERWRITE,
-  parseFrontmatterTools, agentDeclaredTools, composeAllowedTools, definitionPath,
+  parseFrontmatterTools, agentDeclaredTools, agentFileDeclaredTools, composeAllowedTools, definitionPath,
   safeJoin, sanitizeLog, resolveBin,
 } = require('./tools');
 
@@ -127,6 +127,38 @@ test('an agent name that escapes the workspace contributes nothing, and logs why
   assert.deepStrictEqual(got, []);
   assert.match(logged[0], /escapes the workspace/);
   assert.strictEqual(definitionPath(dir, '../../../etc/passwd'), null);
+});
+
+// ---- agentFileDeclaredTools (multi-repo-workspace) --------------------------
+
+test('agentFileDeclaredTools reads tools: from an explicit absolute path', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-copilot-agentfile-'));
+  const file = path.join(dir, 'k8s-ops.md');
+  fs.writeFileSync(file, '---\ntools: Read, Bash(kubectl:*)\n---\nrole\n');
+  assert.deepStrictEqual(agentFileDeclaredTools(file), ['Read', 'Bash(kubectl:*)']);
+});
+
+test('agentFileDeclaredTools contributes nothing for an empty path', () => {
+  assert.deepStrictEqual(agentFileDeclaredTools(''), []);
+  assert.deepStrictEqual(agentFileDeclaredTools(undefined), []);
+});
+
+test('agentFileDeclaredTools logs and contributes nothing for a missing file', () => {
+  const logged = [];
+  const got = agentFileDeclaredTools('/does/not/exist/agent.md', (m) => logged.push(m));
+  assert.deepStrictEqual(got, []);
+  assert.strictEqual(logged.length, 1);
+  assert.match(logged[0], /\/does\/not\/exist\/agent\.md/);
+});
+
+test('agentFileDeclaredTools logs and contributes nothing for unparseable frontmatter', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-copilot-agentfile-'));
+  const file = path.join(dir, 'broken.md');
+  fs.writeFileSync(file, '---\ntools: Read\nnever closed\n');
+  const logged = [];
+  const got = agentFileDeclaredTools(file, (m) => logged.push(m));
+  assert.deepStrictEqual(got, []);
+  assert.strictEqual(logged.length, 1);
 });
 
 // ---- safeJoin ----------------------------------------------------------------

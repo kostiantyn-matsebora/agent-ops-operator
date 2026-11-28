@@ -223,6 +223,28 @@ test('an agent declaration and full wiring (system prompt, thread, max-turns) al
   assert.strictEqual(out.status, 'succeeded');
 });
 
+// multi-repo-workspace: agentFile (an absolute path) is exclusive with
+// `agent` and, when present, is read instead of resolving `agent` under
+// WORKSPACE — proven here by declaring CONTRADICTING tools at each
+// location: if agent were still consulted, the composed allowlist would
+// carry Bash instead of Read.
+test('a unit carrying agentFile reads tools from that absolute path, never the agent name under WORKSPACE', async (t) => {
+  fs.mkdirSync(path.join(process.env.WORKSPACE, '.claude', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(process.env.WORKSPACE, '.claude', 'agents', 'k8s-ops.md'), '---\ntools: Bash\n---\n');
+  const agentFileDir = tmp('agentops-agentfile-');
+  const agentFile = path.join(agentFileDir, 'other-repo-agent.md');
+  fs.writeFileSync(agentFile, '---\ntools: Read\n---\n');
+
+  process.env.FAKE_MODE = 'with_init'; // vendor reports tools=[Read,Bash]
+  const logged = withConsoleLog(t);
+  const out = await runClaude({ promptText: 'hi', runId: 'r-agentfile', agent: 'k8s-ops', agentFile });
+  assert.strictEqual(out.status, 'succeeded');
+  assert.ok(
+    logged.some((l) => l.includes('tools agent=') && l.includes('declared=1') && l.includes('-> Read')),
+    `expected agentFile's Read declaration, never the agent name's Bash, got: ${logged.join(' | ')}`,
+  );
+});
+
 test('a run reports its turns and tool calls from the stream it printed', async () => {
   process.env.FAKE_MODE = 'fixture';
   process.env.FAKE_STREAM = path.join(__dirname, '..', '..', 'test', 'fixtures', 'claude-stream-json.jsonl');

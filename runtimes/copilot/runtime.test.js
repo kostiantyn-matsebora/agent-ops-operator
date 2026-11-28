@@ -26,13 +26,12 @@ function tmp(prefix) {
 process.env.CONTROL_URL = 'http://127.0.0.1:1';
 process.env.CONVO_ID = 'conv-test';
 process.env.COPILOT_GITHUB_TOKEN = 'test-token';
-process.env.REPO_URL = ''; // exercises syncRepo's early no-op branch
 const HOME = tmp('agentops-copilot-home-');
 process.env.HOME = HOME; // controls COPILOT_HOME/SESSIONS_DIR
 process.env.WORKSPACE = tmp('agentops-copilot-workspace-');
 
 const {
-  gitEnv, repoURL, run, clearDir, syncRepo, onEvent, resolvePrompt,
+  onEvent, resolvePrompt,
   contextIdOf, sessionConfig, finish, resolveContinuity, attempt, WORKSPACE, SESSIONS_DIR,
   pollNextUnit, reportDone,
 } = require('./runtime');
@@ -62,56 +61,6 @@ function withFetch(t, impl) {
   global.fetch = impl;
   t.after(() => { global.fetch = real; });
 }
-
-// ---- gitEnv / repoURL, default (no auth configured) --------------------------
-
-test('gitEnv with no GIT_AUTH_TYPE adds no SSH command, and passes process.env through', () => {
-  const env = gitEnv();
-  assert.strictEqual(env.GIT_SSH_COMMAND, undefined);
-  assert.strictEqual(env.PATH, process.env.PATH);
-});
-
-test('repoURL with no https auth type returns the configured URL unchanged', () => {
-  assert.strictEqual(repoURL(), '');
-});
-
-// ---- syncRepo: no REPO_URL configured -----------------------------------------
-
-test('syncRepo is a no-op when no REPO_URL is configured', async () => {
-  await assert.doesNotReject(syncRepo());
-});
-
-// ---- run(): a real subprocess, both success and failure -----------------------
-
-test('run() captures stdout and a zero exit code from a real subprocess', async () => {
-  const r = await run(process.execPath, ['-e', "process.stdout.write('run-ok')"]);
-  assert.strictEqual(r.code, 0);
-  assert.strictEqual(r.out, 'run-ok');
-});
-
-test('run() captures stderr and a non-zero exit code', async () => {
-  const r = await run(process.execPath, ['-e', "process.stderr.write('run-err'); process.exit(3)"]);
-  assert.strictEqual(r.code, 3);
-  assert.strictEqual(r.err, 'run-err');
-});
-
-test('run() resolves rather than throwing when the binary does not exist', async () => {
-  const r = await run('agentops-definitely-not-a-real-binary', []);
-  assert.strictEqual(r.code, -1);
-  assert.ok(r.err.length > 0, 'the spawn error message is surfaced');
-});
-
-// ---- clearDir -------------------------------------------------------------------
-
-test('clearDir empties a directory recursively without removing the directory itself', () => {
-  const dir = tmp('agentops-cleardir-');
-  fs.writeFileSync(path.join(dir, 'a.txt'), 'x');
-  fs.mkdirSync(path.join(dir, 'sub'));
-  fs.writeFileSync(path.join(dir, 'sub', 'b.txt'), 'y');
-  clearDir(dir);
-  assert.deepStrictEqual(fs.readdirSync(dir), []);
-  assert.ok(fs.existsSync(dir), 'the mount point itself must survive');
-});
 
 // ---- onEvent: every transcript branch -----------------------------------------
 
