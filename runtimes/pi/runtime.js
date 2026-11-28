@@ -1,9 +1,18 @@
 // agentops pi agent runtime — implements the AgentRuntime /work contract:
 //   1. long-poll  GET  $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25
 //   2. run the pi coding agent (through its SDK, in-process) against the
-//      profile's repo checkout, streaming a formatted transcript to STDOUT
+//      already-populated workspace at WORKSPACE, streaming a formatted
+//      transcript to STDOUT
 //   3. report     POST $CONTROL_URL/work/done
 //   4. exit 0 after RUNTIME_IDLE_TTL_M minutes without work
+//
+// multi-repo-workspace moved cloning into the `workspace-sync` init
+// container, ahead of this process ever starting — this runtime holds no
+// git credential and runs no clone/fetch of its own. It reads WORKSPACE
+// (always set) and START_DIR (set only when the conversation's
+// `workingDir` resolves), and a work unit's `agentFile` (an absolute path,
+// exclusive with `agent`) names the definition to read instead of
+// resolving `agent` under WORKSPACE itself.
 //
 // THE FOURTH RUNTIME, and the second (after copilot) whose vendor owns its
 // own tool vocabulary and its own session store. Both are translated HERE —
@@ -33,11 +42,10 @@
 
 'use strict';
 
-const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { readAgentDefinition, composeAllowedTools, safeJoin, sanitizeLog } = require('./tools');
+const { readAgentDefinition, agentFileDefinition, composeAllowedTools, safeJoin, sanitizeLog } = require('./tools');
 const { translate, decide, checkInventory } = require('./vocabulary');
 const { confirmContextMissing } = require('./continuity');
 const { registerMcpTools } = require('./mcp');
@@ -47,13 +55,11 @@ const { loaderOptions: piCodeLoaderOptions, piCodeEnabled } = require('./picode'
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
 const POD_NAME = process.env.POD_NAME || '';
-const REPO_URL = process.env.REPO_URL || '';
-const REPO_REF = process.env.REPO_REF || 'master';
-const GIT_AUTH_TYPE = process.env.GIT_AUTH_TYPE || '';
-const GIT_SSH_KEY = process.env.GIT_SSH_KEY || '';
-const GIT_TOKEN = process.env.GIT_TOKEN || '';
 const TTL_MS = (Number.parseInt(process.env.RUNTIME_IDLE_TTL_M || '10', 10)) * 60 * 1000;
-const WORKSPACE = process.env.WORKSPACE || '/data/workspace';
+const WORKSPACE = process.env.WORKSPACE || '/workspace';
+// START_DIR is only ever set by the manager when the conversation's
+// `workingDir` resolves — absent means start in WORKSPACE itself.
+const START_DIR = process.env.START_DIR || '';
 // MCP_CONFIG is read by mcp.js's loadMcpServers, through buildResourceLoader's
 // registerMcpTools call below — declared here, beside every other env fact
 // this runtime reads, rather than left for mcp.js alone to default silently.
@@ -153,55 +159,10 @@ async function withTimeout(promise, ms, message) {
   }
 }
 
-// ---- repo checkout ----------------------------------------------------------
-
-function gitEnv() {
-  const env = { ...process.env };
-  if (GIT_AUTH_TYPE === 'ssh' && GIT_SSH_KEY) {
-    env.GIT_SSH_COMMAND = `ssh -i ${GIT_SSH_KEY} -o UserKnownHostsFile=/tmp/known_hosts -o StrictHostKeyChecking=accept-new`;
-  }
-  return env;
-}
-
-function repoURL() {
-  if (GIT_AUTH_TYPE === 'https' && GIT_TOKEN && REPO_URL.startsWith('https://')) {
-    return REPO_URL.replace('https://', `https://x-access-token:${GIT_TOKEN}@`);
-  }
-  return REPO_URL;
-}
-
-function run(cmd, args, opts = {}) {
-  return new Promise((resolve) => {
-    const p = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '', err = '';
-    p.stdout.on('data', (c) => { out += c; });
-    p.stderr.on('data', (c) => { err += c; });
-    p.on('error', (e) => resolve({ code: -1, out, err: String(e.message) }));
-    p.on('close', (code) => resolve({ code, out, err }));
-  });
-}
-
-// WORKSPACE may itself be a volume mount point — never remove the directory,
-// only its contents.
-function clearDir(dir) {
-  for (const e of fs.readdirSync(dir)) {
-    fs.rmSync(path.join(dir, e), { recursive: true, force: true });
-  }
-}
-
-async function syncRepo() {
-  if (!REPO_URL) { fs.mkdirSync(WORKSPACE, { recursive: true }); return; } // MGR-5
-  if (!fs.existsSync(path.join(WORKSPACE, '.git'))) {
-    fs.mkdirSync(WORKSPACE, { recursive: true });
-    clearDir(WORKSPACE);
-    const r = await run('git', ['clone', '--depth', '1', '-b', REPO_REF, repoURL(), '.'], { cwd: WORKSPACE, env: gitEnv() });
-    if (r.code !== 0) throw new Error(`git clone: ${r.err.slice(-400)}`);
-  } else {
-    const fetch = await run('git', ['fetch', '--depth', '1', 'origin', REPO_REF], { cwd: WORKSPACE, env: gitEnv() });
-    if (fetch.code !== 0) throw new Error(`git fetch: ${fetch.err.slice(-400)}`);
-    const reset = await run('git', ['reset', '--hard', `origin/${REPO_REF}`], { cwd: WORKSPACE, env: gitEnv() });
-    if (reset.code !== 0) throw new Error(`git reset: ${reset.err.slice(-400)}`);
-  }
+// startDirectory is where the agent starts (D7): START_DIR when the
+// conversation's `workingDir` resolved one, WORKSPACE otherwise.
+function startDirectory() {
+  return START_DIR || WORKSPACE;
 }
 
 // ---- the SDK client ----------------------------------------------------------
@@ -398,7 +359,7 @@ async function buildResourceLoader(sdk, unit, grant, definitionBody, denials, mc
   // each tool grant.mcpPatterns permits, named mcp__<server>__<tool>.
   const mcpExtensionFactory = (pi) => registerMcpTools(pi, MCP_CONFIG, grant.mcpPatterns, undefined, undefined, mcpHandle);
   const loader = new sdk.DefaultResourceLoader({
-    cwd: WORKSPACE,
+    cwd: startDirectory(),
     agentDir: PI_AGENT_DIR,
     // task 2.9 / S6: a checkout's own AGENTS.md/CLAUDE.md is a second,
     // uncomposed prompt the manager never agreed to — turned off entirely.
@@ -407,7 +368,7 @@ async function buildResourceLoader(sdk, unit, grant, definitionBody, denials, mc
     extensionFactories: [extensionFactory, mcpExtensionFactory],
     // The OPTIONAL pi-code package (picode.js): reads the checkout's .claude/ as
     // Claude Code does. Empty when the chart's `pi.piCode` is off.
-    ...piCodeLoaderOptions(sdk, { agentDir: PI_AGENT_DIR, workspace: WORKSPACE }),
+    ...piCodeLoaderOptions(sdk, { agentDir: PI_AGENT_DIR, workspace: startDirectory() }),
     // task 3.4: load ONLY the two factories above — pi's own built-in mcp
     // extension would otherwise double-register these same mcp__ tool
     // names from its own (unused by this runtime) connection logic.
@@ -435,8 +396,9 @@ async function buildResourceLoader(sdk, unit, grant, definitionBody, denials, mc
 // the resource loader's own extension but left out of this list would be
 // known to pi's tool registry yet never offered to the model.
 async function openSession(sdk, modelCtx, unit, grant, loader, extraToolNames = []) {
+  const cwd = startDirectory();
   const base = {
-    cwd: WORKSPACE,
+    cwd,
     agentDir: PI_AGENT_DIR,
     modelRuntime: modelCtx.modelRuntime,
     model: modelCtx.model,
@@ -446,14 +408,14 @@ async function openSession(sdk, modelCtx, unit, grant, loader, extraToolNames = 
   const existingId = contextIdOf(unit);
   if (!existingId) {
     const id = crypto.randomUUID();
-    const sessionManager = sdk.SessionManager.create(WORKSPACE, path.join(SESSIONS_ROOT, id), { id });
+    const sessionManager = sdk.SessionManager.create(cwd, path.join(SESSIONS_ROOT, id), { id });
     const { session } = await sdk.createAgentSession({ ...base, sessionManager });
     return { session, id, resumed: false };
   }
   const sessionDir = path.join(SESSIONS_ROOT, existingId);
-  const found = sdk.SessionManager.findById(WORKSPACE, existingId, sessionDir);
+  const found = sdk.SessionManager.findById(cwd, existingId, sessionDir);
   if (!found) throw new Error(`no pi session file found for context ${existingId}`);
-  const sessionManager = sdk.SessionManager.open(found, sessionDir, WORKSPACE);
+  const sessionManager = sdk.SessionManager.open(found, sessionDir, cwd);
   const { session } = await sdk.createAgentSession({ ...base, sessionManager });
   return { session, id: existingId, resumed: true };
 }
@@ -543,13 +505,17 @@ async function runPi(unit) {
   // No `exitCode`: the prompt could not even be assembled, so nothing ran.
   if (p.error) return { status: 'failed', result: p.error };
 
-  const definition = readAgentDefinition(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
+  // `agentFile` (an absolute path, exclusive with `agent`) is used as-is
+  // when present — the manager already resolved it.
+  const definition = unit.agentFile
+    ? agentFileDefinition(unit.agentFile, (m) => console.log(sanitizeLog(m)))
+    : readAgentDefinition(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
   const allowed = composeAllowedTools(definition.tools, unit.allowedTools, unit.toolsMode);
   const grant = translate(allowed);
 
   const id = contextIdOf(unit);
   console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${id ? ' continue=' + sanitizeLog(id) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
-  console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${definition.tools.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
+  console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || unit.agentFile || '-')} declared=${definition.tools.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
   console.log(`[runtime] pi built-ins=${sanitizeLog(grant.builtinNames.length ? grant.builtinNames.join(',') : '(none)')}`);
   console.log(`[runtime] pi-code ${piCodeEnabled() ? "on: the checkout's .claude/ is read as Claude Code reads it" : "off"}`);
   for (const s of grant.scoped) console.log(`[runtime] scoped pattern withheld: ${sanitizeLog(s)} — pi has no per-command shell narrowing, granting nothing`);
@@ -629,10 +595,10 @@ module.exports = {
   modelEntry,
   lengthStopMessage,
   positiveInt,
-  gitEnv, repoURL, run, clearDir, syncRepo, onEvent, resolvePrompt, contextIdOf,
+  onEvent, resolvePrompt, contextIdOf,
   buildResourceLoader, openSession, attempt, runPi, finish, resolveContinuity,
   extractBrief, logInventoryGaps, getSdk, getModelContext, closeMcpClients,
-  SESSIONS_ROOT, WORKSPACE, PI_AGENT_DIR,
+  SESSIONS_ROOT, WORKSPACE, START_DIR, startDirectory, PI_AGENT_DIR,
 };
 
 // Extracted to a NAMED top-level function rather than left as an inline
@@ -705,21 +671,21 @@ async function reportDone(unit, out) {
 module.exports.pollNextUnit = pollNextUnit;
 module.exports.reportDone = reportDone;
 
-// A checkout the run cannot trust must fail the run, with a reason, never
-// proceed with whatever the workspace happened to hold from before.
+// A unit that throws (a bug, an SDK error) must FAIL THAT RUN with a reason
+// rather than take the whole pod process down — the next poll must still
+// happen. The workspace itself is no longer this process's concern:
+// workspace-sync populates it before this pod ever starts.
 async function runUnit(unit) {
   try {
-    await syncRepo();
+    return await runPi(unit);
   } catch (e) {
-    console.error(`[runtime] sync: ${e.message}`);
-    return { status: 'failed', result: `repository checkout: ${e.message}` };
+    console.error(`[runtime] run ${sanitizeLog(unit.runId)}: ${e.message}`);
+    return { status: 'failed', result: `run failed: ${e.message}` };
   }
-  return runPi(unit);
 }
 
 async function runLoop() {
-  console.log(`[runtime] pi runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE} state=${SESSIONS_ROOT}`);
-  try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
+  console.log(`[runtime] pi runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE} start=${startDirectory()} state=${SESSIONS_ROOT}`);
 
   let lastWork = Date.now();
   let idle = false;

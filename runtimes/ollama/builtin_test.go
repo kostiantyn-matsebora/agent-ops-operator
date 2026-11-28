@@ -118,6 +118,54 @@ func TestBash(t *testing.T) {
 	}
 }
 
+// StartDir (multi-repo-workspace's D7) is where a relative tool path
+// resolves from and where Bash runs — never narrower than Workspace, which
+// stays the escape boundary regardless.
+func TestStartDir(t *testing.T) {
+	b, ws := newBuiltins(t)
+	sub := filepath.Join(ws, "services", "api")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "local.txt"), []byte("from the subdir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b.StartDir = sub
+
+	// Bash runs IN StartDir, not Workspace.
+	if text, isErr := call(t, b, "Bash", `{"command":"pwd"}`); isErr || strings.TrimSpace(text) != sub {
+		t.Errorf("Bash must run in StartDir: isErr=%v pwd=%q want %q", isErr, text, sub)
+	}
+
+	// A relative path joins from StartDir: "local.txt" is the subdir's file,
+	// not a same-named file at the workspace root.
+	if text, isErr := call(t, b, "Read", `{"path":"local.txt"}`); isErr || text != "from the subdir" {
+		t.Errorf("Read must resolve relative to StartDir: isErr=%v %q", isErr, text)
+	}
+
+	// workingDir only picks where the agent starts, never what it may
+	// reach — a sibling file elsewhere in Workspace is still reachable by a
+	// relative path that climbs back out of StartDir.
+	if text, isErr := call(t, b, "Read", `{"path":"../../hello.txt"}`); isErr || !strings.HasPrefix(text, "hello world") {
+		t.Errorf("a relative path must still reach the rest of Workspace: isErr=%v %q", isErr, text)
+	}
+
+	// The escape boundary stays the full Workspace, never narrowed to
+	// StartDir: climbing out of Workspace itself is still refused.
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(sub, filepath.Join(outside, "secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]string{"path": rel})
+	if text, isErr := call(t, b, "Read", string(args)); !isErr || !strings.Contains(text, "escapes") {
+		t.Errorf("escaping Workspace itself must still be refused: isErr=%v %q", isErr, text)
+	}
+}
+
 func TestMalformedArguments(t *testing.T) {
 	b, _ := newBuiltins(t)
 	for _, name := range []string{"Read", "Grep", "Glob", "Edit", "Write", "Bash"} {

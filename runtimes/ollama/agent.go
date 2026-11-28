@@ -82,11 +82,18 @@ func (a *Agent) run(ctx context.Context, u WorkUnit, calls *callLog) RunResult {
 
 	// The allowlist: the wiring's half from the unit, the agent definition's
 	// half from the checkout, composed per mode — then the gate, ONCE.
-	declared := agentDeclaredTools(a.Workspace, u.Agent, a.Logf)
+	// AgentFile (an absolute path, exclusive with Agent) is used as-is when
+	// present — the manager already resolved it.
+	var declared []string
+	if u.AgentFile != "" {
+		declared = agentFileDeclaredTools(u.AgentFile, a.Logf)
+	} else {
+		declared = agentDeclaredTools(a.Workspace, u.Agent, a.Logf)
+	}
 	allowed := composeAllowedTools(declared, u.AllowedTools, u.ToolsMode)
 	granted, unavailable, ignored, uninterpretable := a.Registry.Gate(allowed)
 	a.Logf("[runtime] tools agent=%s declared=%d wiring=%d mode=%s -> %s",
-		orDash(u.Agent), len(declared), len(splitList(u.AllowedTools)), orDefault(u.ToolsMode, ModeMerge), toolNames(granted))
+		orDash(orDefault(u.Agent, u.AgentFile)), len(declared), len(splitList(u.AllowedTools)), orDefault(u.ToolsMode, ModeMerge), toolNames(granted))
 	for _, p := range unavailable {
 		a.Logf("[runtime] allowlist entry %q: no built-in and no connected MCP server provides it — unavailable on this runtime", p)
 	}

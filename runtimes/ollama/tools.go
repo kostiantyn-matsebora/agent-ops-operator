@@ -162,6 +162,29 @@ func agentDeclaredTools(workspace, agent string, logf func(string, ...any)) []st
 	return tools
 }
 
+// agentFileDeclaredTools reads the tools: frontmatter from an explicit
+// absolute path — the resolved AgentFile a work unit carries in place of
+// Agent once the wiring names one (multi-repo-workspace). Exclusive with
+// agentDeclaredTools's own workspace+name lookup: the caller picks one or
+// the other per unit, never both. Same tolerant contract — a missing or
+// unparseable file contributes nothing, logged rather than failing the run.
+func agentFileDeclaredTools(agentFile string, logf func(string, ...any)) []string {
+	if agentFile == "" {
+		return nil
+	}
+	text, err := os.ReadFile(agentFile)
+	if err != nil {
+		logf("[runtime] agent file %s: %v — treating it as declaring no tools", agentFile, err)
+		return nil
+	}
+	tools, perr := parseFrontmatterTools(string(text))
+	if perr != nil {
+		logf("[runtime] agent file %s: %v — treating it as declaring no tools", agentFile, perr)
+		return nil
+	}
+	return tools
+}
+
 // composeAllowedTools joins the two halves per mode. Any mode not recognised —
 // including an absent one — is merge, because reading it as overwrite would
 // silently strip what the agent declared.

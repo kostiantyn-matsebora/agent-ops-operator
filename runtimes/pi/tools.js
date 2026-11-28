@@ -166,8 +166,9 @@ function agentFileDefinition(agentFile, log = () => {}) {
   let text;
   try {
     text = fs.readFileSync(agentFile, 'utf8');
-  } catch {
-    return { tools: [], body: '' }; // no definition — the wiring's tools stand alone, no body to append
+  } catch (e) {
+    log(`[runtime] agent file ${agentFile}: ${e.message} — treating it as declaring no tools and no body`);
+    return { tools: [], body: '' };
   }
   const parsed = parseFrontmatter(text);
   if (parsed.error) {

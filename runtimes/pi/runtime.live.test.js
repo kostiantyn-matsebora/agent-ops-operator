@@ -33,7 +33,6 @@ function freshRuntime(env) {
   process.env.PI_PROVIDER = 'fake';
   process.env.PI_PROVIDER_API = 'openai-completions';
   process.env.PI_BASE_URL = '';
-  process.env.REPO_URL = '';
   process.env.RUNTIME_IDLE_TTL_M = '10';
   delete process.env.PI_CODE_ENABLED; // on by default; a test that wants it off says so
   for (const [k, v] of Object.entries(env)) process.env[k] = v;

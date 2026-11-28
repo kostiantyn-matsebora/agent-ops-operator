@@ -26,9 +26,24 @@ import (
 
 // Builtins configures the native tools.
 type Builtins struct {
-	Workspace   string
+	Workspace string
+	// StartDir is where the agent starts (D7 of multi-repo-workspace): set
+	// only when the conversation's workingDir resolves one. Empty means
+	// start in Workspace itself. It is where a relative tool path is
+	// resolved from and where Bash runs — the escape boundary stays the
+	// full Workspace regardless, since workingDir only picks where the
+	// agent starts, never what it may reach.
+	StartDir    string
 	OutputMax   int
 	BashTimeout time.Duration
+}
+
+// startDir is where a relative tool path resolves from and where Bash runs.
+func (b Builtins) startDir() string {
+	if b.StartDir != "" {
+		return b.StartDir
+	}
+	return b.Workspace
 }
 
 // Register adds the six built-ins to a registry.
@@ -57,6 +72,9 @@ var errEscapes = errors.New("path escapes the workspace")
 
 // resolve confines a path to the workspace: absolute paths, `..` and symlinked
 // escapes are all refused after evaluating whatever part of the path exists.
+// A relative path joins from startDir(), never narrower than the workspace:
+// workingDir only picks where the agent starts, never what it may reach, so
+// `../other-repo/x` still resolves as long as it stays inside Workspace.
 func (b Builtins) resolve(p string) (string, error) {
 	if p == "" {
 		return "", errors.New("path is required")
@@ -68,7 +86,11 @@ func (b Builtins) resolve(p string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("workspace: %w", err)
 	}
-	full := filepath.Join(root, p)
+	base := root
+	if start, err := filepath.EvalSymlinks(b.startDir()); err == nil && within(root, start) {
+		base = start
+	}
+	full := filepath.Join(base, p)
 	if !within(root, full) {
 		return "", errEscapes
 	}
@@ -350,7 +372,7 @@ func (b Builtins) bash(ctx context.Context, raw json.RawMessage) (string, bool, 
 	ctx, cancel := context.WithTimeout(ctx, b.BashTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", a.Command)
-	cmd.Dir = b.Workspace
+	cmd.Dir = b.startDir()
 	cmd.WaitDelay = 2 * time.Second
 	captureCap := b.OutputMax
 	if captureCap <= 0 || captureCap > maxBashCaptureBytes {

@@ -7,7 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { readAgentDefinition, composeAllowedTools, parseFrontmatter, MODE_OVERWRITE } = require('./tools');
+const { readAgentDefinition, agentFileDefinition, composeAllowedTools, parseFrontmatter, MODE_OVERWRITE } = require('./tools');
 
 function mkWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-pi-tools-'));
@@ -71,6 +71,41 @@ test('an absent workspace or agent name short-circuits to empty, no filesystem a
 test('composeAllowedTools merge unions the agent declaration with the wiring, agent first', () => {
   const got = composeAllowedTools(['Read'], ['Bash', 'Read'], 'merge');
   assert.deepStrictEqual(got, ['Read', 'Bash']);
+});
+
+// ---- agentFileDefinition (multi-repo-workspace) -----------------------------
+
+test('agentFileDefinition reads the declared tools and body from an explicit absolute path', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-pi-agentfile-'));
+  const file = path.join(dir, 'k8s-ops.md');
+  fs.writeFileSync(file, '---\ntools: Read, Grep\n---\nYou operate the cluster.');
+  const got = agentFileDefinition(file);
+  assert.deepStrictEqual(got.tools, ['Read', 'Grep']);
+  assert.strictEqual(got.body, 'You operate the cluster.');
+});
+
+test('agentFileDefinition contributes nothing for an empty path', () => {
+  assert.deepStrictEqual(agentFileDefinition(''), { tools: [], body: '' });
+  assert.deepStrictEqual(agentFileDefinition(undefined), { tools: [], body: '' });
+});
+
+test('agentFileDefinition logs and contributes nothing for a missing file', () => {
+  const logs = [];
+  const got = agentFileDefinition('/does/not/exist/agent.md', (m) => logs.push(m));
+  assert.deepStrictEqual(got, { tools: [], body: '' });
+  assert.strictEqual(logs.length, 1);
+  assert.match(logs[0], /\/does\/not\/exist\/agent\.md/);
+});
+
+test('agentFileDefinition logs and contributes nothing for unparseable frontmatter', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-pi-agentfile-'));
+  const file = path.join(dir, 'broken.md');
+  fs.writeFileSync(file, '---\ntools: Read\nStay terse.');
+  const logs = [];
+  const got = agentFileDefinition(file, (m) => logs.push(m));
+  assert.deepStrictEqual(got, { tools: [], body: '' });
+  assert.strictEqual(logs.length, 1);
+  assert.match(logs[0], /never closed/);
 });
 
 test('composeAllowedTools overwrite passes the wiring alone, dropping the agent declaration', () => {

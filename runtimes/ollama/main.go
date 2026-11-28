@@ -4,9 +4,17 @@
 // only to produce the next message.
 //
 //  1. long-poll  GET  $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25
-//  2. run the loop against the profile's checkout, streaming to STDOUT
+//  2. run the loop against the already-populated workspace, streaming to STDOUT
 //  3. report     POST $CONTROL_URL/work/done
 //  4. exit 0 after RUNTIME_IDLE_TTL_M minutes without work
+//
+// multi-repo-workspace moved cloning into the `workspace-sync` init
+// container, ahead of this process ever starting — this runtime holds no
+// git credential and runs no clone/fetch of its own. It reads WORKSPACE
+// (always set) and START_DIR (set only when the conversation's workingDir
+// resolves), and a work unit's AgentFile (an absolute path, exclusive with
+// Agent) names the definition to read instead of resolving Agent under
+// WORKSPACE itself.
 package main
 
 import (
@@ -36,19 +44,10 @@ func envInt(name string, def int) int {
 
 func logf(format string, a ...any) { fmt.Fprintf(os.Stdout, format+"\n", a...) }
 
-// runUnit syncs the checkout before running a unit against it, and FAILS the
-// run with a reason when that sync fails, rather than running the agent
-// against a workspace that may be stale, half-cloned, or simply gone --
-// `repo.Sync` already surfaces every git failure (clone, fetch, reset), but
-// doing nothing with that error beyond a log line let the loop carry on as
-// if the checkout were fine (O9). No process ran here either, so ExitCode
-// stays omitted.
-func runUnit(ctx context.Context, repo Repo, builtins Builtins, mcpc *MCPClient, agent *Agent, unit WorkUnit, logf func(string, ...any)) RunResult {
-	if err := repo.Sync(ctx); err != nil {
-		reason := fmt.Sprintf("workspace sync failed: %v", err)
-		logf("[runtime] %s", reason)
-		return RunResult{Status: "failed", Result: reason}
-	}
+// runUnit builds this unit's own registry and runs it. The workspace itself
+// is no longer this process's concern: workspace-sync populates it before
+// this pod ever starts.
+func runUnit(ctx context.Context, builtins Builtins, mcpc *MCPClient, agent *Agent, unit WorkUnit, logf func(string, ...any)) RunResult {
 	// A registry PER UNIT: the built-ins, plus whatever the MCP servers list
 	// now that the proxy has seen this unit's grants.
 	agent.Registry = NewRegistry()
@@ -73,7 +72,10 @@ func main() {
 		os.Exit(1)
 	}
 	pod := os.Getenv("POD_NAME")
-	workspace := env("WORKSPACE", "/data/workspace")
+	workspace := env("WORKSPACE", "/workspace")
+	// startDir is only ever set by the manager when the conversation's
+	// workingDir resolves — absent means start in workspace itself.
+	startDir := os.Getenv("START_DIR")
 	home := env("HOME", "/data/context")
 	ttl := time.Duration(envInt("RUNTIME_IDLE_TTL_M", 10)) * time.Minute
 	numCtx := envInt("OLLAMA_NUM_CTX", 8192)
@@ -82,8 +84,12 @@ func main() {
 	ctx := context.Background()
 	ollama := &Ollama{URL: ollamaURL, Model: model, NumCtx: numCtx, NumPredict: envInt("OLLAMA_NUM_PREDICT", 0), KeepAlive: os.Getenv("OLLAMA_KEEP_ALIVE"), HTTP: newHTTPClient(chatTimeout)}
 
-	logf("[runtime] ollama runtime %s — convo=%s pod=%s ttl=%s workspace=%s model=%s endpoint=%s num_ctx=%d",
-		version, convo, pod, ttl, workspace, model, ollamaURL, numCtx)
+	startDisplay := startDir
+	if startDisplay == "" {
+		startDisplay = workspace
+	}
+	logf("[runtime] ollama runtime %s — convo=%s pod=%s ttl=%s workspace=%s start=%s model=%s endpoint=%s num_ctx=%d",
+		version, convo, pod, ttl, workspace, startDisplay, model, ollamaURL, numCtx)
 	info, err := ollama.Check(ctx)
 	switch {
 	case err != nil:
@@ -97,13 +103,7 @@ func main() {
 			map[bool]string{true: " (the server's only model, chosen because OLLAMA_MODEL is unset)", false: ""}[model == ""])
 	}
 
-	repo := Repo{URL: os.Getenv("REPO_URL"), Ref: env("REPO_REF", "master"), AuthType: os.Getenv("GIT_AUTH_TYPE"),
-		SSHKey: os.Getenv("GIT_SSH_KEY"), Token: os.Getenv("GIT_TOKEN"), Workspace: workspace}
-	if err := repo.Sync(ctx); err != nil {
-		logf("[runtime] initial sync: %v", err)
-	}
-
-	builtins := Builtins{Workspace: workspace, OutputMax: envInt("TOOL_OUTPUT_MAX", 64*1024),
+	builtins := Builtins{Workspace: workspace, StartDir: startDir, OutputMax: envInt("TOOL_OUTPUT_MAX", 64*1024),
 		BashTimeout: time.Duration(envInt("BASH_TIMEOUT_S", 120)) * time.Second}
 	cfg, err := readMCPConfig(env("MCP_CONFIG", "/etc/agentops/mcp.json"))
 	if err != nil {
@@ -138,7 +138,7 @@ func main() {
 			agent.ModelCanCallTools = info.Tools || !info.Present
 			agent.Model = ollama.Model
 		}
-		res := runUnit(ctx, repo, builtins, mcpc, agent, *unit, logf)
+		res := runUnit(ctx, builtins, mcpc, agent, *unit, logf)
 		lastWork = time.Now()
 		fmt.Fprintf(os.Stdout, "\n=== RESULT (%s) ===\n%s\n", res.Status, res.Result)
 		if err := control.Report(ctx, unit.RunID, res, time.Sleep); err != nil {

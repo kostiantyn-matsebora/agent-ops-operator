@@ -58,9 +58,8 @@ test('with RUNTIME_IDLE_TTL_M=0 the process eventually reports the idle TTL and 
   // sleeps out its 5s retry before the idle check gets a second, successful
   // look — the same shape the other three runtimes' identical test accepts
   // (no fixed-duration kill, just a wait for the real exit event). Exercises
-  // the main loop's own scaffolding (console.log, syncRepo, the
-  // fetch-failure retry, the idle-TTL branch, process.exit(0)) without ever
-  // touching the pi SDK.
+  // the main loop's own scaffolding (console.log, the fetch-failure retry,
+  // the idle-TTL branch, process.exit(0)) without ever touching the pi SDK.
   const child = spawn(process.execPath, [RUNTIME], {
     env: {
       ...process.env,
@@ -68,7 +67,6 @@ test('with RUNTIME_IDLE_TTL_M=0 the process eventually reports the idle TTL and 
       CONVO_ID: 'conv-idle',
       PI_API_KEY: 'test-key',
       PI_MODEL: 'fake-model',
-      REPO_URL: '',
       HOME: tmp('agentops-pi-idle-home-'),
       WORKSPACE: tmp('agentops-pi-idle-ws-'),
       RUNTIME_IDLE_TTL_M: '0',
@@ -92,7 +90,6 @@ test('SIGTERM exits 0 promptly through its own handler, not the idle-TTL path (L
       CONVO_ID: 'conv-sigterm',
       PI_API_KEY: 'test-key',
       PI_MODEL: 'fake-model',
-      REPO_URL: '',
       HOME: tmp('agentops-pi-sigterm-home-'),
       WORKSPACE: tmp('agentops-pi-sigterm-ws-'),
       RUNTIME_IDLE_TTL_M: '60',

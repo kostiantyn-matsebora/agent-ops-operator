@@ -92,6 +92,34 @@ func TestOneToolCall(t *testing.T) {
 	}
 }
 
+// AgentFile (an absolute path, exclusive with Agent) must win over Agent —
+// the manager already resolved it, so this runtime must never fall back to
+// resolving Agent under Workspace once AgentFile is set. Deliberately
+// contradicting declarations at both locations proves which one actually
+// decided the advertised tool.
+func TestAgentFileTakesPrecedenceOverAgent(t *testing.T) {
+	s := &scripted{replies: []Message{text("ok")}}
+	a, ws := newAgent(t, s)
+	if err := os.MkdirAll(filepath.Join(ws, ".claude", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".claude", "agents", "ops.md"), []byte("---\ntools: Bash\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agentFile := filepath.Join(t.TempDir(), "other-repo-agent.md")
+	if err := os.WriteFile(agentFile, []byte("---\ntools: Read\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := a.Run(context.Background(), WorkUnit{PromptText: "q", Agent: "ops", AgentFile: agentFile})
+	if res.Status != "succeeded" {
+		t.Fatalf("%+v", res)
+	}
+	if n := len(s.calls[0]); n != 1 || s.calls[0][0].Function.Name != "Read" {
+		t.Errorf("AgentFile's Read declaration must win, never Agent's Bash: advertised %+v", s.calls[0])
+	}
+}
+
 func TestHallucinatedToolAndMalformedArgs(t *testing.T) {
 	s := &scripted{replies: []Message{toolCall("Bash", `{"command":"id"}`), toolCall("Read", `{"path":`), text("ok")}}
 	a, _ := newAgent(t, s)

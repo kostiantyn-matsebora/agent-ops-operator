@@ -33,10 +33,14 @@ type WorkUnit struct {
 	PromptText      string            `json:"promptText,omitempty"`
 	PromptVars      map[string]string `json:"promptVars,omitempty"`
 	Agent           string            `json:"agent,omitempty"`
-	SystemPrompt    string            `json:"systemPrompt,omitempty"`
-	AllowedTools    string            `json:"allowedTools,omitempty"`
-	ToolsMode       string            `json:"toolsMode,omitempty"`
-	MaxTurns        int32             `json:"maxTurns,omitempty"`
+	// AgentFile is an absolute path, exclusive with Agent — the manager's
+	// already-resolved definition for this unit (multi-repo-workspace). When
+	// set, it is read in place of resolving Agent under Workspace.
+	AgentFile    string `json:"agentFile,omitempty"`
+	SystemPrompt string `json:"systemPrompt,omitempty"`
+	AllowedTools string `json:"allowedTools,omitempty"`
+	ToolsMode    string `json:"toolsMode,omitempty"`
+	MaxTurns     int32  `json:"maxTurns,omitempty"`
 }
 
 // ContextID reads the handle under its current name, falling back to the

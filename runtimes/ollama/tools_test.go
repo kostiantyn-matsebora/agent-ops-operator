@@ -84,6 +84,36 @@ func TestAgentDeclaredTools(t *testing.T) {
 	eq(t, agentDeclaredTools(dir, "k8s-engineer", t.Logf), []string{"Read", "Grep"})
 }
 
+// ---- agentFileDeclaredTools (multi-repo-workspace) ----
+
+func TestAgentFileDeclaredTools(t *testing.T) {
+	eq(t, agentFileDeclaredTools("", t.Logf), nil)
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "k8s-ops.md")
+	if err := os.WriteFile(file, []byte("---\ntools: Read, Grep\n---\nrole\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eq(t, agentFileDeclaredTools(file, t.Logf), []string{"Read", "Grep"})
+
+	var logged []string
+	missing := filepath.Join(dir, "does-not-exist.md")
+	eq(t, agentFileDeclaredTools(missing, func(f string, a ...any) { logged = append(logged, f) }), nil)
+	if len(logged) != 1 {
+		t.Errorf("a missing agent file must log once, got %v", logged)
+	}
+
+	logged = nil
+	broken := filepath.Join(dir, "broken.md")
+	if err := os.WriteFile(broken, []byte("---\ntools: Read\nnever closed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eq(t, agentFileDeclaredTools(broken, func(f string, a ...any) { logged = append(logged, f) }), nil)
+	if len(logged) != 1 {
+		t.Errorf("unparseable frontmatter must log once, got %v", logged)
+	}
+}
+
 // ---- composition ----
 
 func TestCompose(t *testing.T) {

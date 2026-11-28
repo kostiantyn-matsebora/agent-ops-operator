@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,30 +47,37 @@ func TestEnvIntParsesFallsBackAndRejectsNonPositive(t *testing.T) {
 	}
 }
 
-// A failed sync must fail the RUN with a reason instead of letting the loop
-// carry on against a workspace that was never actually refreshed (O9) --
-// `git clone` against a source path that does not exist fails immediately,
-// with no network involved.
-func TestRunUnitFailsTheRunWhenSyncFails(t *testing.T) {
-	repo := Repo{URL: filepath.Join(t.TempDir(), "does-not-exist-agentops-repo"), Ref: "main", Workspace: t.TempDir()}
-	agent, _ := newAgent(t, &scripted{})
-	var logged []string
-	logf := func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }
-	res := runUnit(context.Background(), repo, Builtins{}, &MCPClient{}, agent, WorkUnit{PromptText: "q"}, logf)
-	if res.Status != "failed" || !strings.Contains(res.Result, "workspace sync failed") {
-		t.Errorf("%+v", res)
+// multi-repo-workspace moved cloning into the `workspace-sync` init
+// container: runUnit must run the already-populated workspace as is,
+// invoking no git command of its own, and must leave what workspace-sync
+// put there untouched. A fake `git` placed first on PATH that fails loudly
+// if ever invoked proves the absence, rather than merely asserting the
+// removed Repo/Sync symbols are gone.
+func TestRunUnitNeverInvokesGit(t *testing.T) {
+	bin := t.TempDir()
+	marker := filepath.Join(bin, "git-invoked")
+	script := "#!/bin/sh\necho \"git invoked: $@\" >> " + marker + "\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if res.ExitCode != nil {
-		t.Errorf("no process ran -- exitCode must be omitted, got %v", *res.ExitCode)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	agent, ws := newAgent(t, &scripted{replies: []Message{text("the answer")}})
+	sentinel := filepath.Join(ws, "already-here.txt")
+	if err := os.WriteFile(sentinel, []byte("workspace-sync put this here"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	found := false
-	for _, l := range logged {
-		if strings.Contains(l, "workspace sync failed") {
-			found = true
-		}
+
+	res := runUnit(context.Background(), Builtins{Workspace: ws}, &MCPClient{}, agent, WorkUnit{PromptText: "q"}, t.Logf)
+	if res.Status != "succeeded" {
+		t.Fatalf("%+v", res)
 	}
-	if !found {
-		t.Errorf("the sync failure must be logged, got %v", logged)
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the runtime invoked git on a run — it must clone nothing, workspace-sync already populated the workspace")
+	}
+	got, err := os.ReadFile(sentinel)
+	if err != nil || string(got) != "workspace-sync put this here" {
+		t.Errorf("the pre-populated workspace must survive untouched, got %q, err=%v", got, err)
 	}
 }
 
