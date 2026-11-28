@@ -59,7 +59,7 @@ terms and SHALL be scanned on the same terms.
 #### Scenario: Retired vocabulary returns
 
 - **WHEN** a change reintroduces a removed field name, rule or command as a
-  current claim in any spec
+  current claim in any published document
 - **THEN** CI fails, naming the term and the file
 
 #### Scenario: Retired vocabulary sits outside the scan set
