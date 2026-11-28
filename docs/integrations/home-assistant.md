@@ -93,7 +93,7 @@ inert.
 
 An override of `mcp.toolsets.*.tools` must add the prefixed names itself, or
 an agent on 2026.9 gets none at all, silently. Check what your instance
-registers with a `tools/list` call to its `/mcp_server/sse` endpoint.
+registers with a `tools/list` call to its `/api/mcp` endpoint.
 
 **The repair agent's admin server needs two flags together**
 (`adminMcp.enabled` + `adminMcpServer.enabled` — neither renders alone). It

@@ -254,8 +254,8 @@ metadata:
 spec:
   servers:
     homeassistant:
-      type: sse
-      url: "https://ha.example.org/mcp_server/sse"
+      type: http
+      url: "https://ha.example.org/api/mcp"
       headers:
         - name: Authorization
           valueFrom:

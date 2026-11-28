@@ -280,7 +280,7 @@ logsAdapter:
 #
 # There is NO server workload to deploy, and that is the difference from the
 # Kubernetes and Prometheus bundles: Home Assistant SERVES ITS OWN MCP endpoint
-# (the built-in MCP Server integration, SSE at /mcp_server/sse). Enable that
+# (the built-in MCP Server integration, streamable HTTP at /api/mcp). Enable that
 # integration in Home Assistant and the endpoint below already exists.
 #
 # WITHOUT MCP the agents are not helpless — they fall back to the REST API with
@@ -294,9 +294,11 @@ mcp:
   # The MCP endpoint. Empty = derived from homeAssistant.endpoint, which is
   # where the built-in integration serves.
   url: ""
-  # Transport: sse is Home Assistant's own (path /mcp_server/sse). Set http only
-  # when pointing at a different server that speaks streamable HTTP.
-  transport: sse
+  # Transport: http is streamable HTTP, which Home Assistant serves at /api/mcp
+  # and which every shipped runtime speaks. sse is Home Assistant's legacy
+  # two-endpoint transport (path /mcp_server/sse): the pi runtime cannot connect
+  # to it, because it POSTs and Home Assistant answers a POST there with 405.
+  transport: http
   # Optional header passthrough. Empty = an Authorization header sourced from
   # the `authorization` key of the credential below, which is what makes a
   # default install work. Set it to point somewhere else entirely.

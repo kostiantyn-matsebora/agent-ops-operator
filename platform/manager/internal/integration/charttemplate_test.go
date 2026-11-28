@@ -2299,8 +2299,21 @@ func TestHaMCPServerKeyIsFixed(t *testing.T) {
 	if !strings.Contains(cfg, "\n    homeassistant:\n") {
 		t.Fatalf("the MCP server key must be homeassistant:\n%s", cfg)
 	}
-	if !strings.Contains(cfg, "/mcp_server/sse") {
-		t.Fatalf("an empty url must default onto Home Assistant's own MCP endpoint:\n%s", cfg)
+	if !strings.Contains(cfg, "type: http") || !strings.Contains(cfg, "/api/mcp") {
+		t.Fatalf("an empty url must default onto Home Assistant's streamable HTTP endpoint:\n%s", cfg)
+	}
+	if strings.Contains(cfg, "/mcp_server/sse") {
+		t.Fatalf("the default must not be the legacy SSE endpoint, which a POST gets a 405 from:\n%s", cfg)
+	}
+}
+
+// The legacy transport stays reachable for a runtime that speaks it, and keeps
+// its own path.
+func TestHaMCPLegacySSEIsStillSelectable(t *testing.T) {
+	out := helmTemplate(t, append(haArgs(), "--set", "home-assistant.mcp.transport=sse")...)
+	cfg := stripComments(haDoc(t, out, "MCPConfig", "ha-api"))
+	if !strings.Contains(cfg, "type: sse") || !strings.Contains(cfg, "/mcp_server/sse") {
+		t.Fatalf("transport=sse must select the legacy endpoint:\n%s", cfg)
 	}
 }
 

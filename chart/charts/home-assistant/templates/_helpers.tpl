@@ -101,10 +101,10 @@ serves its own. */ -}}
 {{- end -}}
 
 {{- /* The path for the declared transport. Home Assistant's integration serves
-SSE at /mcp_server/sse; /mcp is the streamable-HTTP convention other servers
-use. */ -}}
+streamable HTTP at /api/mcp and the legacy two-endpoint SSE transport at
+/mcp_server/sse, where a POST is refused with 405. */ -}}
 {{- define "home-assistant.mcpPath" -}}
-{{- if eq .Values.mcp.transport "sse" -}}/mcp_server/sse{{- else -}}/mcp{{- end -}}
+{{- if eq .Values.mcp.transport "sse" -}}/mcp_server/sse{{- else -}}/api/mcp{{- end -}}
 {{- end -}}
 
 {{- /* The headers the MCP path sends.
