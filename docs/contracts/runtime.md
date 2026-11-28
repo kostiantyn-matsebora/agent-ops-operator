@@ -66,7 +66,7 @@ Long-polls for this conversation's next work unit.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `runId` | `string` | **yes** | A unique id for this unit, echoed back in the completion report. |
-| `convo` | `string` | **yes** | The Conversation this unit belongs to, by its ID — a runtime that echoes this field back on its completion report (rather than its own CONVO_ID env var) must still resolve, since /work/done looks the report's convo up strictly by ID (conversation-identity Decision 1/7). |
+| `convo` | `string` | **yes** | The Conversation this unit belongs to, by its ID — a runtime that echoes this field back on its completion report (rather than its own CONVO_ID env var) must still resolve, since /work/done looks the report's convo up strictly by ID. |
 | `threadId` | `string` |  | The bound channel's thread id, present only for a conversation bound to exactly one channel. |
 | `runtimeContextId` | `string` |  | The runtime's OWN handle for this conversation's accumulated context, echoed back from the last run. |
 | `resumeSessionId` | `string` |  | The former name of `runtimeContextId`, sent alongside it for ONE release so a runtime image can be upgraded independently of the manager. |

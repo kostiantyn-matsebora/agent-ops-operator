@@ -21,14 +21,6 @@ Images: manager 0.66.0, console 0.46.0, channel-telegram 0.28.0.
   tested against a real one. The fixing loop now also merges the base branch in.
   Delivery tooling only: no chart value, image or CRD changes, and no upgrade step.
 
-### Fixed
-
-- **`runtime-claude` read a failed resume against an unreadable context store as
-  `continued`.** The vendor opens a new session and returns its id on the error
-  result, and that id was counted as a recovery, so the outage check never ran. A
-  failed turn now counts as recovered only when it says something, and the run
-  reports the outage. Takes effect with the next `runtime-claude` image.
-
 ### Changed
 
 - **BREAKING.** A conversation's `ID` is now its system identity, minted once
@@ -44,6 +36,14 @@ Images: manager 0.66.0, console 0.46.0, channel-telegram 0.28.0.
   the correlation key — the correlation key moves to a new `correlationId`
   field on the same operation. The channel adapter contract moves to wire
   `contract=3`, and an adapter still declaring `contract=2` is refused `400`.
+
+### Fixed
+
+- **`runtime-claude` read a failed resume against an unreadable context store as
+  `continued`.** The vendor opens a new session and returns its id on the error
+  result, and that id was counted as a recovery, so the outage check never ran. A
+  failed turn now counts as recovered only when it says something, and the run
+  reports the outage. Takes effect with the next `runtime-claude` image.
 
 ### Upgrade
 

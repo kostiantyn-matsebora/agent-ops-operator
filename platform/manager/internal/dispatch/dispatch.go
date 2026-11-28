@@ -82,7 +82,7 @@ type WorkUnit struct {
 	// Convo is the Conversation this unit belongs to, by its ID — a runtime
 	// that echoes this field back on its completion report (rather than its
 	// own CONVO_ID env var) must still resolve, since /work/done looks the
-	// report's convo up strictly by ID (conversation-identity Decision 1/7).
+	// report's convo up strictly by ID.
 	Convo string `json:"convo"`
 	// ThreadID is the bound channel's thread id, present only for a
 	// conversation bound to exactly one channel. The runtime never posts to
