@@ -7,8 +7,8 @@ THE MANAGER'S RBAC, SPLIT BY PLANE (split-conversation-namespace decision 4).
 Two rule sets, never one inlined Role:
 
   agentops.managerControlOnlyRules        every wiring/identity kind, signals,
-                                           adapter Deployments, serviceaccounts,
-                                           Services, leases, its own pods
+                                           adapter Deployments, Services,
+                                           leases, its own pods
                                            (get/list/watch)
   agentops.managerConversationsOnlyRules  pods, Conversation/ConversationInput
                                            and their status, PVC create/list/
@@ -48,14 +48,12 @@ which indents EVERY line uniformly — the pattern `agentops.runtimeReadRules`
 - apiGroups: ["agentops.dev"]
   resources: ["agentprofiles/status", "mcpconfigs/status", "channels/status", "signalsources/status", "signals/status", "agentruntimes/status", "channeladapters/status", "signaladapters/status", "pipelines/status", "agentcapabilities/status", "coordinators/status"]
   verbs: ["get", "update", "patch"]
-# ChannelAdapter reconciler: own adapter workloads + their
-# zero-RBAC SAs (own namespace only)
+# ChannelAdapter reconciler: owns adapter workloads. It creates no
+# ServiceAccount — every adapter identity is a chart-rendered reference
+# (adapters.md), never one the manager brings into being.
 - apiGroups: ["apps"]
   resources: ["deployments"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: [""]
-  resources: ["serviceaccounts"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
 # Adapter reconcilers: own the Service of port-declaring adapters
 # (agentops-signal-<name>, agentops-adapter-<name>)
 - apiGroups: [""]

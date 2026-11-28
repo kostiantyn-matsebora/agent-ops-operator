@@ -27,3 +27,9 @@ python3 .github/scripts/retired-vocabulary-guard.py --counts   # what a task fil
   launder a reintroduced term.
 - **Add the term in the SAME change that retires the thing.**
 - **`says` states the REPLACEMENT**, not the prohibition.
+- **The `scan` globs in `.github/retired-vocabulary.json` are a DEFINITION of
+  "published", not a list of files somebody had in mind.** A root file, an
+  issue/PR template or an ADR that an adopter can read is published whether or
+  not it is listed — `least-privilege-manager` found three live reintroductions
+  sitting outside the scanned set. Adding a published document means adding it
+  to `scan` in the SAME change, not a later cleanup.

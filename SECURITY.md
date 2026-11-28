@@ -4,7 +4,8 @@
 
 This project is `v1alpha1` and pre-1.0. **Only the most recent released chart
 version, and the image tags that chart references by default, are supported.**
-There are no backports to earlier chart versions — a fix ships as a new patch
+
+There are no backports to earlier chart versions. A fix ships as a new patch
 release, and the upgrade path is in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
@@ -64,17 +65,18 @@ choice.
 **Out of scope**
 
 - Vulnerabilities in upstream projects the chart references (Kubernetes, the
-  MCP servers, the agent CLI). Report those to their own projects; if the chart's
+  MCP servers, the agent CLI). Report those to their own projects. If the chart's
   default makes one reachable that would not otherwise be, that part is in scope.
 - **A known CVE in a published image's packages with no fix released.** Every
   image is scanned with Trivy on the pull request that builds it and weekly
-  after publication; a CRITICAL or HIGH finding **with a fix available** blocks
+  after publication. A CRITICAL or HIGH finding **with a fix available** blocks
   the merge, and one without is knowingly not gated. If you believe an
   unfixable finding is reachable through what the chart deploys, that reasoning
   is a report — the finding alone is one we already have.
 - An install that grants an agent more cluster power than the defaults do.
-  `allowPodExecution` and `rbacMode` are documented decisions — see
+  `allowPodExecution`, and a declared runtime account stating its own rules
+  (`rbac.runtime.serviceAccounts`), are documented decisions — see
   [docs/installation.md](docs/installation.md).
 - The model's output itself. An agent that says something wrong is a prompt
-  problem; an agent that *reaches* something its wiring did not grant is a
+  problem. An agent that *reaches* something its wiring did not grant is a
   finding.

@@ -8,6 +8,16 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [Unreleased]
+
+### Security
+
+- **The manager's chart Role grants no verb on `serviceaccounts`.** The grant
+  was unused — no reconciler calls, watches or lists the type — and
+  contradicted `docs/concepts.md`'s and `.claude/rules/wiring.md`'s existing
+  claim that the manager holds no such RBAC. Nothing to migrate: removing an
+  unused grant changes no existing behaviour.
+
 ## [25.0.0] — 2026-11-22
 
 Images: manager 0.66.0, console 0.46.0, channel-telegram 0.28.0.
