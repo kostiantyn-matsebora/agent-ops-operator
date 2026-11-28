@@ -58,8 +58,10 @@ func cachedKinds() []client.Object {
 		}
 	}
 	return append(objs,
+		// NOT ServiceAccount: no reconciler watches or reads it (least-privilege-manager),
+		// and the chart grants the manager no verb on it — an informer here would never sync.
 		&corev1.Pod{}, &corev1.ConfigMap{}, &corev1.PersistentVolumeClaim{},
-		&corev1.Service{}, &corev1.ServiceAccount{}, &appsv1.Deployment{})
+		&corev1.Service{}, &appsv1.Deployment{})
 }
 
 func assertManagerCacheSyncs(t *testing.T, ctl, conv string) {

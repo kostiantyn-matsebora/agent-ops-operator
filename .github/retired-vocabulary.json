@@ -31,11 +31,16 @@
     "openspec/specs/**/*.md",
     "docs/*.md",
     "docs/guides/*.md",
+    "docs/adr/*.md",
     "README.md",
     "chart/values.yaml",
     "chart/charts/*/values.yaml",
     "chart/templates/NOTES.txt",
-    "CONTRIBUTING.md"
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    ".github/ISSUE_TEMPLATE/*.yml",
+    ".github/PULL_REQUEST_TEMPLATE.md"
   ],
   "skip": [
     "docs/CHANGELOG.md"
@@ -257,7 +262,9 @@
         "need no worker",
         "needs a worker",
         "needWorker",
-        "service worker"
+        "service worker",
+        "retired",
+        "retired vocabulary"
       ]
     },
     {

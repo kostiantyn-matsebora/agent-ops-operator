@@ -33,10 +33,10 @@ fake makes a behaviour depend on an omission rather than a field:
 
 | | Is |
 |---|---|
-| **A** | coordinator as channel; Pipeline unchanged |
-| **B** | `Pipeline.spec.addressable` flag; sources and channels forbidden by CEL |
-| **C** | extract `AgentCapability`; every Pipeline references one |
-| **D** | extract `AgentCapability`; Pipeline takes it INLINE or by ref; new `Coordinator` kind |
+| **A** | coordinator as channel — Pipeline unchanged |
+| **B** | `Pipeline.spec.addressable` flag — sources and channels forbidden by CEL |
+| **C** | extract `AgentCapability` — every Pipeline references one |
+| **D** | extract `AgentCapability` — Pipeline takes it INLINE or by ref — new `Coordinator` kind |
 | **E** | subagents inside the coordinator's pod (claude-code's own Task tool) |
 
 ## Trade-off analysis
@@ -82,10 +82,10 @@ the other.**
 
 | Kind | Field | Rule |
 |---|---|---|
-| `Pipeline` | inline fields OR `capabilityRef` | mutually exclusive by CEL; inline IS today's Pipeline unchanged |
-| `Coordinator` | `signalSourceRefs` | inbound is CLAIMED, as a Pipeline's is; `/<coordinator> <task>` addresses it as a Pipeline is addressed, binding the origin surface |
+| `Pipeline` | inline fields OR `capabilityRef` | mutually exclusive by CEL — inline IS today's Pipeline unchanged |
+| `Coordinator` | `signalSourceRefs` | inbound is CLAIMED, as a Pipeline's is — `/<coordinator> <task>` addresses it as a Pipeline is addressed, binding the origin surface |
 | | `channelRefs` | where it ESCALATES to |
-| | `agents[]{capabilityRef, description}` | the WHOLE outbound reach; enforced server-side per token, not by `--allowedTools` |
+| | `agents[]{capabilityRef, description}` | the WHOLE outbound reach — enforced server-side per token, not by `--allowedTools` |
 | | `limits{maxAgents, maxTurns, deadline}` | see D5 |
 
 - Description lives on the entry, not the AgentCapability.
@@ -159,7 +159,7 @@ names the ONE HOP parent (D3), never the tree's top.
 - Conversation REUSE scopes on `causedBy` as on `pipelineRef`.
 - `/channel/inbound` refuses an input whose origin is its own target conversation.
 - `DeliverInputs` mirrors member results to every channel on the root.
-- Root context grows per member result; concise member output is the control.
+- Root context grows per member result. Concise member output is the control.
 - New component: the aops MCP server — reads, plus async `invoke` / `close` /
   `escalate` / `read`, reach bounded per token behind the ADR 0001 wall.
 - Sync `invoke` is forbidden: it holds the root's serial queue and a slot.
@@ -168,7 +168,7 @@ names the ONE HOP parent (D3), never the tree's top.
 
 | Idea | Because |
 |---|---|
-| naming a Pipeline from an HTTP tool | `POST /task` returns |
+| naming a Pipeline from an HTTP tool | `POST /task` is deleted |
 | transferring a conversation between Pipelines | rewrites the identity and storage snapshot in flight |
 | depth counter as loop breaker | bounds height, not width |
 | `structured` output mode, `audience` on adapters | guard for a leak D3 removes |

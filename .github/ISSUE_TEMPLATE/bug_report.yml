@@ -88,7 +88,7 @@ body:
         a CNI that replaces kube-proxy, a storage class with quirks, an
         admission controller. Several of the known gotchas here are exactly
         that kind of interaction.
-      placeholder: "k8s 1.31, k3s, Cilium in strict kube-proxy-replacement mode, NFS-backed home volume"
+      placeholder: "k8s 1.31, k3s, Cilium in strict kube-proxy-replacement mode, NFS-backed context volume"
     validations:
       required: false
 

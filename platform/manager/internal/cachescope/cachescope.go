@@ -15,8 +15,8 @@ import (
 // actually grant it, kind by kind.
 //
 // The DEFAULT is the control namespace alone: every wiring and identity kind,
-// signals, adapter Deployments, Services and ServiceAccounts live there, and
-// the conversations Role grants none of them. A cache spanning both
+// signals, adapter Deployments and Services live there, and the conversations
+// Role grants none of them. A cache spanning both
 // namespaces for every kind starts one informer per kind in each, and a
 // forbidden list never syncs — the manager timed out waiting for its caches
 // and crash-looped on the first split install.
